@@ -51,20 +51,6 @@ test('no-cli providers report state no-cli, nothing updatable', async () => {
   assert.equal(glm!.installedVersion, null);
 });
 
-test('hermes reports updatable with a read installed version (Addendum 3)', async () => {
-  _resetLatestCache();
-  const hermes = await getHarnessVersionStatus('hermes', baseDeps({
-    runVersion: async () => 'Hermes Agent v0.17.0 (2026.6.19)',
-  }));
-  assert.equal(hermes!.state, 'updatable');
-  assert.equal(hermes!.installedVersion, '0.17.0');
-  assert.equal(hermes!.updatable, true);
-  // No cheap "latest" probe for a git build: nothing is compared, so the UI must
-  // not claim "Latest" — it offers the idempotent updater instead.
-  assert.equal(hermes!.upToDate, null);
-  assert.equal(hermes!.reason, 'no-latest-probe');
-});
-
 test('the installed-version probe is TTL-cached and invalidated by an update', async () => {
   _resetLatestCache();
   let reads = 0;
@@ -277,7 +263,7 @@ test('getAll returns one row per harness in the contract shape', async () => {
   const all = await getAllHarnessVersionStatuses(baseDeps({ runVersion: async () => '1.0.0' }));
   const ids = all.map((s) => s.provider);
   assert.ok(ids.includes('claude'));
-  assert.ok(ids.includes('hermes'));
+  assert.ok(!ids.includes('hermes'), 'a deleted body has no version row');
   assert.ok(ids.includes('glm'));
   for (const row of all) {
     assert.ok(typeof row.checkedAt === 'string');

@@ -26,7 +26,7 @@
  *
  * `:id` is a harness id — the provider registry id where one exists
  * (`claude`, `codex`, `antigravity`, `cursor`, `opencode`, `qwen`, `kimi`,
- * `hermes`, `glm`, `deepseek`). The route also accepts the aliases `agy`
+ * `glm`, `deepseek`). The route also accepts the aliases `agy`
  * (→ antigravity) and `cursor-agent` (→ cursor) and normalises them.
  */
 
@@ -152,10 +152,33 @@ export type HarnessActionErrorCode =
   | 'INVALID_ROLLBACK_SCOPE'
   | 'INVALID_RECOVERY_ACTION';
 
+/**
+ * Why a same-uid process stayed unchecked (B-1468 L3):
+ *   - `fd_unreadable`: its open-file list is unreadable and it is not a known
+ *     non-dumpable system agent;
+ *   - `identity_unverified`: its name matches a known system agent, but the
+ *     same process could not be confirmed across the scan (pid reused or its
+ *     start time unreadable), so the allowlist was not applied.
+ */
+export type HarnessUncheckedReason = 'fd_unreadable' | 'identity_unverified';
+
+/** A same-uid process whose open files could not be checked (B-1468). */
+export interface HarnessUncheckedProcess {
+  pid: number;
+  /** Kernel `comm` (≤15 chars); never a command line. */
+  comm: string;
+  /** Always set by the server; optional only for older payloads. */
+  reason?: HarnessUncheckedReason;
+}
+
 /** Generic refusal body (no path, member id or command ever appears). */
 export interface HarnessActionError {
   code: HarnessActionErrorCode | string;
   message: string;
+  /** STORE_ACCESS_UNPROVABLE only: processes that could not be checked (≤ cap). */
+  uncheckedProcesses?: HarnessUncheckedProcess[];
+  /** STORE_ACCESS_UNPROVABLE only: total unchecked count (may exceed the list). */
+  uncheckedProcessCount?: number;
 }
 
 /** One acknowledgement the server requires before a risky action. */
@@ -260,6 +283,9 @@ export type HarnessUpdateJobPhase =
  * Machine error codes a job can carry (ADR-159 Addendum 3 "contract deltas"):
  *   - `pinned_refused`      the digest pin is armed over a pinned harness
  *   - `live_session_active` the atomic no-live-session gate rejected the run
+ *   - `live_gate_unverifiable` a leg of that gate (presence, launch registry or
+ *     systemd user-unit probe) could not answer, so it failed closed (B-1474);
+ *     the job status stays `skipped_live_session`
  *   - `installation_unrecognized` no exact installed version or supported path
  *   - `dirty_installation` a git-backed install has local changes
  *   - `update_failed` / `update_timeout` / `verify_failed` / `no_update_argv`
@@ -271,6 +297,10 @@ export interface HarnessUpdateJobError {
   message: string;
   /** Arabic rendering of the same message (UI is ar-first). */
   messageAr?: string;
+  /** STORE_ACCESS_UNPROVABLE only: processes that could not be checked (≤ cap). */
+  uncheckedProcesses?: HarnessUncheckedProcess[];
+  /** STORE_ACCESS_UNPROVABLE only: total unchecked count (may exceed the list). */
+  uncheckedProcessCount?: number;
 }
 
 /** GET /update-jobs/:jobId body. */

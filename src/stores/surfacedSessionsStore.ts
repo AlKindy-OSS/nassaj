@@ -74,6 +74,16 @@ type NegativeCacheEntry = { epoch: number; expiresAt: number };
 
 let contextById = new Map<string, SurfacedContext>();
 let negativeCacheById = new Map<string, NegativeCacheEntry>();
+/**
+ * T-1951 qa-critic fix: ids whose indicator state transitioned and therefore
+ * need a fresh fetch, but whose OLD context is deliberately kept in
+ * `contextById` (stale-while-revalidate) until that fetch resolves — deleting
+ * it eagerly made the row (including the SELECTED session, exempt only from
+ * the separate prune loop below) vanish for the length of one fetch cycle
+ * (250ms debounce, up to `RATE_LIMIT_COOLDOWN_MS` under a 429). Cleared by
+ * `applySurfacedSessionContexts` once the fetch it was waiting on lands.
+ */
+let staleIds = new Set<string>();
 let identityEpoch = 0;
 /**
  * T-1949 follow-up: the 60/min-per-user rate limit is shared across every
@@ -146,8 +156,13 @@ export function applySurfacedSessionContexts(
   }
   const expiresAt = Date.now() + NEGATIVE_CACHE_TTL_MS;
   for (const id of requestedIds) {
+    // The fetch this id was staled-and-waiting-for has now landed (found,
+    // negative, or dropped) — the stale mark's only job was to force it back
+    // into `wanted` despite an already-resolved (soon to be replaced) context.
+    staleIds.delete(id);
     if (!foundIds.has(id)) {
       negativeCacheById.set(id, { epoch, expiresAt });
+      contextById.delete(id);
       changed = true;
     }
   }
@@ -194,6 +209,7 @@ export function pruneSurfacedContextsToProjects(activeProjectIds: ReadonlySet<st
   for (const [id, context] of contextById) {
     if (!activeProjectIds.has(context.projectId)) {
       contextById.delete(id);
+      staleIds.delete(id);
       changed = true;
       projectLeft = true;
     }
@@ -215,6 +231,7 @@ export function resetSurfacedSessionsStore(): void {
   identityEpoch += 1;
   lastActiveProjectIdsSignature = null;
   cooldownUntil = 0;
+  staleIds = new Set();
   if (contextById.size === 0 && negativeCacheById.size === 0) return;
   contextById = new Map();
   negativeCacheById = new Map();
@@ -225,13 +242,24 @@ if (typeof window !== 'undefined') {
   window.addEventListener('auth:identity-changing', resetSurfacedSessionsStore);
 }
 
+/** Test-only: current context ids, to assert refresh/prune behaviour (T-1951) without a live fetch. */
+export function __getSurfacedContextIdsForTests(): string[] {
+  return [...contextById.keys()];
+}
+
 /** Test-only escape hatch; production code never needs a full reset mid-run. */
 export function __resetSurfacedSessionsStoreForTests(): void {
   identityEpoch = 0;
   contextById = new Map();
   negativeCacheById = new Map();
+  staleIds = new Set();
   lastActiveProjectIdsSignature = null;
   cooldownUntil = 0;
+}
+
+/** Test-only: whether `sessionId` is currently held stale-while-revalidate (T-1951). */
+export function __isSurfacedContextStaleForTests(sessionId: string): boolean {
+  return staleIds.has(sessionId);
 }
 
 // ---------------------------------------------------------------------------
@@ -322,23 +350,60 @@ export function computeSurfacedSessionsForProject(
 }
 
 /**
- * Forces a re-render of whatever reads `computeSurfacedSessionsForProject`
- * whenever this store OR any of the three indicator stores it reads from
- * changes — those stores decide candidate membership just as much as this one
- * decides content, so a consumer subscribed only to this store would miss an
- * indicator clearing/appearing.
+ * Sorted signature of the surfaced ROW candidates (id + indicator state) for
+ * one project — `id` alone would miss a re-rank (state changing priority),
+ * `state` alone would miss a candidate entering/leaving.
+ *
+ * A state-less context is NOT dropped here (qa-critic T-1951 fix): a null
+ * state still renders a row when the candidate is the SELECTED session (see
+ * `computeSurfacedSessionsForProject`'s own `!state && !isSelected` check),
+ * and this signature must change when that row's context is replaced even
+ * though its state stays `null` throughout — hence the literal `-` marker
+ * instead of skipping the id outright.
  */
-export function useSurfacedSessionsRenderTick(): number {
-  const generationRef = useRef(0);
+function computeSurfacedRowSignatureForProject(projectId: string): string {
+  const candidateIds = new Set<string>([
+    ...getProcessStateSessionIdsForProject(projectId),
+    ...getOutcomeSessionIdsForProject(projectId),
+    ...getWorkflowSessionIdsForProject(projectId),
+  ]);
+  const parts: string[] = [];
+  for (const id of candidateIds) {
+    const context = contextById.get(id);
+    if (!context || context.projectId !== projectId) continue;
+    const state = rowState(id);
+    parts.push(`${id}:${state ?? '-'}`);
+  }
+  return parts.sort().join(',');
+}
+
+/**
+ * T-1951 (B-1431/T-1949 follow-up): `useSurfacedSessionsRenderTick` bumped on
+ * EVERY emit of the four stores it read — including a workflow's `callCount`
+ * ticking up on an otherwise-unchanged run — forcing the whole sidebar
+ * controller (and therefore `computeSurfacedSessionsForProject` + its sort,
+ * for every project, including collapsed ones) to re-render on a change no
+ * row ever displays.
+ *
+ * This returns a primitive signature (`useSyncExternalStore`'s Object.is check
+ * is then a cheap string compare) built ONLY from the currently EXPANDED
+ * projects — a collapsed project's rows are not rendered, so a change inside
+ * one must not cost a re-render either. `expandedProjectIds` is read through a
+ * ref so the subscription itself never needs to re-arm when the expanded set
+ * changes; the signature simply recomputes against the latest set the next
+ * time any of the four stores emits (and once more on the render this hook's
+ * own caller triggers when `expandedProjectIds` itself changes, same as any
+ * other prop).
+ */
+export function useSurfacedSessionsSignature(expandedProjectIds: ReadonlySet<string>): string {
+  const expandedRef = useRef(expandedProjectIds);
+  expandedRef.current = expandedProjectIds;
+
   const subscribeAll = useCallback((listener: () => void) => {
-    const bump = () => {
-      generationRef.current += 1;
-      listener();
-    };
-    const unsubSurfaced = subscribe(bump);
-    const unsubProcess = subscribeSessionProcessState(bump);
-    const unsubOutcome = subscribeSessionCompletion(bump);
-    const unsubWorkflow = subscribeWorkflowStatus(bump);
+    const unsubSurfaced = subscribe(listener);
+    const unsubProcess = subscribeSessionProcessState(listener);
+    const unsubOutcome = subscribeSessionCompletion(listener);
+    const unsubWorkflow = subscribeWorkflowStatus(listener);
     return () => {
       unsubSurfaced();
       unsubProcess();
@@ -346,7 +411,16 @@ export function useSurfacedSessionsRenderTick(): number {
       unsubWorkflow();
     };
   }, []);
-  return useSyncExternalStore(subscribeAll, () => generationRef.current);
+
+  const getSnapshot = useCallback(() => {
+    const parts: string[] = [];
+    for (const projectId of [...expandedRef.current].sort()) {
+      parts.push(`${projectId}=${computeSurfacedRowSignatureForProject(projectId)}`);
+    }
+    return parts.join('|');
+  }, []);
+
+  return useSyncExternalStore(subscribeAll, getSnapshot);
 }
 
 // ---------------------------------------------------------------------------
@@ -383,14 +457,33 @@ function loadedIdsForProject(project: Project, bucketKeys: readonly string[]): S
  * indicator ids minus the loaded page minus a live negative cache. Exported
  * so "collapsed projects not fetched" and the identity-race case are
  * testable without mounting the hook.
+ *
+ * Also owns two pieces of `contextById` upkeep the driver used to skip
+ * entirely (T-1951):
+ *  - a candidate whose indicator state TRANSITIONS (not its first sighting —
+ *    `lastStateById` must already hold a prior value) is marked STALE and put
+ *    back into `wanted` so the next batch refreshes title/last-activity —
+ *    but its existing context is deliberately kept in `contextById` (not
+ *    deleted) until that batch resolves: a qa-critic fix, since evicting it
+ *    eagerly made the row (including a SELECTED session) vanish for a whole
+ *    fetch cycle. See `staleIds` and `applySurfacedSessionContexts`.
+ *  - a context this project's indicator stores no longer name as a candidate
+ *    is dropped (bounded memory for long-lived tabs), and its `lastStateById`
+ *    / `staleIds` entries are dropped alongside it so neither map grows
+ *    unbounded for a long-lived tab — `selectedSessionId` is exempt from all
+ *    three, mirroring `computeSurfacedSessionsForProject`'s own rule that a
+ *    row the owner is reading must not vanish the instant its indicator
+ *    clears.
  */
 export function collectWantedSurfacedSessionIds(
   projects: readonly Project[],
   expandedProjectIds: ReadonlySet<string>,
   bucketKeys: readonly string[],
   lastStateById: Map<string, SessionRowIndicatorState | null>,
+  selectedSessionId: string | null = null,
 ): string[] {
   const wanted = new Set<string>();
+  let contextChanged = false;
   for (const project of projects) {
     if (!expandedProjectIds.has(project.projectId)) continue;
     const loaded = loadedIdsForProject(project, bucketKeys);
@@ -408,15 +501,40 @@ export function collectWantedSurfacedSessionIds(
       // the batch down with it.
       if (!SESSION_CONTEXT_ID_PATTERN.test(id)) continue;
       const currentState = rowState(id);
+      const hadPriorState = lastStateById.has(id);
       if (lastStateById.get(id) !== currentState) {
         lastStateById.set(id, currentState);
         invalidateSurfacedNegativeCache(id);
+        // Only a real TRANSITION marks the context stale — the first time an
+        // id is ever seen (`hadPriorState` false) must not stale a context
+        // `applySurfacedSessionContexts` already resolved moments earlier.
+        // The context itself is kept (stale-while-revalidate): deleting it
+        // here made the row disappear for the length of the refetch, even
+        // for the SELECTED session (qa-critic T-1951 fix).
+        if (hadPriorState && contextById.has(id)) {
+          staleIds.add(id);
+        }
       }
-      if (contextById.has(id)) continue;
-      if (isSurfacedSessionNegativeCached(id)) continue;
+      // A fresh (non-stale) context already answers this id — nothing to
+      // fetch. A stale one still counts as "resolved" for negative-cache
+      // purposes (it is not missing, just due for a refresh), so only the
+      // freshness check gates re-fetching, not the negative cache.
+      if (contextById.has(id) && !staleIds.has(id)) continue;
+      if (!staleIds.has(id) && isSurfacedSessionNegativeCached(id)) continue;
       wanted.add(id);
     }
+
+    for (const [id, context] of contextById) {
+      if (context.projectId !== project.projectId) continue;
+      if (candidateIds.has(id)) continue;
+      if (id === selectedSessionId) continue;
+      contextById.delete(id);
+      staleIds.delete(id);
+      lastStateById.delete(id);
+      contextChanged = true;
+    }
   }
+  if (contextChanged) emitChange();
   return [...wanted];
 }
 
@@ -431,16 +549,20 @@ export function useSurfacedSessionsDriver(
   projects: readonly Project[],
   expandedProjectIds: ReadonlySet<string>,
   bucketKeys: readonly string[],
+  selectedSessionId: string | null = null,
 ): void {
   const projectsRef = useRef(projects);
   projectsRef.current = projects;
   const expandedRef = useRef(expandedProjectIds);
   expandedRef.current = expandedProjectIds;
+  const selectedSessionIdRef = useRef(selectedSessionId);
+  selectedSessionIdRef.current = selectedSessionId;
   const lastStateByIdRef = useRef(new Map<string, SessionRowIndicatorState | null>());
 
   useEffect(() => {
     let disposed = false;
     let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+    let cooldownRecoveryTimer: ReturnType<typeof setTimeout> | null = null;
     let controller: AbortController | null = null;
     // T-1949: a 429 (or any non-OK response) parks every batch until the
     // module-level `cooldownUntil` deadline instead of retrying on the very
@@ -452,15 +574,48 @@ export function useSurfacedSessionsDriver(
     // dep, so a fresh `projects` array reference re-inits this whole effect,
     // and a local would reset to 0 on every one of those re-inits.
 
+    const clearCooldownRecoveryTimer = () => {
+      if (cooldownRecoveryTimer) {
+        clearTimeout(cooldownRecoveryTimer);
+        cooldownRecoveryTimer = null;
+      }
+    };
+
+    // T-1951: a 429 used to sit silent until the NEXT indicator event
+    // rearmed `schedule()` — on a quiet project that could be minutes away.
+    // This arms one single follow-up fetch for the moment the cooldown itself
+    // elapses, so recovery does not depend on unrelated activity elsewhere.
+    const scheduleCooldownRecovery = () => {
+      clearCooldownRecoveryTimer();
+      const delay = Math.max(0, cooldownUntil - Date.now());
+      cooldownRecoveryTimer = setTimeout(() => {
+        cooldownRecoveryTimer = null;
+        runFetch();
+      }, delay);
+    };
+
     const runFetch = () => {
       if (disposed) return;
-      if (Date.now() < cooldownUntil) return;
+      if (Date.now() < cooldownUntil) {
+        // qa-critic T-1951 fix: this effect can re-init mid-cooldown (a fresh
+        // `projects` array reference, per the comment above) — the OLD
+        // effect's cleanup already cleared ITS `cooldownRecoveryTimer`, and
+        // this NEW effect's own `schedule()` call on mount lands here and
+        // used to just bail, leaving nothing armed to ever re-check
+        // `cooldownUntil` again until unrelated indicator activity happened
+        // to fire `schedule()` a second time. Re-arm on every early return so
+        // recovery survives an arbitrary number of re-inits during one
+        // cooldown window.
+        scheduleCooldownRecovery();
+        return;
+      }
       const epoch = getSurfacedSessionsIdentityEpoch();
       const wanted = collectWantedSurfacedSessionIds(
         projectsRef.current,
         expandedRef.current,
         bucketKeys,
         lastStateByIdRef.current,
+        selectedSessionIdRef.current,
       );
       if (wanted.length === 0) return;
 
@@ -472,8 +627,18 @@ export function useSurfacedSessionsDriver(
         void api
           .sessionContexts(ids, { signal: activeController.signal })
           .then((response: Response) => {
+            // T-1951: a response for an identity that has since changed (a
+            // real account switch, mid-flight) must never throttle the NEW
+            // identity's own fetches — this batch describes an account that
+            // no longer exists in this tab. `disposed` is checked here too
+            // (qa-critic fix): without it, a non-OK response landing after
+            // this effect's own cleanup still armed a NEW
+            // `cooldownRecoveryTimer` that the (already-run) cleanup could
+            // never clear — a leaked timer outliving its effect.
+            if (disposed || epoch !== getSurfacedSessionsIdentityEpoch()) return null;
             if (!response.ok) {
               cooldownUntil = Date.now() + RATE_LIMIT_COOLDOWN_MS;
+              scheduleCooldownRecovery();
               return null;
             }
             return response.json();
@@ -503,6 +668,7 @@ export function useSurfacedSessionsDriver(
     return () => {
       disposed = true;
       if (debounceTimer) clearTimeout(debounceTimer);
+      clearCooldownRecoveryTimer();
       controller?.abort();
       unsubProcess();
       unsubOutcome();

@@ -30,32 +30,32 @@ describe('CLI Turn Supervisor capability gate', () => {
     assert.match(source, /await executeConformantTurn\(/u);
     assert.doesNotMatch(source, /new TurnOrchestrator\(/u);
   });
-  it('is server-authoritative and exact to the four chat flags', () => {
+  it('is server-authoritative and exact to the three chat flags', () => {
     const env = {
       NASSAJ_TURN_SUPERVISOR_CODEX_CHAT: 'true', NASSAJ_TURN_SUPERVISOR_QWEN_CHAT: '1',
       NASSAJ_TURN_SUPERVISOR_OPENCODE_CHAT: 'yes', NASSAJ_TURN_SUPERVISOR_HERMES_CHAT: 'on',
     };
-    for (const provider of ['codex', 'qwen', 'opencode', 'hermes']) {
+    for (const provider of ['codex', 'qwen', 'opencode']) {
       assert.equal(isCliTurnSupervisorEnabled(provider, 'chat', env, () => true), true, provider);
       assert.equal(isCliTurnSupervisorEnabled(provider, 'agent', env), false, provider);
       assert.equal(isCliTurnSupervisorEnabled(provider, 'chat', {}), false, provider);
     }
     assert.equal(isCliTurnSupervisorEnabled('cursor', 'chat', env), false);
+    // T-1953: the hermes cell is deleted; its old flag arms nothing.
+    assert.equal(isCliTurnSupervisorArmed('hermes', 'chat', env), false);
+    assert.equal(isCliTurnSupervisorEnabled('hermes', 'chat', env, () => true), false);
   });
 
-  it('installed Qwen help and Hermes zero-tool probes deny the current binaries', () => {
+  it('the installed Qwen help probe denies the current binary', () => {
     assert.equal(cliCapabilityInternals.qwenProbe(process.env), false);
-    assert.equal(cliCapabilityInternals.hermesProbe(process.env), false);
     const env = {
       ...process.env,
-      NASSAJ_TURN_SUPERVISOR_QWEN_CHAT: '1', NASSAJ_TURN_SUPERVISOR_HERMES_CHAT: '1',
+      NASSAJ_TURN_SUPERVISOR_QWEN_CHAT: '1',
     };
     assert.equal(isCliTurnSupervisorArmed('qwen', 'chat', env), true);
     assert.equal(isCliTurnSupervisorEnabled('qwen', 'chat', env), false);
-    assert.equal(isCliTurnSupervisorArmed('hermes', 'chat', env), true);
-    assert.equal(isCliTurnSupervisorEnabled('hermes', 'chat', env), false);
     assert.equal(CLI_HARNESS_MATRIX.find(({ provider }) => provider === 'qwen')?.supported, false);
-    assert.equal(CLI_HARNESS_MATRIX.find(({ provider }) => provider === 'hermes')?.supported, false);
+    assert.equal(CLI_HARNESS_MATRIX.some(({ provider }) => (provider as string) === 'hermes'), false);
   });
 
   it('refuses capability child creation during update without caching a denial', () => {

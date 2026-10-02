@@ -50,6 +50,10 @@ mock.module(url('../modules/database/index.js'), {
         user.id === userId && user.authorization_generation === generation,
     },
     appConfigDb: { getOrCreateJwtSecret: () => FIXED_SECRET },
+    // ADR-194 D1: with the store mocked out, the SSO state read fails closed
+    // (enforced), so the attestation gate consults identity links; this
+    // account has none and is therefore never SSO-governed.
+    userIdentitiesDb: { attestationSummary: () => ({ linkCount: 0, latestAttestedAt: null }) },
     auditLogDb: {
       record: (event: string, payload: Record<string, unknown>) => {
         auditCalls.push({ event, payload });

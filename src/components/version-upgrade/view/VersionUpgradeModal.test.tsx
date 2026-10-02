@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 
 import enCommon from '../../../i18n/locales/en/common.json';
 import arCommon from '../../../i18n/locales/ar/common.json';
@@ -29,6 +29,12 @@ vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: tMock, i18n: { lan
 const authenticatedFetch = vi.fn();
 vi.mock('../../../utils/api', () => ({
   authenticatedFetch: (...args: unknown[]) => authenticatedFetch(...args),
+}));
+
+// B-1448 slice 2: the close-terminals action is owner-only; the role is switchable per test.
+let authRole: string | null = 'owner';
+vi.mock('../../auth/context/AuthContext', () => ({
+  useOptionalAuth: () => (authRole ? { user: { id: 1, username: 'owner', role: authRole } } : null),
 }));
 
 const { VersionUpgradeModal } = await import('./VersionUpgradeModal');
@@ -813,6 +819,344 @@ describe('VersionUpgradeModal scheduled-message wait (T-1912)', () => {
 
 // ─── i18n coverage ────────────────────────────────────────────────────────────
 
+// ─── B-1448: open terminals and the update lock on restart_queued ───────────
+
+describe('VersionUpgradeModal terminal wait (B-1448)', () => {
+  beforeEach(() => {
+    localStorage.clear();
+    authenticatedFetch.mockReset();
+    authenticatedFetch.mockResolvedValue(response(200, { job: null }));
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response(200, {
+      systemUpdate: { updaterProtocol: 'async-v2', updaterStrategy: 'atomic-release', updateReady: true },
+    })));
+    localStorage.setItem(UPDATE_ATTEMPT_STORAGE_KEY, JSON.stringify({
+      idempotencyKey: '9a844646-ff69-4db1-9fbc-bccb7688cccb',
+      jobId: 'term-1',
+      statusUrl: '/api/system/update/jobs/term-1',
+      targetVersion: '1.45.0.0',
+      createdAt: Date.now(),
+    }));
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+    activeLocale = 'en';
+  });
+
+  const queued = (autoActivation: Record<string, unknown>) => response(200, {
+    state: 'restart_queued', targetVersion: '1.45.0.0', strategy: 'git-checkout-v2', autoActivate: true, autoActivation,
+  });
+
+  it('names the count and the holders of the open terminals', async () => {
+    routeFetch({ status: () => queued({ state: 'waiting_terminals', code: 'open_terminals', liveSessions: 0,
+      openTerminals: { count: 2, attached: 2, detached: 0, usernames: ['owner', 'sara'], detachedClosesAt: null } }) });
+    renderModal();
+    expect(await screen.findByText(/Waiting for 2 open terminal\(s\) held by owner, sara to close/)).not.toBeNull();
+  });
+
+  it('says when detached Shell tabs close by themselves, in Arabic too', async () => {
+    activeLocale = 'ar';
+    routeFetch({ status: () => queued({ state: 'waiting_terminals', code: 'open_terminals', liveSessions: 0,
+      openTerminals: { count: 1, attached: 0, detached: 1, usernames: [], detachedClosesAt: Date.UTC(2026, 8, 30, 12, 0, 0) } }) });
+    renderModal();
+    expect(await screen.findByText(/بانتظار إغلاق 1 طرفية مفتوحة.*منها 1 تبويب Shell/)).not.toBeNull();
+  });
+
+  it('explains a lock-contention deferral instead of "0 live sessions"', async () => {
+    routeFetch({ status: () => queued({ state: 'waiting_sessions', code: 'update_lock_contended', liveSessions: null }) });
+    renderModal();
+    expect(await screen.findByText(/Waiting for another operation to release the update lock/)).not.toBeNull();
+    expect(screen.queryByText(/live session\(s\)/)).toBeNull();
+  });
+
+  it('an unmapped failure code is shown, never hidden behind "unexpected error"', async () => {
+    routeFetch({ status: () => response(200, {
+      state: 'failed', targetVersion: '1.45.0.0', strategy: 'git-checkout-v2', errorCode: 'some_new_code',
+    }) });
+    renderModal();
+    expect(await screen.findByText(/An unexpected error occurred \(some_new_code\)/)).not.toBeNull();
+  });
+
+  it('a failed job with no errorCode never shows a raw {{code}} placeholder (en and ar)', async () => {
+    for (const locale of ['en', 'ar'] as const) {
+      activeLocale = locale;
+      localStorage.setItem(UPDATE_ATTEMPT_STORAGE_KEY, JSON.stringify({
+        idempotencyKey: '9a844646-ff69-4db1-9fbc-bccb7688cccb', jobId: 'term-1',
+        statusUrl: '/api/system/update/jobs/term-1', targetVersion: '1.45.0.0', createdAt: Date.now(),
+      }));
+      routeFetch({ status: () => response(200, {
+        state: 'failed', targetVersion: '1.45.0.0', strategy: 'git-checkout-v2',
+      }) });
+      const { container } = renderModal();
+      await screen.findByText(/An unexpected error occurred|حدث خطأ غير متوقَّع/);
+      expect(container.ownerDocument.body.textContent).not.toContain('{{code}}');
+      expect(container.ownerDocument.body.textContent).toContain('(unknown)');
+      cleanup();
+    }
+  });
+
+  it('a mapped activation refusal gets its own words', async () => {
+    routeFetch({ status: () => response(200, {
+      state: 'failed', targetVersion: '1.45.0.0', strategy: 'git-checkout-v2', errorCode: 'update_lock_contended',
+    }) });
+    renderModal();
+    expect(await screen.findByText('Update lock busy')).not.toBeNull();
+  });
+});
+
+describe('VersionUpgradeModal close terminals and update (B-1448 slice 2)', () => {
+  const SNAP_A = 'a'.repeat(32);
+  const SNAP_B = 'b'.repeat(32);
+  const CLOSE_URL = '/api/system/update/jobs/term-1/close-terminals';
+  const terminalsA = { count: 2, attached: 2, detached: 0, usernames: ['owner', 'sara'], detachedClosesAt: null, snapshot: SNAP_A };
+  const terminalsB = { count: 3, attached: 3, detached: 0, usernames: ['owner', 'sara', 'omar'], detachedClosesAt: null, snapshot: SNAP_B };
+
+  const waiting = () => response(200, {
+    state: 'restart_queued', targetVersion: '1.45.0.0', strategy: 'git-checkout-v2', autoActivate: true,
+    autoActivation: { state: 'waiting_terminals', code: 'open_terminals', liveSessions: 0, openTerminals: terminalsA },
+  });
+
+  /** Route the status poll to the waiting job and every close-terminals POST to `close`. */
+  function routeClose(close: () => Response) {
+    authenticatedFetch.mockImplementation(async (url: string) => {
+      if (url === '/api/system/update/jobs/active') return response(200, { job: null });
+      if (url === PREFLIGHT_URL) return CLEAR_PREFLIGHT();
+      if (url === CLOSE_URL) return close();
+      return waiting();
+    });
+  }
+
+  const closeCalls = () => authenticatedFetch.mock.calls.filter(([url]) => url === CLOSE_URL);
+  const sentSnapshot = (index: number) => JSON.parse(String(closeCalls()[index][1].body)).expectedSnapshot;
+  const BUTTON = /Close 2 terminals and update/;
+
+  beforeEach(() => {
+    localStorage.clear();
+    authenticatedFetch.mockReset();
+    authRole = 'owner';
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response(200, {
+      systemUpdate: { updaterProtocol: 'async-v2', updaterStrategy: 'atomic-release', updateReady: true },
+    })));
+    localStorage.setItem(UPDATE_ATTEMPT_STORAGE_KEY, JSON.stringify({
+      idempotencyKey: '9a844646-ff69-4db1-9fbc-bccb7688cccb', jobId: 'term-1',
+      statusUrl: '/api/system/update/jobs/term-1', targetVersion: '1.45.0.0', createdAt: Date.now(),
+    }));
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+    activeLocale = 'en';
+    authRole = 'owner';
+  });
+
+  it('shows the button to the owner', async () => {
+    routeClose(() => response(500, {}));
+    renderModal();
+    expect(await screen.findByRole('button', { name: BUTTON })).not.toBeNull();
+  });
+
+  it('never shows the button to a non-owner, nor without a signed-in user', async () => {
+    for (const role of ['member', null]) {
+      authRole = role;
+      routeClose(() => response(500, {}));
+      renderModal();
+      await screen.findByText(/Waiting for 2 open terminal\(s\) held by owner, sara/);
+      expect(screen.queryByRole('button', { name: BUTTON })).toBeNull();
+      cleanup();
+    }
+  });
+
+  it('asks first: the click lists count and holders, warns, and calls nothing', async () => {
+    routeClose(() => response(500, {}));
+    renderModal();
+    fireEvent.click(await screen.findByRole('button', { name: BUTTON }));
+    const group = screen.getByRole('group', { name: 'Close the open terminals and start the update?' });
+    expect(group.textContent).toContain('This closes 2 open terminals');
+    expect(within(group).getAllByRole('listitem').map((item) => item.textContent)).toEqual(['owner', 'sara']);
+    expect(group.textContent).toContain('unsaved work in them is lost');
+    expect(closeCalls()).toHaveLength(0);
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByRole('group')).toBeNull();
+    expect(closeCalls()).toHaveLength(0);
+  });
+
+  it('the confirm calls the API with the snapshot the owner saw, then reports the close', async () => {
+    routeClose(() => response(200, { jobId: 'term-1', status: 'closed', closed: 2, remaining: 0, activation: 'triggered' }));
+    renderModal();
+    fireEvent.click(await screen.findByRole('button', { name: BUTTON }));
+    fireEvent.click(within(screen.getByRole('group')).getByRole('button', { name: BUTTON }));
+    expect(await screen.findByText('Closed 2 terminals. The update is starting.')).not.toBeNull();
+    expect(closeCalls()).toHaveLength(1);
+    expect(closeCalls()[0][1].method).toBe('POST');
+    expect(sentSnapshot(0)).toBe(SNAP_A);
+    expect(screen.queryByRole('button', { name: BUTTON })).toBeNull();
+  });
+
+  it('is disabled and busy while the request runs, so it cannot be sent twice', async () => {
+    let release: (value: Response) => void = () => {};
+    routeClose(() => new Promise<Response>((resolve) => { release = resolve; }) as unknown as Response);
+    renderModal();
+    fireEvent.click(await screen.findByRole('button', { name: BUTTON }));
+    fireEvent.click(within(screen.getByRole('group')).getByRole('button', { name: BUTTON }));
+    const busy = await screen.findByRole('button', { name: /Closing terminals/ });
+    expect((busy as HTMLButtonElement).disabled).toBe(true);
+    expect(busy.getAttribute('aria-busy')).toBe('true');
+    expect((screen.getByRole('button', { name: 'Cancel' }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(busy);
+    expect(closeCalls()).toHaveLength(1);
+    release(response(200, { jobId: 'term-1', status: 'closed', closed: 2, remaining: 0, activation: 'triggered' }));
+    expect(await screen.findByText(/Closed 2 terminals/)).not.toBeNull();
+  });
+
+  it('409 terminals_changed shows the new set and asks again, then sends the NEW snapshot', async () => {
+    let calls = 0;
+    routeClose(() => {
+      calls += 1;
+      return calls === 1
+        ? response(409, { success: false, code: 'terminals_changed', openTerminals: terminalsB })
+        : response(200, { jobId: 'term-1', status: 'closed', closed: 3, remaining: 0, activation: 'triggered' });
+    });
+    renderModal();
+    fireEvent.click(await screen.findByRole('button', { name: BUTTON }));
+    fireEvent.click(within(screen.getByRole('group')).getByRole('button', { name: BUTTON }));
+    expect(await screen.findByText(/The open terminals changed since you looked\. Nothing was closed\./)).not.toBeNull();
+    const group = screen.getByRole('group');
+    expect(group.textContent).toContain('This closes 3 open terminals');
+    expect(group.textContent).toContain('omar');
+    // Nothing is re-sent on its own: the owner confirms the new set.
+    expect(closeCalls()).toHaveLength(1);
+    fireEvent.click(within(group).getByRole('button', { name: /Close 3 terminals and update/ }));
+    expect(await screen.findByText(/Closed 3 terminals/)).not.toBeNull();
+    expect(sentSnapshot(0)).toBe(SNAP_A);
+    expect(sentSnapshot(1)).toBe(SNAP_B);
+  });
+
+  it.each([
+    [409, { code: 'update_not_overridable' }, /can no longer be started this way/],
+    [404, { code: 'update_job_not_found' }, /no longer exists/],
+    [400, { code: 'terminal_snapshot_invalid' }, /terminal list could not be read/],
+    [403, { code: 'owner_identity_unavailable' }, /owner identity could not be confirmed/],
+    [403, { error: 'Insufficient permissions' }, /Only the owner can close terminals/],
+    [429, { error: 'Too many requests' }, /Too many attempts/],
+    [500, { code: 'boom' }, /Closing the terminals failed \(boom\)/],
+  ])('HTTP %i %j gets its own clear error and keeps the confirmation open', async (status, body, text) => {
+    routeClose(() => response(status, body));
+    renderModal();
+    fireEvent.click(await screen.findByRole('button', { name: BUTTON }));
+    fireEvent.click(within(screen.getByRole('group')).getByRole('button', { name: BUTTON }));
+    expect((await screen.findByRole('alert')).textContent).toMatch(text);
+    expect(screen.getByRole('group')).not.toBeNull();
+  });
+
+  it.each([
+    ['sessions_active', /Chat sessions are still running/],
+    ['scheduled_wait', /A scheduled message is pending\. Skip the scheduled wait first/],
+    ['not_waiting_terminals', /no longer waiting for terminals/],
+    ['activator_failed', /automatic restart could not be started/],
+    ['local_main', /local main branch/],
+    [undefined, /can no longer be started this way/],
+  ])('409 update_not_overridable reason %s gets its own words', async (reason, text) => {
+    routeClose(() => response(409, { success: false, code: 'update_not_overridable', ...(reason ? { reason } : {}) }));
+    renderModal();
+    fireEvent.click(await screen.findByRole('button', { name: BUTTON }));
+    fireEvent.click(within(screen.getByRole('group')).getByRole('button', { name: BUTTON }));
+    expect((await screen.findByRole('alert')).textContent).toMatch(text);
+  });
+
+  it('T4a: a partial close says how many are still open, not that the update starts', async () => {
+    routeClose(() => response(200, { jobId: 'term-1', status: 'closed', closed: 2, remaining: 1, activation: 'triggered' }));
+    renderModal();
+    fireEvent.click(await screen.findByRole('button', { name: BUTTON }));
+    fireEvent.click(within(screen.getByRole('group')).getByRole('button', { name: BUTTON }));
+    expect(await screen.findByText(/Closed 2 terminals, but 1 are still open\. The update keeps waiting/)).not.toBeNull();
+    expect(screen.queryByText(/The update is starting/)).toBeNull();
+  });
+
+  it('T4a: the Arabic partial-close text names both counts', async () => {
+    activeLocale = 'ar';
+    routeClose(() => response(200, { jobId: 'term-1', status: 'closed', closed: 2, remaining: 1, activation: 'triggered' }));
+    renderModal();
+    fireEvent.click(await screen.findByRole('button', { name: /أغلق 2 طرفية وحدّث/ }));
+    fireEvent.click(within(screen.getByRole('group')).getByRole('button', { name: /أغلق 2 طرفية وحدّث/ }));
+    expect(await screen.findByText(/أُغلق: 2 طرفية، وما زالت 1 طرفية مفتوحة/)).not.toBeNull();
+  });
+
+  it('T5: the warning says the tabs and their output/scrollback are deleted (en and ar)', async () => {
+    routeClose(() => response(500, {}));
+    renderModal();
+    fireEvent.click(await screen.findByRole('button', { name: BUTTON }));
+    expect(screen.getByRole('group').textContent).toMatch(/terminal tabs are deleted, not just disconnected: their output and scrollback are erased/);
+    cleanup();
+    activeLocale = 'ar';
+    renderModal();
+    fireEvent.click(await screen.findByRole('button', { name: /أغلق 2 طرفية وحدّث/ }));
+    expect(screen.getByRole('group').textContent).toMatch(/ستُحذف تبويبات الطرفيات نفسها.*يُمحى مخرجها وسجلّ التمرير/);
+  });
+
+  it('a network failure is named, not swallowed', async () => {
+    routeClose(() => { throw new TypeError('Failed to fetch'); });
+    renderModal();
+    fireEvent.click(await screen.findByRole('button', { name: BUTTON }));
+    fireEvent.click(within(screen.getByRole('group')).getByRole('button', { name: BUTTON }));
+    expect((await screen.findByRole('alert')).textContent).toMatch(/Could not reach the server/);
+  });
+
+  it('never sends a request when the set carries no snapshot', async () => {
+    authenticatedFetch.mockImplementation(async (url: string) => {
+      if (url === '/api/system/update/jobs/active') return response(200, { job: null });
+      if (url === PREFLIGHT_URL) return CLEAR_PREFLIGHT();
+      if (url === CLOSE_URL) return response(500, {});
+      return response(200, {
+        state: 'restart_queued', targetVersion: '1.45.0.0', strategy: 'git-checkout-v2', autoActivate: true,
+        autoActivation: { state: 'waiting_terminals', code: 'open_terminals', liveSessions: 0,
+          openTerminals: { ...terminalsA, snapshot: 'not-hex' } },
+      });
+    });
+    renderModal();
+    fireEvent.click(await screen.findByRole('button', { name: BUTTON }));
+    fireEvent.click(within(screen.getByRole('group')).getByRole('button', { name: BUTTON }));
+    expect((await screen.findByRole('alert')).textContent).toMatch(/terminal list could not be read/);
+    expect(closeCalls()).toHaveLength(0);
+  });
+
+  it('renders the Arabic strings', async () => {
+    activeLocale = 'ar';
+    routeClose(() => response(500, {}));
+    renderModal();
+    fireEvent.click(await screen.findByRole('button', { name: /أغلق 2 طرفية وحدّث/ }));
+    const group = screen.getByRole('group');
+    expect(group.textContent).toContain('ويضيع كل عمل غير محفوظ');
+    expect(group.textContent).toContain('sara');
+  });
+
+  it('has every close-terminals string in ar and en, with the Arabic plural forms', () => {
+    const en = (enCommon as { versionUpdate: { closeTerminals: Record<string, unknown> } }).versionUpdate.closeTerminals;
+    const ar = (arCommon as { versionUpdate: { closeTerminals: Record<string, unknown> } }).versionUpdate.closeTerminals;
+    const flat = (node: Record<string, unknown>, prefix = ''): string[] => Object.entries(node).flatMap(([key, value]) =>
+      value && typeof value === 'object' ? flat(value as Record<string, unknown>, `${prefix}${key}.`) : [`${prefix}${key}`]);
+    const base = (keys: string[]) => new Set(keys.map((key) => key.replace(/_(zero|one|two|few|many|other)$/, '')));
+    expect([...base(flat(ar))].sort()).toEqual([...base(flat(en))].sort());
+    for (const key of ['button', 'confirm', 'confirmMessage', 'done']) {
+      for (const form of ['zero', 'one', 'two', 'few', 'many', 'other']) expect(ar[`${key}_${form}`], `ar ${key}_${form}`).toBeTruthy();
+      for (const form of ['one', 'other']) expect(en[`${key}_${form}`], `en ${key}_${form}`).toBeTruthy();
+    }
+    const errorKeys = ['notOverridable', 'jobNotFound', 'snapshotInvalid', 'forbidden', 'ownerIdentity', 'rateLimited', 'network', 'unknown',
+      ...['sessions_active', 'scheduled_wait', 'not_waiting_terminals', 'activator_failed', 'local_main']
+        .map((reason) => `notOverridableReasons.${reason}`)];
+    for (const form of ['zero', 'one', 'two', 'few', 'many', 'other']) {
+      expect(ar[`doneRemaining_${form}`], `ar doneRemaining_${form}`).toBeTruthy();
+      expect(ar[`terminalsUnit_${form}`], `ar terminalsUnit_${form}`).toBeTruthy();
+    }
+    for (const key of errorKeys) {
+      expect(lookup(en, `errors.${key}`), `en errors.${key}`).toBeTruthy();
+      expect(lookup(ar, `errors.${key}`), `ar errors.${key}`).toBeTruthy();
+    }
+    expect(lookup(ar, 'errors.unknown')).toContain('{{code}}');
+  });
+});
+
 describe('i18n coverage — all mapped error codes have ar+en keys', () => {
   const ERROR_CODES = [
     'dirty_worktree', 'wrong_branch', 'detached_head', 'non_fast_forward',
@@ -824,7 +1168,22 @@ describe('i18n coverage — all mapped error codes have ar+en keys', () => {
     'insufficient_disk', 'storage_probe_failed', 'update_database_state_unknown',
     'runtime_verification_failed', 'release_layout_retired', 'sealed_release_identity_mismatch',
     'unsupported_install_mode', 'update_source_state_degraded', 'unknown',
+    // B-1448: activation refusals that used to fall back to "unexpected error".
+    'update_lock_contended', 'update_maintenance_active', 'update_lock_unavailable',
+    'source_update_activation_interrupted',
   ];
+
+  // B-1448: the terminal and lock waits exist in both languages with the same placeholders.
+  for (const key of ['waitingTerminals', 'waitingTerminalsUsers', 'detachedTerminals', 'waitingLock']) {
+    it(`has ar+en autoActivate.${key} with matching placeholders`, () => {
+      const en = lookup(enCommon, `versionUpdate.autoActivate.${key}`);
+      const ar = lookup(arCommon, `versionUpdate.autoActivate.${key}`);
+      expect(en).toBeTruthy();
+      expect(ar).toBeTruthy();
+      const placeholders = (text: string) => [...text.matchAll(/\{\{(\w+)\}\}/g)].map((m) => m[1]).sort();
+      expect(placeholders(ar!)).toEqual(placeholders(en!));
+    });
+  }
 
   for (const code of ERROR_CODES) {
     it(`has en title+hint for "${code}"`, () => {

@@ -254,6 +254,11 @@ test('known unattributable spend is declared as a gap rather than silently omitt
     const report = await costLedgerService.scan({ claudeRoots: [root], harnesses: ['claude'] });
     const harnesses = report.gaps.map((gap) => gap.harness);
     assert.ok(harnesses.includes('hermes'));
+    // T-1953: the same wording session-cost gives a retired-body conversation.
+    assert.equal(
+      report.gaps.find((gap) => gap.harness === 'hermes')?.reason,
+      'Hermes was removed as an agent body; its past conversations carry no usage record nassaj can read.',
+    );
     for (const gap of report.gaps) {
       assert.ok(gap.reason.length > 20, 'a gap must carry a written reason, not a flag');
     }

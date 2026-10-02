@@ -227,15 +227,16 @@ test('the secret value never appears in any response body across the lifecycle',
 });
 
 test('a terminal-only provider is rejected with 400 TERMINAL_ONLY', async () => {
-  // T-866: 'cursor' has no credential-writer facet and is not a hosted vendor,
-  // so both write and status short-circuit to TERMINAL_ONLY (no DB/role check).
-  // (Facet providers claude/codex/opencode are covered by their own writer
-  // suites; exercising them here would require a provisioned per-user tree/DB.)
-  const set = await call('POST', '/api/providers/cursor/api-key', { user: 'u1', body: { apiKey: TEST_API_KEY } });
+  // T-866: 'antigravity' has no credential-writer facet and is not a hosted
+  // vendor, so both write and status short-circuit to TERMINAL_ONLY (no DB/role
+  // check). (Facet providers claude/codex/opencode are covered by their own
+  // writer suites; exercising them here would require a provisioned per-user
+  // tree/DB.) The subject was 'cursor' until T-1953 retired that body.
+  const set = await call('POST', '/api/providers/antigravity/api-key', { user: 'u1', body: { apiKey: TEST_API_KEY } });
   assert.equal(set.status, 400);
   assert.equal(set.body.error?.code, 'TERMINAL_ONLY');
 
-  const status = await call('GET', '/api/providers/cursor/api-key', { user: 'u1' });
+  const status = await call('GET', '/api/providers/antigravity/api-key', { user: 'u1' });
   assert.equal(status.status, 400);
   assert.equal(status.body.error?.code, 'TERMINAL_ONLY');
 });
@@ -262,12 +263,17 @@ test('capability endpoint reports the writer method per provider', async () => {
   const codex = await call('GET', '/api/providers/codex/api-key/capability', { user: 'u1' });
   assert.deepEqual(codex.body.data, { provider: 'codex', method: 'cli_stdin' });
 
-  // Terminal-only: cursor reports none.
+  // Terminal-only: antigravity reports none.
+  const agy = await call('GET', '/api/providers/antigravity/api-key/capability', { user: 'u1' });
+  assert.deepEqual(agy.body.data, { provider: 'antigravity', method: 'none' });
+
+  // T-1953: a retired body with no key slot has no capability left to report.
   const cursor = await call('GET', '/api/providers/cursor/api-key/capability', { user: 'u1' });
-  assert.deepEqual(cursor.body.data, { provider: 'cursor', method: 'none' });
+  assert.equal(cursor.status, 400);
+  assert.equal(cursor.body.error?.code, 'provider_removed');
 });
 
-test('Qwen APIs expose personal credentials and the native runtime catalog', async () => {
+test('Qwen keeps its personal key slot while its body surfaces are refused (T-1953)', async () => {
   const key = 'sk-sp-personal-key-123';
   const set = await call('POST', '/api/providers/qwen/api-key', {
     user: '1',
@@ -277,35 +283,14 @@ test('Qwen APIs expose personal credentials and the native runtime catalog', asy
   assert.deepEqual(set.body.data, { provider: 'qwen', configured: true });
   assert.doesNotMatch(JSON.stringify(set.body), new RegExp(key));
 
-  // Keep the API contract test independent from whether the developer host has
-  // Qwen installed. The live-install probe is covered separately.
-  const previousQwenPath = process.env.QWEN_PATH;
-  try {
-    process.env.QWEN_PATH = '/definitely/missing/qwen';
-    const status = await call('GET', '/api/providers/qwen/auth/status', { user: '1' });
-    assert.equal(status.status, 200);
-    assert.deepEqual(
-      status.body.data,
-      {
-        installed: false,
-        authenticated: false,
-        email: null,
-        method: null,
-        provider: 'qwen',
-        error: 'Qwen Code CLI is not installed',
-      },
-    );
-  } finally {
-    if (previousQwenPath === undefined) delete process.env.QWEN_PATH;
-    else process.env.QWEN_PATH = previousQwenPath;
+  // The key is spent through the OpenCode carrier (qwen-plan/*). The Qwen body's
+  // own CLI status probe and native catalog are retired with the body.
+  for (const route of ['/api/providers/qwen/auth/status', '/api/providers/qwen/models?bypassCache=true']) {
+    const refused = await call('GET', route, { user: '1' });
+    assert.equal(refused.status, 400, route);
+    assert.equal(refused.body.error?.code, 'provider_removed', route);
+    assert.doesNotMatch(JSON.stringify(refused.body), new RegExp(key));
   }
-
-  // Bypass the process-level persisted catalog cache: this assertion verifies
-  // the credential profile written above, not a catalog cached by the live host.
-  const models = await call('GET', '/api/providers/qwen/models?bypassCache=true', { user: '1' });
-  assert.equal(models.status, 200, JSON.stringify(models.body));
-  assert.equal(models.body.data.provider, 'qwen');
-  assert.equal(models.body.data.models.DEFAULT, 'qwen3-coder-plus');
 
   const oversized = await call('PUT', '/api/providers/qwen/api-key', {
     user: '1',

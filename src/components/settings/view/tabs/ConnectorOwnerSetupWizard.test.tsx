@@ -1,6 +1,24 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import arSettings from '../../../../i18n/locales/ar/settings.json';
+import enSettings from '../../../../i18n/locales/en/settings.json';
+
+const lookup = (tree: unknown, key: string): string | undefined => {
+  const value = key.split('.').reduce<unknown>(
+    (node, part) => (node && typeof node === 'object' ? (node as Record<string, unknown>)[part] : undefined), tree);
+  return typeof value === 'string' ? value : undefined;
+};
+const i18nLanguage = vi.hoisted(() => ({ current: 'en' as 'en' | 'ar' }));
+vi.mock('react-i18next', () => ({
+  useTranslation: () => ({
+    t: (key: string) => lookup(i18nLanguage.current === 'ar' ? arSettings : enSettings, key) ?? key,
+    i18n: { language: i18nLanguage.current },
+  }),
+}));
+const originTexts = (language: 'en' | 'ar') =>
+  (language === 'ar' ? arSettings : enSettings).connectorsSettings.ownerSetup.origin;
+
 const { loadConnectorOwnerSetup, mutateConnectorOwnerSetup, verifyConnectorOwnerProfile, requestStepUp } = vi.hoisted(() => ({
   loadConnectorOwnerSetup: vi.fn(), mutateConnectorOwnerSetup: vi.fn(), verifyConnectorOwnerProfile: vi.fn(),
   requestStepUp: vi.fn(),
@@ -16,7 +34,7 @@ import type { ConnectorOwnerSetupStatus, OwnerSetupStep } from './connectorOwner
 
 const fixture = (
   resumableStep: OwnerSetupStep,
-  overrides?: Partial<Pick<ConnectorOwnerSetupStatus, 'packExpiresAt' | 'warnings'>>,
+  overrides?: Partial<Pick<ConnectorOwnerSetupStatus, 'packExpiresAt' | 'warnings' | 'originProposal'>>,
 ): ConnectorOwnerSetupStatus => ({
   schemaVersion: 1 as const, readyForAccountLinking: resumableStep === 'complete', resumableStep,
   checks: [
@@ -28,6 +46,9 @@ const fixture = (
   ],
   origin: resumableStep === 'origin' ? null : { installationId: 'install-1', canonicalOrigin: 'https://nassaj.example',
     callbackUrl: 'https://nassaj.example/connectors/oauth/callback', originRevision: 1 },
+  // Origin-step fixtures carry a usable proposal unless a test overrides it (B-1461 L2).
+  originProposal: overrides && 'originProposal' in overrides ? overrides.originProposal ?? null
+    : resumableStep === 'origin' ? { canonicalOrigin: 'https://nassaj.example', source: 'public_origin' } : null,
   trustBundleRevision: resumableStep === 'origin' || resumableStep === 'trust' ? 0 : 1,
   activePack: ['activation', 'complete'].includes(resumableStep) ? {
     issuer: 'nassaj', channel: 'stable', sequence: 1, digest: 'a'.repeat(43), expiresAt: null,
@@ -45,7 +66,7 @@ const fixture = (
   ] : [],
 });
 
-beforeEach(() => { loadConnectorOwnerSetup.mockReset(); mutateConnectorOwnerSetup.mockReset();
+beforeEach(() => { i18nLanguage.current = 'en'; loadConnectorOwnerSetup.mockReset(); mutateConnectorOwnerSetup.mockReset();
   verifyConnectorOwnerProfile.mockReset(); requestStepUp.mockReset(); });
 afterEach(cleanup);
 
@@ -179,6 +200,63 @@ describe('owner setup wizard', () => {
       route: 'origin', expectedRevision: 0,
       body: { canonicalOrigin: 'https://fresh.example', expectedOriginRevision: 0 },
     })));
+  });
+
+  it('B-1461: pre-fills the server origin proposal and names its source, without saving', async () => {
+    for (const language of ['en', 'ar'] as const) {
+      i18nLanguage.current = language;
+      loadConnectorOwnerSetup.mockResolvedValue(fixture('origin', {
+        originProposal: { canonicalOrigin: 'https://sso-node.example', source: 'oidc_redirect_uri' } }));
+      render(<ConnectorOwnerSetupWizard owner csrfToken={'c'.repeat(64)} recentAuthRequired={false} language={language}/>);
+      await waitFor(() => expect((screen.getByRole('textbox') as HTMLInputElement).value)
+        .toBe('https://sso-node.example'));
+      expect(screen.getByText(originTexts(language).proposalSource.oidc_redirect_uri)).toBeTruthy();
+      expect(mutateConnectorOwnerSetup).not.toHaveBeenCalled();
+      cleanup();
+    }
+    expect(originTexts('ar').proposalSource.oidc_redirect_uri).toContain('عنوان الرجوع لدخول المؤسسة');
+  });
+
+  it('B-1461 L2: without a usable proposal nothing is pre-filled and Save stays disabled', async () => {
+    const cases = [
+      [{ canonicalOrigin: null, source: 'invalid_public_origin' } as const, originTexts('en').invalidPublicOrigin],
+      [null, enSettings.connectorsSettings.stepUp.errors.originUnconfiguredOwner],
+    ] as const;
+    for (const [originProposal, text] of cases) {
+      loadConnectorOwnerSetup.mockResolvedValue(fixture('origin', { originProposal }));
+      render(<ConnectorOwnerSetupWizard owner csrfToken={'c'.repeat(64)} recentAuthRequired={false} language="en"/>);
+      expect((await screen.findByRole('alert')).textContent).toContain(text);
+      expect((screen.getByRole('textbox') as HTMLInputElement).value).toBe('');
+      fireEvent.change(screen.getByRole('textbox'), { target: { value: 'https://fresh.example' } });
+      expect((screen.getByRole('button', { name: 'Save and continue' }) as HTMLButtonElement).disabled).toBe(true);
+      expect(mutateConnectorOwnerSetup).not.toHaveBeenCalled();
+      cleanup();
+    }
+  });
+
+  it('B-1461: explains the proposal mismatch and each bootstrap refusal in both languages', async () => {
+    const cases = [
+      [new ConnectorOwnerSetupRequestError('CONNECTOR_ORIGIN_PROPOSAL_MISMATCH', 403), 'proposalMismatch'],
+      [new ConnectorOwnerSetupRequestError('CONNECTOR_ORIGIN_BOOTSTRAP_REFUSED', 409, 'startup_profile'),
+        'bootstrapStartupProfile'],
+      [new ConnectorOwnerSetupRequestError('CONNECTOR_ORIGIN_BOOTSTRAP_REFUSED', 409,
+        'existing_installation_effects'), 'bootstrapExistingEffects'],
+      [new ConnectorOwnerSetupRequestError('CONNECTOR_ORIGIN_BOOTSTRAP_REFUSED', 409), 'bootstrapRefused'],
+    ] as const;
+    for (const language of ['en', 'ar'] as const) {
+      for (const [refusal, key] of cases) {
+        i18nLanguage.current = language;
+        loadConnectorOwnerSetup.mockResolvedValue(fixture('origin'));
+        mutateConnectorOwnerSetup.mockRejectedValueOnce(refusal);
+        render(<ConnectorOwnerSetupWizard owner csrfToken={'c'.repeat(64)} recentAuthRequired={false} language={language}/>);
+        fireEvent.change(await screen.findByRole('textbox'), { target: { value: 'https://fresh.example' } });
+        fireEvent.click(screen.getByRole('button', { name: language === 'ar' ? 'حفظ ومتابعة' : 'Save and continue' }));
+        const alert = await screen.findByRole('alert');
+        expect(alert.textContent).toContain(originTexts(language).errors[key]);
+        expect(alert.textContent).toContain(refusal.code);
+        cleanup();
+      }
+    }
   });
 
   it('deduplicates DCR profile setup by provider and sends no secret', async () => {

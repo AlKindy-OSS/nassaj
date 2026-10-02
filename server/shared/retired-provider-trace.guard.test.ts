@@ -91,6 +91,7 @@ const ALLOWLIST: Readonly<Record<string, string>> = Object.freeze({
   'server/services/isolation/agy-onboarding.service.js': AGY_HOME,
   'server/services/isolation/agy-onboarding.test.ts': AGY_HOME,
   'server/services/isolation/credential-principal.js': CREDENTIAL_UNIT,
+  'server/services/isolation/engine-carrier-survival.isolation.test.ts': 'asserts GEMINI_API_KEY is stripped',
   'server/services/isolation/gemini-governance-material.js': AGY_GOVERNANCE,
   'server/services/isolation/grant-home.js': 'grants link .gemini for the agy unit',
   'server/services/isolation/isolation.e2e.test.ts': CREDENTIAL_UNIT,
@@ -109,8 +110,11 @@ const ALLOWLIST: Readonly<Record<string, string>> = Object.freeze({
   'shared/retiredProviders.ts': 'the one place the retired id is named, for typed refusals',
   'public/modelConstants.js': 'cursor/agy/opencode catalogs list Google gemini-* models',
   'src/components/chat/hooks/useProviderGovernance.ts': 'agy gemini-md governance mechanism id',
+  'src/components/chat/view/ChatInterface.tsx': 'lists gemini among retired bodies never shown as an active provider',
   'src/components/chat/view/subcomponents/MessageModelBadge.test.tsx': 'badge label for a Google gemini-* model',
   'src/components/provider-auth/providerSelectionEmptyState.antigravityRows.test.tsx': AGY_MODELS,
+  'src/components/provider-auth/retiredProviderSurfaces.test.ts':
+    "docstring/asserts why gemini's runtime-deleted guard differs from the four body-only retirements (T-1953)",
   'src/components/settings/hooks/useCredentialGrants.ts': CREDENTIAL_UNIT,
   'src/components/settings/view/tabs/agents-settings/governanceToneNeutrality.test.tsx': AGY_GOVERNANCE,
   'src/components/settings/view/tabs/agents-settings/instructionSources.test.tsx': AGY_GOVERNANCE,
@@ -136,6 +140,7 @@ const ALLOWLIST: Readonly<Record<string, string>> = Object.freeze({
   'src/lib/themePrimaryContrast.test.ts': THEME,
   'src/lib/themeRingContrast.test.ts': THEME,
   'src/lib/themeStatusContrast.test.ts': THEME,
+  'src/types/app.ts': 'excludes gemini among retired bodies from the ActiveBodyProvider type',
 });
 
 function collectMatchingFiles(): string[] {

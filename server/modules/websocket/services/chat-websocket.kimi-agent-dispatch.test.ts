@@ -1,27 +1,19 @@
 /**
- * chat-websocket.kimi-agent-dispatch.test.ts — KM-5 (ADR-062 §4.2 KM-3, W5-A).
+ * chat-websocket.kimi-agent-dispatch.test.ts — KM-5 (ADR-062 §4.2 KM-3), T-1953.
  *
- * Tests for the kimi-agent dispatch logic inside `dispatchProviderCommand`
- * (chat-websocket.service.ts, KM-3). This is the narrow "survived the
- * governance / disable wall and now routed to the right launcher" layer.
+ * The kimi BODY is retired (ADR-192). This file used to prove the ADR-062
+ * agent-run bypass — `mode === 'agent'` with `spawnKimiAgent` wired reached the
+ * native launcher past the disable wall. That bypass sits AFTER the retired-body
+ * refusal in `dispatchProviderCommand`, so it can no longer be reached; the
+ * native launcher stays in the tree as dormant code until it is deleted.
  *
- * THE CORE CONTRACT (KM-3 / §4.2; kimi is back in DISABLED_PROVIDERS per the
- * owner decision of 2026-09-29, c4fe8f58c):
- *   • `mode === 'agent'` + `spawnKimiAgent` injected → spawnKimiAgent is called
- *     (the ADR-062 agent-run bypass of the disable wall, unchanged by that
- *     decision — the dormant native launcher mechanics stay covered here).
- *   • `mode === 'agent'` WITHOUT `spawnKimiAgent` → refused as disabled; no
- *     launcher runs and spawnKimiAgent is NOT invented.
- *   • No mode / mode=chat → refused as disabled; neither spawnKimi nor
- *     spawnKimiAgent runs.
+ * THE CONTRACT NOW: every `kimi-command` — agent or chat, launcher wired or
+ * not, carrier flag on or off — gets the single typed `provider_removed`
+ * refusal before a run starts, and no launcher of any kind is called. (The kimi
+ * ENGINE is a different axis: it travels as `claude-command` and is pinned by
+ * chat-websocket.engine-carrier-survival.test.ts.)
  *
- * Proves (all pure — module-mocked DB, no binary, no real WS):
- *  (A) agent + wired → spawnKimiAgent called with (command, options, writer).
- *  (B) agent + NOT wired → refused, no launcher.
- *  (C) chat (no mode / mode=chat) → refused, no launcher.
- *  (D) spawnKimi never called when spawnKimiAgent handles the turn.
- *  (E) a refused kimi chat turn does NOT leak into spawnKimiAgent even when the
- *      launcher is wired.
+ * Pure: module-mocked DB, no binary, no real WS.
  *
  * Runner:
  *   npx tsx --experimental-test-module-mocks --tsconfig server/tsconfig.json \
@@ -108,7 +100,6 @@ function makeDeps(overrides: {
     queryCodex: spawn('codex'),
     spawnAntigravity: spawn('antigravity'),
     spawnOpenCode: spawn('opencode'),
-    spawnHermes: spawn('hermes'),
     spawnKimi: spawn('kimi-chat'),
     spawnDeepSeek: spawn('deepseek'),
     spawnGlm: spawn('glm'),
@@ -119,7 +110,6 @@ function makeDeps(overrides: {
     abortCodexSession: () => false,
     abortAntigravitySession: () => false,
     abortOpenCodeSession: () => false,
-    abortHermesSession: () => false,
     abortKimiSession: () => false,
     abortDeepSeekSession: () => false,
     abortGlmSession: () => false,
@@ -142,189 +132,52 @@ function makeDeps(overrides: {
   return { deps, calls, spawnLog };
 }
 
-/** Asserts the single not-started refusal the dispatch seam sends for a disabled provider. */
-function assertRefusedAsDisabled(sent: SentPayload[], calls: string[]) {
-  assert.deepEqual(calls, [], 'no launcher runs for a disabled provider');
+/** Asserts the single not-started refusal the dispatch seam sends for the retired kimi body. */
+function assertRefusedAsRemoved(sent: SentPayload[], calls: string[]) {
+  assert.deepEqual(calls, [], 'no launcher runs for a retired body');
   assert.equal(sent.length, 1, 'exactly one refusal frame');
-  const [refusal] = sent as Array<SentPayload & { notStarted?: boolean }>;
+  const [refusal] = sent as Array<SentPayload & { notStarted?: boolean; code?: string }>;
   assert.equal(refusal.kind, 'complete');
   assert.equal(refusal.success, false);
   assert.equal(refusal.provider, 'kimi');
   assert.equal(refusal.notStarted, true, 'refused before a run starts');
-  assert.match(String(refusal.error), /disabled on this deployment/);
+  assert.equal(refusal.code, 'provider_removed');
 }
 
-// ---------------------------------------------------------------------------
-// (A) mode==='agent' + spawnKimiAgent wired → spawnKimiAgent called
-// ---------------------------------------------------------------------------
-test('(A) kimi mode=agent with spawnKimiAgent wired → routes to spawnKimiAgent', async () => {
-  const { writer } = makeWriter();
-  let agentCalled = false;
+const WIRED = { spawnKimiAgent: async () => {} };
 
-  const { deps, calls } = makeDeps({
-    spawnKimiAgent: async () => {
-      agentCalled = true;
-    },
+const KIMI_TURNS: ReadonlyArray<[string, Parameters<typeof makeDeps>[0], Record<string, unknown>]> = [
+  ['(A) mode=agent with spawnKimiAgent wired', WIRED, { mode: 'agent', coordinationLevel: 'direct' }],
+  ['(A) mode=agent with full agent options', WIRED,
+    { mode: 'agent', permissionMode: 'acceptEdits', model: 'kimi-k2.6', coordinationLevel: 'direct' }],
+  ['(B) mode=agent WITHOUT spawnKimiAgent wired', {}, { mode: 'agent', coordinationLevel: 'direct' }],
+  ['(C) chat with no mode', WIRED, { coordinationLevel: 'direct' }],
+  ['(C) chat with explicit mode=chat', WIRED, { mode: 'chat', coordinationLevel: 'direct' }],
+];
+
+for (const [label, overrides, options] of KIMI_TURNS) {
+  test(`${label} → provider_removed, no launcher`, async () => {
+    const { writer, sent } = makeWriter();
+    const { deps, calls } = makeDeps(overrides);
+
+    await dispatchProviderCommand('kimi-command', { command: 'work', options }, writer, deps);
+
+    assertRefusedAsRemoved(sent, calls);
   });
+}
 
-  await dispatchProviderCommand(
-    'kimi-command',
-    { command: 'write tests', options: { mode: 'agent', coordinationLevel: 'direct' } },
-    writer,
-    deps,
-  );
-
-  assert.ok(agentCalled, 'spawnKimiAgent must be called for mode=agent + wired launcher');
-  assert.ok(calls.includes('kimi-agent'), 'kimi-agent must appear in the calls log');
-  assert.ok(!calls.includes('kimi-chat'), 'spawnKimi (chat path) must NOT be called');
-});
-
-test('(A) spawnKimiAgent receives the correct command and options', async () => {
-  const { writer } = makeWriter();
-  const COMMAND = 'implement the feature';
-  const OPTIONS = { mode: 'agent', permissionMode: 'acceptEdits', model: 'kimi-k2.6', coordinationLevel: 'direct' };
-
-  let capturedCmd = '';
-  let capturedOpts: unknown = null;
-
-  const { deps } = makeDeps({
-    spawnKimiAgent: async (cmd: string, opts: unknown) => {
-      capturedCmd = cmd;
-      capturedOpts = opts;
-    },
-  });
-
-  await dispatchProviderCommand(
-    'kimi-command',
-    { command: COMMAND, options: OPTIONS },
-    writer,
-    deps,
-  );
-
-  assert.equal(capturedCmd, COMMAND, 'spawnKimiAgent must receive the original command');
-  assert.deepEqual(
-    (capturedOpts as typeof OPTIONS).mode,
-    'agent',
-    'spawnKimiAgent options must include mode:agent',
-  );
-});
-
-// ---------------------------------------------------------------------------
-// (B) mode==='agent' WITHOUT spawnKimiAgent wired → refused as disabled
-// ---------------------------------------------------------------------------
-test('(B) kimi mode=agent WITHOUT spawnKimiAgent wired → refused, no launcher', async () => {
+test('(D) resuming a session persisted under kimi in agent mode is refused the same way', async () => {
   const { writer, sent } = makeWriter();
-
-  // No spawnKimiAgent in deps → kimiAgentRun=false → no bypass. kimi is globally
-  // disabled (2026-09-29), so the request is refused; it does not degrade to the
-  // chat launcher and spawnKimiAgent is not invented.
-  const { deps, calls } = makeDeps({});
+  const { deps, calls } = makeDeps({ ...WIRED, sessionProvider: { 'kimi-session-1': 'kimi' } });
 
   await dispatchProviderCommand(
     'kimi-command',
-    { command: 'test', options: { mode: 'agent', coordinationLevel: 'direct' } },
+    { command: 'continue', options: { sessionId: 'kimi-session-1', mode: 'agent', coordinationLevel: 'direct' } },
     writer,
     deps,
   );
 
-  assertRefusedAsDisabled(sent, calls);
-});
-
-// ---------------------------------------------------------------------------
-// (C) No mode (chat turn) → refused as disabled
-// ---------------------------------------------------------------------------
-test('(C) kimi chat (no mode) → refused, never spawnKimi or spawnKimiAgent', async () => {
-  const { writer, sent } = makeWriter();
-
-  // spawnKimiAgent IS wired, but no mode=agent → kimiAgentRun=false (chat path).
-  // kimi is disabled → refused; neither launcher runs.
-  const { deps, calls } = makeDeps({
-    spawnKimiAgent: async () => {
-      throw new Error('spawnKimiAgent must not be called for a chat turn');
-    },
-  });
-
-  await dispatchProviderCommand(
-    'kimi-command',
-    { command: 'hello', options: { coordinationLevel: 'direct' } }, // no mode
-    writer,
-    deps,
-  );
-
-  assertRefusedAsDisabled(sent, calls);
-});
-
-test('(C) kimi chat with explicit mode=chat → refused, no launcher', async () => {
-  const { writer, sent } = makeWriter();
-  const { deps, calls } = makeDeps({
-    spawnKimiAgent: async () => {},
-  });
-
-  await dispatchProviderCommand(
-    'kimi-command',
-    { command: 'hello', options: { mode: 'chat', coordinationLevel: 'direct' } },
-    writer,
-    deps,
-  );
-
-  // mode=chat is NOT 'agent' → kimiAgentRun=false → the disable wall refuses it.
-  assertRefusedAsDisabled(sent, calls);
-});
-
-// ---------------------------------------------------------------------------
-// (D) spawnKimi (vendor-runtime) never called when spawnKimiAgent handles the turn
-// ---------------------------------------------------------------------------
-test('(D) spawnKimi is NOT called when spawnKimiAgent handles the agent turn', async () => {
-  const { writer } = makeWriter();
-  const { deps, calls } = makeDeps({
-    spawnKimiAgent: async () => {},
-  });
-
-  await dispatchProviderCommand(
-    'kimi-command',
-    { command: 'do-work', options: { mode: 'agent', coordinationLevel: 'direct' } },
-    writer,
-    deps,
-  );
-
-  assert.ok(calls.includes('kimi-agent'), 'kimi-agent must be called');
-  assert.ok(
-    !calls.includes('kimi-chat'),
-    'spawnKimi (chat path) must NOT be called when spawnKimiAgent is wired + mode=agent',
-  );
-});
-
-// ---------------------------------------------------------------------------
-// (E) A refused chat turn does not leak into spawnKimiAgent
-// ---------------------------------------------------------------------------
-test('(E) vendor-runtime isolation: chat turn never reaches spawnKimiAgent', async () => {
-  // Even when spawnKimiAgent is wired, a chat-mode kimi turn must NOT end up in
-  // spawnKimiAgent — it is refused as disabled. This proves the native-agent
-  // bypass is ONLY for agent mode.
-  const { writer, sent } = makeWriter();
-  let kimiAgentHit = false;
-
-  const { deps, calls } = makeDeps({
-    spawnKimiAgent: async () => {
-      kimiAgentHit = true;
-    },
-  });
-
-  // Chat mode: kimi is disabled → refused, spawnKimiAgent NEVER touched.
-  await dispatchProviderCommand(
-    'kimi-command',
-    { command: 'tell me something', options: { mode: 'chat', coordinationLevel: 'direct' } },
-    writer,
-    deps,
-  );
-
-  assert.equal(
-    kimiAgentHit,
-    false,
-    'spawnKimiAgent must not be invoked for a chat-mode kimi turn',
-  );
-  // Confirm it was refused explicitly (not silently dropped).
-  assertRefusedAsDisabled(sent, calls);
+  assertRefusedAsRemoved(sent, calls);
 });
 
 // ---------------------------------------------------------------------------
@@ -352,29 +205,12 @@ test('isOpenCodeCarrierEnabled: OFF by default, ON with truthy values', () => {
   }
 });
 
-// Verify kimi agent bypass does NOT enable the GLM carrier.
-test('kimi agent run does not enable GLM carrier (independent flags)', async () => {
-  // When kimi agent mode is dispatched and the GLM carrier flag is OFF,
-  // the GLM path must not be activated. They are independent bypass conditions.
-  const { writer } = makeWriter();
-  let opencodeHit = false;
-  let kimiAgentHit = false;
-
-  // Ensure GLM carrier flag is OFF in env.
+test('(E) an armed GLM carrier flag does not route a kimi agent turn to OpenCode', async () => {
   const savedCarrier = process.env.NASSAJ_OPENCODE_CARRIER;
-  delete process.env.NASSAJ_OPENCODE_CARRIER;
-
+  process.env.NASSAJ_OPENCODE_CARRIER = '1';
   try {
-    const { deps } = makeDeps({
-      spawnKimiAgent: async () => {
-        kimiAgentHit = true;
-      },
-    });
-
-    // Override spawnOpenCode to detect if it is ever called.
-    (deps as Record<string, unknown>).spawnOpenCode = async () => {
-      opencodeHit = true;
-    };
+    const { writer, sent } = makeWriter();
+    const { deps, calls } = makeDeps(WIRED);
 
     await dispatchProviderCommand(
       'kimi-command',
@@ -383,8 +219,7 @@ test('kimi agent run does not enable GLM carrier (independent flags)', async () 
       deps,
     );
 
-    assert.equal(kimiAgentHit, true, 'kimi agent must run');
-    assert.equal(opencodeHit, false, 'GLM/opencode must not run when only kimi agent is dispatched');
+    assertRefusedAsRemoved(sent, calls);
   } finally {
     if (savedCarrier === undefined) delete process.env.NASSAJ_OPENCODE_CARRIER;
     else process.env.NASSAJ_OPENCODE_CARRIER = savedCarrier;

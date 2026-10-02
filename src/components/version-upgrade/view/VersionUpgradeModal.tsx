@@ -25,6 +25,7 @@ import {
     type BlockedStorageFigures,
     type StoredUpdateAttempt,
     type ManifestDrift,
+    type OpenTerminals,
     type UpdateJobSnapshot,
     type UpdateJobState,
 } from "../updateJobClient";
@@ -34,12 +35,32 @@ import { UpdateTerminalLog } from "./UpdateTerminalLog";
 import { UpdateConsentPanel } from "./UpdateConsentPanel";
 import { DeferralWaitingPanel } from "./DeferralWaitingPanel";
 import { ScheduledWaitPanel } from "./ScheduledWaitPanel";
+import { CloseTerminalsAction } from "./CloseTerminalsAction";
 
 type Translate = ReturnType<typeof useTranslation>['t'];
+
+/**
+ * B-1448: the terminal wait, with the count, whose terminals they are and, for
+ * detached Shell tabs, when they close by themselves.
+ */
+function terminalWaitMessage(terminals: OpenTerminals | null, t: Translate): string {
+    const count = terminals?.count ?? 0;
+    const users = terminals?.usernames.length ? terminals.usernames.join(', ') : null;
+    const main = users
+        ? t('versionUpdate.autoActivate.waitingTerminalsUsers', { count, users })
+        : t('versionUpdate.autoActivate.waitingTerminals', { count });
+    if (!terminals?.detached || terminals.detachedClosesAt === null) return main;
+    const time = new Date(terminals.detachedClosesAt).toLocaleTimeString();
+    return `${main} ${t('versionUpdate.autoActivate.detachedTerminals', { count: terminals.detached, time })}`;
+}
 
 /** What the restart_queued box says when the owner consented at start (T-1751). */
 function autoActivationMessage(job: UpdateJobSnapshot, t: Translate): string {
     const status = job.autoActivation;
+    if (status?.state === 'waiting_terminals') return terminalWaitMessage(status.openTerminals, t);
+    if (status?.state === 'waiting_sessions' && status.code === 'update_lock_contended') {
+        return t('versionUpdate.autoActivate.waitingLock');
+    }
     if (status?.state === 'waiting_sessions') {
         return t('versionUpdate.autoActivate.waiting', { count: status.liveSessions ?? 0 });
     }
@@ -337,12 +358,18 @@ function PhaseStepper({ job, jobId, onScheduledOverridden }: PhaseStepperProps) 
                 />
             ) : job.state === 'restart_queued' && (job.autoActivate
                 && job.autoActivation?.state !== 'expired' && job.autoActivation?.state !== 'refused' ? (
-                <div
-                    role="status"
-                    className="rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-900 dark:border-blue-800/50 dark:bg-blue-950/30 dark:text-blue-200"
-                >
-                    {autoActivationMessage(job, t)}
-                </div>
+                <>
+                    <div
+                        role="status"
+                        className="rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-900 dark:border-blue-800/50 dark:bg-blue-950/30 dark:text-blue-200"
+                    >
+                        {autoActivationMessage(job, t)}
+                    </div>
+                    {/* B-1448 slice 2: owner-only "close N terminals and update". */}
+                    {job.autoActivation?.state === 'waiting_terminals' && (
+                        <CloseTerminalsAction jobId={jobId} openTerminals={job.autoActivation.openTerminals} />
+                    )}
+                </>
             ) : (
                 <div
                     role="status"
@@ -369,7 +396,9 @@ function ErrorPanel({ job }: ErrorPanelProps) {
 
     // Fall back to generic "unknown" if the code key doesn't exist.
     const title = t(titleKey, { defaultValue: t('versionUpdate.errorCodes.unknown.title') });
-    const hint = t(hintKey, { defaultValue: t('versionUpdate.errorCodes.unknown.hint') });
+    // B-1448: an unmapped code is still named, never hidden behind "unexpected".
+    // {code} goes to BOTH lookups: with no errorCode the key IS unknown.hint (M1).
+    const hint = t(hintKey, { code, defaultValue: t('versionUpdate.errorCodes.unknown.hint', { code }) });
 
     return (
         <div

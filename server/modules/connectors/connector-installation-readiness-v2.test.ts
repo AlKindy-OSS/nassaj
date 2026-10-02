@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 import Database from 'better-sqlite3';
 import express from 'express';
 
+import { ConnectorOriginBootstrapRefusedError } from './connector-origin-bootstrap-refusal.js';
 import { SqliteConnectorPolicyV2Store } from './connector-policy-v2-store.js';
 import type { ConnectorPolicyState } from './connector-policy-v2.js';
 import {
@@ -296,9 +297,11 @@ test('first-origin bootstrap is explicit and refuses installations with prior co
       if (unsafe === 'effect') database.prepare(`INSERT INTO connector_policy_v2_capability_nonce
         (nonce,installation_id,record_json,binding_digest,subject_digest) VALUES (?,?,?,?,?)`)
         .run('existing', INSTALLATION, '{}', 'binding', 'subject');
+      const reason = unsafe === 'disabled' ? 'startup_profile' : 'existing_installation_effects';
       assert.throws(() => store.setOrigin({ installationId: INSTALLATION, userId: 7,
         proposedOrigin: 'https://nassaj.example', expectedOriginRevision: 0,
-        authority: authority(), nowMs: NOW }), /bootstrap_unsafe/u);
+        authority: authority(), nowMs: NOW }), (error: unknown) => error instanceof ConnectorOriginBootstrapRefusedError
+        && /bootstrap_unsafe/u.test(error.message) && error.reason === reason);
       assert.equal(store.read(INSTALLATION), null);
     } finally { database.close(); }
   }
@@ -344,6 +347,7 @@ test('unmounted route factory serves GET without origin and protects owner PUT e
     installationId: INSTALLATION, store: f.store, now: () => NOW,
     resolveInstallationMember: () => ({ installationId: INSTALLATION, userId: 7, role: 'owner' }),
     executeOriginWrite: (_advance, effect) => { effect(); return true; },
+    readOriginProposal: () => 'https://nassaj.example',
     readFacts: () => { factsRead += 1; return [fact()]; },
     readRecentOwnerSession: () => ({ installationId: INSTALLATION, userId: 7,
       authTimeMs: NOW - 1_000, expiresAtMs: NOW + 30_000,
@@ -392,6 +396,7 @@ test('route PUT enforces exact body, CSRF, recent auth, and revision conflicts',
     installationId: INSTALLATION, store: f.store, readFacts: () => [], now: () => NOW,
     resolveInstallationMember: () => ({ installationId: INSTALLATION, userId: 7, role: 'owner' }),
     executeOriginWrite: (_advance, effect) => { effect(); return true; },
+    readOriginProposal: () => 'https://nassaj.example',
     readRecentOwnerSession: () => ({ installationId: INSTALLATION, userId: 7,
       authTimeMs: NOW - 1_000, expiresAtMs: NOW + 30_000,
       csrfTokenHash: createHash('sha256').update(csrf).digest('hex') }),
@@ -435,6 +440,7 @@ test('route dependency failures and cross-install facts return bounded secret-fr
         return { installationId: INSTALLATION, userId: 7, role: 'owner' };
       },
       executeOriginWrite: (_advance, effect) => { effect(); return true; },
+      readOriginProposal: () => 'https://nassaj.example',
       readFacts: () => failure === 'facts'
         ? [fact({ installationId: 'install-2' })] : [fact()],
       readRecentOwnerSession: () => {
@@ -460,5 +466,81 @@ test('route dependency failures and cross-install facts return bounded secret-fr
       await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
       f.database.close();
     }
+  }
+});
+
+/** Serves the PUT /origin route over a fixture store with a given trusted-config proposal. */
+const servePutOrigin = async (store: ConnectorInstallationOriginV2Store, proposal: () => string | null) => {
+  const csrf = 'f'.repeat(64);
+  const app = express(); app.use(express.json());
+  app.use('/api/connectors/v2/installation', createConnectorInstallationReadinessV2Routes({
+    installationId: INSTALLATION, store, readFacts: () => [], now: () => NOW,
+    resolveInstallationMember: () => ({ installationId: INSTALLATION, userId: 7, role: 'owner' }),
+    executeOriginWrite: (_advance, effect) => { effect(); return true; },
+    readOriginProposal: proposal,
+    readRecentOwnerSession: () => ({ installationId: INSTALLATION, userId: 7, authTimeMs: NOW - 1_000,
+      expiresAtMs: NOW + 30_000, csrfTokenHash: createHash('sha256').update(csrf).digest('hex') }),
+  }));
+  const server = app.listen(0, '127.0.0.1');
+  await new Promise<void>((resolve, reject) => { server.once('listening', resolve); server.once('error', reject); });
+  const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}/api/connectors/v2/installation/origin`;
+  const put = async (canonicalOrigin: string, expectedOriginRevision = 0) => {
+    const response = await fetch(url, { method: 'PUT', headers: { 'content-type': 'application/json',
+      origin: canonicalOrigin, 'x-csrf-token': csrf },
+    body: JSON.stringify({ canonicalOrigin, expectedOriginRevision }) });
+    return { status: response.status, body: await response.json() as Record<string, unknown> };
+  };
+  const close = () => new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+  return { put, close };
+};
+
+test('B-1461 H2: before the first bind the PUT body must equal the live trusted-config proposal', async () => {
+  for (const proposal of [() => 'https://nassaj.example', () => null,
+    () => { throw new Error('private proposal failure'); }]) {
+    const f = fixture();
+    const route = await servePutOrigin(f.store, proposal);
+    try {
+      const mismatch = await route.put('https://other.example');
+      assert.equal(mismatch.status, 403);
+      assert.deepEqual(mismatch.body, { code: 'CONNECTOR_ORIGIN_PROPOSAL_MISMATCH' });
+      assert.equal(f.store.read(INSTALLATION), null);
+    } finally { await route.close(); f.database.close(); }
+  }
+  const f = fixture();
+  const route = await servePutOrigin(f.store, () => 'https://nassaj.example');
+  try {
+    assert.equal((await route.put('https://nassaj.example')).status, 200);
+    assert.equal(f.store.read(INSTALLATION)?.canonicalOrigin, 'https://nassaj.example');
+  } finally { await route.close(); f.database.close(); }
+});
+
+test('B-1461: a pre-bind PUT with a non-zero revision is a revision conflict, not a bootstrap refusal', async () => {
+  const f = fixture();
+  const route = await servePutOrigin(f.store, () => 'https://nassaj.example');
+  try {
+    const conflict = await route.put('https://nassaj.example', 1);
+    assert.equal(conflict.status, 409);
+    assert.deepEqual(conflict.body, { code: 'CONNECTOR_ORIGIN_REVISION_CONFLICT' });
+    assert.equal(f.store.read(INSTALLATION), null);
+  } finally { await route.close(); f.database.close(); }
+});
+
+test('B-1461 H3: each first-bind refusal is 409 CONNECTOR_ORIGIN_BOOTSTRAP_REFUSED with its reason', async () => {
+  for (const reason of ['startup_profile', 'existing_installation_effects'] as const) {
+    const database = new Database(':memory:');
+    const policy = new SqliteConnectorPolicyV2Store(database, INSTALLATION, initialPolicy());
+    // startup_profile is the forward (existing-installation) start-up profile (T-1958).
+    const store = new ConnectorInstallationOriginV2Store(database, policy,
+      { allowInitialOriginBootstrap: reason !== 'startup_profile' });
+    if (reason === 'existing_installation_effects') database.prepare(`INSERT INTO connector_policy_v2_capability_nonce
+      (nonce,installation_id,record_json,binding_digest,subject_digest) VALUES (?,?,?,?,?)`)
+      .run('existing', INSTALLATION, '{}', 'binding', 'subject');
+    const route = await servePutOrigin(store, () => 'https://nassaj.example');
+    try {
+      const refused = await route.put('https://nassaj.example');
+      assert.equal(refused.status, 409, reason);
+      assert.deepEqual(refused.body, { code: 'CONNECTOR_ORIGIN_BOOTSTRAP_REFUSED', reason });
+      assert.equal(store.read(INSTALLATION), null);
+    } finally { await route.close(); database.close(); }
   }
 });

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { MouseEvent as ReactMouseEvent, ReactNode } from 'react';
 
 import { AnimatedRow } from './AnimatedRow';
@@ -13,10 +13,6 @@ import type { ProjectToolbarProps, SessionWithProvider } from '../../types/types
 import type { BulkSelectionKind } from '../../hooks/useSidebarController';
 import { announceContextMenuOpen, useDismissableContextMenu } from '../../hooks/useDismissableContextMenu';
 import { useSidebarSessionExtras } from '../../context/SidebarSessionExtrasContext';
-import {
-  computeSurfacedSessionsForProject,
-  useSurfacedSessionsRenderTick,
-} from '../../../../stores/surfacedSessionsStore';
 
 import SidebarSessionItem from './SidebarSessionItem';
 
@@ -26,6 +22,8 @@ type SidebarProjectSessionsProps = ProjectToolbarProps & {
   contentDirection?: 'rtl' | 'ltr';
   isExpanded: boolean;
   sessions: SessionWithProvider[];
+  /** T-1951: the "+N" hint's count, computed once by the controller. */
+  surfacedHiddenCount: number;
   selectedSession: ProjectSession | null;
   isSessionStarred: (session: SessionWithProvider) => boolean;
   onToggleStarSession: (session: SessionWithProvider, projectName: string) => void;
@@ -117,6 +115,7 @@ export default function SidebarProjectSessions({
   onProjectToolbarPresence,
   isExpanded,
   sessions,
+  surfacedHiddenCount,
   selectedSession,
   isSessionStarred,
   onToggleStarSession,
@@ -154,19 +153,11 @@ export default function SidebarProjectSessions({
   const { hideClosedSessions } = useSidebarSessionExtras();
 
   // B-1431/T-1949: `sessions` already unions in this project's surfaced rows
-  // (Sidebar.tsx aliases `getProjectSessions` to the merged selector), so the
-  // cap's own hidden count is re-derived here purely to render the "+N" hint —
-  // it is never used to decide which rows are visible.
-  useSurfacedSessionsRenderTick();
-  const loadedSessionIds = useMemo(
-    () => new Set(sessions.filter((session) => !session.__surfaced).map((session) => session.id)),
-    [sessions],
-  );
-  const { hiddenCount: surfacedHiddenCount } = computeSurfacedSessionsForProject(
-    project.projectId,
-    loadedSessionIds,
-    selectedSession?.id ?? null,
-  );
+  // (Sidebar.tsx aliases `getProjectSessions` to the merged selector). The
+  // cap's own hidden count used to be RE-derived here via a second store
+  // subscription purely to render the "+N" hint; `surfacedHiddenCount` is now
+  // computed once by the controller (T-1951) and simply passed down — this
+  // component owns none of the surfaced-store wiring any more.
 
   // Close the context menu when the project collapses so no stale listeners remain.
   useEffect(() => {
@@ -264,10 +255,17 @@ export default function SidebarProjectSessions({
             <Plus aria-hidden="true" />
             {t('sessions.newSession')}
           </Button>
-          {/* Owner decision: Project Board sits right next to the avatar stack
-              (then the add-member circle after it), not lumped in with the
-              other tool icons — this button is pulled out of the tools loop
-              below so it renders immediately beside `participantsSummary`. */}
+          {/* Owner decision (2026-09-30): folder/git/board/members/add-member form
+              one cluster on the visual left, "جلسة جديدة" stays alone on the
+              visual right — the flexible gap sits between the two clusters, so
+              it now lives here (right after the new-session button) instead of
+              inside the participants wrapper. */}
+          <div className="min-w-0 flex-1" />
+          <div dir={contentDirection} className="shrink-0 overflow-hidden">{participantsSummary}</div>
+          {/* Project Board sits right next to the avatar/add-member cluster
+              (then git/files after it), not lumped in with the other tool
+              icons — this button is pulled out of the tools loop below so it
+              renders immediately beside `participantsSummary`. */}
           {onOpenProjectTool && (
             <button type="button" data-project-tool="board"
               aria-pressed={activeProjectTool === 'board'}
@@ -276,7 +274,6 @@ export default function SidebarProjectSessions({
               <KanbanSquare aria-hidden="true" className="size-3.5" />
             </button>
           )}
-          <div dir={contentDirection} className="min-w-0 flex-1 overflow-hidden">{participantsSummary}</div>
           {onOpenProjectTool && <div className="flex shrink-0 items-center">
             {([['git', GitBranch], ['files', Folder]] as const).map(([tool, Icon]) => (
               <button key={tool} type="button" data-project-tool={tool}

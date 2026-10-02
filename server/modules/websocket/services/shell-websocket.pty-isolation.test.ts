@@ -256,19 +256,62 @@ function asRequest(id: unknown, role: string | undefined = 'user') {
 // Use the real cwd as projectPath: the handler statSyncs it and requires a dir.
 const PROJECT_PATH = process.cwd();
 
-test('a retired provider is refused before env resolution or PTY spawn', async () => {
-  await withIsolatedDatabase(() => {
-    spawnCalls.length = 0;
-    resolveCalls.length = 0;
-    const ws = makeFakeWs();
-    handleShellConnection(ws as never, asRequest(7), deps);
-    ws.emit('message', initMessage(PROJECT_PATH, { provider: [...RETIRED_PROVIDER_IDS][0] }));
-    assert.equal(resolveCalls.length, 0);
-    assert.equal(spawnCalls.length, 0);
-    const error = ws.sent.find((frame) => (frame as { code?: string })?.code === 'provider_removed');
-    assert.ok(error, 'a stable provider_removed frame is emitted');
+/** Emits one init frame and asserts the typed refusal with no env resolution and no PTY. */
+function assertRetiredShellRefusal(overrides: Record<string, unknown>, label: string) {
+  spawnCalls.length = 0;
+  resolveCalls.length = 0;
+  const ws = makeFakeWs();
+  handleShellConnection(ws as never, asRequest(7), deps);
+  ws.emit('message', initMessage(PROJECT_PATH, overrides));
+  assert.equal(resolveCalls.length, 0, `${label}: no env is resolved`);
+  assert.equal(spawnCalls.length, 0, `${label}: no PTY is spawned`);
+  const error = ws.sent.find((frame) => (frame as { code?: string })?.code === 'provider_removed');
+  assert.ok(error, `${label}: a stable provider_removed frame is emitted`);
+}
+
+for (const retired of RETIRED_PROVIDER_IDS) {
+  test(`${retired}: a retired provider PTY is refused before env resolution or spawn`, async () => {
+    await withIsolatedDatabase(() => {
+      assertRetiredShellRefusal({ provider: retired }, `${retired} PTY`);
+      assertRetiredShellRefusal(
+        { provider: retired, sessionId: 'resume-1', hasSession: true }, `${retired} resume`,
+      );
+    });
   });
-});
+}
+
+// T-1953: the fixed login commands the UI issued for the retired bodies. Each is
+// refused under its own provider. The third column is the refusal a MEMBER gets
+// when the command is paired with a live provider instead: a command still in
+// PROVIDER_CANONICAL_LOGIN_COMMANDS fails the command-provider binding, while
+// the hermes login left that map with its body and is now an arbitrary shell
+// command, which the role gate forbids to members.
+const RETIRED_LOGIN_COMMANDS: ReadonlyArray<[string, string, string]> = [
+  ['cursor', 'cursor-agent login', 'provider_mismatch'],
+  ['hermes', 'hermes setup --portal', 'forbidden'],
+  ['kimi', 'kimi login', 'provider_mismatch'],
+];
+
+for (const [provider, initialCommand, smuggledRefusal] of RETIRED_LOGIN_COMMANDS) {
+  test(`${provider}: the login command "${initialCommand}" is refused as provider_removed`, async () => {
+    await withIsolatedDatabase(() => {
+      assert.equal(RETIRED_PROVIDER_IDS.has(provider), true);
+      assertRetiredShellRefusal({ provider, initialCommand, isPlainShell: true }, `${provider} login`);
+    });
+  });
+
+  test(`${provider}: its login command cannot be smuggled under a live provider`, async () => {
+    await withIsolatedDatabase(() => {
+      spawnCalls.length = 0;
+      const ws = makeFakeWs();
+      handleShellConnection(ws as never, asRequest(7), deps);
+      ws.emit('message', initMessage(PROJECT_PATH, { provider: 'claude', initialCommand, isPlainShell: true }));
+      assert.equal(spawnCalls.length, 0, 'no PTY is spawned');
+      const error = ws.sent.find((frame) => (frame as { code?: string })?.code === smuggledRefusal);
+      assert.ok(error, `the pair is refused with ${smuggledRefusal}`);
+    });
+  });
+}
 
 test('B-MU-PTY-ENV: PTY env comes from resolveProviderEnv(userId, provider) — not raw process.env', async () => {
   await withIsolatedDatabase(() => {
@@ -552,54 +595,10 @@ test('B5: an opencode PTY for a non-owner resolves the opencode (XDG) isolation,
 
 // --- ADR-062 / B-KIMI-TERM: the Kimi login terminal --------------------------
 //
-// Kimi was unreachable from the terminal at all: the UI listed it as a pure-API
-// vendor (no login CTA, no login command) and the backend had no `kimi` case, so
-// a kimi PTY collapsed onto the `claude` isolation knob. These prove the seam is
-// now provider- AND mode-correct, which is what keeps the device-code token out
-// of the shared operator tree.
-
-test('B-KIMI-TERM: a kimi PTY resolves the kimi isolation in AGENT mode, not claude', async () => {
-  await withIsolatedDatabase(() => {
-    spawnCalls.length = 0;
-    resolveCalls.length = 0;
-
-    // Exactly what ProviderLoginModal sends for kimi.
-    const ws = makeFakeWs();
-    handleShellConnection(ws as never, asRequest(43, 'user'), deps);
-    ws.emit('message', initMessage(PROJECT_PATH, {
-      provider: 'kimi',
-      isPlainShell: true,
-      initialCommand: 'kimi login',
-    }));
-
-    assert.equal(ws.closes.length, 0, 'the kimi login terminal passed the role gate');
-    assert.equal(resolveCalls.length, 1, 'resolver consulted once');
-    assert.equal(
-      resolveCalls[0].provider,
-      'kimi',
-      'the kimi provider was forwarded (not collapsed to the claude default)'
-    );
-    assert.equal(
-      resolveCalls[0].mode,
-      'agent',
-      'a terminal runs the NATIVE CLI, so the seam is asked in agent mode (SL-5)'
-    );
-
-    assert.equal(spawnCalls.length, 1, 'one pty spawned');
-    const env = spawnCalls[0].env;
-    assert.equal(
-      env.KIMI_CODE_HOME,
-      '/isolated/43/.kimi',
-      'the PTY carries the per-user KIMI_CODE_HOME, so `kimi login` writes its '
-      + 'device-code token into the user tree — not the shared operator ~/.kimi-code'
-    );
-    assert.notEqual(
-      env.CLAUDE_CONFIG_DIR,
-      '/isolated/43/.claude',
-      'the claude CONFIG_DIR knob was NOT applied to a kimi terminal (pre-fix bug)'
-    );
-  });
-});
+// T-1953: the kimi body is retired, so its login terminal is refused as
+// `provider_removed` before env resolution (asserted with the retired login
+// commands above). The agent-mode seam assertion that lived here is gone with
+// the terminal it described; what remains is that no other PTY drifted.
 
 test('B-KIMI-TERM: every non-kimi PTY still resolves in chat mode (no behaviour drift)', async () => {
   await withIsolatedDatabase(() => {

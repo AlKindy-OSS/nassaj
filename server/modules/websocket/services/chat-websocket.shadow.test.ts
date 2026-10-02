@@ -174,7 +174,6 @@ function dependencies(input: {
     spawnCursor: unused,
     spawnAntigravity: async (_command: string, options: unknown) => input.antigravity?.(options),
     spawnOpenCode: unused,
-    spawnHermes: unused,
     spawnKimi: unused,
     spawnDeepSeek: unused,
     spawnGlm: unused,

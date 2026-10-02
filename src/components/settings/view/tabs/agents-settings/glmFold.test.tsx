@@ -50,12 +50,6 @@ function renderTab() {
           allowVendorDelegation: false,
         }}
         onClaudePermissionsChange={() => {}}
-        cursorPermissions={{
-          allowedCommands: [],
-          disallowedCommands: [],
-          skipPermissions: false,
-        }}
-        onCursorPermissionsChange={() => {}}
         codexPermissionMode="default"
         onCodexPermissionModeChange={() => {}}
         projects={[]}

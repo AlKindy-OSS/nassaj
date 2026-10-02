@@ -6,6 +6,7 @@ import FileTree from '../../file-tree/view/FileTree';
 import StandaloneShell from '../../standalone-shell/view/StandaloneShell';
 import GitPanel from '../../git-panel/view/GitPanel';
 import type { MainContentProps } from '../types/types';
+import type { SessionDeepLinkResolution } from '../../../hooks/useProjectsState';
 import { usePaletteOpsRegister } from '../../../contexts/PaletteOpsContext';
 import { useUiPreferences } from '../../../hooks/useUiPreferences';
 import { useEditorSidebar } from '../../code-editor/hooks/useEditorSidebar';
@@ -18,6 +19,43 @@ import { useAuth } from '../../auth';
 import MainContentHeader from './subcomponents/MainContentHeader';
 import MainContentStateView from './subcomponents/MainContentStateView';
 import ErrorBoundary from './ErrorBoundary';
+
+/**
+ * B-1469 round 4: a brand-new session's `session_created` navigates this tab
+ * to `/session/:id` (useChatRealtimeHandlers) *before* that id has reached the
+ * project's session list (REST/`projects_updated` lag) — the exact shape
+ * `useProjectsState`'s deep-link effect treats as "an unresolved deep link",
+ * flipping `deepLinkResolution.status` to `loading` for the brief window
+ * until its own `api.sessionContext` round-trip (or the session list catching
+ * up) resolves it. Showing `MainContentStateView` for that window swapped out
+ * the whole chat tree, unmounting `ChatInterface` — and with it its own
+ * `useSessionStore()` instance and `pendingViewSessionRef` — a few dozen ms
+ * after the optimistic user bubble had already been written into the
+ * (about-to-be-discarded) store. `processingSessions` already names exactly
+ * "a session this tab is actively running right now" (stamped in the same
+ * `session_created` handler, before it navigates) — a strictly stronger
+ * signal than the deep-link machinery has, with no server round-trip needed —
+ * so a session it already vouches for skips the placeholder entirely instead
+ * of waiting for the deep-link resolver's own confirmation.
+ *
+ * Scoped to `status === 'loading'` only (qa-critic round 1): `forbidden` and
+ * `not_found` are the resolver's own DEFINITIVE verdicts, not a race with it
+ * — they must always surface, even for an id `processingSessions` still
+ * names. `processingSessions` is also filled from session-status frames
+ * (`useChatRealtimeHandlers.ts`) and can go stale (a tab left open past a
+ * session's real lifetime), so it is trusted only to skip the transient
+ * "still resolving" window, never to override a resolved rejection.
+ */
+export function shouldShowDeepLinkPlaceholder(
+  deepLinkResolution: SessionDeepLinkResolution,
+  processingSessions: Set<string>,
+): boolean {
+  if (deepLinkResolution.status === 'idle') return false;
+  if (deepLinkResolution.status === 'loading') {
+    return !processingSessions.has(deepLinkResolution.sessionId);
+  }
+  return true;
+}
 
 function MainContent({
   selectedProject,
@@ -96,7 +134,9 @@ function MainContent({
     return <MainContentStateView mode="loading" isMobile={isMobile} onMenuClick={onMenuClick} />;
   }
 
-  if (deepLinkResolution.status !== 'idle') {
+  // See `shouldShowDeepLinkPlaceholder` above (B-1469 round 4) for why a
+  // session `processingSessions` already vouches for skips this placeholder.
+  if (shouldShowDeepLinkPlaceholder(deepLinkResolution, processingSessions)) {
     return (
       <MainContentStateView
         mode="deep-link"

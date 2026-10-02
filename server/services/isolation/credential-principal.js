@@ -10,7 +10,7 @@
  *   • providers with a dedicated knob (claude → CLAUDE_CONFIG_DIR, codex →
  *     CODEX_HOME, kimi agent → KIMI_CODE_HOME, vendor keys) point straight at
  *     the owner's provider dir / key;
- *   • providers steered by HOME or XDG (agy, hermes, cursor, opencode)
+ *   • providers steered by HOME or XDG (agy, cursor, opencode)
  *     get a GRANT HOME (grant-home.js): the grantee's own tree with just the
  *     granted provider dirs linked to the owner's. Never the owner's root — the
  *     root holds every other credential the owner has.
@@ -54,7 +54,6 @@ export const GRANTABLE_PROVIDERS = Object.freeze([
   'agy',
   'cursor',
   'opencode',
-  'hermes',
   'kimi',
   'deepseek',
   'glm',

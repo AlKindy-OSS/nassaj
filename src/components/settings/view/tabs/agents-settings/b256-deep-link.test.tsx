@@ -62,8 +62,6 @@ const baseProps: AgentsSettingsTabProps = {
     allowVendorDelegation: false,
   },
   onClaudePermissionsChange: vi.fn(),
-  cursorPermissions: { allowedCommands: [], disallowedCommands: [], skipPermissions: false },
-  onCursorPermissionsChange: vi.fn(),
   codexPermissionMode: 'default',
   onCodexPermissionModeChange: vi.fn(),
   projects: [],

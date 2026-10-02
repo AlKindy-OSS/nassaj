@@ -28,7 +28,11 @@ import express from 'express';
 import { appConfigDb, closeConnection, initializeDatabase } from '@/modules/database/index.js';
 import { AppError } from '@/shared/utils.js';
 
+import { installSingleFile, makeWorld } from './__tests__/harness-world.js';
 import { acquireHarnessLease, _resetHarnessLeases } from './lease.js';
+import { snapshotError } from './snapshot/errors.js';
+import { removeFixture } from './snapshot/__tests__/fixtures.js';
+import { _setSnapshotRuntimeOverrides } from './snapshot-runtime.js';
 import { isSchedulerRunning, stopHarnessAutoUpdateScheduler } from './scheduler.js';
 import router from './harness-update.routes.js';
 import { _setVersionStatusTestDeps } from './version-status.service.js';
@@ -92,6 +96,33 @@ after(async () => {
   await new Promise<void>((resolve) => server.close(() => resolve()));
   closeConnection();
   fs.rmSync(dbDir, { recursive: true, force: true });
+});
+
+// First owner POST of the file: the owner action limiter (10/min) is still fresh.
+test('B-1468: a 423 STORE_ACCESS_UNPROVABLE body names unchecked processes as { pid, comm, reason } only', async () => {
+  const savedHome = process.env.HOME;
+  const w = makeWorld();
+  try {
+    installSingleFile(w, '.opencode/bin/opencode', 'opencode 1.18.32');
+    const leaked = { pid: 21, comm: 'node', reason: 'fd_unreadable', cmdline: 'node --secret=x', cwd: '/home/user' };
+    _setSnapshotRuntimeOverrides({
+      ...w.rt,
+      assertNoHolders: () => { throw snapshotError('STORE_ACCESS_UNPROVABLE', { uncheckedProcesses: [leaked, { pid: 'x' }] }); },
+    });
+    const res = await call('POST', '/api/providers/opencode/restore-compatible', { id: 1, role: 'owner' }, {});
+    assert.equal(res.status, 423);
+    assert.deepEqual(res.json, {
+      code: 'STORE_ACCESS_UNPROVABLE',
+      message: 'Harness action refused (STORE_ACCESS_UNPROVABLE).',
+      uncheckedProcesses: [{ pid: 21, comm: 'node', reason: 'fd_unreadable' }],
+      uncheckedProcessCount: 1,
+    });
+  } finally {
+    _setSnapshotRuntimeOverrides(null);
+    _resetHarnessLeases();
+    process.env.HOME = savedHome;
+    removeFixture(w.root);
+  }
 });
 
 test('only an owner may mutate; admin/member/anonymous are refused', async () => {

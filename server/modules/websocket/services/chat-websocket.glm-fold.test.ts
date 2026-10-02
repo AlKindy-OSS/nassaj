@@ -87,7 +87,6 @@ function makeDeps() {
     queryCodex: spawn('codex'),
     spawnAntigravity: spawn('antigravity'),
     spawnOpenCode: spawn('opencode'),
-    spawnHermes: spawn('hermes'),
     spawnKimi: spawn('kimi'),
     spawnDeepSeek: spawn('deepseek'),
     spawnGlm: spawn('glm'),

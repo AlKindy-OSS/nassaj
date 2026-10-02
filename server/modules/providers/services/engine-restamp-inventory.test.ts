@@ -22,6 +22,16 @@ const APP_CONFIG_WRITERS = new Set([
   'server/modules/database/migrations.ts',
   'server/modules/database/repositories/app-config.ts',
   'server/modules/database/repositories/engine-restamp-intent.db.ts',
+  // T-1946: the API key SSO window (key 'api_keys.sso_attestation_window_days').
+  'server/modules/database/repositories/api-key-sso-window.ts',
+  // ADR-194 (T-1962): 'sso.disabled' and 'installation.origin' only; never the
+  // reserved engine_restamp namespace (the next test still enforces that).
+  'server/modules/database/repositories/sso-oidc-config.ts',
+  'server/modules/database/sso-oidc-config.migration.ts',
+  'server/services/installation-origin.service.js',
+  // T-1962 test fixtures (not *.test.* files, so the glob sees them).
+  'server/routes/__tests__/settings-sso-harness.ts',
+  'server/services/__tests__/sso-config-fixture.ts',
 ]);
 const RESERVED_NAMESPACE_WRITERS = new Set([
   'server/modules/database/repositories/engine-restamp-intent.db.ts',

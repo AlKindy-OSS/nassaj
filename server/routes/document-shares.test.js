@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import test from 'node:test';
+import test, { before } from 'node:test';
 
 import express from 'express';
 import Database from 'better-sqlite3';
@@ -14,8 +14,14 @@ import { inspectSharedDocument, readSharedDocument, readSharedPageAsset, saveSha
 import { createSharedDocumentPreviewBuilder } from '../services/document-share-preview.js';
 
 import { createDocumentSharesRouter } from './document-shares.js';
+import { initializeDatabase } from '../modules/database/index.js';
 
 const secret = 'synthetic-test-secret-document-shares-only-123456789';
+
+// ADR-194 D1: the verifier's SSO attestation check reads the SSO state from the
+// app store and fails closed on a read failure. Initialise the per-case store so
+// it reads as "SSO not configured" instead of an unreadable (enforced) state.
+before(async () => { await initializeDatabase(); });
 
 async function fixture(t, buildPreview, identityMiddleware) {
   // assertRoot refuses dotted segments and /tmp, so never derive the root from cwd.

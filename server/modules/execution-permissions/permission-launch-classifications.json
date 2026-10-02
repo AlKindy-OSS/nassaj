@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "reviewedSiteDigest": "sha256:81fdf54286c1ef6a3d6db448ccc18d56beab19a4d6d2051a074be3b0f9c5cd13",
+  "reviewedSiteDigest": "sha256:8b543087e738cf74711de3ad4f5faeecb0c40dd06d2952410b5c4d2eedad5e37",
   "exact": {
     "server/services/document-share-preview.js#child_process.spawn#1": {
       "classification": "bounded_local_compute",
@@ -473,6 +473,16 @@
       "test": "tierb-pass.test.ts"
     },
     {
+      "prefix": "server/modules/net/pinned-transport.ts#",
+      "classification": "pinned_outbound_fetch_effect",
+      "owner": "shared pinned outbound fetch (ADR-194 D7)",
+      "purpose": "connector_setup_and_sso_relying_party",
+      "actorSource": "authenticated connector management flow; SSO relying party (owner-configured discovery, JWKS and token exchange carrying the client secret)",
+      "gate": "DNS pinning, D7 address matrix, port rule, bounded redirects and bodies; connector ownership or owner-only SSO settings with sso_config step-up",
+      "adapter": "pinnedFetchJson (connector safe fetch wrapper and OIDC verifier transport)",
+      "test": "address-policy.test.ts, pinned-fetch.test.ts, oidc-verifier.service.test.ts, settings-sso.api.test.ts"
+    },
+    {
       "prefix": "server/modules/connectors/connector-auth-safe-fetch.ts#",
       "classification": "connector_management_effect",
       "owner": "connector authentication fetch",
@@ -500,16 +510,6 @@
       "actorSource": "enclosed WS/REST caller",
       "gate": "caller ADR-134 LaunchPermit",
       "adapter": "spawnOpenCode",
-      "test": "chat websocket and execution adapter tests"
-    },
-    {
-      "prefix": "runtime#hermes.cli",
-      "classification": "provider_effect_enclosed",
-      "owner": "Hermes CLI adapter",
-      "purpose": "spawn",
-      "actorSource": "enclosed WS caller",
-      "gate": "caller ADR-134 LaunchPermit",
-      "adapter": "spawnHermes",
       "test": "chat websocket and execution adapter tests"
     },
     {
@@ -868,7 +868,7 @@
       "owner": "harness update/rollback child runner (T-1749/ADR-159, moved for T-1871)",
       "purpose": "harness_update",
       "actorSource": "owner-only update/rollback endpoints, the server-side scheduler tick or boot reconcile (mutating runs); any authenticated reader of the version-status routes (`<binary> --version` reads only)",
-      "gate": "cmd/args are always server-owned: descriptor updateArgv, descriptor binary + versionArgs, or fixed git/npm/uv argv whose only variable parts are the descriptor npm prefix/package, a version parsed from the installed binary, a 40-hex rev captured from the checkout, and the operator uv path (HERMES_UV_PATH, else ~/.local/bin/uv, else a PATH lookup of uv for the hermes rollback only); no client command string. Every run uses cleanSpawnEnv, a hard timeout with process-group SIGKILL, and bounded output capture. Mutating runs additionally hold the per-harness single-flight lease and the atomic no-live-session gate that also blocks new spawns, and write an audited job row; snapshot-path updaters are also recorded in the durable spawn ledger. Version reads are capped at 10 s and take no lease.",
+      "gate": "cmd/args are always server-owned: descriptor updateArgv, descriptor binary + versionArgs, or fixed npm argv whose only variable parts are the descriptor npm prefix/package and a version parsed from the installed binary; no client command string. Every run uses cleanSpawnEnv, a hard timeout with process-group SIGKILL, and bounded output capture. Mutating runs additionally hold the per-harness single-flight lease and the atomic no-live-session gate that also blocks new spawns, and write an audited job row; snapshot-path updaters are also recorded in the durable spawn ledger. Version reads are capped at 10 s and take no lease.",
       "adapter": "runHarnessUpdateCommand (and defaultRunVersion)",
       "test": "update.service.test.ts, run-command tests and spawn-admission.test.ts"
     },

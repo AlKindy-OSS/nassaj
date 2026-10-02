@@ -30,8 +30,8 @@ test('outbound prompt retains exact user bytes and does not repeat its own wrapp
   }
 });
 
-test('all seven CLI launchers import the shared outbound wrapper', () => {
-  for (const file of ['agy-cli', 'hermes-cli', 'opencode-cli', 'qwen-cli', 'kimi-agent-cli', 'cursor-cli']) {
+test('all five CLI launchers import the shared outbound wrapper', () => {
+  for (const file of ['agy-cli', 'opencode-cli', 'qwen-cli', 'kimi-agent-cli', 'cursor-cli']) {
     const source = readFileSync(new URL(`../server/${file}.js`, import.meta.url), 'utf8');
     assert.match(source, /withRuntimeInstructions as withCoordinationDirective.*runtime-instructions/);
     assert.match(source, /withCoordinationDirective\(/);
@@ -133,7 +133,7 @@ test('stripping never removes user text that merely resembles the wrapper', () =
 
 test('no launcher carries its own copy of the publish command', () => {
   const launchers = [
-    'claude-sdk', 'openai-codex', 'agy-cli', 'hermes-cli',
+    'claude-sdk', 'openai-codex', 'agy-cli',
     'opencode-cli', 'qwen-cli', 'kimi-agent-cli', 'cursor-cli',
   ];
   for (const file of launchers) {

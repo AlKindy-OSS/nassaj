@@ -4,10 +4,8 @@ import { VENDOR_PROVIDERS, type VendorProvider } from '../provider-auth/vendorPr
 import BrandImageLogo, { hasBrandImage } from './BrandImageLogo';
 import ClaudeLogo from './ClaudeLogo';
 import CodexLogo from './CodexLogo';
-import CursorLogo from './CursorLogo';
 import DeepSeekLogo from './DeepSeekLogo';
 import OpenCodeLogo from './OpenCodeLogo';
-import QwenLogo from './QwenLogo';
 import VendorLogo from './VendorLogo';
 
 type SessionProviderLogoProps = {
@@ -41,7 +39,8 @@ const makeInitialLogo = (fill: string, initials: string) =>
   };
 
 // deepseek now has its own mark (T-1761). glm renders via the shared VendorLogo
-// (ADR-036). antigravity, kimi, hermes and qwen moved to their REAL marks.
+// (ADR-036). antigravity moved to its REAL mark; cursor, hermes, qwen and kimi
+// are retired bodies and render the grey retired tile instead (T-1953).
 // sakana is the last placeholder, and is not shown in settings.
 const SakanaLogo = makeInitialLogo('#14B8A6', 'S');
 
@@ -58,10 +57,6 @@ export default function SessionProviderLogo({
     return <RetiredProviderLogo className={className} />;
   }
 
-  if (provider === 'cursor') {
-    return <CursorLogo className={className} />;
-  }
-
   if (provider === 'codex') {
     return <CodexLogo className={className} />;
   }
@@ -70,8 +65,8 @@ export default function SessionProviderLogo({
     return <OpenCodeLogo className={className} />;
   }
 
-  // Checked BEFORE the vendor branch: kimi is a hosted vendor id too, and the
-  // generic "K" badge would otherwise win over its own mark.
+  // antigravity is the only body id left that reaches this branch: kimi and
+  // hermes are retired bodies and are already caught above.
   if (hasBrandImage(provider)) {
     return <BrandImageLogo provider={provider} className={className} />;
   }
@@ -90,10 +85,6 @@ export default function SessionProviderLogo({
 
   if (provider === 'sakana') {
     return <SakanaLogo className={className} />;
-  }
-
-  if (provider === 'qwen') {
-    return <QwenLogo className={className} />;
   }
 
   return <ClaudeLogo className={className} />;

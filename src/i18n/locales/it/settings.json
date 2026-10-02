@@ -768,7 +768,6 @@
     "skipPermissions": {
       "label": "Salta richieste di permesso (usa con cautela)",
       "claudeDescription": "Equivalente al flag --dangerously-skip-permissions",
-      "cursorDescription": "Equivalente al flag -f in Cursor CLI",
       "activeWarning": "The permission prompt is disabled: tools and commands run without asking you."
     },
     "allowVendorDelegation": {
@@ -790,34 +789,12 @@
       "empty": "Nessuno strumento bloccato configurato",
       "addLabel": "Add a blocked tool"
     },
-    "allowedCommands": {
-      "title": "Comandi shell consentiti",
-      "description": "Comandi shell automaticamente consentiti senza richiedere permesso",
-      "placeholder": "es. \"Shell(ls)\" o \"Shell(git status)\"",
-      "quickAdd": "Aggiunta rapida comandi comuni:",
-      "empty": "Nessun comando consentito configurato",
-      "addLabel": "Add an allowed command"
-    },
-    "blockedCommands": {
-      "title": "Comandi shell bloccati",
-      "description": "Comandi shell automaticamente bloccati",
-      "placeholder": "es. \"Shell(rm -rf)\" o \"Shell(sudo)\"",
-      "empty": "Nessun comando bloccato configurato",
-      "addLabel": "Add a blocked command"
-    },
     "toolExamples": {
       "title": "Esempi pattern strumenti:",
       "bashGitLog": "- Consenti tutti i comandi git log",
       "bashGitDiff": "- Consenti tutti i comandi git diff",
       "write": "- Consenti tutti gli utilizzi dello strumento Write",
       "bashRm": "- Blocca tutti i comandi rm (pericoloso)"
-    },
-    "shellExamples": {
-      "title": "Esempi comandi shell:",
-      "ls": "- Consenti comando ls",
-      "gitStatus": "- Consenti git status",
-      "npmInstall": "- Consenti npm install",
-      "rmRf": "- Blocca eliminazione ricorsiva"
     },
     "codex": {
       "permissionMode": "Modalità permessi",

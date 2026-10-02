@@ -251,7 +251,6 @@ export type ChatWebSocketDependencies = {
   queryCodex: (command: string, options: unknown, writer: WebSocketWriter) => Promise<unknown>;
   spawnAntigravity: (command: string, options: unknown, writer: WebSocketWriter) => Promise<unknown>;
   spawnOpenCode: (command: string, options: unknown, writer: WebSocketWriter) => Promise<unknown>;
-  spawnHermes: (command: string, options: unknown, writer: WebSocketWriter) => Promise<unknown>;
   spawnKimi: (command: string, options: unknown, writer: WebSocketWriter) => Promise<unknown>;
   /**
    * KM-3 (ADR-062 §4.2): the Kimi NATIVE agent launcher
@@ -309,11 +308,11 @@ export type ChatWebSocketDependencies = {
       provider: string; mode: string; coordinationLevel: CoordinationLevel; model?: string;
     }): boolean;
     execute(input: {
-      provider: 'codex' | 'qwen' | 'opencode' | 'hermes'; mode: 'chat'; coordinationLevel: CoordinationLevel; model?: string;
+      provider: 'codex' | 'qwen' | 'opencode'; mode: 'chat'; coordinationLevel: CoordinationLevel; model?: string;
       prompt: string; userId: number; clientMsgId: string; sessionId: string | null;
       projectPath?: string; onSession: (sessionId: string, isNew: boolean) => void;
     }): Promise<{ text: string; model: string; sessionId: string; isNewSession: boolean }>;
-    cancel(input: { provider: 'codex' | 'qwen' | 'opencode' | 'hermes'; sessionId: string; userId: number | null }): boolean;
+    cancel(input: { provider: 'codex' | 'qwen' | 'opencode'; sessionId: string; userId: number | null }): boolean;
   };
   spawnQwen?: (command: string, options: unknown, writer: WebSocketWriter) => Promise<unknown>;
   /**
@@ -398,7 +397,6 @@ export type ChatWebSocketDependencies = {
   abortCodexSession: (sessionId: string) => boolean;
   abortAntigravitySession: (sessionId: string) => boolean;
   abortOpenCodeSession: (sessionId: string) => boolean;
-  abortHermesSession: (sessionId: string) => boolean;
   abortKimiSession: (sessionId: string) => boolean;
   abortDeepSeekSession: (sessionId: string) => boolean;
   abortGlmSession: (sessionId: string) => boolean;
@@ -446,7 +444,6 @@ export type ChatWebSocketDependencies = {
   isCodexSessionActive: (sessionId: string) => boolean;
   isAntigravitySessionActive: (sessionId: string) => boolean;
   isOpenCodeSessionActive: (sessionId: string) => boolean;
-  isHermesSessionActive: (sessionId: string) => boolean;
   isKimiSessionActive: (sessionId: string) => boolean;
   isDeepSeekSessionActive: (sessionId: string) => boolean;
   isGlmSessionActive: (sessionId: string) => boolean;
@@ -491,7 +488,6 @@ export type ChatWebSocketDependencies = {
   getActiveCodexSessions: () => unknown;
   getActiveAntigravitySessions: () => unknown;
   getActiveOpenCodeSessions: () => unknown;
-  getActiveHermesSessions: () => unknown;
   getActiveKimiSessions: () => unknown;
   getActiveDeepSeekSessions: () => unknown;
   getActiveGlmSessions: () => unknown;
@@ -549,7 +545,7 @@ export function resolveSessionControlProvider(
 }
 
 /**
- * Typed pre-start refusal for a provider whose runtime was deleted (T-1853).
+ * Typed pre-start refusal for a provider retired as a body (T-1853, T-1953).
  * Nothing is spawned and no session state is written (`notStarted`).
  */
 function retiredProviderRefusal(provider: LLMProvider, data: ChatIncomingMessage) {
@@ -575,7 +571,6 @@ const COMMAND_TYPE_TO_PROVIDER: Record<string, LLMProvider> = {
   'cursor-command': 'cursor',
   'codex-command': 'codex',
   'antigravity-command': 'antigravity',
-  'hermes-command': 'hermes',
   'kimi-command': 'kimi',
   'deepseek-command': 'deepseek',
   'glm-command': 'glm',
@@ -916,8 +911,8 @@ function hostedProvider(provider: string): provider is 'kimi' | 'deepseek' | 'gl
   return provider === 'kimi' || provider === 'deepseek' || provider === 'glm';
 }
 
-function mechanicallyCoordinatedCliProvider(provider: string): provider is 'codex' | 'qwen' | 'opencode' | 'hermes' {
-  return provider === 'codex' || provider === 'qwen' || provider === 'opencode' || provider === 'hermes';
+function mechanicallyCoordinatedCliProvider(provider: string): provider is 'codex' | 'qwen' | 'opencode' {
+  return provider === 'codex' || provider === 'qwen' || provider === 'opencode';
 }
 
 export function abortCliSupervisedTurn(
@@ -1014,7 +1009,6 @@ export function requestProviderAbort(
     case 'agy':
     case 'antigravity': return dependencies.abortAntigravitySession(run.sessionId) === true;
     case 'opencode': return dependencies.abortOpenCodeSession(run.sessionId) === true;
-    case 'hermes': return dependencies.abortHermesSession(run.sessionId) === true;
     case 'kimi': return dependencies.abortKimiSession(run.sessionId) === true;
     case 'deepseek': return dependencies.abortDeepSeekSession(run.sessionId) === true;
     case 'glm': return dependencies.abortGlmSession(run.sessionId) === true;
@@ -1786,8 +1780,11 @@ async function dispatchFencedProviderCommand(
     : null;
   const targetProvider = persistedProvider ?? requestedProvider;
 
-  // T-1853: a stale client type or a persisted row may still name a provider
-  // whose runtime was deleted — refuse with a typed frame, never spawn.
+  // T-1853/T-1953: a stale client type or a persisted row may still name a
+  // provider retired as a body — refuse with a typed frame, never spawn. This is
+  // the BODY axis only: an engine run arrives as `claude-command` on a session
+  // persisted under `claude`, so a `kimi` engine stamp never matches here. It
+  // runs before the kimi agent bypass below, which is therefore unreachable.
   const retiredProvider = retiredProviderOfCommandType(messageType)
     ?? (isRetiredProvider(persistedProvider) ? persistedProvider : null);
   if (retiredProvider) {
@@ -2494,11 +2491,6 @@ async function dispatchFencedProviderCommand(
       dependencies.spawnAntigravity(command, options, writer));
     return;
   }
-  if (targetProvider === 'hermes') {
-    await runAdmittedLegacyProvider('hermes', 'hermes', 'cli', options =>
-      dependencies.spawnHermes(command, options, writer));
-    return;
-  }
   if (targetProvider === 'opencode') {
     await runAdmittedLegacyProvider('opencode', 'opencode', 'cli', options =>
       dependencies.spawnOpenCode(command, options, writer));
@@ -2660,8 +2652,6 @@ export async function abortSessionTurn(
     success = dependencies.abortAntigravitySession(sessionId);
   } else if (provider === 'opencode') {
     success = dependencies.abortOpenCodeSession(sessionId);
-  } else if (provider === 'hermes') {
-    success = dependencies.abortHermesSession(sessionId);
   } else if (provider === 'kimi') {
     success = dependencies.abortKimiSession(sessionId);
   } else if (provider === 'deepseek') {
@@ -3734,8 +3724,6 @@ export function handleChatConnection(
           dependencies.attachAntigravitySession(sessionId, lastSeq, sendRawToThisSocket);
         } else if (provider === 'opencode') {
           isActive = dependencies.isOpenCodeSessionActive(sessionId);
-        } else if (provider === 'hermes') {
-          isActive = dependencies.isHermesSessionActive(sessionId);
         } else if (provider === 'qwen') {
           isActive = dependencies.isQwenSessionActive?.(sessionId) ?? false;
         } else if (provider === 'claude') {
@@ -3886,7 +3874,6 @@ export function handleChatConnection(
             codex: visibleIds(dependencies.getActiveCodexSessions()),
             antigravity: visibleIds(dependencies.getActiveAntigravitySessions()),
             opencode: visibleIds(dependencies.getActiveOpenCodeSessions()),
-            hermes: visibleIds(dependencies.getActiveHermesSessions()),
             kimi: visibleIds(dependencies.getActiveKimiSessions()),
             deepseek: visibleIds(dependencies.getActiveDeepSeekSessions()),
             glm: visibleIds(dependencies.getActiveGlmSessions()),

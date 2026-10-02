@@ -14,7 +14,6 @@
  * (server/shared/harness-binary-parity.guard.test.ts) fails on any divergence.
  */
 
-import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -41,7 +40,6 @@ import {
 export type HarnessInstallMethod =
   | 'native-self-update'
   | 'npm-prefix'
-  | 'git-shallow'
   | 'none';
 
 export type HarnessChecksumSource = 'opencode-github' | 'npm-registry' | 'none';
@@ -50,16 +48,13 @@ export type HarnessChecksumSource = 'opencode-github' | 'npm-registry' | 'none';
 export interface HarnessUpdateArgv {
   cmd: string;
   args: string[];
-  /** Working directory for the update (hermes runs inside its git checkout). */
+  /** Working directory for the update, when the updater must run inside one. */
   cwd?: string;
   /**
    * Extra env merged OVER `cleanSpawnEnv()` for this harness's update AND its
-   * recovery run. Two uses today:
-   *   - `TMPDIR=/var/tmp` for the npm harness (qwen): npm stages the
-   *     tarball in TMPDIR, and the host's /tmp is tmpfs = RAM (the 2026-07 OOM
-   *     incident). ADR-159 Addendum 3 makes /var/tmp binding for both.
-   *   - `HERMES_HOME` for hermes: the updater rewrites the checkout, so it must
-   *     read the operator's own hermes home explicitly, not a derived one.
+   * recovery run. One use today: `TMPDIR=/var/tmp` for the npm harness (qwen) —
+   * npm stages the tarball in TMPDIR, and the host's /tmp is tmpfs = RAM (the
+   * 2026-07 OOM incident). ADR-159 Addendum 3 makes /var/tmp binding for both.
    * Never secrets: this is a fixed, code-owned table (no request field reaches it).
    */
   env?: Record<string, string>;
@@ -158,8 +153,6 @@ export interface HarnessDescriptor {
   autoUpdaterDisableVerified: boolean;
   /** For npm-prefix harnesses: the install prefix + package (update + recovery). */
   npm?: { prefix: string; pkg: string };
-  /** For git-shallow (hermes): the shallow git checkout the updater rewrites. */
-  gitCheckoutDir?: string;
   /**
    * Resolves the final spawn/version/update binary through the shared harness
    * registry (no env parameter: a member env can never redirect it). Throws
@@ -169,10 +162,7 @@ export interface HarnessDescriptor {
   /** Argv appended to the binary to read the installed version. */
   versionArgs: string[];
   /** Builds the exact fixed update argv, or null when not updatable. */
-  updateArgv: (
-    env?: NodeJS.ProcessEnv,
-    context?: { gitCheckoutDir?: string },
-  ) => HarnessUpdateArgv | null;
+  updateArgv: (env?: NodeJS.ProcessEnv) => HarnessUpdateArgv | null;
   latestProbe: HarnessLatestProbe;
   /**
    * The CLI's own updater only STAGES the new exe in `<bin dir>/.staging` and
@@ -212,36 +202,6 @@ function codexUpdateArgv(): HarnessUpdateArgv | null {
   }
 }
 
-/** hermes git checkout (measured: shallow clone at ~/.hermes/hermes-agent). */
-export function resolveHermesCheckoutDir(env: NodeJS.ProcessEnv = process.env): string {
-  const override = env.HERMES_CHECKOUT_DIR?.trim();
-  return override || path.join(home(), '.hermes', 'hermes-agent');
-}
-
-/** hermes per-user state root, passed explicitly to the updater (isolation). */
-function resolveHermesHome(env: NodeJS.ProcessEnv = process.env): string {
-  const override = env.HERMES_HOME?.trim();
-  return override || path.join(home(), '.hermes');
-}
-
-/** `uv` used to reinstall the hermes venv on rollback (measured ~/.local/bin/uv). */
-export function resolveUvBinary(env: NodeJS.ProcessEnv = process.env): string {
-  const override = env.HERMES_UV_PATH?.trim();
-  if (override) return override;
-  const measured = path.join(home(), '.local', 'bin', 'uv');
-  try {
-    if (fs.existsSync(measured)) return measured;
-  } catch {
-    /* fall through */
-  }
-  return 'uv';
-}
-
-/** Python interpreter of the hermes venv, for `uv pip install -e .` on rollback. */
-export function resolveHermesVenvPython(env: NodeJS.ProcessEnv = process.env): string {
-  return path.join(resolveHermesCheckoutDir(env), 'venv', 'bin', 'python');
-}
-
 /** TMPDIR every npm-backed harness update/recovery runs under (never tmpfs). */
 export const NPM_UPDATE_TMPDIR = '/var/tmp';
 
@@ -253,8 +213,6 @@ export const NPM_UPDATE_TMPDIR = '/var/tmp';
  *                   `--disable <FEATURE>`, not an auto-updater switch.
  *   - antigravity:  no auto-update env in --help or bundled strings.
  *   - cursor:       no auto-update env in --help.
- *   - hermes:       git-shallow (Addendum 3); no built-in updater knob, so the
- *                   scheduler skips it and the manual button owns its updates.
  *   - qwen:         npm-managed; NO_UPDATE_NOTIFIER is carried in the descriptor
  *                   but UNVERIFIED on-host, so it is not wired into the spawn env.
  * KNOB VERIFIED and WIRED (claude, opencode, kimi):
@@ -273,7 +231,7 @@ export const NPM_UPDATE_TMPDIR = '/var/tmp';
  * auto-update scheduler (its built-in updater could still race the server).
  */
 export const AUTOUPDATER_DISABLE_NONE = Object.freeze([
-  'codex', 'antigravity', 'cursor', 'hermes', 'qwen',
+  'codex', 'antigravity', 'cursor', 'qwen',
 ]);
 
 /**
@@ -484,44 +442,6 @@ export const HARNESS_UPDATE_DESCRIPTORS: Readonly<Record<string, HarnessDescript
     // kimi run outside Nassaj (a login shell) can still update itself.
     notices: { dataNotBackedUp: true, selfUpdating: true },
   },
-  hermes: {
-    id: 'hermes',
-    aliases: [],
-    installMethod: 'git-shallow',
-    // ADR-159 Addendum 3 (supersedes D4): the checkout is a SHALLOW CLONE and
-    // the carried 5ecf3bf0 is upstream, not a local-only commit, so nothing is
-    // destroyed. `hermes update` = git fetch + reset --hard + uv pip install -e.
-    // `--yes` is required for a headless run (it only answers the CLI's
-    // interactive migrate/stash prompts; it does not change what is installed).
-    state: 'updatable',
-    updatable: true,
-    reason: null,
-    runProviders: ['hermes'],
-    pinKey: null,
-    checksumSource: 'none',
-    disableAutoUpdaterEnv: null,
-    autoUpdaterDisableVerified: false,
-    gitCheckoutDir: resolveHermesCheckoutDir(),
-    resolveBinary: fromRegistry('hermes'),
-    versionArgs: ['--version'],
-    updateArgv: (env = process.env, context = {}) => ({
-      cmd: path.join(
-        context.gitCheckoutDir ?? resolveHermesCheckoutDir(env), 'venv', 'bin', 'hermes',
-      ),
-      args: ['update', '--yes'],
-      // The updater rewrites the checkout, so it runs INSIDE it.
-      cwd: context.gitCheckoutDir ?? resolveHermesCheckoutDir(env),
-      // HERMES_HOME isolation: name the state root explicitly instead of letting
-      // the CLI derive ~/.hermes from whatever HOME cleanSpawnEnv() carries.
-      env: { HERMES_HOME: resolveHermesHome(env) },
-    }),
-    latestProbe: null,
-    // Legacy exact-version recovery (npm reinstall / git reset); no snapshot yet.
-    manualOnly: false,
-    snapshot: null,
-    restoreCompatible: null,
-    notices: null,
-  },
   glm: {
     id: 'glm',
     aliases: [],
@@ -598,14 +518,14 @@ export function getHarnessDescriptor(idOrAlias: unknown): HarnessDescriptor | nu
 
 /**
  * Parses a CLI `--version` output into a comparable version string. Handles the
- * plain `1.2.3` / `2026.07.23-e383d2b` / `0.42.0` forms and hermes' banner
- * (`Hermes Agent v0.17.0 (…)`). Returns null when no version token is found.
+ * plain `1.2.3` / `2026.07.23-e383d2b` / `0.42.0` forms and a `vX.Y.Z` banner
+ * (`Some Agent v0.17.0 (…)`). Returns null when no version token is found.
  */
 export function parseVersionOutput(raw: string | null | undefined): string | null {
   if (typeof raw !== 'string') return null;
   const text = raw.trim();
   if (text === '') return null;
-  // hermes banner: prefer the `vX.Y.Z` token.
+  // Banner form: prefer the `vX.Y.Z` token.
   const vTagged = text.match(/\bv(\d+\.\d+\.\d+[\w.-]*)/i);
   if (vTagged) return vTagged[1];
   // Otherwise the first version-looking token (date-versions included).

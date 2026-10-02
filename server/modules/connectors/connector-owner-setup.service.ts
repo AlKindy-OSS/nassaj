@@ -21,6 +21,7 @@ import { type ConnectorSetupStore } from './connector-setup-store.js';
 import { connectorTrustBundleDigest, parseConnectorTrustBundle } from './connector-trust-bundle.js';
 import type { AuthorizedOwnerOperation } from './connector-owner-operation-gate.js';
 import type { ConnectorProfileDto } from './connector-auth-profile-management.js';
+import type { ConnectorOriginProposal } from './connector-installation-origin-resolver.js';
 
 export class ConnectorOwnerSetupError extends Error {
   constructor(readonly code: string, readonly status: number) { super(code); }
@@ -31,6 +32,8 @@ export const CONNECTOR_PACK_EXPIRY_WARNING_MS = 7 * 24 * 60 * 60 * 1_000;
 
 export type ConnectorOwnerSetupStatus = ConnectorSetupDoctorReport & Readonly<{
   origin: ConnectorCanonicalOrigin | null;
+  /** Trusted-config origin proposal (B-1461, ADR-193); owner-only and null once an origin is persisted. */
+  originProposal: ConnectorOriginProposal | null;
   trustBundleRevision: number;
   activePack:
     Readonly<{ issuer: string; channel: string; sequence: number; digest: string; expiresAt: string | null }>
@@ -63,7 +66,8 @@ export class ConnectorOwnerSetupService {
     private readonly executeWrite: ExecuteWrite, private readonly now: () => number = Date.now,
     private readonly verifyProfileEffect?: (providerId: string,
       body: Readonly<{ method: 'dcr_pkce'|'byo_app'; clientId?: string; clientSecret?: string }>,
-      authority: AuthorizedOwnerOperation) => Promise<ConnectorProfileDto>) {}
+      authority: AuthorizedOwnerOperation) => Promise<ConnectorProfileDto>,
+    private readonly readOriginProposal: () => ConnectorOriginProposal | null = () => null) {}
 
   status(): ConnectorOwnerSetupStatus {
     const report = inspectConnectorSetup(this.database, this.installationId, this.authority, this.now());
@@ -123,7 +127,9 @@ export class ConnectorOwnerSetupService {
       if (packExpiresAtMs <= nowMs) warnings.push('pack_expired');
       else if (packExpiresAtMs - nowMs <= CONNECTOR_PACK_EXPIRY_WARNING_MS) warnings.push('pack_expiring_soon');
     }
-    return Object.freeze({ ...report, origin, trustBundleRevision: trust?.revision ?? 0,
+    return Object.freeze({ ...report, origin,
+      originProposal: origin === null ? this.#originProposal() : null,
+      trustBundleRevision: trust?.revision ?? 0,
       activePack: pack ? Object.freeze({ issuer: pack.issuer, channel: pack.channel,
         sequence: pack.sequence, digest: pack.digest, expiresAt: packExpiresAt }) : null,
       packExpiresAt, warnings: Object.freeze(warnings),
@@ -308,6 +314,11 @@ export class ConnectorOwnerSetupService {
           ? error.code : 'CONNECTOR_PROFILE_SETUP_UNAVAILABLE' }) }));
       throw error;
     }
+  }
+
+  /** A failing proposal read is no proposal; it never blocks status. */
+  #originProposal(): ConnectorOriginProposal | null {
+    try { return this.readOriginProposal() ?? null; } catch { return null; }
   }
 
   #writerEpoch(): number {

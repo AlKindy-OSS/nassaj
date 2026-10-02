@@ -15,6 +15,7 @@ import {
   PROVIDER_FALLBACK_MODELS,
   sanitizeStoredModel,
   sanitizeStoredProvider,
+  type FallbackCatalogProvider,
 } from '../../../constants/providerModelFallbacks';
 import { onApplyServerPreference } from '../../../preferences/preferencesSync';
 import { filterDisabledProviders } from '../../../../shared/disabledProviders';
@@ -110,9 +111,6 @@ export function useChatProviderState({ selectedSession, selectedProject }: UseCh
   const [engineProvider, setEngineProvider] = useState<EngineProvider>(() => {
     return readStoredEngineProvider();
   });
-  const [cursorModel, setCursorModel] = useState<string>(() => {
-    return sanitizeStoredModel('cursor', localStorage.getItem('cursor-model'));
-  });
   // B-235: while an engine is engaged, the `claude-model` slot carries a VENDOR
   // model id (`glm-5.2`), not a Claude one — that is the whole point of the
   // engine axis (ADR-037/ADR-073: the body is Claude Code, the model id belongs
@@ -132,9 +130,6 @@ export function useChatProviderState({ selectedSession, selectedProject }: UseCh
   const [opencodeModel, setOpenCodeModel] = useState<string>(() => {
     return sanitizeStoredModel('opencode', localStorage.getItem('opencode-model'));
   });
-  const [hermesModel, setHermesModel] = useState<string>(() => {
-    return sanitizeStoredModel('hermes', localStorage.getItem('hermes-model'));
-  });
   // Antigravity (agy) does not expose model selection from the UI; the real
   // model is chosen inside agy's own settings. We still carry a tiny piece of
   // state so the provider plugs into existing model-aware helpers uniformly.
@@ -151,9 +146,6 @@ export function useChatProviderState({ selectedSession, selectedProject }: UseCh
   });
   const [glmModel, setGlmModel] = useState<string>(() => {
     return localStorage.getItem('glm-model') || FALLBACK_DEFAULT_MODEL.glm;
-  });
-  const [qwenModel, setQwenModel] = useState<string>(() => {
-    return localStorage.getItem('qwen-model') || FALLBACK_DEFAULT_MODEL.qwen;
   });
 
   const [providerModelCatalog, setProviderModelCatalog] = useState<
@@ -225,21 +217,9 @@ export function useChatProviderState({ selectedSession, selectedProject }: UseCh
       return;
     }
 
-    if (targetProvider === 'cursor') {
-      setCursorModel(model);
-      localStorage.setItem('cursor-model', model);
-      return;
-    }
-
     if (targetProvider === 'codex') {
       setCodexModel(model);
       localStorage.setItem('codex-model', model);
-      return;
-    }
-
-    if (targetProvider === 'hermes') {
-      setHermesModel(model);
-      localStorage.setItem('hermes-model', model);
       return;
     }
 
@@ -258,12 +238,6 @@ export function useChatProviderState({ selectedSession, selectedProject }: UseCh
     if (targetProvider === 'glm') {
       setGlmModel(model);
       localStorage.setItem('glm-model', model);
-      return;
-    }
-
-    if (targetProvider === 'qwen') {
-      setQwenModel(model);
-      localStorage.setItem('qwen-model', model);
       return;
     }
 
@@ -309,10 +283,7 @@ export function useChatProviderState({ selectedSession, selectedProject }: UseCh
     // the "Claude engine on X" picker groups need that catalog to offer any
     // model at all. Body axis and engine axis, unioned once, here.
     const providers: LLMProvider[] = Array.from(new Set<LLMProvider>([
-      ...filterDisabledProviders<LLMProvider>([
-        'claude', 'cursor', 'codex', 'antigravity', 'opencode', 'hermes',
-        'kimi', 'deepseek', 'glm', 'qwen',
-      ]),
+      ...filterDisabledProviders<LLMProvider>(['claude', 'codex', 'antigravity', 'opencode']),
       ...ENGINE_VENDOR_PROVIDERS,
     ]));
     const requestId = providerModelsRequestIdRef.current + 1;
@@ -382,7 +353,9 @@ export function useChatProviderState({ selectedSession, selectedProject }: UseCh
 
       // Failed provider: keep the catalog populated with the embedded fallback
       // so the sanitizer always has a valid option list to work against.
-      nextCatalog[p] = PROVIDER_FALLBACK_MODELS[p];
+      // `p` only ever iterates the static body list + ENGINE_VENDOR_PROVIDERS
+      // above, both subsets of FallbackCatalogProvider (T-1953).
+      nextCatalog[p] = PROVIDER_FALLBACK_MODELS[p as FallbackCatalogProvider];
       fallbackProviders.push(p);
     });
 
@@ -461,9 +434,6 @@ export function useChatProviderState({ selectedSession, selectedProject }: UseCh
       // value as it stood at mount.
       setClaudeModel(sanitizeStoredModel(claudeSlotCatalogProvider(engineProviderRef.current), raw));
     });
-    const offCursor = onApplyServerPreference('cursor-model', (raw) => {
-      setCursorModel(sanitizeStoredModel('cursor', raw));
-    });
     const offCodex = onApplyServerPreference('codex-model', (raw) => {
       setCodexModel(sanitizeStoredModel('codex', raw));
     });
@@ -473,17 +443,12 @@ export function useChatProviderState({ selectedSession, selectedProject }: UseCh
     const offAntigravity = onApplyServerPreference('antigravity-model', (raw) => {
       setAntigravityModel(sanitizeStoredModel('antigravity', raw));
     });
-    const offHermes = onApplyServerPreference('hermes-model', (raw) => {
-      setHermesModel(sanitizeStoredModel('hermes', raw));
-    });
     return () => {
       offProvider();
       offClaude();
-      offCursor();
       offCodex();
       offOpencode();
       offAntigravity();
-      offHermes();
     };
   }, []);
 
@@ -540,10 +505,6 @@ export function useChatProviderState({ selectedSession, selectedProject }: UseCh
   }, [claudeModelCatalog, claudeModel, reconcileProviderModel]);
 
   useEffect(() => {
-    reconcileProviderModel('cursor-model', providerModelCatalog.cursor, cursorModel, setCursorModel);
-  }, [providerModelCatalog.cursor, cursorModel, reconcileProviderModel]);
-
-  useEffect(() => {
     reconcileProviderModel('codex-model', providerModelCatalog.codex, codexModel, setCodexModel);
   }, [providerModelCatalog.codex, codexModel, reconcileProviderModel]);
 
@@ -555,10 +516,6 @@ export function useChatProviderState({ selectedSession, selectedProject }: UseCh
       setOpenCodeModel,
     );
   }, [providerModelCatalog.opencode, opencodeModel, reconcileProviderModel]);
-
-  useEffect(() => {
-    reconcileProviderModel('hermes-model', providerModelCatalog.hermes, hermesModel, setHermesModel);
-  }, [providerModelCatalog.hermes, hermesModel, reconcileProviderModel]);
 
   useEffect(() => {
     const kimi = providerModelCatalog.kimi;
@@ -598,15 +555,6 @@ export function useChatProviderState({ selectedSession, selectedProject }: UseCh
       }
     }
   }, [providerModelCatalog.glm, glmModel]);
-
-  useEffect(() => {
-    const qwen = providerModelCatalog.qwen;
-    if (qwen) {
-      const next = pickStoredOrCurrent('qwen-model', qwenModel, qwen);
-      if (next !== qwenModel) setQwenModel(next);
-      if (localStorage.getItem('qwen-model') !== next) localStorage.setItem('qwen-model', next);
-    }
-  }, [providerModelCatalog.qwen, qwenModel]);
 
   useEffect(() => {
     if (!selectedSession?.id) {
@@ -671,28 +619,6 @@ export function useChatProviderState({ selectedSession, selectedProject }: UseCh
       previous.filter((request) => !request.sessionId || request.sessionId === selectedSession?.id),
     );
   }, [selectedSession?.id]);
-
-  useEffect(() => {
-    if (provider !== 'cursor') {
-      return;
-    }
-
-    authenticatedFetch('/api/cursor/config')
-      .then((response) => response.json())
-      .then((data) => {
-        if (!data.success || !data.config?.model?.modelId) {
-          return;
-        }
-
-        const modelId = data.config.model.modelId as string;
-        if (!localStorage.getItem('cursor-model')) {
-          setCursorModel(modelId);
-        }
-      })
-      .catch((error) => {
-        console.error('Error loading Cursor config:', error);
-      });
-  }, [provider]);
 
   const cyclePermissionMode = useCallback(() => {
     // T-904: rotate within the OPEN SESSION's own mode set, not the global
@@ -819,8 +745,6 @@ export function useChatProviderState({ selectedSession, selectedProject }: UseCh
     engineProvider,
     setEngineProvider: persistEngineProvider,
     selectClaudeEngineProvider,
-    cursorModel,
-    setCursorModel,
     claudeModel,
     setClaudeModel,
     codexModel,
@@ -829,16 +753,12 @@ export function useChatProviderState({ selectedSession, selectedProject }: UseCh
     setAntigravityModel,
     opencodeModel,
     setOpenCodeModel,
-    hermesModel,
-    setHermesModel,
     kimiModel,
     setKimiModel,
     deepseekModel,
     setDeepSeekModel,
     glmModel,
     setGlmModel,
-    qwenModel,
-    setQwenModel,
     permissionMode,
     setPermissionMode,
     pendingPermissionRequests,

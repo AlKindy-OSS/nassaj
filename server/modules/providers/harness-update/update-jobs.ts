@@ -10,6 +10,7 @@
 
 import type {
   HarnessUpdateJob,
+  HarnessUpdateJobError,
   HarnessUpdateJobPhase,
   HarnessUpdateJobStatus,
 } from '../../../../shared/harness-update.contract.js';
@@ -36,6 +37,9 @@ export type HarnessAuditAction =
   | 'harness_update_succeeded'
   | 'harness_update_failed'
   | 'harness_update_noop'
+  // B-1474: a manual run refused by the live-session gate. Metadata: provider,
+  // kind, leg, cause (short codes only).
+  | 'harness_update_skipped'
   | 'harness_update_rolled_back'
   | 'harness_update_rollback_failed'
   | 'harness_snapshot_pruned'
@@ -59,8 +63,6 @@ export interface InternalJob extends HarnessUpdateJob {
   finished: boolean;
   /** Epoch ms the job reached a terminal state (null while running). */
   finishedAt: number | null;
-  /** git-shallow only: the pre-update `git rev-parse HEAD`, for rollback. */
-  gitRev: string | null;
   /** Keep the lease held after an unverifiable rollback. */
   retainLease: boolean;
   /** Promise that settles when the job leaves a running state (for tests). */
@@ -79,6 +81,12 @@ export function _awaitHarnessJob(jobId: string): Promise<void> {
   return jobs.get(jobId)?.done ?? Promise.resolve();
 }
 
+function cloneJobError(error: HarnessUpdateJobError): HarnessUpdateJobError {
+  const copy = { ...error };
+  if (error.uncheckedProcesses) copy.uncheckedProcesses = error.uncheckedProcesses.map((p) => ({ ...p }));
+  return copy;
+}
+
 /** Public (wire) view of a job. */
 export function toPublic(job: InternalJob): HarnessUpdateJob {
   return {
@@ -90,7 +98,7 @@ export function toPublic(job: InternalJob): HarnessUpdateJob {
     log: [...job.log],
     fromVersion: job.fromVersion,
     toVersion: job.toVersion,
-    error: job.error ? { ...job.error } : null,
+    error: job.error ? cloneJobError(job.error) : null,
   };
 }
 
@@ -140,7 +148,7 @@ export function makeJob(
   return {
     jobId, provider, status, phase, percent,
     log: [], fromVersion: null, toVersion: null, error: null,
-    userId, trigger, finished: false, finishedAt: null, gitRev: null, retainLease: false,
+    userId, trigger, finished: false, finishedAt: null, retainLease: false,
     done: Promise.resolve(),
   };
 }
@@ -198,19 +206,23 @@ const FAILURE_MESSAGES_AR: Readonly<Record<string, string>> = Object.freeze({
   SNAPSHOT_LAYOUT_MISMATCH: 'بنية التثبيت لا تطابق المتوقَّع، فرُفض التحديث.',
 });
 
-/** Marks `job` failed with `code` and writes the failure audit row. */
+/**
+ * Marks `job` failed with `code` and writes the failure audit row. `extra`
+ * carries optional wire details (the unchecked processes); it is not audited.
+ */
 export function failJob(
   job: InternalJob,
   code: string,
   message: string,
   audit: HarnessAuditFn,
   exitCode: number | null = null,
+  extra: Pick<HarnessUpdateJobError, 'uncheckedProcesses' | 'uncheckedProcessCount'> = {},
 ): void {
   setJob(job, {
     status: 'failed',
     phase: 'done',
     percent: 100,
-    error: { code, message, messageAr: FAILURE_MESSAGES_AR[code] ?? 'فشل تحديث الواجهة.' },
+    error: { code, message, messageAr: FAILURE_MESSAGES_AR[code] ?? 'فشل تحديث الواجهة.', ...extra },
     finished: true,
     finishedAt: Date.now(),
   });

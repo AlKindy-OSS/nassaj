@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Bot } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
+import type { ActiveBodyProvider } from '../../../../../types/app';
 import type { AgentCategory, AgentProvider } from '../../../types/types';
 import SettingsSection from '../../SettingsSection';
 import LocalModelsSettingsTab from '../local-models/LocalModelsSettingsTab';
@@ -19,8 +20,6 @@ export default function AgentsSettingsTab({
   onRefreshAuthStatus,
   claudePermissions,
   onClaudePermissionsChange,
-  cursorPermissions,
-  onCursorPermissionsChange,
   codexPermissionMode,
   onCodexPermissionModeChange,
   projects,
@@ -122,14 +121,13 @@ export default function AgentsSettingsTab({
   // الآلي الذي يمنع «شركة يتيمة» بعد حذف تبويب المورّدين يسأل نفس المصدر.
   const visibleAgents = useMemo<AgentProvider[]>(() => visibleSettingsAgents(), []);
 
-  const agentContextById = useMemo<Record<AgentProvider, AgentContext>>(() => ({
+  // T-1953: keyed by ActiveBodyProvider — cursor/hermes/qwen/kimi are retired
+  // bodies, gone from `visibleAgents` (visibleSettingsAgents) permanently, so
+  // this map never needs to answer for them.
+  const agentContextById = useMemo<Record<ActiveBodyProvider, AgentContext>>(() => ({
     claude: {
       authStatus: providerAuthStatus.claude,
       onLogin: () => onProviderLogin('claude'),
-    },
-    cursor: {
-      authStatus: providerAuthStatus.cursor,
-      onLogin: () => onProviderLogin('cursor'),
     },
     codex: {
       authStatus: providerAuthStatus.codex,
@@ -146,18 +144,8 @@ export default function AgentsSettingsTab({
       authStatus: providerAuthStatus.opencode,
       onLogin: () => onProviderLogin('opencode'),
     },
-    qwen: {
-      authStatus: providerAuthStatus.qwen,
-      onLogin: () => onProviderLogin('qwen'),
-    },
-    // kimi has BOTH paths (ADR-062): the API-key panel and — because it ships
-    // the native @moonshot-ai/kimi-code CLI — a real device-code login modal, so
-    // `onLogin` is live here. deepseek/glm have no CLI: their `onLogin` never
-    // reaches a CTA because AccountContent lists them as pure-API providers.
-    kimi: {
-      authStatus: providerAuthStatus.kimi,
-      onLogin: () => onProviderLogin('kimi'),
-    },
+    // deepseek/glm have no CLI: their `onLogin` never reaches a CTA because
+    // AccountContent lists them as pure-API providers.
     deepseek: {
       authStatus: providerAuthStatus.deepseek,
       onLogin: () => onProviderLogin('deepseek'),
@@ -165,10 +153,6 @@ export default function AgentsSettingsTab({
     glm: {
       authStatus: providerAuthStatus.glm,
       onLogin: () => onProviderLogin('glm'),
-    },
-    hermes: {
-      authStatus: providerAuthStatus.hermes,
-      onLogin: () => onProviderLogin('hermes'),
     },
     sakana: {
       authStatus: providerAuthStatus.sakana,
@@ -178,14 +162,10 @@ export default function AgentsSettingsTab({
     onProviderLogin,
     providerAuthStatus.claude,
     providerAuthStatus.codex,
-    providerAuthStatus.cursor,
     providerAuthStatus.antigravity,
     providerAuthStatus.opencode,
-    providerAuthStatus.qwen,
-    providerAuthStatus.kimi,
     providerAuthStatus.deepseek,
     providerAuthStatus.glm,
-    providerAuthStatus.hermes,
     providerAuthStatus.sakana,
   ]);
 
@@ -247,11 +227,9 @@ export default function AgentsSettingsTab({
             selectedAgent={selectedAgent}
             selectedCategory={selectedCategory}
             agentContextById={agentContextById}
-            onRefreshAuthStatus={() => onRefreshAuthStatus(selectedAgent)}
+            onRefreshAuthStatus={() => onRefreshAuthStatus(selectedAgent as ActiveBodyProvider)}
             claudePermissions={claudePermissions}
             onClaudePermissionsChange={onClaudePermissionsChange}
-            cursorPermissions={cursorPermissions}
-            onCursorPermissionsChange={onCursorPermissionsChange}
             codexPermissionMode={codexPermissionMode}
             onCodexPermissionModeChange={onCodexPermissionModeChange}
             projects={projects}

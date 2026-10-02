@@ -6,7 +6,7 @@
  */
 
 export type HostedTurnProvider = 'kimi' | 'deepseek' | 'glm';
-export type CliTurnProvider = 'codex' | 'claude' | 'qwen' | 'opencode' | 'hermes';
+export type CliTurnProvider = 'codex' | 'claude' | 'qwen' | 'opencode';
 export type TurnProvider = HostedTurnProvider | CliTurnProvider;
 
 declare const capabilityTokenBrand: unique symbol;

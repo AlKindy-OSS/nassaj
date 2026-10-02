@@ -6,10 +6,11 @@
  * محفوظٍ في بافر الجلسة وscrollback الطرفية). فمن أغلق النافذة قبل النسخ فقد
  * أتلف النسخة الوحيدة. وخريطة `DEVICE_AUTH_NOTICES` كانت تغطّي codex وkimi
  * وحدهما — سهوٌ لا استثناء: وُلدت الخريطة (efa5a0b5e) والأمرُ آنذاك `/login`،
- * وحين تحوّل إلى `setup-token` (b1de1d0e7) لم يُلمس هذا الملف.
+ * وحين تحوّل إلى `setup-token` (b1de1d0e7) لم يُلمس هذا الملف. kimi تقاعد
+ * كجسمٍ (T-1953) وخرجت إفادته من الخريطة معه — لا حالة له هنا بعد الآن.
  *
  * ما يُثبّت هنا: أنّ الإفادة تُقرأ لمزوّد claude، وأنّها تسمّي الخطوتين وموضع
- * اللصق بدقّة، وأنّ إفادتَي codex وkimi لم تنكسرا بإضافتها.
+ * اللصق بدقّة، وأنّ إفادة codex لم تنكسر بإضافتها.
  *
  * RUNNER: vitest (jsdom).
  */
@@ -40,7 +41,7 @@ import ProviderLoginModal from './ProviderLoginModal';
 
 afterEach(cleanup);
 
-const open = (provider: 'claude' | 'codex' | 'kimi') =>
+const open = (provider: 'claude' | 'codex') =>
   render(<ProviderLoginModal isOpen provider={provider} onClose={vi.fn()} />);
 
 describe('ProviderLoginModal — the claude notice (B-1260: full OAuth login)', () => {
@@ -76,13 +77,6 @@ describe('ProviderLoginModal — the claude notice (B-1260: full OAuth login)', 
     open('codex');
     expect(screen.getByText(/Device Authorization/i)).toBeTruthy();
     expect(screen.getByText(/enter the code to authorize Codex/i)).toBeTruthy();
-    expect(screen.queryByText(/paste the token/i)).toBeNull();
-  });
-
-  it('leaves the kimi notice and its generic heading untouched', () => {
-    open('kimi');
-    expect(screen.getByText(/Device Authorization/i)).toBeTruthy();
-    expect(screen.getByText(/links a Kimi subscription/i)).toBeTruthy();
     expect(screen.queryByText(/paste the token/i)).toBeNull();
   });
 });

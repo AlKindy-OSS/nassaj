@@ -15,6 +15,8 @@ import {
   settlePermissionNotStarted,
   type PermissionTerminalOutcome,
   deviceAccountSessionsDb,
+  apiKeyCredentialState,
+  parseApiKeyCredentialId,
 } from '@/modules/database/index.js';
 
 import type { AuthenticatedLaunchActor } from './actor.js';
@@ -109,10 +111,13 @@ export const createExecutionPermissionGateway = (dependencies: GatewayDependenci
         AND is_active = 1 AND status = 'active'`).get(actor.userId, actor.authorizationGeneration);
     if (!userCurrent) throw new PermissionStateConflictError('IDENTITY_STALE');
     if (actor.authenticationKind === 'ck') {
-      const match = /^api-key:(\d+)$/u.exec(actor.authenticationCredentialId ?? '');
-      const keyCurrent = match && dependencies.database.prepare(`SELECT 1 FROM api_keys
-        WHERE id = ? AND user_id = ? AND is_active = 1`).get(Number(match[1]), actor.userId);
-      if (!keyCurrent) throw new PermissionStateConflictError('IDENTITY_STALE');
+      // T-1946: the same key predicate as authentication, SSO window included.
+      const apiKeyId = parseApiKeyCredentialId(actor.authenticationCredentialId);
+      if (apiKeyId === null || apiKeyCredentialState(dependencies.database, {
+        apiKeyId, userId: actor.userId, nowMs: dependencies.nowMs(),
+      }) !== 'current') {
+        throw new PermissionStateConflictError('IDENTITY_STALE');
+      }
     }
     if (!actor.deviceSessionId) {
       return;

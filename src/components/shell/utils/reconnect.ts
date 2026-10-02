@@ -34,6 +34,13 @@ export const NORMAL_CLOSE_CODE = 1000;
  */
 export const FINAL_SHELL_REFUSAL_CLOSE_CODES = Object.freeze([4401, 4403, 4404]);
 
+/**
+ * B-1448: the close reason (and `error` frame code) when the owner closed every
+ * terminal to install an update. It rides on a final 4404, so both terminal
+ * clients stop; the reason only decides which explanation the user sees.
+ */
+export const UPDATE_TERMINALS_CLOSED_REASON = 'update_terminals_closed';
+
 /** Whether a close code is one of the endpoint's outright refusals. */
 export function isFinalShellRefusalClose(code: number): boolean {
   return FINAL_SHELL_REFUSAL_CLOSE_CODES.includes(code);

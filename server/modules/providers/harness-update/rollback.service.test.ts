@@ -13,6 +13,7 @@ import path from 'node:path';
 import { after, before, beforeEach, test } from 'node:test';
 
 import { initializeDatabase } from '@/modules/database/index.js';
+import { UserUnitProbeError } from '@/modules/workflow-supervisor/index.js';
 import { AppError } from '@/shared/utils.js';
 
 import { _resetHarnessLeases, isHarnessLeased } from './lease.js';
@@ -335,4 +336,18 @@ test('M-1: a journal that cannot be settled refuses the acknowledgement (409)', 
   await assert.rejects(() => startRecovery('codex', { action: 'acknowledge', userId: 1 }), codeOf('RECOVERY_UNVERIFIED'));
   assert.equal(loadManifest(dir).state, 'rollback_failed');
   assert.equal(isHarnessRecoveryBlocked('codex'), true);
+});
+
+test('B-1474: rollback refused by an unverifiable gate returns its own code and releases the lease', async () => {
+  const run = await succeededCodexRun();
+  _setSnapshotRuntimeOverrides({
+    ...w.rt,
+    hasUnregisteredLaunch: async () => { throw new UserUnitProbeError('systemctl_failed', 'Failed to connect to bus'); },
+  });
+  const job = await startManualRollback({ harness: 'codex', jobId: run.jobId, scope: 'binary', acks: undefined, userId: 1 });
+  assert.equal(job.status, 'skipped_live_session');
+  assert.equal(job.error?.code, 'live_gate_unverifiable');
+  assert.doesNotMatch(job.error?.message ?? '', /bus/);
+  assert.equal(isHarnessLeased('codex'), false);
+  assert.equal(liveVersion(launcher()), '2.0.0');
 });

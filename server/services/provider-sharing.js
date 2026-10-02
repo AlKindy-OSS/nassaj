@@ -31,12 +31,9 @@ export const KNOWN_PROVIDERS = Object.freeze([
   'agy',
   'cursor',
   'opencode',
-  // hermes was absent from this list, which was not a neutral omission: the
-  // policy gate answers `policy[provider] === 'isolated'`, false for a key it
-  // never heard of, so hermes returned the operator's environment before any
-  // isolation case could run — invisible to the admin panel and to the resolver
-  // alike. Being listed is what makes a provider governable at all (ADR-105).
-  'hermes',
+  // Being listed is what makes a provider governable at all (ADR-105): the
+  // resolver refuses any id absent from this list instead of handing it the
+  // operator's environment. A deleted body (hermes, T-1953) is absent on purpose.
   'kimi',
   'deepseek',
   'glm',
@@ -78,12 +75,6 @@ const DEFAULT_CONFIG = Object.freeze({
   // tie-breaker ADR-105 rejects — the cost of that default is that every
   // member's opencode turn spends whatever key sits in the operator's auth.json.
   opencode: 'isolated',
-  // hermes keeps ALL its state under ~/.hermes — auth.json beside config.yaml,
-  // sessions, state.db — so the HOME override isolates the credential. The
-  // operator's config.yaml and bin/ are symlinked back in (provision-user-dirs):
-  // they are configuration and tooling, not credentials, and forking them per
-  // user would mean every member re-declaring the model endpoints by hand.
-  hermes: 'isolated',
   // Hosted vendor providers default to 'isolated': each user's API key is held
   // in the encrypted per-user secrets store and injected per spawn, so they must
   // never fall back to a shared operator key (B-VR-2B).

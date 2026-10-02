@@ -12,6 +12,8 @@ import type { Server } from 'node:http';
 
 import express from 'express';
 
+import { createSsoConfigDouble } from '../services/__tests__/sso-config-double.js';
+
 const passThrough = (_req: unknown, _res: unknown, next: () => void) => next();
 const url = (spec: string) => pathToFileURL(path.resolve(import.meta.dirname, spec)).href;
 
@@ -21,6 +23,7 @@ let userRow: Record<string, unknown> | null = null;
 const linkedUserIds = new Set<number>();
 const audits: Array<{ action: string; metadata?: unknown }> = [];
 const inviteCalls: string[] = [];
+const sso = createSsoConfigDouble({ enforced: false, loginAvailable: false });
 
 class MockInviteError extends Error {
   status: number;
@@ -30,6 +33,7 @@ class MockInviteError extends Error {
   }
 }
 
+mock.module(url('../services/sso-config.service.js'), { namedExports: sso.exports });
 mock.module(url('../modules/database/index.js'), {
   namedExports: {
     userDb: { getUserByUsername: () => userRow, updateLastLogin: () => {} },
@@ -110,15 +114,12 @@ const post = (route: string, body: unknown) => fetch(`${baseUrl}/api/auth${route
   body: JSON.stringify(body),
 });
 
-async function withOidc(enabled: boolean, run: () => Promise<void>) {
-  const saved = { enabled: process.env.OIDC_ENABLED, project: process.env.OIDC_ROLE_PROJECT_ID };
-  process.env.OIDC_ENABLED = enabled ? 'true' : 'false';
-  process.env.OIDC_ROLE_PROJECT_ID = 'proj-synth';
+/** Runs with the SSO policy enforced (ADR-194 D1) or not; login availability does not matter here. */
+async function withSsoPolicy(enforced: boolean, run: () => Promise<void>) {
+  sso.state.enforced = enforced;
+  sso.state.loginAvailable = false;
   try { await run(); } finally {
-    for (const [key, value] of [['OIDC_ENABLED', saved.enabled], ['OIDC_ROLE_PROJECT_ID', saved.project]] as const) {
-      if (value === undefined) delete process.env[key];
-      else process.env[key] = value;
-    }
+    sso.state.enforced = false;
   }
 }
 
@@ -137,7 +138,7 @@ const OWNER = { id: 1, username: 'owner', role: 'owner', password_hash: '$argon2
 test('T-1939: a linked member with the right password gets 403 sso_required, no token', async () => {
   reset(MEMBER, true);
   linkedUserIds.add(12);
-  await withOidc(true, async () => {
+  await withSsoPolicy(true, async () => {
     const res = await post('/login', { username: 'member', password: 'right' });
     assert.equal(res.status, 403);
     const body = await res.json();
@@ -152,7 +153,7 @@ test('T-1939: a linked member with the right password gets 403 sso_required, no 
 test('T-1939: a wrong password on a linked member stays the generic 401 (no linkage oracle)', async () => {
   reset(MEMBER, false);
   linkedUserIds.add(12);
-  await withOidc(true, async () => {
+  await withSsoPolicy(true, async () => {
     const res = await post('/login', { username: 'member', password: 'wrong' });
     assert.equal(res.status, 401);
     assert.deepEqual(await res.json(), { error: 'Invalid username or password' });
@@ -160,7 +161,7 @@ test('T-1939: a wrong password on a linked member stays the generic 401 (no link
 });
 
 test('T-1939: the owner (linked or not) and unlinked members keep password login', async () => {
-  await withOidc(true, async () => {
+  await withSsoPolicy(true, async () => {
     reset(OWNER, true);
     linkedUserIds.add(1);
     assert.equal((await post('/login', { username: 'owner', password: 'right' })).status, 200);
@@ -169,19 +170,19 @@ test('T-1939: the owner (linked or not) and unlinked members keep password login
   });
 });
 
-test('T-1939: OIDC off — a linked member logs in with a password exactly as before', async () => {
+test('T-1939: SSO policy off — a linked member logs in with a password exactly as before', async () => {
   reset(MEMBER, true);
   linkedUserIds.add(12);
-  await withOidc(false, async () => {
+  await withSsoPolicy(false, async () => {
     const res = await post('/login', { username: 'member', password: 'right' });
     assert.equal(res.status, 200);
     assert.equal((await res.json()).token, 'test-jwt');
   });
 });
 
-test('T-1939: with SSO live invites neither accept nor create local-password accounts', async () => {
+test('T-1939: with the SSO policy enforced invites neither accept nor create local-password accounts', async () => {
   reset(null, false);
-  await withOidc(true, async () => {
+  await withSsoPolicy(true, async () => {
     const accept = await post('/invite/accept', { token: 't', username: 'newbie', password: 'password123' });
     assert.equal(accept.status, 403);
     assert.equal((await accept.json()).code, 'sso_required_for_new_accounts');
@@ -193,9 +194,9 @@ test('T-1939: with SSO live invites neither accept nor create local-password acc
   });
 });
 
-test('T-1939: OIDC off — invites are created and accepted as before', async () => {
+test('T-1939: SSO policy off — invites are created and accepted as before', async () => {
   reset(null, false);
-  await withOidc(false, async () => {
+  await withSsoPolicy(false, async () => {
     assert.equal((await post('/invites', { role: 'user' })).status, 201);
     const accept = await post('/invite/accept', { token: 't', username: 'newbie', password: 'password123' });
     assert.equal(accept.status, 200);

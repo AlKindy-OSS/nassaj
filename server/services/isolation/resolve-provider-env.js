@@ -71,7 +71,7 @@
  * is applied and the base environment is returned unchanged — preserving the
  * single-user behavior the app had before multi-user.
  *
- * @typedef {'claude'|'codex'|'agy'|'cursor'|'opencode'|'hermes'|'kimi'|'deepseek'|'glm'|'qwen'} ProviderName
+ * @typedef {'claude'|'codex'|'agy'|'cursor'|'opencode'|'kimi'|'deepseek'|'glm'|'qwen'} ProviderName
  *
  * Spawn mode for a provider (SL-5/ADR-062). 'chat' is the historical toolless
  * HTTP path (the default — identical to the pre-SL-5 behavior for EVERY
@@ -129,9 +129,8 @@ function resolveIsolatedProviderEnv(userId, provider, baseEnv, mode, honorGrants
   // treated as shared. This gate used to answer `policy[provider] === 'isolated'`,
   // which is false for an unknown key, so a provider missing from KNOWN_PROVIDERS
   // took the operator's environment through the early return below and never
-  // reached the switch at all. hermes has been doing exactly that: it is absent
-  // from the policy, so neither the admin panel nor the `default:` branch could
-  // see it, and every member's hermes turn ran on the operator's login.
+  // reached the switch at all — it ran every member's turn on the operator's
+  // login, invisible to the admin panel and to the `default:` branch alike.
   if (!KNOWN_PROVIDERS.includes(provider)) {
     throw new AppError(
       `Provider "${provider}" is not covered by the credential-isolation policy, so it cannot run `
@@ -253,24 +252,6 @@ function resolveIsolatedProviderEnv(userId, provider, baseEnv, mode, honorGrants
       }
       return env;
     }
-    case 'hermes': {
-      // hermes has no env knob either: it resolves ~/.hermes from HOME and keeps
-      // its OAuth (auth.json), its transcripts (sessions/, state.db) and its
-      // caches there. Overriding HOME isolates the credential and the history
-      // together, while provisionUserDirs links the operator's config.yaml and
-      // bin/ back in so the member inherits the model endpoints and helper tools
-      // without inheriting the account.
-      const hermesRoot = homeRoot();
-      env.HOME = hermesRoot;
-      // T-1749 / ADR-159 D3: also set HERMES_HOME explicitly (parity with
-      // CLAUDE_CONFIG_DIR / CODEX_HOME / KIMI_CODE_HOME). HOME already isolates
-      // ~/.hermes; naming the dedicated knob too makes the isolation independent
-      // of the CLI keeping its "~/.hermes derived from HOME" behaviour, and it is
-      // the same knob the isolated-cli-cage sandbox already passes through. Stays
-      // outside the ANTHROPIC_*/CLAUDE_* namespace so the IRON RULE holds.
-      env.HERMES_HOME = path.join(hermesRoot, '.hermes');
-      return env;
-    }
     case 'cursor': {
       // cursor-agent keeps EVERYTHING under $HOME: the installer puts the binary
       // in ~/.local/share/cursor-agent, and the CLI writes its login and chat
@@ -332,8 +313,8 @@ function resolveIsolatedProviderEnv(userId, provider, baseEnv, mode, honorGrants
       // ADR-105 — a provider with no isolation case does NOT fall back to the
       // operator's environment. That default was fail-OPEN: it silently ran one
       // member's work on another person's credentials, and it applied to every
-      // provider anyone forgot to wire (hermes reaches this line today, and any
-      // provider added tomorrow would too).
+      // provider anyone forgot to wire (any provider added tomorrow would reach
+      // this line too).
       //
       // Refusing here is deliberately louder than hiding the provider: the
       // member is told the provider has no per-user path yet, instead of
@@ -375,7 +356,7 @@ function applyHarnessUpdaterPolicy(provider, env) {
  * this fix EVERY child provider process inherited nassaj's own secrets —
  * JWT_SECRET above all, plus DATABASE_PATH and NASSAJ_PROVIDER_SECRETS_KEY.
  * `sanitizeVendorAgentEnv` (SL-3) only ever ran on the kimi/glm carrier paths,
- * so claude / codex / agy / opencode / hermes / cursor inherited them
+ * so claude / codex / agy / opencode / cursor inherited them
  * raw (e.g. openai-codex.js:535 passes this result straight into `new Codex({
  * env })`). One prompt-injected `env | grep JWT_SECRET` in any agent turn was a
  * full account-takeover primitive.

@@ -44,6 +44,7 @@ import {
 } from '../../constants/providerCapabilities';
 import { cn } from '../../../../lib/utils';
 import { isSideChannelCommandForProvider } from '../../utils/btwCommand';
+import { isReservedSteerCommand } from '../../utils/steerCommand';
 import { normalizeArabicSlashCommand } from '../../utils/commandLocalization';
 import { effortModes } from '../../constants/thinkingModes';
 import FileAttachment from './FileAttachment';
@@ -151,6 +152,8 @@ interface ChatComposerProps {
   runActiveOverride?: boolean;
   /** T-1904 e2e (BLOCKER) — see ClaudeStatus.tsx. Fail-closed; defaults true (legacy solo). */
   isConfirmedStarter?: boolean;
+  /** T-1956 — `/steer` hint indicator in the running bar (own steerable turn only). */
+  showSteerHint?: boolean;
   onAbortSession: () => void;
   provider: Provider | string;
   displayProvider: Provider | string;
@@ -1037,6 +1040,7 @@ export default function ChatComposer({
   onSteerClick,
   runActiveOverride = false,
   isConfirmedStarter = true,
+  showSteerHint = false,
   onAbortSession,
   displayProvider,
   permissionMode,
@@ -1187,6 +1191,16 @@ export default function ChatComposer({
       displayProvider,
     );
 
+  // B-1450 — «/steer» أمرٌ محجوز دائماً (T-1904 bug 3، isReservedSteerCommand)
+  // بصرف النظر عن مزوّد الجلسة أو canSteer: الاعتراض والقبول/الرفض من جانب
+  // الخادم وحده (SteerRejectCode). هنا فقط نُرخي بوابة تعطيل الإرسال ونعكس
+  // حالة الجاهزية على الزرّ — تماماً كـisBtwReady أعلاه — فيبقى مساراً واحداً
+  // (نفس handleSubmit) يعمل بلمسة، لا بلوحة مفاتيح فقط. لا فحص canSteer هنا
+  // بتصميم مقصود: طبقة التحليل تتجاوزه عمداً (T-1904).
+  const isSteerReady = isReservedSteerCommand(
+    normalizeArabicSlashCommand(input, displayProvider, i18n?.language),
+  );
+
   // T-1904 e2e (bug 5) — a viewer (not this run's starter) must never see the
   // send button turn into the disabled square "busy" glyph: it looks exactly
   // like a stop control they don't have, and had no aria-label at all. Force
@@ -1194,8 +1208,8 @@ export default function ChatComposer({
   // just never disabled purely by `isLoading`, which mirrors someone ELSE's
   // turn for a viewer, not their own in-flight send).
   const isViewerComposer = Boolean(viewerStarterName);
-  const promptSubmitStatus = (isBtwReady || isViewerComposer) ? 'ready' : undefined;
-  const promptSubmitActive = isLoading && !isBtwReady && !isViewerComposer;
+  const promptSubmitStatus = (isBtwReady || isSteerReady || isViewerComposer) ? 'ready' : undefined;
+  const promptSubmitActive = isLoading && !isBtwReady && !isSteerReady && !isViewerComposer;
   const promptSubmitAriaLabel = promptSubmitActive
     ? t('input.sendBusy', { defaultValue: 'Sending is unavailable while a reply is streaming' })
     : t('input.send', { defaultValue: 'Send' });
@@ -1679,6 +1693,7 @@ export default function ChatComposer({
           onSteerClick={onSteerClick}
           runActiveOverride={runActiveOverride}
           isConfirmedStarter={isConfirmedStarter}
+          showSteerHint={showSteerHint}
       />
 
       {pendingPermissionRequests.length > 0 && (
@@ -2253,7 +2268,7 @@ export default function ChatComposer({
             />
             <PromptInputSubmit
               status={promptSubmitStatus}
-              disabled={(!input.trim() && attachedImages.length === 0) || Boolean(executingCommand) || (isLoading && !isBtwReady && !isViewerComposer) || !isWsConnected || isImageCropping}
+              disabled={(!input.trim() && attachedImages.length === 0) || Boolean(executingCommand) || (isLoading && !isBtwReady && !isSteerReady && !isViewerComposer) || !isWsConnected || isImageCropping}
               title={!isWsConnected ? t('ws.sendDisabledTitle', { defaultValue: 'Cannot send — connection lost' }) : undefined}
               aria-label={promptSubmitAriaLabel}
               className="h-8 w-8 shrink-0 sm:h-8 sm:w-8"

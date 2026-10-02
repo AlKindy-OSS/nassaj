@@ -393,12 +393,10 @@
     "providerInfo": {
       "anthropic": "di Anthropic",
       "openai": "di OpenAI",
-      "cursorEditor": "Editor codice AI",
       "google": "di Google"
     },
     "readyPrompt": {
       "claude": "Pronto a usare Claude con {{model}}. Inizia a digitare il tuo messaggio qui sotto.",
-      "cursor": "Pronto a usare Cursor con {{model}}. Inizia a digitare il tuo messaggio qui sotto.",
       "codex": "Pronto a usare Codex con {{model}}. Inizia a digitare il tuo messaggio qui sotto.",
       "antigravity": "Pronto per Antigravity (agy) con {{model}}. Inizia a scrivere il tuo messaggio qui sotto.",
       "opencode": "Pronto a usare OpenCode con {{model}}. Inizia a digitare il tuo messaggio qui sotto.",
@@ -570,6 +568,9 @@
     "harnessLine": "Harness: {{harness}}",
     "olderModels_one": "{{count}} modello precedente",
     "olderModels_other": "{{count}} modelli precedenti"
+  },
+  "composer": {
+    "replyInProgress": "L'agente sta lavorando ora — attendi il completamento della risposta o interrompila per inviare il tuo messaggio."
   },
   "ws": {
     "statusConnected": "Connesso",

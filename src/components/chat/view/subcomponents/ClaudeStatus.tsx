@@ -6,7 +6,7 @@ import { formatWorkDuration } from '../../../../utils/workDurationFormat';
 import SessionProviderLogo from '../../../llm-logo-provider/SessionProviderLogo';
 import type { RunProgress } from '../../hooks/useRunProgress';
 
-import { RunStatusActions, RunStatusIdentityLabel } from './RunStatusViewerActions';
+import { RunStatusActions, RunStatusIdentityLabel, RunStatusSteerHint } from './RunStatusViewerActions';
 
 type ClaudeStatusProps = {
   status: {
@@ -75,6 +75,8 @@ type ClaudeStatusProps = {
    * the real resolved value (never leaves multi-user identity ambiguous).
    */
   isConfirmedStarter?: boolean;
+  /** T-1956 — show the `/steer` hint indicator (viewer's own steerable turn only). */
+  showSteerHint?: boolean;
 };
 
 const ACTION_KEYS = [
@@ -139,6 +141,7 @@ export default function ClaudeStatus({
   onSteerClick,
   runActiveOverride = false,
   isConfirmedStarter = true,
+  showSteerHint = false,
 }: ClaudeStatusProps) {
   const isViewer = viewerStarterName != null;
   const { t, i18n } = useTranslation('chat');
@@ -560,6 +563,7 @@ export default function ClaudeStatus({
               إلا لمن نعرف يقيناً أنه البادئ (`isConfirmedStarter`، فشلٌ
               مغلَق)، وغير البادئ يملك زرّ التوجيه وحده حين steerable. لا نسخة
               ثانية من هذا القرار. */}
+          <RunStatusSteerHint show={showSteerHint} t={t} />
           <RunStatusActions
             canStop={isConfirmedStarter && isLoading && status?.can_interrupt !== false && Boolean(onAbort)}
             onAbort={onAbort}

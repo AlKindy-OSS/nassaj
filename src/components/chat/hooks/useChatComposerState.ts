@@ -70,6 +70,7 @@ import { isReservedSteerCommand, parseSteerText } from '../utils/steerCommand';
 
 import { resolveStickyEffortMode } from './stickyEffortMode';
 import { readSessionEngineProvider, writePendingEngineStamp } from './useChatProviderState';
+import { writePendingModelStamp } from './pendingModelStamp';
 import { useFileMentions } from './useFileMentions';
 import {
   isBtwSlashEntry,
@@ -176,16 +177,13 @@ interface UseChatComposerStateArgs {
   engineProvider: 'kimi' | 'deepseek' | 'glm' | null;
   permissionMode: PermissionMode | string;
   cyclePermissionMode: () => void;
-  cursorModel: string;
   claudeModel: string;
   codexModel: string;
   antigravityModel: string;
   opencodeModel: string;
-  hermesModel: string;
   kimiModel: string;
   deepseekModel: string;
   glmModel: string;
-  qwenModel: string;
   isLoading: boolean;
   canAbortSession: boolean;
   tokenBudget: Record<string, unknown> | null;
@@ -395,16 +393,13 @@ export function useChatComposerState({
   engineProvider,
   permissionMode,
   cyclePermissionMode,
-  cursorModel,
   claudeModel,
   codexModel,
   antigravityModel,
   opencodeModel,
-  hermesModel,
   kimiModel,
   deepseekModel,
   glmModel,
-  qwenModel,
   isLoading,
   canAbortSession,
   tokenBudget,
@@ -689,23 +684,19 @@ export function useChatComposerState({
           sessionId: executionSessionId,
           provider: displayProvider,
           model:
-            displayProvider === 'cursor'
-              ? cursorModel
-              : displayProvider === 'codex'
-                ? codexModel
-                : displayProvider === 'antigravity'
-                    ? antigravityModel
-                    : displayProvider === 'opencode'
-                      ? opencodeModel
-                      : displayProvider === 'hermes'
-                        ? hermesModel
-                        : displayProvider === 'kimi'
-                          ? kimiModel
-                          : displayProvider === 'deepseek'
-                            ? deepseekModel
-                            : displayProvider === 'glm'
-                              ? glmModel
-                              : claudeModel,
+            displayProvider === 'codex'
+              ? codexModel
+              : displayProvider === 'antigravity'
+                  ? antigravityModel
+                  : displayProvider === 'opencode'
+                    ? opencodeModel
+                    : displayProvider === 'kimi'
+                      ? kimiModel
+                      : displayProvider === 'deepseek'
+                        ? deepseekModel
+                        : displayProvider === 'glm'
+                          ? glmModel
+                          : claudeModel,
           tokenUsage: tokenBudget,
         };
 
@@ -773,8 +764,6 @@ export function useChatComposerState({
       claudeModel,
       codexModel,
       currentSessionId,
-      cursorModel,
-          hermesModel,
       opencodeModel,
       kimiModel,
       deepseekModel,
@@ -1024,13 +1013,11 @@ export function useChatComposerState({
   const getToolsSettings = useCallback((targetProvider: LLMProvider) => {
     try {
       const settingsKey =
-        targetProvider === 'cursor'
-          ? 'cursor-tools-settings'
-          : targetProvider === 'codex'
-            ? 'codex-settings'
-            : targetProvider === 'antigravity'
-                ? 'antigravity-settings'
-                : 'claude-settings';
+        targetProvider === 'codex'
+          ? 'codex-settings'
+          : targetProvider === 'antigravity'
+            ? 'antigravity-settings'
+            : 'claude-settings';
       const savedSettings = safeLocalStorage.getItem(settingsKey);
       if (savedSettings) {
         return JSON.parse(savedSettings);
@@ -1049,19 +1036,16 @@ export function useChatComposerState({
    * نيّة صاحب الرسالة في صندوق الصادر — فما يُحفظ للإعادة هو بالضبط ما أُرسل.
    */
   const composerModelFor = useCallback((target: string): string => (
-    target === 'cursor' ? cursorModel
-      : target === 'codex' ? codexModel
-        : target === 'antigravity' ? antigravityModel
-            : target === 'opencode' ? opencodeModel
-              : target === 'hermes' ? hermesModel
-                : target === 'kimi' ? kimiModel
-                  : target === 'deepseek' ? deepseekModel
-                    : target === 'glm' ? glmModel
-                      : target === 'qwen' ? qwenModel
-                      : claudeModel
+    target === 'codex' ? codexModel
+      : target === 'antigravity' ? antigravityModel
+          : target === 'opencode' ? opencodeModel
+            : target === 'kimi' ? kimiModel
+              : target === 'deepseek' ? deepseekModel
+                : target === 'glm' ? glmModel
+                : claudeModel
   ), [
-    antigravityModel, claudeModel, codexModel, cursorModel, deepseekModel,
-    glmModel, hermesModel, kimiModel, opencodeModel, qwenModel,
+    antigravityModel, claudeModel, codexModel, deepseekModel,
+    glmModel, kimiModel, opencodeModel,
   ]);
 
   // Single source of truth for building and sending a provider chat command.
@@ -1189,6 +1173,17 @@ export function useChatComposerState({
       };
 
       let result: { ok: boolean } | void;
+      // T-1953: cursor/hermes/qwen are retired bodies — no longer reachable
+      // from a brand-new send (resolveSendProvider only returns the global
+      // selection there, and the picker can no longer select them), but a
+      // RESUME into an old conversation of theirs still seals to the session's
+      // own `__provider`. The command TYPE must stay `<id>-command` so the
+      // server's retired-provider refusal (`provider_removed`) fires correctly
+      // instead of the turn silently misrouting to Claude below; only the
+      // per-provider model STATE is gone, so `effectiveModel` (already computed
+      // above, itself falling back to `claudeModel` for an id `composerModelFor`
+      // no longer recognizes) stands in for it — a value the server never reads
+      // before refusing.
       if (effectiveProvider === 'cursor') {
         result = dispatch({
           type: 'cursor-command',
@@ -1196,7 +1191,7 @@ export function useChatComposerState({
           sessionId: targetSessionId,
           options: {
             cwd: resolvedProjectPath, projectPath: resolvedProjectPath, sessionId: targetSessionId,
-            resume, model: cursorModel, skipPermissions: toolsSettings?.skipPermissions || false,
+            resume, model: effectiveModel, skipPermissions: toolsSettings?.skipPermissions || false,
             sessionSummary, toolsSettings,
           },
         });
@@ -1258,7 +1253,7 @@ export function useChatComposerState({
           sessionId: targetSessionId,
           options: {
             cwd: resolvedProjectPath, projectPath: resolvedProjectPath, sessionId: targetSessionId,
-            resume, model: hermesModel, sessionSummary,
+            resume, model: effectiveModel, sessionSummary,
           },
         });
       } else if (effectiveProvider === 'kimi') {
@@ -1316,8 +1311,11 @@ export function useChatComposerState({
         // effectiveEngineProvider is already sealed to the session's own stamp
         // for resumes (line above) but writePendingEngineStamp is a no-op for
         // resumes anyway since session_created never fires for a healthy resume.
+        // B-1483: same one-shot handoff as the engine stamp above, for the
+        // model axis — see pendingModelStamp.ts for the full race it closes.
         if (!resume) {
           writePendingEngineStamp(effectiveEngineProvider);
+          writePendingModelStamp(claudeModel);
         }
         // Anthropic / Claude provider. Attach `effort` only when a non-empty value is chosen.
         const claudeOptions: Record<string, unknown> = {
@@ -1357,8 +1355,8 @@ export function useChatComposerState({
       return result == null ? true : result.ok;
     },
     [
-      antigravityModel, claudeModel, codexModel, cursorModel, opencodeModel,
-      hermesModel, kimiModel, deepseekModel, glmModel, qwenModel, engineProvider, composerMode, coordinationLevel,
+      antigravityModel, claudeModel, codexModel, opencodeModel,
+      kimiModel, deepseekModel, glmModel, engineProvider, composerMode, coordinationLevel,
       getToolsSettings, permissionMode, provider, selectedProject, selectedSession, sendMessage,
       composerModelFor,
     ],
@@ -1664,7 +1662,21 @@ export function useChatComposerState({
         return;
       }
 
-      if ((!currentInput.trim() && attachedImages.length === 0) || isLoading || submitSealRef.current || !selectedProject) {
+      // B-1469: a send rejected only because a reply is running must tell the
+      // user why instead of silently dropping the keystroke. `/steer` and
+      // `/btw` are intercepted above and already reach the agent while
+      // `isLoading`, unaffected by this guard. The user can only interrupt by
+      // stopping the run (owner decision: a hint, not a send queue), so this
+      // never auto-retries — it just keeps the text in the composer.
+      const hasSendableContent = Boolean(currentInput.trim()) || attachedImages.length > 0;
+      if (isLoading && hasSendableContent) {
+        setSendError(t('composer.replyInProgress'));
+        if (sendErrorTimerRef.current) clearTimeout(sendErrorTimerRef.current);
+        sendErrorTimerRef.current = setTimeout(() => setSendError(null), 6000);
+        return;
+      }
+
+      if (!hasSendableContent || isLoading || submitSealRef.current || !selectedProject) {
         return;
       }
 

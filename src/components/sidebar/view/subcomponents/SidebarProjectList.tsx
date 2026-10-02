@@ -29,6 +29,8 @@ export type SidebarProjectListProps = ProjectToolbarProps & {
   onToggleBulkSelectedId: (id: string) => void;
   onStartBulkSelectionWithId: (kind: BulkSelectionKind, id: string) => void;
   getProjectSessions: (project: Project) => SessionWithProvider[];
+  /** T-1951: the "+N" hint's count, pulled out of `SidebarProjectSessions`'s own subscription. */
+  getSurfacedHiddenCount: (project: Project) => number;
   onLoadMoreSessions: (projectId: string) => void;
   loadingMoreProjects: Set<string>;
   isProjectStarred: (projectName: string) => boolean;
@@ -81,6 +83,7 @@ export default function SidebarProjectList({
   onToggleBulkSelectedId,
   onStartBulkSelectionWithId,
   getProjectSessions,
+  getSurfacedHiddenCount,
   onLoadMoreSessions,
   loadingMoreProjects,
   isProjectStarred,
@@ -155,6 +158,7 @@ export default function SidebarProjectList({
               editingProject={editingProject}
               editingName={editingName}
               sessions={getProjectSessions(project)}
+              surfacedHiddenCount={getSurfacedHiddenCount(project)}
               initialSessionsLoaded={initialSessionsLoaded.has(project.projectId)}
               isLoadingMoreSessions={loadingMoreProjects.has(project.projectId)}
               currentTime={currentTime}

@@ -15,6 +15,10 @@
  * The callback branches on this field, so a login transaction can never link
  * and a link transaction can never act as a login.
  *
+ * ADR-194 D2 (T-1962 S3): every non-test entry also binds the active config
+ * `configVersion` at start, and 'test' is the owner's sign-in against the
+ * unapplied draft (`ownerUserId`, `configHash`, `draftVersion`).
+ *
  * T-1939 6B: 'step_up' is an SSO-linked member re-proving themselves at the
  * IdP for a sensitive action. It binds `userId`, `requestedAtMs` and the
  * `audience` ('connector_owner'); the callback answers it with a one-time
@@ -44,30 +48,49 @@ function hashBrowserTransaction(transaction) {
   return crypto.createHash('sha256').update(transaction).digest();
 }
 
-const PURPOSES = new Set(['login', 'link', 'step_up']);
+const PURPOSES = new Set(['login', 'link', 'step_up', 'test']);
 const STEP_UP_AUDIENCES = new Set(['connector_owner']);
+const CONFIG_HASH = /^[0-9a-f]{64}$/;
+
+const isVersion = (value) => Number.isSafeInteger(value) && value >= 0;
 
 /**
- * Normalizes the purpose-specific binding, or null when invalid. 'link' and
- * 'step_up' entries must name a positive integer user id and a finite request
- * instant; only 'step_up' carries (and requires) an audience; a 'login' entry
- * carries none of them.
+ * ADR-194 D2 `test` binding: the owner who started it, the draft hash and the
+ * draft_version at start. It never carries a sign-in user, audience or
+ * active-config version, so it cannot be mistaken for any other purpose.
  */
-function purposeBinding({ purpose = 'login', userId, requestedAtMs, audience }) {
-  if (!PURPOSES.has(purpose)) {
+function testBinding({ ownerUserId, configHash, draftVersion, ...rest }) {
+  const extra = Object.values(rest).some((value) => value !== undefined);
+  if (extra || !Number.isInteger(ownerUserId) || ownerUserId <= 0 || typeof configHash !== 'string'
+    || !CONFIG_HASH.test(configHash) || !isVersion(draftVersion)) {
     return null;
   }
+  return { purpose: 'test', ownerUserId, configHash, draftVersion };
+}
+
+/**
+ * Normalizes the purpose-specific binding, or null when invalid. Every
+ * non-test entry carries the active `configVersion` at start (ADR-194 D9
+ * fence). 'link' and 'step_up' entries must name a positive integer user id
+ * and a finite request instant; only 'step_up' carries (and requires) an
+ * audience; a 'login' entry binds no user.
+ */
+function purposeBinding({ purpose = 'login', ...binding }) {
+  if (!PURPOSES.has(purpose)) return null;
+  if (purpose === 'test') return testBinding(binding);
+  const { userId, requestedAtMs, audience, configVersion, ...rest } = binding;
+  if (!isVersion(configVersion) || Object.values(rest).some((value) => value !== undefined)) return null;
   if (purpose === 'login') {
     return userId === undefined && requestedAtMs === undefined && audience === undefined
-      ? { purpose } : null;
+      ? { purpose, configVersion } : null;
   }
   if (!Number.isInteger(userId) || userId <= 0 || !Number.isFinite(requestedAtMs)) {
     return null;
   }
   if (purpose === 'link') {
-    return audience === undefined ? { purpose, userId, requestedAtMs } : null;
+    return audience === undefined ? { purpose, userId, requestedAtMs, configVersion } : null;
   }
-  return STEP_UP_AUDIENCES.has(audience) ? { purpose, userId, requestedAtMs, audience } : null;
+  return STEP_UP_AUDIENCES.has(audience) ? { purpose, userId, requestedAtMs, audience, configVersion } : null;
 }
 
 function matchesTransaction(expectedHash, transaction) {
@@ -108,9 +131,10 @@ export function createOidcPkceStore({ ttlMs, maxEntries } = {}) {
    * purpose is the only thing revealed; no secret or user id leaves.
    * @param {string} state
    * @param {string} browserTransaction
-   * @returns {{ entry: ({ nonce: string, codeVerifier: string, purpose: 'login' | 'link' | 'step_up',
-   *   userId?: number, requestedAtMs?: number, audience?: string } | null),
-   *   stalePurpose: 'login' | 'link' | 'step_up' | null }}
+   * @returns {{ entry: ({ nonce: string, codeVerifier: string, purpose: 'login' | 'link' | 'step_up' | 'test',
+   *   userId?: number, requestedAtMs?: number, audience?: string, configVersion?: number,
+   *   ownerUserId?: number, configHash?: string, draftVersion?: number } | null),
+   *   stalePurpose: 'login' | 'link' | 'step_up' | 'test' | null }}
    */
   function consumeWithOutcome(state, browserTransaction) {
     if (typeof state !== 'string' || state.length === 0) {
@@ -135,8 +159,9 @@ export function createOidcPkceStore({ ttlMs, maxEntries } = {}) {
      * Registers a pending authorization request under its `state`.
      * @param {string} state base64url CSRF/state token from /login
      * @param {{ nonce: string, codeVerifier: string, browserTransaction: string,
-     *   purpose?: 'login' | 'link' | 'step_up', userId?: number, requestedAtMs?: number,
-     *   audience?: 'connector_owner' }} secrets
+     *   purpose?: 'login' | 'link' | 'step_up' | 'test', userId?: number, requestedAtMs?: number,
+     *   audience?: 'connector_owner', configVersion?: number, ownerUserId?: number,
+     *   configHash?: string, draftVersion?: number }} secrets
      * @returns {boolean} false when the bounded store is full or input is invalid
      */
     store(state, { nonce, codeVerifier, browserTransaction, ...binding }) {

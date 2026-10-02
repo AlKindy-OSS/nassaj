@@ -102,6 +102,25 @@ describe('withdrawOptimisticUserRow (B-518, B-1078)', () => {
     const { result } = renderHook(() => useSessionStore());
     expect(result.current.withdrawOptimisticUserRow('لا-أحد', FIRST)).toBeNull();
   });
+
+  it('B-1469: a withdrawn row never comes back through a later merged history snapshot', () => {
+    const { result } = twoPending();
+    expect(withdraw(result.current, SID, FIRST)).toBe('أول');
+    expect(result.current.getMessages(SID).map(row => row.id)).toEqual([SECOND]);
+
+    // The server never saw the withdrawn row (it was rejected pre-dispatch),
+    // so a later tail snapshot cannot possibly carry it either — this only
+    // guards that the id-based merge in `applyHistorySnapshot` (B-1469) has
+    // no way to resurrect a row `realtimeMessages` no longer holds.
+    act(() => {
+      result.current.applyHistorySnapshot(SID, {
+        messages: [{ ...userRow(SECOND, 'ثانٍ', '2026-08-06T10:01:00.000Z') }],
+        total: 1, hasMore: false, nextCursor: null, tokenUsage: null,
+        responseTurnDurationTotalMs: null, historySchema: 1, payloadMode: 'full', revision: 'r1',
+      }, { merge: true });
+    });
+    expect(result.current.getMessages(SID).map(row => row.id)).toEqual([SECOND]);
+  });
 });
 
 describe('branchSessionId moves the pending cmid_ row (B-1078)', () => {

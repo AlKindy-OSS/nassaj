@@ -768,7 +768,6 @@
     "skipPermissions": {
       "label": "権限プロンプトをスキップ（注意して使用）",
       "claudeDescription": "--dangerously-skip-permissions フラグに相当",
-      "cursorDescription": "Cursor CLIの -f フラグに相当",
       "activeWarning": "The permission prompt is disabled: tools and commands run without asking you."
     },
     "allowVendorDelegation": {
@@ -790,34 +789,12 @@
       "empty": "ブロックされたツールはありません",
       "addLabel": "Add a blocked tool"
     },
-    "allowedCommands": {
-      "title": "許可されたシェルコマンド",
-      "description": "権限の確認なしに自動的に許可されるシェルコマンド",
-      "placeholder": "例: \"Shell(ls)\" または \"Shell(git status)\"",
-      "quickAdd": "よく使うコマンドを追加:",
-      "empty": "許可されたコマンドはありません",
-      "addLabel": "Add an allowed command"
-    },
-    "blockedCommands": {
-      "title": "ブロックされたシェルコマンド",
-      "description": "自動的にブロックされるシェルコマンド",
-      "placeholder": "例: \"Shell(rm -rf)\" または \"Shell(sudo)\"",
-      "empty": "ブロックされたコマンドはありません",
-      "addLabel": "Add a blocked command"
-    },
     "toolExamples": {
       "title": "ツールパターンの例:",
       "bashGitLog": "- すべてのgit logコマンドを許可",
       "bashGitDiff": "- すべてのgit diffコマンドを許可",
       "write": "- すべてのWriteツールの使用を許可",
       "bashRm": "- すべてのrmコマンドをブロック（危険）"
-    },
-    "shellExamples": {
-      "title": "シェルコマンドの例:",
-      "ls": "- lsコマンドを許可",
-      "gitStatus": "- git statusを許可",
-      "npmInstall": "- npm installを許可",
-      "rmRf": "- 再帰的削除をブロック"
     },
     "codex": {
       "permissionMode": "権限モード",

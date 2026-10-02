@@ -428,7 +428,55 @@
       "restarting": "Safe restart in progress. This window reconnects when the new version is up.",
       "expired": "Consent expired. Confirm activation again in this dialog.",
       "refused": "The safe restart was refused ({{code}}) and will be retried. You can also press safe restart in the command board.",
-      "refusedTerminal": "The safe restart failed its safety check ({{code}}) and will not be retried automatically. Fix the cause, then confirm activation again in this dialog."
+      "refusedTerminal": "The safe restart failed its safety check ({{code}}) and will not be retried automatically. Fix the cause, then confirm activation again in this dialog.",
+      "waitingTerminals": "Waiting for {{count}} open terminal(s) to close, then the safe restart runs by itself. No terminal will be closed automatically.",
+      "waitingTerminalsUsers": "Waiting for {{count}} open terminal(s) held by {{users}} to close, then the safe restart runs by itself. No terminal will be closed automatically.",
+      "detachedTerminals": "{{count}} of them are closed Shell tabs that end by themselves at {{time}}.",
+      "waitingLock": "Waiting for another operation to release the update lock; retrying automatically."
+    },
+    "closeTerminals": {
+      "button": "Close {{count}} terminals and update",
+      "button_one": "Close 1 terminal and update",
+      "button_other": "Close {{count}} terminals and update",
+      "confirmTitle": "Close the open terminals and start the update?",
+      "confirmMessage": "This closes {{count}} open terminals of every member, then the update starts at once.",
+      "confirmMessage_one": "This closes 1 open terminal, then the update starts at once.",
+      "confirmMessage_other": "This closes {{count}} open terminals of every member, then the update starts at once.",
+      "usersLabel": "Held by:",
+      "noUsers": "The holders' names are not available.",
+      "warning": "The terminal tabs are deleted, not just disconnected: their output and scrollback are erased, unsaved work in them is lost, and any command still running in them stops.",
+      "confirm": "Close {{count}} terminals and update",
+      "confirm_one": "Close 1 terminal and update",
+      "confirm_other": "Close {{count}} terminals and update",
+      "cancel": "Cancel",
+      "closing": "Closing terminals...",
+      "changed": "The open terminals changed since you looked. Nothing was closed. Review the new list and confirm again.",
+      "done": "Closed {{count}} terminals. The update is starting.",
+      "done_one": "Closed 1 terminal. The update is starting.",
+      "done_other": "Closed {{count}} terminals. The update is starting.",
+      "errors": {
+        "notOverridable": "This update can no longer be started this way. It has moved on or is not waiting for terminals.",
+        "jobNotFound": "This update job no longer exists. Close this window and open it again.",
+        "snapshotInvalid": "The terminal list could not be read. Wait for the status to refresh, then try again.",
+        "forbidden": "Only the owner can close terminals for an update.",
+        "ownerIdentity": "Your owner identity could not be confirmed. Sign in again, then try again.",
+        "rateLimited": "Too many attempts. Wait a minute, then try again.",
+        "network": "Could not reach the server. Check the connection, then try again.",
+        "unknown": "Closing the terminals failed ({{code}}). Nothing was closed by this attempt.",
+        "notOverridableReasons": {
+          "sessions_active": "Chat sessions are still running. The update waits for them to end; closing terminals does not help yet.",
+          "scheduled_wait": "A scheduled message is pending. Skip the scheduled wait first, then close the terminals.",
+          "not_waiting_terminals": "The update is no longer waiting for terminals, so there is nothing to close.",
+          "activator_failed": "The automatic restart could not be started. Check the update status, then try again.",
+          "local_main": "This node updates from its local main branch, so it cannot close terminals to update from here."
+        }
+      },
+      "terminalsUnit": "{{count}} terminals",
+      "terminalsUnit_one": "1 terminal",
+      "terminalsUnit_other": "{{count}} terminals",
+      "doneRemaining": "Closed {{closedLabel}}, but {{count}} are still open. The update keeps waiting for them.",
+      "doneRemaining_one": "Closed {{closedLabel}}, but 1 is still open. The update keeps waiting for it.",
+      "doneRemaining_other": "Closed {{closedLabel}}, but {{count}} are still open. The update keeps waiting for them."
     },
     "terminal": {
       "show": "Show terminal output",
@@ -559,9 +607,25 @@
         "title": "Deferral window expired",
         "hint": "The update waited 24 hours for active sessions to end but the node never became idle. Press the safe-restart button on the command board to activate the staged build manually."
       },
+      "update_lock_contended": {
+        "title": "Update lock busy",
+        "hint": "Another operation (usually an open terminal or a running turn) held the update lock. Close open terminals and Shell tabs, then start the update again."
+      },
+      "update_maintenance_active": {
+        "title": "Update gate not open",
+        "hint": "The update gate is closed or waiting for recovery. Check the node status before retrying."
+      },
+      "update_lock_unavailable": {
+        "title": "Update lock unavailable",
+        "hint": "The server could not take the update lock (the flock tool failed to start). Check the server environment."
+      },
+      "source_update_activation_interrupted": {
+        "title": "Activation interrupted",
+        "hint": "The server stopped while activating the update. No change was kept; start the update again."
+      },
       "unknown": {
         "title": "Update failed",
-        "hint": "An unexpected error occurred. Check server logs or contact support."
+        "hint": "An unexpected error occurred ({{code}}). Check server logs or contact support."
       }
     },
     "sourceVersionLabel": "Source tree (not the running build)",

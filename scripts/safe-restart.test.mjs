@@ -60,7 +60,6 @@ const cases = [
   ['codex مباشر',                  ['codex'],                                     'codex'],
   ['agy مباشر',                    ['agy'],                                       'agy'],
   ['opencode مباشر',               ['opencode'],                                  'opencode'],
-  ['hermes مباشر',                 ['hermes'],                                    'hermes'],
   ['claude بمسار مطلق',            ['/usr/local/bin/claude'],                     'claude'],
   ['codex بمسار + وسيط',           ['/opt/x/codex', 'resume'],                    'codex'],
   // ── سلبية: ليست جلسة مزوّد ───────────────────────────────────────────────────
@@ -76,7 +75,6 @@ const cases = [
   ['node codex.cjs',               ['node', '/x/codex.cjs'],                      'codex'],
   ['bun run opencode.js',          ['bun', 'run', '/x/opencode.js'],              'opencode'],
   ['bun run opencode (bareword)',  ['bun', 'run', 'opencode'],                    'opencode'],
-  ['deno run hermes.js',           ['deno', 'run', '/x/hermes.js'],               'hermes'],
   // ── أعلام node التقييمية (EVAL_FLAGS) قبل رمز السكربت ⇒ null (B-196) ──────────
   ['node -e code',                 ['node', '-e', 'require("x");claude'],         null],
   ['node --eval code',             ['node', '--eval', 'opencode()'],              null],
@@ -92,7 +90,6 @@ const cases = [
   ['shim claude-code',             ['node', '/x/claude-code/cli.js'],             'claude'],
   ['shim opencode dir',            ['node', '/x/opencode/dist/index.js'],         'opencode'],
   ['shim agy dir',                 ['node', '/x/agy/bin.js'],                     'agy'],
-  ['shim hermes dir',              ['node', '/x/hermes/run.js'],                  'hermes'],
   // ── تمييز codex عن opencode: '/opencode/' لا يُنسب codex (B-196) ──────────────
   ['opencode لا يُنسب codex',       ['node', '/x/opencode/cli.js'],               'opencode'],
   // ── وسيط موضعي بعد رمز السكربت الأول لا يُفحص (B-196) ─────────────────────────
@@ -105,7 +102,6 @@ const cases = [
   ['قفص: bwrap بمسار مطلق',        ['/opt/codex/bwrap', '--dev', '/dev', '--', 'codex'], 'codex'],
   ['قفص: تركيب ثم مزوّد',          ['bwrap', '--ro-bind', '/usr', '/usr', '--tmpfs', '/workspace/.nassaj-users', '--bind', '/w', '/w', '--', 'agy'], 'agy'],
   ['قفص: shim مفسّر بعد الفاصل',    ['bwrap', '--bind', '/a', '/a', '--', 'node', '/x/@anthropic-ai/claude-code/cli.js'], 'claude'],
-  ['قفص: hermes بعد الفاصل',       ['bwrap', '--proc', '/proc', '--', '/usr/bin/hermes'], 'hermes'],
   // قيمة علم اسمها مزوّد يجب ألّا تُلتقط قبل الفاصل (سبب رفض عدّ الأرِيّات).
   ['قفص: مسار تركيب باسم مزوّد',    ['bwrap', '--bind', '/opt/opencode', '/opt/opencode', '--', 'claude'], 'claude'],
   // fail-closed: bwrap لا يحمل الفاصل ⇒ لا نمرّ على عمياء بل نعدّه جلسة حيّة.
@@ -125,7 +121,7 @@ console.log('\n# الجزء A2: كشف القفص على argv حقيقي من bu
 try {
   process.env.NASSAJ_PROVIDER_CAGE = 'true';
   const { buildCagedLaunch } = await import('../server/services/isolation/provider-cage.js');
-  for (const prov of ['claude', 'agy', 'opencode', 'hermes']) {
+  for (const prov of ['claude', 'agy', 'opencode']) {
     const built = buildCagedLaunch(
       { userId: 2, provider: prov, cmd: prov, args: ['--resume', 'abc12345'], cwd: process.cwd() },
       { resolveBwrapPath: () => '/usr/bin/bwrap' },

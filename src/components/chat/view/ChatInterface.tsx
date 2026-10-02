@@ -9,7 +9,7 @@ import PermissionContext from '../../../contexts/PermissionContext';
 import { QuickSettingsPanel } from '../../quick-settings-panel';
 import { useWebSocket } from '../../../contexts/WebSocketContext';
 import type { ChatInterfaceProps, Provider  } from '../types/types';
-import type { LLMProvider } from '../../../types/app';
+import type { ActiveBodyProvider, LLMProvider } from '../../../types/app';
 import { useChatProviderState } from '../hooks/useChatProviderState';
 import {
   bumpSessionActivityEpoch,
@@ -217,8 +217,6 @@ function ChatInterface({
     engineProvider,
     setEngineProvider,
     selectClaudeEngineProvider,
-    cursorModel,
-    setCursorModel,
     claudeModel,
     setClaudeModel,
     codexModel,
@@ -227,16 +225,12 @@ function ChatInterface({
     setAntigravityModel,
     opencodeModel,
     setOpenCodeModel,
-    hermesModel,
-    setHermesModel,
     kimiModel,
     setKimiModel,
     deepseekModel,
     setDeepSeekModel,
     glmModel,
     setGlmModel,
-    qwenModel,
-    setQwenModel,
     permissionMode,
     pendingPermissionRequests,
     setPendingPermissionRequests,
@@ -261,12 +255,15 @@ function ChatInterface({
   // loading), reset to the first qualified (installed===true) provider.
   // fail-open: only act on a confirmed installed===false, never during loading.
   useEffect(() => {
-    const currentStatus = providerAuthStatus[provider];
-    if (!shouldResetProvider(currentStatus)) return;
+    // A retired/historical provider (cursor/hermes/qwen/kimi/gemini) is never
+    // an ActiveBodyProvider key of providerAuthStatus (T-1953): such a stale
+    // `provider` value has no status row and must not be treated as installed.
+    const currentStatus = providerAuthStatus[provider as ActiveBodyProvider];
+    if (!currentStatus || !shouldResetProvider(currentStatus)) return;
 
     // Find first qualified provider (installed===true), defaulting to 'claude'.
-    // Derived from PROVIDER_UI_CAPABILITIES (Record<LLMProvider, …>, so TS
-    // enforces every provider is a key) instead of a hand-maintained literal —
+    // Derived from PROVIDER_UI_CAPABILITIES (Record<ActiveBodyProvider, …>, so
+    // TS enforces every provider is a key) instead of a hand-maintained literal —
     // the previous hard-coded list omitted kimi/deepseek/glm (and sakana),
     // so a user on one of those could be silently bounced to an unauthenticated
     // 'claude' the moment its auth status resolved to installed===false.
@@ -274,7 +271,7 @@ function ChatInterface({
     // (deepseek/glm): they are absent from the picker and refused at the
     // dispatch seam, so landing on one is a dead end, not a fallback.
     const fallback = resolveFallbackProvider(
-      Object.keys(PROVIDER_UI_CAPABILITIES) as LLMProvider[],
+      Object.keys(PROVIDER_UI_CAPABILITIES) as ActiveBodyProvider[],
       providerAuthStatus,
     );
 
@@ -295,18 +292,19 @@ function ChatInterface({
   // تُستعمل لإظهار «النموذج الذي سيُطبَّق على الدور الأول» في جلسة جديدة.
   const fallbackGlobalModel = useMemo(() => {
     const dp = displayProvider;
-    if (dp === 'cursor') return cursorModel;
     if (dp === 'codex') return codexModel;
     if (dp === 'antigravity') return antigravityModel;
     if (dp === 'opencode') return opencodeModel;
-    if (dp === 'hermes') return hermesModel;
     if (dp === 'kimi') return kimiModel;
     if (dp === 'deepseek') return deepseekModel;
     if (dp === 'glm') return glmModel;
-    if (dp === 'qwen') return qwenModel;
+    // Retired bodies (cursor/hermes/qwen, T-1953) can still be `displayProvider`
+    // for a historical session (__provider), but never take a new turn — this
+    // value only seeds "the model that would apply to a first turn", which is
+    // moot for them. Falls through to the Claude default like any unknown id.
     return claudeModel;
-  }, [displayProvider, claudeModel, cursorModel, codexModel,
-      antigravityModel, opencodeModel, hermesModel, kimiModel, deepseekModel, glmModel, qwenModel]);
+  }, [displayProvider, claudeModel, codexModel,
+      antigravityModel, opencodeModel, kimiModel, deepseekModel, glmModel]);
 
   const {
     historyError,
@@ -589,6 +587,7 @@ function ChatInterface({
     currentUserId: typeof currentAuthUser?.id === 'number' ? currentAuthUser.id : null,
     latestMessage,
     controlEvents,
+    controlFrames,
     sendMessage,
   });
   // T-1904 e2e (BLOCKER) — لا نشترط `isLoading` هنا: وصول steer-turn-state
@@ -757,16 +756,13 @@ function ChatInterface({
     engineProvider,
     permissionMode,
     cyclePermissionMode,
-    cursorModel,
     claudeModel,
     codexModel,
     antigravityModel,
     opencodeModel,
-    hermesModel,
     kimiModel,
     deepseekModel,
     glmModel,
-    qwenModel,
     isLoading,
     canAbortSession,
     tokenBudget,
@@ -1335,24 +1331,18 @@ function ChatInterface({
           textareaRef={textareaRef}
           claudeModel={claudeModel}
           setClaudeModel={setClaudeModel}
-          cursorModel={cursorModel}
-          setCursorModel={setCursorModel}
           codexModel={codexModel}
           setCodexModel={setCodexModel}
           antigravityModel={antigravityModel}
           setAntigravityModel={setAntigravityModel}
           opencodeModel={opencodeModel}
           setOpenCodeModel={setOpenCodeModel}
-          hermesModel={hermesModel}
-          setHermesModel={setHermesModel}
           kimiModel={kimiModel}
           setKimiModel={setKimiModel}
           deepseekModel={deepseekModel}
           setDeepSeekModel={setDeepSeekModel}
           glmModel={glmModel}
           setGlmModel={setGlmModel}
-          qwenModel={qwenModel}
-          setQwenModel={setQwenModel}
           providerModelCatalog={providerModelCatalog}
           providerModelsLoading={providerModelsLoading}
           providerModelsRefreshing={providerModelsRefreshing}
@@ -1426,8 +1416,11 @@ function ChatInterface({
           </div>
         )}
 
-        {canSteer && steerStarterName && (
-          <SteerComposerNote starterName={steerStarterName} isStarter={isKnownStarter} />
+        {/* T-1956: for the starter's own turn the `/steer` hint moved into a
+            tooltip on the running bar (showSteerHint below); the composer keeps
+            only the quota-attribution note for a non-starter. */}
+        {canSteer && steerStarterName && !isKnownStarter && (
+          <SteerComposerNote starterName={steerStarterName} />
         )}
 
         <ChatComposer
@@ -1446,6 +1439,7 @@ function ChatInterface({
           steerable={canSteer}
           runActiveOverride={isRunActiveForViewer && !isLoading}
           isConfirmedStarter={isKnownStarter}
+          showSteerHint={canSteer && Boolean(steerStarterName) && isKnownStarter}
           onSteerClick={handleSteerButtonClick}
           onAbortSession={handleAbortSession}
           provider={provider}

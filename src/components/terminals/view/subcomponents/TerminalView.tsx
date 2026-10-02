@@ -34,7 +34,8 @@ export default function TerminalView({ terminal, isActive, onRequestListRefresh 
 
   // Blocking states (a fresh attach is possible/required) render a centered card.
   const blockingState =
-    state === 'superseded' || state === 'serverRestart' || state === 'notFound' || state === 'error';
+    state === 'superseded' || state === 'serverRestart' || state === 'notFound'
+    || state === 'closedForUpdate' || state === 'error';
 
   const blockingMessage =
     state === 'superseded'
@@ -43,7 +44,9 @@ export default function TerminalView({ terminal, isActive, onRequestListRefresh 
         ? t('status.serverRestart')
         : state === 'notFound'
           ? t('status.notFound')
-          : errorMessage || t('status.error');
+          : state === 'closedForUpdate'
+            ? t('errors.closedForUpdate')
+            : errorMessage || t('status.error');
 
   const canReconnect = state === 'superseded' || state === 'serverRestart' || state === 'error';
 
@@ -102,7 +105,7 @@ export default function TerminalView({ terminal, isActive, onRequestListRefresh 
               <div className="mx-auto mb-3 flex h-11 w-11 items-center justify-center rounded-full bg-gray-700/70">
                 <AlertTriangle className="h-5 w-5 text-amber-400" aria-hidden="true" />
               </div>
-              <p className="mb-4 text-sm leading-relaxed text-gray-200">{blockingMessage}</p>
+              <p role="alert" className="mb-4 text-sm leading-relaxed text-gray-200">{blockingMessage}</p>
               {canReconnect && (
                 <button
                   type="button"

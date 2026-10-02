@@ -3,12 +3,14 @@
  *
  * When an unknown IdP subject signs in, the /callback login branch may create
  * a local SSO-only account for it — but only when every gate holds:
- *   - OIDC is live AND OIDC_JIT_ENABLED is exactly 'true' (default off: the
- *     owner turns it on only after existing members have self-linked, so a
- *     member is never given a second, empty account);
- *   - OIDC_ALLOWED_ORG_IDS lists at least one organization (an empty list
- *     refuses — fail-closed), and the verified id_token carries a known
- *     project role granted BY one of those organizations;
+ *   - SSO login is available AND the active SSO config opts in (jit_enabled,
+ *     default off: the owner turns it on only after existing members have
+ *     self-linked, so a member is never given a second, empty account);
+ *   - the active config restricts tenants (tenant mode other than `none` —
+ *     fail-closed), and the verified id_token maps to a role through the
+ *     config's claim path and rules AND passes its tenant restriction
+ *     (ADR-194 D4/D5; `role_grant_scope` counts only roles granted by an
+ *     allowed scope);
  *   - the username derived from preferred_username is free (case-insensitive
  *     over every account, active or not) and not reserved. A clash is refused;
  *     there is no auto-suffix and never any linking by e-mail;
@@ -22,8 +24,8 @@ import crypto from 'crypto';
 // mocks, and a named import of an absent binding would fail at link time.
 import * as databaseModule from '../modules/database/index.js';
 
-import { extractZitadelRoleNames, extractZitadelRoleNamesFromOrgs, mapExternalRoles } from './external-role-mapper.js';
-import { oidcEnabled } from './oidc-config.js';
+import { activeSsoMapping, ssoJitEnabled } from './sso-config.service.js';
+import { evaluateSsoClaims } from './sso-role-mapping.js';
 import { SSO_ONLY_PASSWORD_HASH } from './sso-only-password.js';
 import { isReservedUsername } from './username-policy.js';
 
@@ -34,48 +36,14 @@ const HOUR_MS = 60 * 60_000;
 const MIN_USERNAME_LENGTH = 3;
 const MAX_USERNAME_LENGTH = 32;
 const MAX_PREFERRED_USERNAME_LENGTH = 512;
-const ORG_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
 const BASE32_ALPHABET = 'abcdefghijklmnopqrstuvwxyz234567';
 
 /** Epoch-ms timestamps of this hour's provisions (bounded by the cap). */
 const recentProvisions = [];
 
-/** Whether JIT creation is switched on (explicit opt-in, default off). */
+/** Whether JIT creation is switched on: login available and the active row opts in (ADR-194 D1). */
 export function jitEnabled() {
-  return oidcEnabled() && process.env.OIDC_JIT_ENABLED === 'true';
-}
-
-/**
- * The organizations allowed to provision accounts, from the comma-separated
- * OIDC_ALLOWED_ORG_IDS. Malformed entries are dropped; an empty set means JIT
- * refuses every sign-in. A non-empty set also filters the role of EVERY SSO
- * sign-in and self-link (see ssoRoleNames).
- * @returns {Set<string>}
- */
-export function allowedOrgIds() {
-  const raw = process.env.OIDC_ALLOWED_ORG_IDS;
-  if (typeof raw !== 'string') {
-    return new Set();
-  }
-  return new Set(raw.split(',').map((entry) => entry.trim()).filter((entry) => ORG_ID_PATTERN.test(entry)));
-}
-
-/**
- * The project role names an SSO sign-in or self-link may act on (qa veto on
- * slice 4). When OIDC_ALLOWED_ORG_IDS lists any organization, only roles
- * granted BY one of them count — for linked members exactly as for JIT — so a
- * foreign organization's grant can neither raise a role nor keep access once
- * the allowed organization revokes its own. An empty allowlist keeps the
- * unfiltered project-scoped roles for existing links (JIT refuses on its own).
- * @param {Record<string, unknown>} claims verified id_token claims
- * @param {string | undefined} projectId configured Zitadel project id
- * @returns {string[]}
- */
-export function ssoRoleNames(claims, projectId) {
-  const orgs = allowedOrgIds();
-  return orgs.size === 0
-    ? extractZitadelRoleNames(claims, projectId)
-    : extractZitadelRoleNamesFromOrgs(claims, projectId, orgs);
+  return ssoJitEnabled();
 }
 
 /** RFC 4648 base32 (lower-case, unpadded) of the leading bytes of `buffer`. */
@@ -136,24 +104,27 @@ export function resetProvisionCap() {
   recentProvisions.length = 0;
 }
 
+/** Mapping refusals that mean "no usable role" rather than "outside the allowed tenant". */
+const NO_ROLE_REASONS = new Set(['roles_claim_absent', 'no_recognized_role', 'mapping_unavailable']);
+
 /**
  * Decides whether an unknown subject may get an account, without writing.
- * @param {{ claims: Record<string, unknown>, subject: string, projectId: string | undefined,
- *           nowMs: number }} input
- * @returns {{ outcome: 'disabled' | 'allowlist_missing' | 'no_role' | 'org_not_allowed'
- *             | 'capped' } | { outcome: 'ready', role: 'admin' | 'user', username: string }}
+ * Tenant and size refusals keep their D4/D5 reason as the outcome.
+ * @param {{ claims: Record<string, unknown>, subject: string, nowMs: number }} input
+ * @returns {{ outcome: 'disabled' | 'tenant_restriction_missing' | 'no_role' | 'tenant_not_allowed'
+ *             | 'email_unverified' | 'claim_too_large' | 'capped' }
+ *   | { outcome: 'ready', role: 'admin' | 'user', username: string }}
  */
-export function planJitProvision({ claims, subject, projectId, nowMs }) {
+export function planJitProvision({ claims, subject, nowMs }) {
   if (!jitEnabled()) return { outcome: 'disabled' };
-  const orgs = allowedOrgIds();
-  if (orgs.size === 0) return { outcome: 'allowlist_missing' };
-  if (mapExternalRoles(extractZitadelRoleNames(claims, projectId)) === null) {
-    return { outcome: 'no_role' };
+  const mapping = activeSsoMapping();
+  if (mapping === null || mapping.tenantMode === 'none') return { outcome: 'tenant_restriction_missing' };
+  const decision = evaluateSsoClaims(claims, mapping);
+  if (decision.role === null) {
+    return { outcome: NO_ROLE_REASONS.has(decision.reason) ? 'no_role' : decision.reason };
   }
-  const role = mapExternalRoles(extractZitadelRoleNamesFromOrgs(claims, projectId, orgs));
-  if (role === null) return { outcome: 'org_not_allowed' };
   if (provisionCapReached(nowMs)) return { outcome: 'capped' };
-  return { outcome: 'ready', role, username: deriveUsername(claims.preferred_username, subject) };
+  return { outcome: 'ready', role: decision.role, username: deriveUsername(claims.preferred_username, subject) };
 }
 
 /**

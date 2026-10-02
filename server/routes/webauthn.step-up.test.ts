@@ -113,14 +113,11 @@ async function enrollWithPassword(userId: number) {
 }
 
 async function withOidc(run: () => Promise<void>) {
-  const saved = { enabled: process.env.OIDC_ENABLED, project: process.env.OIDC_ROLE_PROJECT_ID };
+  const saved = process.env.OIDC_ENABLED;
   process.env.OIDC_ENABLED = 'true';
-  process.env.OIDC_ROLE_PROJECT_ID = 'proj-synth';
   try { await run(); } finally {
-    for (const [key, value] of [['OIDC_ENABLED', saved.enabled], ['OIDC_ROLE_PROJECT_ID', saved.project]] as const) {
-      if (value === undefined) delete process.env[key];
-      else process.env[key] = value;
-    }
+    if (saved === undefined) delete process.env.OIDC_ENABLED;
+    else process.env.OIDC_ENABLED = saved;
   }
 }
 

@@ -83,6 +83,9 @@ const ownerSetupFixture = (resumableStep: 'origin' | 'trust' | 'provider_pack' |
     installationId: 'install-1', canonicalOrigin: 'https://nassaj.example',
     callbackUrl: 'https://nassaj.example/connectors/oauth/callback', originRevision: 1,
   },
+  // B-1461: before the first bind the wizard saves only against a server proposal.
+  originProposal: resumableStep === 'origin'
+    ? { canonicalOrigin: 'https://nassaj.example', source: 'public_origin' } : null,
   trustBundleRevision: ['origin', 'trust'].includes(resumableStep) ? 0 : 1,
   activePack: ['activation', 'complete'].includes(resumableStep)
     ? { issuer: 'nassaj', channel: 'stable', sequence: 1, digest: 'a'.repeat(43), expiresAt: null } : null,

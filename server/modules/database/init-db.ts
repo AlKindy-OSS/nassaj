@@ -32,6 +32,7 @@ import { requireStartupAdmission } from '../../bootstrap-startup-context.js';
 import { migrateDocumentShares } from './document-shares.js';
 import { migrateDeviceAccountSessions } from './device-account-sessions.migration.js';
 import { inspectExistingSecurityState } from './existing-security-state.js';
+import { migrateSsoOidc } from './sso-oidc-config.migration.js';
 
 /** True when a ledger project path still resolves to a real directory. */
 const projectPathResolves = (projectPath: string): boolean => {
@@ -57,6 +58,9 @@ export const initializeAdmittedDatabase = (db: ReturnType<typeof getConnection>,
     migrateAdmittedScheduledMessages(db);
     migrateDeviceAccountSessions(db);
     migrateDocumentShares(db);
+    // ADR-194 (T-1962): without these tables the SSO state model reads a
+    // missing table and locks every linked member out (enforced, unavailable).
+    migrateSsoOidc(db);
     const result = initializeConnectorPolicyV2SubstrateOnly(db, authorityRootPath);
     if (!result.ready) throw new Error(`existing_security_connector_initialization_failed:${result.reason}`);
 };
@@ -86,6 +90,9 @@ export const initializeDatabase = async () => {
             runMigrations(db);
             migrateDeviceAccountSessions(db);
             migrateDocumentShares(db);
+            // Idempotent; also inside runMigrations. Kept explicit so both boot
+            // paths name the T-1962 tables (ADR-194).
+            migrateSsoOidc(db);
             migrateConnectorAuthSchema(db);
             const existingInstallation = db.prepare(`SELECT installation_id AS installationId
                 FROM connector_installations WHERE singleton=1`).get() as { installationId: string } | undefined;

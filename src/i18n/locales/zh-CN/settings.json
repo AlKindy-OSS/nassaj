@@ -768,7 +768,6 @@
     "skipPermissions": {
       "label": "跳过权限提示（请谨慎使用）",
       "claudeDescription": "等同于 --dangerously-skip-permissions 标志",
-      "cursorDescription": "等同于 Cursor CLI 中的 -f 标志",
       "activeWarning": "The permission prompt is disabled: tools and commands run without asking you."
     },
     "allowVendorDelegation": {
@@ -790,34 +789,12 @@
       "empty": "未配置禁用的工具",
       "addLabel": "Add a blocked tool"
     },
-    "allowedCommands": {
-      "title": "允许的 Shell 命令",
-      "description": "无需权限提示即可自动执行的 Shell 命令",
-      "placeholder": "例如：\"Shell(ls)\" 或 \"Shell(git status)\"",
-      "quickAdd": "快速添加常用命令：",
-      "empty": "未配置允许的命令",
-      "addLabel": "Add an allowed command"
-    },
-    "blockedCommands": {
-      "title": "阻止的 Shell 命令",
-      "description": "自动阻止的 Shell 命令",
-      "placeholder": "例如：\"Shell(rm -rf)\" 或 \"Shell(sudo)\"",
-      "empty": "未配置阻止的命令",
-      "addLabel": "Add a blocked command"
-    },
     "toolExamples": {
       "title": "工具模式示例：",
       "bashGitLog": "- 允许所有 git log 命令",
       "bashGitDiff": "- 允许所有 git diff 命令",
       "write": "- 允许所有 Write 工具使用",
       "bashRm": "- 阻止所有 rm 命令（危险）"
-    },
-    "shellExamples": {
-      "title": "Shell 命令示例：",
-      "ls": "- 允许 ls 命令",
-      "gitStatus": "- 允许 git status",
-      "npmInstall": "- 允许 npm install",
-      "rmRf": "- 阻止递归删除"
     },
     "codex": {
       "permissionMode": "权限模式",

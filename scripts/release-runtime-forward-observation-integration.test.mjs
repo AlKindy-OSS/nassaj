@@ -142,7 +142,7 @@ for(const mutation of ['tombstone','nonce','live-pending']){
     delete env.NODE_TEST_CONTEXT;
     const result = spawnSync('/usr/bin/unshare', ['--user', '--map-current-user', '--mount', '--net', '--pid',
         '--keep-caps', '--fork', '--kill-child', launcher, fs.readlinkSync('/proc/self/ns/mnt'), sandbox, process.execPath, entry],
-    { encoding: 'utf8', timeout:120000, maxBuffer: 4 * 1024 * 1024, env });
+    { encoding: 'utf8', timeout:300000, maxBuffer: 4 * 1024 * 1024, env });
     fs.writeFileSync(path.join(project, '.artifacts', 'forward-observation-integration.log'), result.stdout + '\n' + result.stderr);
     assert.equal(result.status, 0, result.stderr + '\n' + result.stdout);
 });

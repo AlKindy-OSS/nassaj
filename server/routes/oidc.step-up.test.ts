@@ -14,10 +14,21 @@ import type { Server } from 'node:http';
 
 import express from 'express';
 
+import { createSsoRuntimeDouble } from '../services/__tests__/sso-runtime-double.js';
+import { createSsoConfigDouble, doubleMapping } from '../services/__tests__/sso-config-double.js';
+
 const url = (spec: string) => pathToFileURL(path.resolve(import.meta.dirname, spec)).href;
+const sso = createSsoConfigDouble();
+mock.module(url('../services/sso-config.service.js'), { namedExports: sso.exports });
 const passThrough = (_req: unknown, _res: unknown, next: () => void) => next();
 const ISSUER = 'https://issuer.example';
-const ROLES_CLAIM = 'urn:zitadel:iam:org:project:proj-synth:roles';
+// Project-scoped roles claim in the nested-grant shape (fixture data, neutral name).
+const ROLES_CLAIM = 'urn:example:iam:org:project:proj-synth:roles';
+const ROLE_MAPPING = doubleMapping({ role_claim_path: `["${ROLES_CLAIM}"]` });
+/** `role_grant_scope` over ROLES_CLAIM allowing only the given scopes (D5). */
+const scopedMapping = (scopes: string[]) => doubleMapping({
+  role_claim_path: `["${ROLES_CLAIM}"]`, tenant_mode: 'role_grant_scope', tenant_values_json: JSON.stringify(scopes),
+});
 const MEMBER_ROLE = { member: { '1': 'org.example' } };
 
 type FakeUser = { id: number; username: string; role: string; password_hash: string;
@@ -48,8 +59,8 @@ function resetState() {
   exchangeFailure = false;
   userLookupFailure = false;
   claims = { sub: 'subject-new', [ROLES_CLAIM]: MEMBER_ROLE, auth_time: Math.floor(Date.now() / 1000) };
-  process.env.OIDC_ENABLED = 'true';
-  delete process.env.OIDC_ALLOWED_ORG_IDS;
+  sso.setActive(true);
+  sso.state.mapping = ROLE_MAPPING;
 }
 
 const publicUser = (user: FakeUser | undefined) => (user && user.active
@@ -161,22 +172,20 @@ mock.module(url('../services/oidc-verifier.service.js'), {
         ? (verified.auth_time as number) * 1000
         : null
     ),
-    createOidcVerifier: () => ({
-      getDiscovery: async () => ({ authorization_endpoint: 'https://issuer.example/authorize' }),
-      exchangeAuthorizationCode: async () => {
-        if (exchangeFailure) throw new Error('token endpoint 500');
-        return { id_token: 'id-token-synthetic' };
-      },
-      verifyIdToken: async () => claims,
-      verifyLogoutToken: async () => ({ sub: 'unused' }),
-    }),
   },
 });
+// ADR-194: the routes read the SSO configuration rows, never OIDC_* env.
+const ssoRuntime = createSsoRuntimeDouble(sso, {
+  exchangeAuthorizationCode: async () => {
+    if (exchangeFailure) throw new Error('token endpoint 500');
+    return { id_token: 'id-token-synthetic' };
+  },
+  verifyIdToken: async () => claims,
+  verifyLogoutToken: async () => ({ sub: 'unused' }),
+});
+mock.module(url('../services/sso-oidc-runtime.service.js'), { namedExports: ssoRuntime.exports });
 
-process.env.OIDC_ISSUER_URL = ISSUER;
-process.env.OIDC_CLIENT_ID = 'client-synthetic';
-process.env.OIDC_REDIRECT_URI = 'https://app.example/api/auth/oidc/callback';
-process.env.OIDC_ROLE_PROJECT_ID = 'proj-synth';
+for (const key of ['OIDC_ISSUER_URL', 'OIDC_CLIENT_ID', 'OIDC_REDIRECT_URI']) delete process.env[key];
 resetState();
 
 const { default: oidcRouter } = await import('./oidc.js');
@@ -238,10 +247,10 @@ const redeem = (grant: string | null, userId: number, txn: string) => oidcStepUp
   userId, audience: 'connector_owner', browserTransaction: txn,
 });
 
-test('start: 501 when OIDC is off, 401 without a session', async () => {
-  process.env.OIDC_ENABLED = 'false';
+test('start: 501 when SSO login is unavailable, 401 without a session', async () => {
+  sso.state.loginAvailable = false;
   assert.equal((await startStepUp(12)).status, 501);
-  process.env.OIDC_ENABLED = 'true';
+  sso.state.loginAvailable = true;
   assert.equal((await startStepUp(null)).status, 401);
 });
 
@@ -407,6 +416,16 @@ test('callback: a withdrawn role refuses the step-up exactly as it would refuse 
   assert.equal(returned(res).searchParams.get('oidc_step_up'), null);
 });
 
+test('callback: a mapping that vanished mid-flight refuses without a withdrawal', async () => {
+  linkMember(22);
+  const transaction = await startedStepUp(22);
+  sso.state.mapping = null;
+  const res = await callback(transaction);
+  assert.equal(returned(res).searchParams.get('oidc_step_up_error'), 'temporarily_unavailable');
+  assert.deepEqual(failureReasons(), ['mapping_unavailable']);
+  assert.ok(!audits.some((record) => record.event === 'oidc_access_denied_no_role'));
+});
+
 test('callback: a failed attestation stamp yields no grant', async () => {
   linkMember(21);
   const transaction = await startedStepUp(21);
@@ -483,4 +502,36 @@ test('start: a database failure answers 503 temporarily_unavailable instead of h
     error: 'Verification temporarily unavailable', code: 'temporarily_unavailable',
   });
   assert.equal(res.headers.get('set-cookie'), null, 'no transaction is opened');
+});
+
+test('ADR-194 D9: an apply before the step-up writes refuses, withdrawing nothing', async () => {
+  linkMember(23);
+  const transaction = await startedStepUp(23);
+  claims = { ...claims, [ROLES_CLAIM]: {} };
+  ssoRuntime.runtime.fenceVersion = 8;
+  try {
+    const res = await callback(transaction);
+    assert.equal(returned(res).searchParams.get('oidc_step_up_error'), 'oidc_config_changed');
+    assert.ok(!audits.some((record) => record.event === 'oidc_access_denied_no_role'),
+      'no denial revocation on a version mismatch');
+  } finally {
+    ssoRuntime.runtime.fenceVersion = null;
+  }
+});
+
+test('ADR-194 D9: an apply after the grant is issued revokes the grant', async () => {
+  linkMember(24);
+  const transaction = await startedStepUp(24);
+  ssoRuntime.runtime.postMintVersion = 8;
+  const issue = mock.method(oidcStepUpGrantStore, 'issue');
+  try {
+    const res = await callback(transaction);
+    assert.equal(returned(res).searchParams.get('oidc_step_up_error'), 'oidc_config_changed');
+    const grant = issue.mock.calls[0]?.result as string;
+    assert.match(grant, /^[A-Za-z0-9_-]{43}$/u, 'a grant was issued inside the fence');
+    assert.equal(redeem(grant, 24, transaction.txn), false, 'and revoked on mismatch');
+  } finally {
+    issue.mock.restore();
+    ssoRuntime.runtime.postMintVersion = null;
+  }
 });

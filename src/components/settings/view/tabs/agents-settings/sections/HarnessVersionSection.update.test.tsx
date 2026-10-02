@@ -192,4 +192,48 @@ describe('HarnessVersionSection update/rollback/recovery (T-1871 stage 4)', () =
     expect(screen.getByRole('button', { name: 'تأكيد' })).toBeTruthy();
     expect(screen.getByText('فشل الاسترجاع التلقائي؛ يلزم تدخّل المالك.')).toBeTruthy();
   });
+
+  // B-1468: STORE_IN_USE and STORE_ACCESS_UNPROVABLE are different facts (a
+  // process really holds the files vs. Nassaj could not verify that none
+  // does) and must render different, honest text — never the same sentence.
+  it('B-1468: names the unchecked process for a STORE_ACCESS_UNPROVABLE refusal with process info', async () => {
+    mockRoutes({
+      '/update': async () => ({
+        ok: false, status: 423,
+        json: async () => ({ code: 'STORE_ACCESS_UNPROVABLE', message: 'unprovable', uncheckedProcesses: [{ pid: 4242, comm: 'sqlite3' }] }),
+      } as Response),
+    });
+    await renderSection();
+    fireEvent.click(screen.getByRole('button', { name: 'تحديث' }));
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toContain('sqlite3 (pid 4242)');
+    expect(alert.textContent).not.toBe('الأداة تستخدم ملفات بياناتها الآن؛ أغلقها ثم أعد المحاولة.');
+  });
+
+  it('B-1468: gives the honest store-privacy refusal text when no process is named', async () => {
+    mockRoutes({
+      '/update': async () => ({
+        ok: false, status: 423,
+        json: async () => ({ code: 'STORE_ACCESS_UNPROVABLE', message: 'unprovable' }),
+      } as Response),
+    });
+    await renderSection();
+    fireEvent.click(screen.getByRole('button', { name: 'تحديث' }));
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toContain('محمية من المستخدمين الآخرين');
+    expect(alert.textContent).not.toBe('الأداة تستخدم ملفات بياناتها الآن؛ أغلقها ثم أعد المحاولة.');
+  });
+
+  it('keeps the STORE_IN_USE text distinct (a process really holds the files)', async () => {
+    mockRoutes({
+      '/update': async () => ({
+        ok: false, status: 423,
+        json: async () => ({ code: 'STORE_IN_USE', message: 'busy' }),
+      } as Response),
+    });
+    await renderSection();
+    fireEvent.click(screen.getByRole('button', { name: 'تحديث' }));
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toBe('الأداة تستخدم ملفات بياناتها الآن؛ أغلقها ثم أعد المحاولة.');
+  });
 });

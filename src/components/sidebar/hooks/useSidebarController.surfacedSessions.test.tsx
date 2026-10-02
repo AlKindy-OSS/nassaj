@@ -163,6 +163,57 @@ describe('B-1431/T-1949 — union of loaded + surfaced rows', () => {
     ]);
   });
 
+  it('reports the surfaced-row cap overflow via getSurfacedHiddenCount (T-1951)', () => {
+    const source = project('alpha', []);
+    const ids = Array.from({ length: 12 }, (_, i) => `s${i}`);
+    applySurfacedSessionContexts(
+      ids,
+      ids.map((id) => ({
+        projectId: 'alpha',
+        provider: 'claude' as const,
+        session: { id, createdAt: '2026-09-01T00:00:00.000Z' } as never,
+      })),
+      getSurfacedSessionsIdentityEpoch(),
+    );
+    for (const id of ids) {
+      applyOutcomeDelta(id, 'done', null, 'visible', 'alpha');
+    }
+
+    const { result } = renderController([source]);
+    act(() => result.current.toggleProject('alpha'));
+
+    // 12 candidates, cap of 10 — the "+N" hint must read 2.
+    expect(result.current.getSurfacedHiddenCount(source)).toBe(2);
+    expect(result.current.getSearchVisibleSessions(source)).toHaveLength(10);
+  });
+
+  it('returns 0 for a collapsed project without computing the surfaced set (qa-critic)', () => {
+    const source = project('alpha', []);
+    const ids = Array.from({ length: 12 }, (_, i) => `s${i}`);
+    applySurfacedSessionContexts(
+      ids,
+      ids.map((id) => ({
+        projectId: 'alpha',
+        provider: 'claude' as const,
+        session: { id, createdAt: '2026-09-01T00:00:00.000Z' } as never,
+      })),
+      getSurfacedSessionsIdentityEpoch(),
+    );
+    for (const id of ids) {
+      applyOutcomeDelta(id, 'done', null, 'visible', 'alpha');
+    }
+
+    const { result } = renderController([source]);
+    // Deliberately never expanded — `SidebarProjectList` calls this hint for
+    // every filtered project regardless of expansion, so a collapsed project
+    // must short-circuit to 0 rather than re-running the candidate scan/sort
+    // for a "+N" hint that is never rendered.
+    expect(result.current.getSurfacedHiddenCount(source)).toBe(0);
+
+    act(() => result.current.toggleProject('alpha'));
+    expect(result.current.getSurfacedHiddenCount(source)).toBe(2);
+  });
+
   it('applies the hide-closed filter to a surfaced row the same way it applies to a loaded one', () => {
     const source = project('alpha', [
       { id: 'loaded-1', createdAt: '2026-08-01T00:00:00.000Z' },

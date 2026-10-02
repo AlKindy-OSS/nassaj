@@ -261,6 +261,13 @@ describe('ConnectorStepUpDialog', () => {
     const view = renderDialog({ owner: true, initialErrorCode: 'CONNECTOR_RECENT_AUTH_ORIGIN_UNCONFIGURED' });
     expect(screen.getByRole('alert').textContent).toContain(stepUp.errors.originUnconfiguredOwner);
     expect(screen.getByRole('alert').textContent).toContain('NASSAJ_PUBLIC_ORIGIN');
+    // B-1461: both languages name every trusted variable that can supply the origin.
+    for (const text of [stepUp.errors.originUnconfiguredOwner,
+      arSettings.connectorsSettings.stepUp.errors.originUnconfiguredOwner]) {
+      for (const variable of ['NASSAJ_PUBLIC_ORIGIN', 'OIDC_REDIRECT_URI', 'WEBAUTHN_ORIGIN']) {
+        expect(text).toContain(variable);
+      }
+    }
     view.unmount();
     renderDialog({ initialErrorCode: 'CONNECTOR_RECENT_AUTH_ORIGIN_UNCONFIGURED' });
     expect(screen.getByRole('alert').textContent).toContain(stepUp.errors.originUnconfigured);

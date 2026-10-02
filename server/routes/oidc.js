@@ -2,9 +2,11 @@
  * OIDC Relying Party routes (P-IDP-3, ADR-046).
  *
  * Mounted under /api/auth/oidc by routes/auth.js. Implements the
- * authorization-code + PKCE flow against an external OpenID Provider (the
- * configured external IdP (`OIDC_ISSUER_URL`) for an existing local user. This RP is a
- * PUBLIC client (no client_secret) and uses PKCE (S256) for the code exchange.
+ * authorization-code + PKCE (S256) flow against the OpenID Provider configured
+ * in the SSO settings rows (ADR-194 D3; never OIDC_* env). The client is
+ * public (PKCE only) or confidential (client_secret_basic / _post, the secret
+ * decrypted only for the token request). Issuer, client id, redirect URI and
+ * the pinned authorization, token and JWKS endpoints all come from the row.
  *
  * Browser-facing (front channel):
  *   GET    /login            → 302 to the IdP authorization endpoint
@@ -50,29 +52,43 @@
  *
  * Design notes:
  *   - Just-in-time accounts (T-1939 slice 4, services/oidc-jit-provision.js):
- *     an unknown subject is refused with oidc_not_linked unless OIDC_JIT_ENABLED
- *     is 'true' (default off), in which case a verified known project role
- *     granted by an OIDC_ALLOWED_ORG_IDS organization creates an SSO-only
+ *     an unknown subject is refused with oidc_not_linked unless the active SSO
+ *     config enables JIT (default off) with a tenant restriction, in which case
+ *     a verified mapped role that passes that restriction creates an SSO-only
  *     account. A subject is never linked to an existing account by e-mail or
  *     username; a username clash is refused with oidc_account_exists.
  *   - The minted JWT NEVER appears in a redirect URL. /callback stashes it in a
  *     1-minute one-time code store and redirects with only an opaque code, which
  *     the SPA immediately redeems at /exchange.
- *   - Discovery and JWKS are fetched over exact HTTPS URLs with bounded,
- *     no-redirect requests and short process-local caches.
+ *   - Only the pinned endpoints are used at runtime, through pinnedFetchJson
+ *     (DNS pinning, the D7 address matrix, no redirects, size and time caps).
+ *     A discovery refresh only detects drift; drift persists
+ *     runtime_fault = discovery_endpoint_changed and SSO becomes unavailable.
+ *   - Callback order (ADR-194 D2): consume the PKCE entry first (also on
+ *     ?error=), select the verifier by the entry's binding (draft for `test`,
+ *     active config otherwise), then RFC 9207 on the selected config. A `test`
+ *     entry ends in completeTestSignIn and never reaches a session, link,
+ *     role, attestation, provisioning or grant write.
+ *   - Version fence (D9): the privileged writes run in one immediate
+ *     transaction with the version check; the one-time code or step-up grant
+ *     is dropped when the version moved after it was minted.
+ *   - The owner signs in locally only (I6): an owner identity is refused in
+ *     the login and self-link branches, and back-channel logout never
+ *     revokes an owner.
  *   - id_token and logout_token signatures and registered OIDC claims are
  *     verified before any identity lookup or revocation side effect.
- *   - Roles (ADR-064/069): the verified Zitadel PROJECT-SCOPED roles claim is
- *     mapped by the shared external-role mapper on every login; owner is
- *     local-only. The generic cross-project roles claim is never trusted.
- *     When OIDC_ALLOWED_ORG_IDS is set, only grants of those organizations
- *     count on EVERY sign-in and self-link, not only for JIT creation.
+ *   - Roles (ADR-194 D4/D5): the verified id_token claim at the active config's
+ *     role claim path is mapped by its rules on every login; owner is
+ *     local-only. The tenant restriction (claim, or role grant scope) applies
+ *     to EVERY sign-in, self-link and step-up, not only to JIT creation.
  *     T-1939: no recognized role → 403 oidc_not_authorized (never a downgrade);
  *     a successful login stamps user_identities.last_attested_at.
  *
- * Gated by oidcEnabled() (services/oidc-config.js): every browser/IdP route
- * returns 501 unless OIDC_ENABLED is exactly 'true' AND OIDC_ROLE_PROJECT_ID is a
- * valid project id (fail-closed — an unscoped role config disables OIDC).
+ * Gated by the SSO state model (services/sso-config.service.js, ADR-194 D1):
+ * the start routes answer 501 unless ssoLoginAvailable(); the callback checks
+ * it only for non-test purposes; the back channel answers while the policy is
+ * enforced, with 503 + Retry-After when it cannot verify, so an IdP
+ * withdrawal is retried instead of dropped.
  */
 
 import crypto from 'crypto';
@@ -103,22 +119,22 @@ import {
 import { clientIp } from '../utils/client-ip.js';
 import { oidcPkceStore } from '../services/oidc-pkce.store.js';
 import { oidcCodeStore } from '../services/oidc-code.store.js';
+import { reconcileLocalRole, syncExternalRole } from '../services/external-role-mapper.js';
+import { safeOauthError } from '../modules/net/pinned-fetch.js';
+import { ssoLoginAvailable } from '../services/sso-config.service.js';
 import {
-  extractZitadelRoleNames,
-  hasZitadelRolesClaim,
-  mapExternalRoles,
-  NO_RECOGNIZED_ROLE_REASON,
-  reconcileLocalRole,
-  ROLES_CLAIM_ABSENT_REASON,
-  syncExternalRole,
-} from '../services/external-role-mapper.js';
-import { oidcEnabled, roleProjectId } from '../services/oidc-config.js';
-import {
-  allowedOrgIds,
-  planJitProvision,
-  provisionSsoUser,
-  ssoRoleNames,
-} from '../services/oidc-jit-provision.js';
+  activeSsoClient,
+  activeVersionStillIs,
+  backchannelSsoVerifier,
+  currentActiveVersion,
+  draftSsoClient,
+  draftTestBinding,
+  runUnderVersionFence,
+  SSO_FENCE_REFUSED,
+} from '../services/sso-oidc-runtime.service.js';
+import { evaluateSsoClaims, MAPPING_UNAVAILABLE_REASON } from '../services/sso-role-mapping.js';
+import { completeTestSignIn, recordTestFailure } from '../services/sso-test-signin.service.js';
+import { planJitProvision, provisionSsoUser } from '../services/oidc-jit-provision.js';
 import {
   isUniqueConflict,
   linkIdentityWithAttestation,
@@ -135,11 +151,7 @@ import {
 } from '../services/oidc-browser-transaction.js';
 import { stepUpAuthTimeFailure } from '../services/oidc-step-up.js';
 import { oidcStepUpGrantStore } from '../services/oidc-step-up-grant.store.js';
-import {
-  createOidcVerifier,
-  idTokenAuthTimeMs,
-  parseExactHttpsIssuer,
-} from '../services/oidc-verifier.service.js';
+import { idTokenAuthTimeMs } from '../services/oidc-verifier.service.js';
 
 /**
  * B-1327 (qa M1): an SSO attestation that demotes a user (e.g. admin → user)
@@ -179,52 +191,18 @@ const NO_STORE_HEADERS = Object.freeze({
   pragma: 'no-cache',
 });
 
-/** @type {{ key: string, verifier: ReturnType<typeof createOidcVerifier> } | null} */
-let verifierCache = null;
+// Owner SSO settings tab (S7); test sign-in outcomes return here with the
+// one-time display id (`ssoTest`) or a fixed refusal code (`ssoTestError`).
+const SETTINGS_SSO_PATH = '/?settings=sso';
+const OWNER_LOCAL_ONLY = 'owner_must_sign_in_locally';
 
 // ---------------------------------------------------------------------------
-// Config helpers
+// Config helpers (ADR-194: the SSO configuration rows, never OIDC_* env)
 // ---------------------------------------------------------------------------
 
-/** The trusted issuer this RP accepts identities from (must equal id_token.iss). */
-function issuerUrl() {
-  return process.env.OIDC_ISSUER_URL || '';
-}
-
-/** The registered public client id. */
-function clientId() {
-  return process.env.OIDC_CLIENT_ID || '';
-}
-
-/**
- * The redirect_uri presented to the IdP. Prefer an explicit OIDC_REDIRECT_URI
- * (recommended — it must byte-for-byte match what is registered at the IdP).
- * Otherwise derive it from the forwarded request: this app sits behind a
- * Cloudflare tunnel that sets X-Forwarded-Proto / X-Forwarded-Host, so we honour
- * those before falling back to the raw request host.
- */
-function redirectUri() {
-  const raw = process.env.OIDC_REDIRECT_URI;
-  if (typeof raw !== 'string' || raw.length === 0 || raw !== raw.trim()) {
-    throw new Error('invalid_redirect_config');
-  }
-  let parsed;
-  try {
-    parsed = new URL(raw);
-  } catch {
-    throw new Error('invalid_redirect_config');
-  }
-  if (
-    parsed.protocol !== 'https:'
-    || parsed.username
-    || parsed.password
-    || parsed.search
-    || parsed.hash
-    || parsed.toString() !== raw
-  ) {
-    throw new Error('invalid_redirect_config');
-  }
-  return raw;
+/** The active row's issuer (identities are keyed by it), or null while SSO is unavailable. */
+function activeIssuer() {
+  return activeSsoClient()?.issuer ?? null;
 }
 
 // ---------------------------------------------------------------------------
@@ -239,19 +217,6 @@ function randomToken() {
 /** PKCE S256 challenge: base64url(SHA-256(code_verifier)). */
 function codeChallengeFor(codeVerifier) {
   return crypto.createHash('sha256').update(codeVerifier).digest('base64url');
-}
-
-function getVerifier() {
-  const issuer = parseExactHttpsIssuer(issuerUrl());
-  const configuredClientId = clientId();
-  const key = `${issuer}\0${configuredClientId}`;
-  if (!verifierCache || verifierCache.key !== key) {
-    verifierCache = {
-      key,
-      verifier: createOidcVerifier({ issuer, clientId: configuredClientId }),
-    };
-  }
-  return verifierCache.verifier;
 }
 
 function logOidcFailure(code) {
@@ -284,10 +249,13 @@ function revokeUserSessions(userId) {
 
 /**
  * T-1939 slice 3: the IdP withdrew a member's grant or signed them out, so every
- * API key they hold is deleted — keys are long-lived bearer credentials that
- * never pass through the SSO attestation window. The owner (local break-glass)
- * is never governed by the IdP. Audited with a count only; a failure is logged
- * and never blocks the caller's own response.
+ * API key they hold is deleted. A back-channel logout is included on purpose:
+ * The identity provider sends one when it deactivates a user, and it cannot be told apart
+ * from an ordinary sign-out (coordinator decision, T-1946 round 2). The T-1946
+ * attestation window covers only the quiet case (no sign-in for N days), where
+ * keys are kept and revive on the next SSO sign-in. The owner (local
+ * break-glass) is never governed by the IdP. Audited with a count only; a
+ * failure is logged and never blocks the caller's own response.
  */
 function revokeApiKeysForSsoWithdrawal(userId, trigger) {
   try {
@@ -301,28 +269,13 @@ function revokeApiKeysForSsoWithdrawal(userId, trigger) {
   }
 }
 
-/** Denial reason when every recognized role came from a non-allowed organization. */
-const ORG_NOT_ALLOWED_REASON = 'org_not_allowed';
-
-/**
- * Audit reason for a sign-in or self-link that ssoRoleNames left without a
- * recognized role: claim absent, a recognized role granted only by
- * organizations outside OIDC_ALLOWED_ORG_IDS, or no recognized role at all.
- */
-function noRoleReason(claims, projectId) {
-  if (!hasZitadelRolesClaim(claims, projectId)) return ROLES_CLAIM_ABSENT_REASON;
-  if (allowedOrgIds().size > 0 && mapExternalRoles(extractZitadelRoleNames(claims, projectId)) !== null) {
-    return ORG_NOT_ALLOWED_REASON;
-  }
-  return NO_RECOGNIZED_ROLE_REASON;
-}
-
 /**
  * T-1939: an SSO login whose attestation carries no recognized project role is
- * refused — never downgraded. For a non-owner the grant withdrawal also ends
+ * refused — never downgraded. The grant withdrawal also ends the member's
  * existing tokens and live work; the local account itself is left enabled and
- * unchanged, so re-granting the role in the IdP restores access. An owner is
- * local-only (never governed by SSO), so its other sessions are untouched.
+ * unchanged, so re-granting the role in the IdP restores access. Callers run
+ * it inside the version fence (ADR-194 D9), and never for an owner (owners
+ * are refused before any mapping, I6).
  */
 function denyLoginWithoutRole(req, user, reason) {
   auditLogDb.record('oidc_access_denied_no_role', {
@@ -347,22 +300,23 @@ function denyLoginWithoutRole(req, user, reason) {
 
 /**
  * Mints state/nonce/verifier and the browser-transaction cookie, stashes them
- * under `state` with the given purpose binding, and returns the IdP
- * authorization URL — or null when the bounded PKCE store is full (the caller
- * answers 503). `extraParams` adds authorization parameters (self-link forces
- * a fresh IdP sign-in with prompt=login&max_age=0). Throws when discovery or
- * the redirect configuration is unavailable.
+ * under `state` with the purpose binding, and returns the IdP authorization
+ * URL — or null when the bounded PKCE store is full (the caller answers 503).
+ * Every endpoint, the redirect URI and the scope come from the selected
+ * config row (ADR-194 D3); an active-config entry also binds its version
+ * (D9). Before using the pinned authorization endpoint the active verifier
+ * checks for discovery drift (throws discovery_endpoint_changed).
  */
-async function beginAuthorization(res, binding, extraParams = {}) {
-  const discovery = await getVerifier().getDiscovery();
+async function beginAuthorization(res, client, binding, extraParams = {}) {
+  if (client.slot === 'active') await client.verifier.checkDiscoveryDrift();
+  const authorizationEndpoint = await client.verifier.authorizationEndpoint();
 
   const state = randomToken();
   const nonce = randomToken();
   const codeVerifier = randomToken();
   const transaction = randomToken();
-  const codeChallenge = codeChallengeFor(codeVerifier);
-
-  if (!oidcPkceStore.store(state, { nonce, codeVerifier, browserTransaction: transaction, ...binding })) {
+  const fullBinding = client.slot === 'active' ? { ...binding, configVersion: client.version } : binding;
+  if (!oidcPkceStore.store(state, { nonce, codeVerifier, browserTransaction: transaction, ...fullBinding })) {
     logOidcFailure('pkce_store_full');
     return null;
   }
@@ -372,14 +326,14 @@ async function beginAuthorization(res, binding, extraParams = {}) {
   });
   setNoStore(res);
 
-  const authUrl = new URL(discovery.authorization_endpoint);
+  const authUrl = new URL(authorizationEndpoint);
   authUrl.searchParams.set('response_type', 'code');
-  authUrl.searchParams.set('client_id', clientId());
-  authUrl.searchParams.set('redirect_uri', redirectUri());
-  authUrl.searchParams.set('scope', 'openid profile email');
+  authUrl.searchParams.set('client_id', client.clientId);
+  authUrl.searchParams.set('redirect_uri', client.redirectUri);
+  authUrl.searchParams.set('scope', client.scope);
   authUrl.searchParams.set('state', state);
   authUrl.searchParams.set('nonce', nonce);
-  authUrl.searchParams.set('code_challenge', codeChallenge);
+  authUrl.searchParams.set('code_challenge', codeChallengeFor(codeVerifier));
   authUrl.searchParams.set('code_challenge_method', 'S256');
   for (const [name, value] of Object.entries(extraParams)) {
     authUrl.searchParams.set(name, value);
@@ -387,19 +341,38 @@ async function beginAuthorization(res, binding, extraParams = {}) {
   return authUrl.toString();
 }
 
+/**
+ * Service half of POST /api/settings/sso/draft/test-login/start (the owner
+ * route is S4): a `test` PKCE entry bound to the owner, the draft hash and the
+ * draft_version, against the draft's pinned endpoints. Does not require
+ * ssoLoginAvailable(). Returns `{ authorizationUrl }` or `{ refusal }`.
+ * @param {import('express').Response} res
+ * @param {number} ownerUserId
+ */
+export async function beginTestAuthorization(res, ownerUserId) {
+  const binding = draftTestBinding();
+  if (binding.refusal) return { refusal: binding.refusal };
+  const testEntry = { purpose: 'test', ownerUserId, configHash: binding.configHash, draftVersion: binding.draftVersion };
+  const draft = draftSsoClient(testEntry);
+  if (draft.refusal) return { refusal: draft.refusal };
+  const authorizationUrl = await beginAuthorization(res, draft.client, testEntry);
+  return authorizationUrl ? { authorizationUrl } : { refusal: 'temporarily_unavailable' };
+}
+
 // Kicks off the authorization-code + PKCE flow and redirects the browser to
 // the IdP. Always a 'login' transaction: it can never link an identity.
 router.get('/login', oidcLoginLimiter, async (req, res) => {
-  if (!oidcEnabled()) {
+  const client = ssoLoginAvailable() ? activeSsoClient() : null;
+  if (!client) {
     return res.status(501).json({ error: 'OIDC is not enabled' });
   }
   try {
-    const authorizationUrl = await beginAuthorization(res, { purpose: 'login' });
+    const authorizationUrl = await beginAuthorization(res, client, { purpose: 'login' });
     if (!authorizationUrl) {
       return res.status(503).json({ error: 'Identity provider temporarily unavailable' });
     }
     return res.redirect(authorizationUrl);
-  } catch (error) {
+  } catch {
     logOidcFailure('login_unavailable');
     return res.status(502).json({ error: 'Identity provider unavailable' });
   }
@@ -408,13 +381,19 @@ router.get('/login', oidcLoginLimiter, async (req, res) => {
 /**
  * Mints the JWT, parks it behind a one-minute one-time code bound to this
  * browser transaction, and redirects to the SPA return page (never the JWT).
+ * ADR-194 D9: after the code is stored the active version is read again; if
+ * an apply landed meanwhile the code is dropped and the login refused.
  */
-function handOffSession(req, res, user, transaction) {
+function handOffSession(req, res, user, transaction, configVersion) {
   const token = generateToken(user);
   const oneTimeCode = randomToken();
   if (!oidcCodeStore.store(oneTimeCode, { token, userId: user.id, browserTransaction: transaction })) {
     logOidcFailure('code_store_full');
     return res.status(503).json({ error: 'Identity provider temporarily unavailable' });
+  }
+  if (!activeVersionStillIs(configVersion)) {
+    oidcCodeStore.discard(oneTimeCode);
+    return redirectLoginRefusal(res, 'oidc_config_changed');
   }
 
   userDb.updateLastLogin(user.id);
@@ -437,6 +416,17 @@ function handOffSession(req, res, user, transaction) {
 function redirectLoginRefusal(res, errorCode) {
   setNoStore(res);
   return res.redirect(`${RETURN_PATH}?error=${encodeURIComponent(errorCode)}`);
+}
+
+/**
+ * ADR-194 I6: an IdP identity bound to an owner never signs in or links; the
+ * owner signs in locally only. Audited (purpose only); nothing else is written.
+ */
+function refuseOwnerIdentity(req, res, userId, purpose) {
+  auditLogDb.record('oidc_owner_sign_in_refused', {
+    userId, metadata: { provider: 'oidc', purpose }, ...auditContext(req),
+  });
+  return redirectLoginRefusal(res, OWNER_LOCAL_ONLY);
 }
 
 /**
@@ -471,19 +461,28 @@ function recordProvisionRefused(req, reason) {
 // Refusal code sent to the return page for each JIT decision that is not 'ready'.
 const JIT_REFUSAL_ERRORS = Object.freeze({
   disabled: 'oidc_not_linked',
-  allowlist_missing: 'oidc_not_linked',
+  tenant_restriction_missing: 'oidc_not_linked',
   no_role: 'oidc_not_authorized',
-  org_not_allowed: 'oidc_not_authorized',
+  tenant_not_allowed: 'oidc_not_authorized',
+  email_unverified: 'oidc_not_authorized',
+  claim_too_large: 'oidc_not_authorized',
 });
+
+/** The JIT write inside the version fence; SSO_FENCE_REFUSED when the config moved. */
+function provisionFenced(entry, plan, { client, subject, nowMs }) {
+  return runUnderVersionFence(entry.configVersion, () => provisionSsoUser({
+    username: plan.username, role: plan.role, issuer: client.issuer, subject, nowMs,
+  }));
+}
 
 /**
  * Login branch for a subject with no link (T-1939 slice 4): JIT-creates an
  * SSO-only account when every gate in services/oidc-jit-provision.js holds,
  * otherwise refuses. Never looks up or links an existing account.
  */
-function signInUnknownSubject(req, res, { claims, subject, transaction }) {
+function signInUnknownSubject(req, res, { entry, claims, subject, transaction, client }) {
   const nowMs = Date.now();
-  const plan = planJitProvision({ claims, subject, projectId: roleProjectId(), nowMs });
+  const plan = planJitProvision({ claims, subject, nowMs });
   if (plan.outcome === 'capped') {
     auditLogDb.record('oidc_provision_capped', {
       userId: null, metadata: { provider: 'oidc' }, ...auditContext(req),
@@ -491,16 +490,14 @@ function signInUnknownSubject(req, res, { claims, subject, transaction }) {
     return redirectLoginRefusal(res, 'rate_limited');
   }
   if (plan.outcome !== 'ready') {
-    if (plan.outcome === 'allowlist_missing') logOidcFailure('jit_allowlist_missing');
+    if (plan.outcome === 'tenant_restriction_missing') logOidcFailure('jit_tenant_restriction_missing');
     if (plan.outcome !== 'disabled') recordProvisionRefused(req, plan.outcome);
     return redirectLoginRefusal(res, JIT_REFUSAL_ERRORS[plan.outcome]);
   }
 
   let created;
   try {
-    created = provisionSsoUser({
-      username: plan.username, role: plan.role, issuer: issuerUrl(), subject, nowMs,
-    });
+    created = provisionFenced(entry, plan, { client, subject, nowMs });
   } catch (error) {
     // A concurrent first sign-in of the same subject won the UNIQUE link;
     // retrying signs in to that account. Anything else is a write failure.
@@ -508,6 +505,7 @@ function signInUnknownSubject(req, res, { claims, subject, transaction }) {
     logOidcFailure('jit_provision_failed');
     return redirectLoginRefusal(res, 'temporarily_unavailable');
   }
+  if (created === SSO_FENCE_REFUSED) return redirectLoginRefusal(res, 'oidc_config_changed');
   if (!created.created) {
     // Accepted disclosure: oidc_account_exists (vs oidc_not_linked) tells the
     // caller the derived username exists. Only a holder of a recognized role
@@ -526,142 +524,266 @@ function signInUnknownSubject(req, res, { claims, subject, transaction }) {
   if (!user) {
     return res.status(401).json({ error: 'Linked account is unavailable' });
   }
-  return handOffSession(req, res, user, transaction);
+  return handOffSession(req, res, user, transaction, entry.configVersion);
 }
 
-// IdP redirect target. Validates state, exchanges the code (PKCE), checks the
-// id_token nonce/issuer, resolves the linked local user, mints a JWT, and hands
-// the browser a one-time code (never the JWT) to redeem at /exchange.
-router.get('/callback', oidcLoginLimiter, async (req, res) => {
-  setNoStore(res);
-  if (!oidcEnabled()) {
-    return res.status(501).json({ error: 'OIDC is not enabled' });
+/**
+ * Inside the version fence: the role sync, the denial revocation and the
+ * attestation stamp for an existing link (ADR-194 D9). Returns
+ * `{ user }`, `{ refusal }` or `{ status, error }`.
+ */
+function applyLoginDecision(req, { linkedUser, identity, decision }) {
+  const user = syncExternalRole({
+    user: linkedUser,
+    mappedRole: decision.role,
+    provider: 'oidc',
+  }, { userDb, auditLogDb, onRoleApplied: revokeLiveAccessOnSsoRoleChange });
+  if (user === null) {
+    denyLoginWithoutRole(req, linkedUser, decision.reason);
+    return { refusal: 'oidc_not_authorized' };
   }
+  if (!user) return { status: 401, error: 'Linked account is unavailable' };
+  // Stamp the attestation BEFORE any credential exists: a token minted for an
+  // unstamped link would be refused as stale on first use (T-1939 slice 3).
+  if (!stampAttestation(identity.id, user.id)) {
+    logOidcFailure('attestation_stamp_failed');
+    return { status: 500, error: 'Sign-in could not be completed' };
+  }
+  return { user };
+}
 
+/**
+ * Existing-link checks before any write: duplicates, active account, owner
+ * (I6). Returns the linked user, or null after answering the request.
+ */
+function linkedLoginPrecheck(req, res, { identity, issuer }) {
+  // T-1939 slice 5: a legacy account holding two links for this issuer
+  // blocked the UNIQUE(user_id, issuer) index; it stays out of SSO until the
+  // owner removes the extra links (never auto-merged).
+  if (userIdentitiesDb.countForUserAndIssuer(identity.user_id, issuer) > 1) {
+    auditLogDb.record('oidc_login_blocked_duplicate_links', {
+      userId: identity.user_id, metadata: { provider: 'oidc' }, ...auditContext(req),
+    });
+    res.status(409).json({
+      error: 'oidc_duplicate_links',
+      message: 'This account has more than one SSO link; ask the owner to remove the extra links',
+    });
+    return null;
+  }
+  // getUserById returns only active (is_active=1, status='active') users.
+  const linkedUser = userDb.getUserById(identity.user_id);
+  if (!linkedUser) {
+    res.status(401).json({ error: 'Linked account is unavailable' });
+    return null;
+  }
+  if (linkedUser.role === 'owner') {
+    refuseOwnerIdentity(req, res, linkedUser.id, 'login');
+    return null;
+  }
+  return linkedUser;
+}
+
+/**
+ * `login` branch: resolve the identity by (active issuer, subject) only, then
+ * map the verified role claim with the selected config (ADR-194 D4/D5;
+ * T-1939: no recognized role → refused, never a downgrade), all writes fenced.
+ */
+function completeLogin(req, res, context) {
+  const { entry, claims, subject, transaction, client } = context;
+  const identity = userIdentitiesDb.findByIssuerAndSubject(client.issuer, subject);
+  if (!identity) return signInUnknownSubject(req, res, context);
+  const linkedUser = linkedLoginPrecheck(req, res, { identity, issuer: client.issuer });
+  if (!linkedUser) return undefined;
+  const decision = evaluateSsoClaims(claims, client.mapping);
+  if (decision.reason === MAPPING_UNAVAILABLE_REASON) {
+    // The config went away mid-flight: refuse, but never treat it as a withdrawal.
+    return redirectLoginRefusal(res, 'temporarily_unavailable');
+  }
+  const outcome = runUnderVersionFence(
+    entry.configVersion, () => applyLoginDecision(req, { linkedUser, identity, decision }),
+  );
+  if (outcome === SSO_FENCE_REFUSED) return redirectLoginRefusal(res, 'oidc_config_changed');
+  if (outcome.refusal) return redirectLoginRefusal(res, outcome.refusal);
+  if (!outcome.user) return res.status(outcome.status).json({ error: outcome.error });
+  return handOffSession(req, res, outcome.user, transaction, entry.configVersion);
+}
+
+// ---------------------------------------------------------------------------
+// Callback (ADR-194 D2 order)
+// ---------------------------------------------------------------------------
+
+// Every callback answer carries no-store and no Referer (D2).
+function setCallbackHeaders(res) {
+  setNoStore(res);
+  res.set('Referrer-Policy', 'no-referrer');
+}
+
+function redirectTestResult(res, resultId) {
+  return res.redirect(`${SETTINGS_SSO_PATH}&ssoTest=${encodeURIComponent(resultId)}`);
+}
+
+function redirectTestError(res, code) {
+  return res.redirect(`${SETTINGS_SSO_PATH}&ssoTestError=${encodeURIComponent(code)}`);
+}
+
+/** A `test` outcome without verified claims: one display row, then settings. */
+function finishTestWithFailure(res, entry, diagnostic, oauthError) {
+  try {
+    const { resultId } = recordTestFailure(entry, { diagnostic, oauthError });
+    return redirectTestResult(res, resultId);
+  } catch {
+    logOidcFailure('test_result_write_failed');
+    return redirectTestError(res, 'temporarily_unavailable');
+  }
+}
+
+/**
+ * D2 step 2, no usable code: the member or owner cancelled at the IdP
+ * (?error=) or the reply is malformed. The entry is already consumed. A test
+ * stores a display result (with the filtered OAuth error); a step-up returns
+ * to its dialog; anything else is a 400.
+ */
+function answerAbandoned(req, res, entry) {
+  const cancelled = typeof req.query.error === 'string';
+  if (entry.purpose === 'test') {
+    const oauthError = cancelled ? safeOauthError({ error: req.query.error }) ?? undefined : undefined;
+    return finishTestWithFailure(res, entry, cancelled ? 'provider_denied' : 'code_missing', oauthError);
+  }
+  if (entry.purpose === 'step_up') {
+    recordStepUpFailure(req, entry.userId, cancelled ? 'provider_denied' : 'code_missing');
+    return redirectStepUpRefusal(res, cancelled ? 'provider_denied' : 'temporarily_unavailable');
+  }
+  return res.status(400).json({ error: 'Missing authorization code' });
+}
+
+/** Active selection for login/link/step_up: login available here only, same version as at start. */
+function selectActiveClient(entry) {
+  const client = ssoLoginAvailable() ? activeSsoClient() : null;
+  if (!client) return { refusal: 'sso_unavailable' };
+  let version;
+  try {
+    version = currentActiveVersion();
+  } catch {
+    return { refusal: 'sso_unavailable' };
+  }
+  if (entry.configVersion !== version || client.version !== version) return { refusal: 'oidc_config_changed' };
+  return { client };
+}
+
+/**
+ * D2 step 3: the verifier is chosen by the entry's binding — the draft (hash,
+ * draft_version and owner re-checked, no discovery) for `test`, the active
+ * config for every other purpose.
+ */
+function selectCallbackClient(entry) {
+  if (entry.purpose !== 'test') return selectActiveClient(entry);
+  const draft = draftSsoClient(entry);
+  return draft.refusal ? { refusal: draft.refusal } : { client: draft.client, draftRow: draft.draftRow };
+}
+
+/**
+ * D2 step 4 (RFC 9207), on the SELECTED config: when its discovery flags
+ * advertise the iss response parameter it must equal that issuer exactly; a
+ * present iss must match even when not advertised.
+ */
+function issParameterAccepted(req, client) {
+  const iss = req.query.iss;
+  if (client.discoveryFlags.authorization_response_iss_parameter_supported === true) return iss === client.issuer;
+  return iss === undefined || iss === client.issuer;
+}
+
+/** A refusal before any token exchange, answered on the right page for the purpose. */
+function refuseCallback(req, res, entry, code) {
+  if (entry.purpose === 'test') return finishTestWithFailure(res, entry, code);
+  if (entry.purpose === 'step_up') {
+    recordStepUpFailure(req, entry.userId, code);
+    return redirectStepUpRefusal(res, code);
+  }
+  return redirectLoginRefusal(res, code);
+}
+
+/** D2 step 5: drift check (active only), code exchange and id_token verification. */
+async function exchangeAndVerify(client, entry, code) {
+  if (client.slot === 'active') await client.verifier.checkDiscoveryDrift();
+  const tokenSet = await client.verifier.exchangeAuthorizationCode({
+    code, redirectUri: client.redirectUri, codeVerifier: entry.codeVerifier,
+  });
+  return client.verifier.verifyIdToken(tokenSet?.id_token, entry.nonce);
+}
+
+function answerExchangeFailure(req, res, entry, error) {
+  logOidcFailure('callback_rejected');
+  const code = typeof error?.code === 'string' && /^[a-z0-9_]{1,64}$/.test(error.code) ? error.code : 'callback_rejected';
+  if (entry.purpose === 'test') return finishTestWithFailure(res, entry, code, error?.oauthError);
+  if (code === 'discovery_endpoint_changed') return refuseCallback(req, res, entry, 'sso_unavailable');
+  if (entry.purpose === 'step_up') {
+    recordStepUpFailure(req, entry.userId, 'provider_exchange_failed');
+    return redirectStepUpRefusal(res, 'temporarily_unavailable');
+  }
+  return res.status(502).json({ error: 'Identity provider unavailable' });
+}
+
+/** D2 step 6, `test`: terminal; nothing but the display row and the apply proof is written. */
+function finishTestSignIn(res, entry, claims, draftRow) {
+  try {
+    const { resultId } = completeTestSignIn(entry, claims, { draftRow });
+    return redirectTestResult(res, resultId);
+  } catch {
+    logOidcFailure('test_result_write_failed');
+    return redirectTestError(res, 'temporarily_unavailable');
+  }
+}
+
+/** D2 steps 6–7 for login/link/step_up: the stored purpose alone decides the branch. */
+function branchOnPurpose(req, res, context) {
+  const { entry, claims } = context;
+  const subject = typeof claims.sub === 'string' ? claims.sub : null;
+  if (!subject || subject.length > MAX_SUBJECT_LENGTH) {
+    if (entry.purpose === 'step_up') {
+      recordStepUpFailure(req, entry.userId, 'subject_missing');
+      return redirectStepUpRefusal(res, 'temporarily_unavailable');
+    }
+    return res.status(401).json({ error: 'id_token missing subject' });
+  }
+  const withSubject = { ...context, subject };
+  if (entry.purpose === 'link') return completeSelfLink(req, res, withSubject);
+  if (entry.purpose === 'step_up') return completeStepUp(req, res, withSubject);
+  if (entry.purpose === 'login') return completeLogin(req, res, withSubject);
+  return res.status(400).json({ error: 'Invalid or expired state' });
+}
+
+// IdP redirect target, in the ADR-194 D2 order: shapes, consume the PKCE entry
+// (also on ?error=), select the verifier by binding, RFC 9207 on the selected
+// config, exchange and verify, then branch on the stored purpose.
+router.get('/callback', oidcLoginLimiter, async (req, res) => {
+  setCallbackHeaders(res);
   const { code, state } = req.query;
   if (typeof state !== 'string' || state.length === 0 || state.length > 256) {
     return res.status(400).json({ error: 'Missing state parameter' });
   }
   const transaction = readBrowserTransaction(req);
-  if (typeof code !== 'string' || code.length === 0 || code.length > 4096) {
-    // No code: the member cancelled at the IdP (?error=) or the reply is
-    // malformed. The transaction is dead either way; a step-up still returns
-    // to the SPA with a fixed code so its dialog learns the outcome.
-    const { entry: abandoned, stalePurpose } = oidcPkceStore.consumeWithOutcome(state, transaction);
-    if (abandoned?.purpose === 'step_up') {
-      const cancelled = typeof req.query.error === 'string';
-      recordStepUpFailure(req, abandoned.userId, cancelled ? 'provider_denied' : 'code_missing');
-      return redirectStepUpRefusal(res, cancelled ? 'provider_denied' : 'temporarily_unavailable');
-    }
-    if (!abandoned) return redirectUnusableState(res, stalePurpose);
-    return res.status(400).json({ error: 'Missing authorization code' });
-  }
-
-  // Single-use consume: an expired or replayed state fails here, and the
-  // browser returns to the SPA (never a raw JSON page).
   const { entry, stalePurpose } = oidcPkceStore.consumeWithOutcome(state, transaction);
-  if (!entry) {
-    return redirectUnusableState(res, stalePurpose);
-  }
+  if (!entry) return redirectUnusableState(res, stalePurpose);
+  if (typeof code !== 'string' || code.length === 0 || code.length > 4096) return answerAbandoned(req, res, entry);
 
+  const selection = selectCallbackClient(entry);
+  if (selection.refusal) return refuseCallback(req, res, entry, selection.refusal);
+  if (!issParameterAccepted(req, selection.client)) return refuseCallback(req, res, entry, 'iss_mismatch');
+
+  let claims;
   try {
-    const verifier = getVerifier();
-
-    // PKCE code exchange — public client, so code_verifier (not a secret) proves
-    // possession. No Authorization header.
-    const body = new URLSearchParams({
-      grant_type: 'authorization_code',
-      code,
-      redirect_uri: redirectUri(),
-      client_id: clientId(),
-      code_verifier: entry.codeVerifier,
-    });
-    const tokenSet = await verifier.exchangeAuthorizationCode(body);
-    const idToken = tokenSet?.id_token;
-    const claims = await verifier.verifyIdToken(idToken, entry.nonce);
-
-    const subject = typeof claims.sub === 'string' ? claims.sub : null;
-    if (!subject || subject.length > MAX_SUBJECT_LENGTH) {
-      if (entry.purpose === 'step_up') {
-        recordStepUpFailure(req, entry.userId, 'subject_missing');
-        return redirectStepUpRefusal(res, 'temporarily_unavailable');
-      }
-      return res.status(401).json({ error: 'id_token missing subject' });
-    }
-
-    // T-1939 slice 5: the stored purpose alone decides the branch. A 'link'
-    // transaction only ever links the account that started it; anything that
-    // is not an explicit 'login' is refused rather than treated as one.
-    if (entry.purpose === 'link') {
-      return completeSelfLink(req, res, { entry, claims, subject, transaction });
-    }
-    if (entry.purpose === 'step_up') {
-      return completeStepUp(req, res, { entry, claims, subject, transaction });
-    }
-    if (entry.purpose !== 'login') {
-      return res.status(400).json({ error: 'Invalid or expired state' });
-    }
-
-    // An unknown subject is refused unless JIT creation is on and every one
-    // of its gates holds (T-1939 slice 4).
-    const identity = userIdentitiesDb.findByIssuerAndSubject(issuerUrl(), subject);
-    if (!identity) {
-      return signInUnknownSubject(req, res, { claims, subject, transaction });
-    }
-    // T-1939 slice 5: a legacy account holding two links for this issuer
-    // blocked the UNIQUE(user_id, issuer) index; it stays out of SSO until the
-    // owner removes the extra links (never auto-merged).
-    if (userIdentitiesDb.countForUserAndIssuer(identity.user_id, issuerUrl()) > 1) {
-      auditLogDb.record('oidc_login_blocked_duplicate_links', {
-        userId: identity.user_id,
-        metadata: { provider: 'oidc' },
-        ...auditContext(req),
-      });
-      return res.status(409).json({
-        error: 'oidc_duplicate_links',
-        message: 'This account has more than one SSO link; ask the owner to remove the extra links',
-      });
-    }
-
-    // getUserById returns only active (is_active=1, status='active') users.
-    const linkedUser = userDb.getUserById(identity.user_id);
-    if (!linkedUser) {
-      return res.status(401).json({ error: 'Linked account is unavailable' });
-    }
-    // ADR-064/069: the verified role claim is an attestation; the shared mapper
-    // decides the local role (never owner, never demotes an owner). Roles are read
-    // ONLY from the project-scoped claim and, when OIDC_ALLOWED_ORG_IDS is set,
-    // only from grants of allowed organizations. T-1939: no recognized role →
-    // refused.
-    const configuredProjectId = roleProjectId();
-    const user = syncExternalRole({
-      user: linkedUser,
-      externalRoles: ssoRoleNames(claims, configuredProjectId),
-      provider: 'oidc',
-    }, { userDb, auditLogDb, onRoleApplied: revokeLiveAccessOnSsoRoleChange });
-    if (user === null) {
-      denyLoginWithoutRole(req, linkedUser, noRoleReason(claims, configuredProjectId));
-      return redirectLoginRefusal(res, 'oidc_not_authorized');
-    }
-    if (!user) {
-      return res.status(401).json({ error: 'Linked account is unavailable' });
-    }
-
-    // Stamp the attestation BEFORE any credential exists: a token minted for an
-    // unstamped link would be refused as stale on first use (T-1939 slice 3).
-    if (!stampAttestation(identity.id, user.id)) {
-      logOidcFailure('attestation_stamp_failed');
-      return res.status(500).json({ error: 'Sign-in could not be completed' });
-    }
-
-    return handOffSession(req, res, user, transaction);
+    claims = await exchangeAndVerify(selection.client, entry, code);
   } catch (error) {
+    return answerExchangeFailure(req, res, entry, error);
+  }
+  if (entry.purpose === 'test') return finishTestSignIn(res, entry, claims, selection.draftRow);
+  try {
+    return branchOnPurpose(req, res, { entry, claims, transaction, client: selection.client });
+  } catch {
     logOidcFailure('callback_rejected');
-    if (entry.purpose === 'step_up' && !res.headersSent) {
-      recordStepUpFailure(req, entry.userId, 'provider_exchange_failed');
-      return redirectStepUpRefusal(res, 'temporarily_unavailable');
-    }
-    return res.status(502).json({ error: 'Identity provider unavailable' });
+    if (res.headersSent) return undefined;
+    if (entry.purpose === 'step_up') return redirectStepUpRefusal(res, 'temporarily_unavailable');
+    return res.status(500).json({ error: 'Sign-in could not be completed' });
   }
 });
 
@@ -670,7 +792,7 @@ router.get('/callback', oidcLoginLimiter, async (req, res) => {
 // transaction cookie. The one-time code remains single-use.
 router.post('/exchange', oidcExchangeLimiter, (req, res) => {
   setNoStore(res);
-  if (!oidcEnabled()) {
+  if (!ssoLoginAvailable()) {
     return res.status(501).json({ error: 'OIDC is not enabled' });
   }
   const { code } = req.body ?? {};
@@ -701,8 +823,8 @@ const oidcSelfLinkLimiter = createRateLimiter({
 });
 
 // Answers 501 before authentication, exactly like the other OIDC routes.
-function requireOidcEnabled(req, res, next) {
-  if (!oidcEnabled()) {
+function requireSsoLoginAvailable(req, res, next) {
+  if (!ssoLoginAvailable()) {
     return res.status(501).json({ error: 'OIDC is not enabled' });
   }
   return next();
@@ -750,20 +872,29 @@ async function selfLinkPasswordRefusal(req, currentPassword) {
 // Whether the caller's own account holds an SSO link (drives the profile UI).
 // `ssoStepUp` is the exact predicate POST /step-up/start admits on (the
 // SSO-only policy), so the client never has to infer the step-up method.
-router.get('/link/self', requireOidcEnabled, authenticateToken, (req, res) => {
+router.get('/link/self', requireSsoLoginAvailable, authenticateToken, (req, res) => {
   setNoStore(res);
+  const issuer = activeIssuer();
   return res.json({
-    linked: userIdentitiesDb.countForUserAndIssuer(req.user.id, issuerUrl()) > 0,
+    linked: issuer !== null && userIdentitiesDb.countForUserAndIssuer(req.user.id, issuer) > 0,
     ssoStepUp: requiresSsoLogin(userDb.getUserById(req.user.id)),
   });
 });
 
-// Starts a self-link for the caller's OWN account. Password first (rate limited
-// per account), then a 'link' PKCE transaction bound to this user id and this
-// browser, with prompt=login&max_age=0 so the IdP must re-authenticate.
+/** ADR-194 I6: an owner signs in locally only, so it may not start a self-link. */
+function ownerSelfLinkRefusal(req) {
+  if (userDb.getUserById(req.user.id)?.role !== 'owner') return null;
+  recordSelfLinkFailure(req, req.user.id, OWNER_LOCAL_ONLY);
+  return { status: 403, body: { error: 'The owner signs in locally only', code: OWNER_LOCAL_ONLY } };
+}
+
+// Starts a self-link for the caller's OWN account. Owners are refused; then the
+// password (rate limited per account), then a 'link' PKCE transaction bound to
+// this user id, this browser and the active config version, with
+// prompt=login&max_age=0 so the IdP must re-authenticate.
 router.post(
   '/link/self/start',
-  requireOidcEnabled,
+  requireSsoLoginAvailable,
   authenticateToken,
   oidcSelfLinkLimiter,
   async (req, res) => {
@@ -772,16 +903,19 @@ router.post(
     if (typeof currentPassword !== 'string' || currentPassword.length === 0 || currentPassword.length > 1024) {
       return res.status(400).json({ error: 'Current password is required', code: 'current_password_required' });
     }
-    const refusal = await selfLinkPasswordRefusal(req, currentPassword);
+    const refusal = ownerSelfLinkRefusal(req) ?? await selfLinkPasswordRefusal(req, currentPassword);
     if (refusal) {
       return res.status(refusal.status).json(refusal.body);
     }
-    if (userIdentitiesDb.countForUserAndIssuer(req.user.id, issuerUrl()) > 0) {
+    const client = activeSsoClient();
+    if (!client) return res.status(503).json({ error: 'Identity provider temporarily unavailable' });
+    if (userIdentitiesDb.countForUserAndIssuer(req.user.id, client.issuer) > 0) {
       return res.status(409).json({ error: 'Account is already linked', code: 'already_linked' });
     }
     try {
       const authorizationUrl = await beginAuthorization(
         res,
+        client,
         { purpose: 'link', userId: req.user.id, requestedAtMs: Date.now() },
         { prompt: 'login', max_age: '0' },
       );
@@ -798,11 +932,12 @@ router.post(
 
 /**
  * Checks that must all pass before a self-link writes anything: a fresh IdP
- * sign-in (auth_time), a still-active account, a recognized project role, and
- * a subject/issuer pair not yet linked. Returns null, or the refusal to send
- * (reason is audited; ids only, never the subject).
+ * sign-in (auth_time), a still-active non-owner account, a recognized role
+ * under the selected config, and a subject/issuer pair not yet linked.
+ * Returns `{ user, decision }`, or the refusal to send (reason is audited;
+ * ids only, never the subject).
  */
-function selfLinkRefusal({ entry, claims, subject, nowMs }) {
+function selfLinkRefusal({ entry, claims, subject, nowMs, client }) {
   const authFailure = selfLinkAuthTimeFailure({
     authTimeMs: idTokenAuthTimeMs(claims),
     requestedAtMs: entry.requestedAtMs,
@@ -817,86 +952,87 @@ function selfLinkRefusal({ entry, claims, subject, nowMs }) {
     return { status: 401, reason: 'account_unavailable', error: 'account_unavailable',
       message: 'Linked account is unavailable' };
   }
-  const projectId = roleProjectId();
-  if (reconcileLocalRole(user.role, ssoRoleNames(claims, projectId)).role === null) {
+  if (user.role === 'owner') return { owner: true };
+  const decision = evaluateSsoClaims(claims, client.mapping);
+  if (decision.reason === MAPPING_UNAVAILABLE_REASON) {
+    return { status: 503, reason: decision.reason, error: 'temporarily_unavailable',
+      message: 'SSO is temporarily unavailable' };
+  }
+  if (reconcileLocalRole(user.role, decision.role).role === null) {
     return { status: 403,
-      reason: noRoleReason(claims, projectId),
+      reason: decision.reason,
       error: 'oidc_not_authorized', message: 'This identity has no role on this nassaj project' };
   }
-  const existing = userIdentitiesDb.findByIssuerAndSubject(issuerUrl(), subject);
-  if (existing) {
+  if (userIdentitiesDb.findByIssuerAndSubject(client.issuer, subject)) {
     return { status: 409, reason: 'subject_taken', error: 'oidc_subject_taken',
       message: 'This identity is already linked to a nassaj account' };
   }
-  if (userIdentitiesDb.countForUserAndIssuer(entry.userId, issuerUrl()) > 0) {
+  if (userIdentitiesDb.countForUserAndIssuer(entry.userId, client.issuer) > 0) {
     return { status: 409, reason: 'already_linked', error: 'already_linked',
       message: 'This account is already linked' };
   }
-  return { user };
+  return { user, decision };
 }
 
-/** Owner linked their own account: WARN log, dedicated audit row, direct alert. */
-function flagOwnerAccountLinked(req, ownerId) {
-  process.stderr.write(`${JSON.stringify({ level: 'warn', scope: 'oidc', code: 'owner_account_self_linked' })}\n`);
-  auditLogDb.record('oidc_owner_account_linked', {
-    userId: ownerId,
-    metadata: { provider: 'oidc' },
-    ...auditContext(req),
+/** Inside the version fence: the link insert with its attestation, then the role sync. */
+function writeSelfLink(entry, checked, { client, subject, nowMs }) {
+  const identityId = linkIdentityWithAttestation({
+    userId: entry.userId, issuer: client.issuer, subject, attestedAtMs: nowMs,
   });
-  void notifyOwnerOfSsoEvent(ownerId, 'owner_account_linked', ownerId);
+  // Same mapper as login: the attested role becomes the local role (never
+  // owner, never demotes an owner). The role was checked above.
+  const user = syncExternalRole({
+    user: checked.user,
+    mappedRole: checked.decision.role,
+    provider: 'oidc',
+  }, { userDb, auditLogDb, onRoleApplied: revokeLiveAccessOnSsoRoleChange });
+  return { identityId, user };
+}
+
+function answerSelfLinkWriteFailure(req, res, entry, error) {
+  const conflict = isUniqueConflict(error);
+  recordSelfLinkFailure(req, entry.userId, conflict ? 'link_conflict' : 'link_failed');
+  if (conflict) {
+    return res.status(409).json({ error: 'oidc_subject_taken', message: 'This identity is already linked' });
+  }
+  logOidcFailure('self_link_write_failed');
+  return res.status(500).json({ error: 'Linking could not be completed' });
 }
 
 /**
  * Callback branch for a 'link' transaction: links the verified subject to the
  * account that started the transaction (entry.userId) — never to anyone else
  * and never by looking the subject up — then signs that account in through the
- * ordinary one-time-code hand-off.
+ * ordinary one-time-code hand-off. An owner is refused (I6); every write runs
+ * inside the version fence (D9).
  */
-function completeSelfLink(req, res, { entry, claims, subject, transaction }) {
+function completeSelfLink(req, res, { entry, claims, subject, transaction, client }) {
   const nowMs = Date.now();
-  const checked = selfLinkRefusal({ entry, claims, subject, nowMs });
+  const checked = selfLinkRefusal({ entry, claims, subject, nowMs, client });
+  if (checked.owner) return refuseOwnerIdentity(req, res, entry.userId, 'link');
   if (!checked.user) {
     recordSelfLinkFailure(req, entry.userId, checked.reason);
     return res.status(checked.status).json({ error: checked.error, message: checked.message });
   }
 
-  let identityId;
+  let written;
   try {
-    identityId = linkIdentityWithAttestation({
-      userId: entry.userId, issuer: issuerUrl(), subject, attestedAtMs: nowMs,
-    });
+    written = runUnderVersionFence(entry.configVersion, () => writeSelfLink(entry, checked, { client, subject, nowMs }));
   } catch (error) {
-    const conflict = isUniqueConflict(error);
-    recordSelfLinkFailure(req, entry.userId, conflict ? 'link_conflict' : 'link_failed');
-    if (conflict) {
-      return res.status(409).json({ error: 'oidc_subject_taken', message: 'This identity is already linked' });
-    }
-    logOidcFailure('self_link_write_failed');
-    return res.status(500).json({ error: 'Linking could not be completed' });
+    return answerSelfLinkWriteFailure(req, res, entry, error);
   }
-
-  // Same mapper as login: the attested role becomes the local role (never
-  // owner, never demotes an owner). The role was checked above.
-  const user = syncExternalRole({
-    user: checked.user,
-    externalRoles: ssoRoleNames(claims, roleProjectId()),
-    provider: 'oidc',
-  }, { userDb, auditLogDb, onRoleApplied: revokeLiveAccessOnSsoRoleChange });
+  if (written === SSO_FENCE_REFUSED) return redirectLoginRefusal(res, 'oidc_config_changed');
 
   auditLogDb.record('oidc_identity_self_linked', {
     userId: entry.userId,
-    metadata: { provider: 'oidc', identityId },
+    metadata: { provider: 'oidc', identityId: written.identityId },
     ...auditContext(req),
   });
-  if (checked.user.role === 'owner') {
-    flagOwnerAccountLinked(req, entry.userId);
-  } else {
-    alertOwners(req, 'member_linked', entry.userId);
-  }
-  if (!user) {
+  alertOwners(req, 'member_linked', entry.userId);
+  if (!written.user) {
     return res.status(401).json({ error: 'Linked account is unavailable' });
   }
-  return handOffSession(req, res, user, transaction);
+  return handOffSession(req, res, written.user, transaction, entry.configVersion);
 }
 
 // ---------------------------------------------------------------------------
@@ -935,6 +1071,7 @@ function redirectStepUpRefusal(res, errorCode) {
  */
 function redirectUnusableState(res, stalePurpose) {
   if (stalePurpose === 'step_up') return redirectStepUpRefusal(res, 'oidc_reauth_required');
+  if (stalePurpose === 'test') return redirectTestError(res, 'transaction_expired');
   return redirectLoginRefusal(res, stalePurpose ? 'transaction_expired' : 'invalid_state');
 }
 
@@ -942,7 +1079,7 @@ function redirectUnusableState(res, stalePurpose) {
  * Why the caller cannot start an IdP step-up, or null. Only an active
  * SSO-linked member (the accounts refused a local step-up) may start one.
  */
-function stepUpStartRefusal(userId) {
+function stepUpStartRefusal(userId, issuer) {
   const user = userDb.getUserById(userId);
   if (!user) {
     return { status: 401, body: { error: 'Verification failed', code: 'step_up_failed' } };
@@ -950,7 +1087,7 @@ function stepUpStartRefusal(userId) {
   if (!requiresSsoLogin(user)) {
     return { status: 409, body: { error: 'Use your password or passkey to confirm', code: 'sso_step_up_not_applicable' } };
   }
-  const currentIssuerLinks = userIdentitiesDb.countForUserAndIssuer(userId, issuerUrl());
+  const currentIssuerLinks = userIdentitiesDb.countForUserAndIssuer(userId, issuer);
   if (currentIssuerLinks === 0) {
     // SSO-only (a link under a previous issuer) but nothing the current IdP
     // can prove: refused up front with its own code, not after an IdP trip.
@@ -970,8 +1107,8 @@ const STEP_UP_UNAVAILABLE = Object.freeze({
  * Local admission for an IdP step-up: eligibility, then one attempt on the
  * shared per-user step-up quota. Returns the refusal to send, or null.
  */
-function stepUpStartAdmission(req) {
-  const refusal = stepUpStartRefusal(req.user.id);
+function stepUpStartAdmission(req, client) {
+  const refusal = stepUpStartRefusal(req.user.id, client.issuer);
   if (refusal) {
     recordStepUpFailure(req, req.user.id, refusal.body.code);
     return refusal;
@@ -991,10 +1128,12 @@ function stepUpStartAdmission(req) {
 // Starts an IdP re-authentication for the caller's own step-up. Counted on the
 // shared per-user step-up quota BEFORE any IdP discovery. Every failure
 // answers with a coded body; nothing is left hanging.
-router.post('/step-up/start', requireOidcEnabled, authenticateToken, async (req, res) => {
+router.post('/step-up/start', requireSsoLoginAvailable, authenticateToken, async (req, res) => {
   setNoStore(res);
+  const client = activeSsoClient();
+  if (!client) return res.status(503).json(STEP_UP_UNAVAILABLE);
   try {
-    const refusal = stepUpStartAdmission(req);
+    const refusal = stepUpStartAdmission(req, client);
     if (refusal) {
       if (refusal.retryAfterSeconds) res.set('Retry-After', String(refusal.retryAfterSeconds));
       return res.status(refusal.status).json(refusal.body);
@@ -1006,6 +1145,7 @@ router.post('/step-up/start', requireOidcEnabled, authenticateToken, async (req,
   try {
     const authorizationUrl = await beginAuthorization(
       res,
+      client,
       { purpose: 'step_up', userId: req.user.id, audience: STEP_UP_AUDIENCE, requestedAtMs: Date.now() },
       { prompt: 'login', max_age: '0' },
     );
@@ -1028,21 +1168,56 @@ router.post('/step-up/start', requireOidcEnabled, authenticateToken, async (req,
  * subject linked to the SAME member (single link), and an active account.
  * Returns the identity and user, or { reason, error } to refuse.
  */
-function stepUpRefusal({ entry, subject, claims, nowMs }) {
+function stepUpRefusal({ entry, subject, claims, nowMs, issuer }) {
   const authFailure = stepUpAuthTimeFailure({
     authTimeMs: idTokenAuthTimeMs(claims), requestedAtMs: entry.requestedAtMs, nowMs,
   });
   if (authFailure) return { reason: authFailure, error: 'oidc_reauth_required' };
-  const identity = userIdentitiesDb.findByIssuerAndSubject(issuerUrl(), subject);
+  const identity = userIdentitiesDb.findByIssuerAndSubject(issuer, subject);
   if (!identity || identity.user_id !== entry.userId) {
     return { reason: 'identity_mismatch', error: 'oidc_step_up_identity_mismatch' };
   }
-  if (userIdentitiesDb.countForUserAndIssuer(entry.userId, issuerUrl()) > 1) {
+  if (userIdentitiesDb.countForUserAndIssuer(entry.userId, issuer) > 1) {
     return { reason: 'duplicate_links', error: 'oidc_duplicate_links' };
   }
   const linkedUser = userDb.getUserById(entry.userId);
   if (!linkedUser) return { reason: 'account_unavailable', error: 'account_unavailable' };
+  // ADR-194 I6: the owner is local-only; an IdP step-up never vouches for it.
+  if (linkedUser.role === 'owner') return { reason: OWNER_LOCAL_ONLY, error: OWNER_LOCAL_ONLY };
   return { identity, linkedUser };
+}
+
+/**
+ * Inside the version fence (ADR-194 D9): role sync, the denial revocation,
+ * the attestation stamp and the grant issuance. Returns `{ grant }` or
+ * `{ refusal, reason }`.
+ */
+function writeStepUp(req, { entry, checked, decision, transaction }) {
+  const user = syncExternalRole({
+    user: checked.linkedUser,
+    mappedRole: decision.role,
+    provider: 'oidc',
+  }, { userDb, auditLogDb, onRoleApplied: revokeLiveAccessOnSsoRoleChange });
+  if (user === null) {
+    denyLoginWithoutRole(req, checked.linkedUser, decision.reason);
+    return { refusal: 'oidc_not_authorized', reason: decision.reason };
+  }
+  if (!user || !stampAttestation(checked.identity.id, entry.userId)) {
+    return { refusal: 'temporarily_unavailable', reason: 'attestation_failed' };
+  }
+  const grant = oidcStepUpGrantStore.issue({
+    userId: entry.userId, audience: entry.audience, browserTransaction: transaction,
+  });
+  if (!grant) {
+    logOidcFailure('step_up_grant_store_full');
+    return { refusal: 'temporarily_unavailable', reason: 'grant_unavailable' };
+  }
+  return { grant };
+}
+
+function refuseStepUp(req, res, entry, reason, code) {
+  recordStepUpFailure(req, entry.userId, reason);
+  return redirectStepUpRefusal(res, code);
 }
 
 /**
@@ -1050,84 +1225,93 @@ function stepUpRefusal({ entry, subject, claims, nowMs }) {
  * attested role goes through the same mapper as login (no recognized role →
  * refused and access withdrawn, exactly as a login would), the attestation is
  * stamped, and a one-time grant bound to member + audience + this browser
- * transaction is handed to the SPA return page.
+ * transaction is handed to the SPA return page. The grant is revoked when the
+ * active config changed after it was issued.
  */
-function completeStepUp(req, res, { entry, claims, subject, transaction }) {
-  const checked = stepUpRefusal({ entry, subject, claims, nowMs: Date.now() });
-  if (!checked.linkedUser) {
-    recordStepUpFailure(req, entry.userId, checked.reason);
-    return redirectStepUpRefusal(res, checked.error);
+function completeStepUp(req, res, { entry, claims, subject, transaction, client }) {
+  const checked = stepUpRefusal({ entry, subject, claims, nowMs: Date.now(), issuer: client.issuer });
+  if (!checked.linkedUser) return refuseStepUp(req, res, entry, checked.reason, checked.error);
+  const decision = evaluateSsoClaims(claims, client.mapping);
+  if (decision.reason === MAPPING_UNAVAILABLE_REASON) {
+    return refuseStepUp(req, res, entry, decision.reason, 'temporarily_unavailable');
   }
-  const projectId = roleProjectId();
-  const user = syncExternalRole({
-    user: checked.linkedUser,
-    externalRoles: ssoRoleNames(claims, projectId),
-    provider: 'oidc',
-  }, { userDb, auditLogDb, onRoleApplied: revokeLiveAccessOnSsoRoleChange });
-  if (user === null) {
-    const reason = noRoleReason(claims, projectId);
-    denyLoginWithoutRole(req, checked.linkedUser, reason);
-    recordStepUpFailure(req, entry.userId, reason);
-    return redirectStepUpRefusal(res, 'oidc_not_authorized');
-  }
-  if (!user || !stampAttestation(checked.identity.id, entry.userId)) {
-    recordStepUpFailure(req, entry.userId, 'attestation_failed');
-    return redirectStepUpRefusal(res, 'temporarily_unavailable');
-  }
-  const grant = oidcStepUpGrantStore.issue({
-    userId: entry.userId, audience: entry.audience, browserTransaction: transaction,
-  });
-  if (!grant) {
-    logOidcFailure('step_up_grant_store_full');
-    recordStepUpFailure(req, entry.userId, 'grant_unavailable');
-    return redirectStepUpRefusal(res, 'temporarily_unavailable');
+  const outcome = runUnderVersionFence(
+    entry.configVersion, () => writeStepUp(req, { entry, checked, decision, transaction }),
+  );
+  if (outcome === SSO_FENCE_REFUSED) return refuseStepUp(req, res, entry, 'oidc_config_changed', 'oidc_config_changed');
+  if (outcome.refusal) return refuseStepUp(req, res, entry, outcome.reason, outcome.refusal);
+  if (!activeVersionStillIs(entry.configVersion)) {
+    oidcStepUpGrantStore.revoke(outcome.grant);
+    return refuseStepUp(req, res, entry, 'oidc_config_changed', 'oidc_config_changed');
   }
   auditLogDb.record('oidc_step_up_verified', {
     userId: entry.userId, metadata: { provider: 'oidc', audience: entry.audience }, ...auditContext(req),
   });
   setStepUpRedirectHeaders(res);
-  return res.redirect(`${RETURN_PATH}?oidc_step_up=${encodeURIComponent(grant)}`);
+  return res.redirect(`${RETURN_PATH}?oidc_step_up=${encodeURIComponent(outcome.grant)}`);
 }
 
 // ---------------------------------------------------------------------------
 // IdP back channel
 // ---------------------------------------------------------------------------
 
-// OIDC back-channel logout. The IdP POSTs a logout_token; we revoke every JWT
-// for the mapped local user by advancing password_changed_at (the same pwd_iat
-// mechanism authenticateToken uses to reject stale tokens). Always returns 200
-// per the spec (the IdP does not act on our error body), but never reveals
-// whether the subject mapped to an account.
+/** Seconds an IdP waits before retrying a logout we could not verify (D1). */
+const BACKCHANNEL_RETRY_AFTER_SECONDS = 300;
+
+/**
+ * Revokes a verified logout's subject unless it is unknown (200 no-op) or
+ * linked to an owner (D6: owner sessions and keys are never revoked by the
+ * IdP). Returns the affected user id, or null.
+ */
+function revokeForLogout(issuer, claims) {
+  const subject = typeof claims.sub === 'string' ? claims.sub : null;
+  const identity = subject ? userIdentitiesDb.findByIssuerAndSubject(issuer, subject) : undefined;
+  if (!identity) return null;
+  if (userDb.getRawById(identity.user_id)?.role === 'owner') return null;
+  try {
+    revokeUserSessions(identity.user_id);
+  } catch {
+    logOidcFailure('logout_revoke_failed');
+  }
+  revokeApiKeysForSsoWithdrawal(identity.user_id, 'backchannel_logout');
+  return identity.user_id;
+}
+
+// OIDC back-channel logout (ADR-194 D1/D6). The IdP POSTs a logout_token,
+// verified with the config row's issuer, client id and PINNED jwks_uri (also
+// in broken states; never a fresh discovery), or for legacy env with
+// discovery under the `public` policy. Revocation advances
+// password_changed_at (the pwd_iat mechanism authenticateToken checks). A
+// verified or rejected token answers 200 and never reveals whether the
+// subject mapped; nothing verifiable while enforced answers 503 + Retry-After.
 router.post('/backchannel-logout', oidcBackchannelLimiter, async (req, res) => {
-  if (!oidcEnabled()) {
+  let selection;
+  try {
+    selection = backchannelSsoVerifier();
+  } catch {
+    selection = { status: 503 };
+  }
+  if (selection.status === 501) {
     return res.status(501).json({ error: 'OIDC is not enabled' });
+  }
+  if (!selection.verifier) {
+    logOidcFailure('logout_verifier_unavailable');
+    return res.status(503).set('Retry-After', String(BACKCHANNEL_RETRY_AFTER_SECONDS))
+      .json({ error: 'SSO temporarily unavailable' });
   }
   // The logout_token arrives form-encoded per the OIDC back-channel spec, but
   // accept JSON too for flexibility.
   let claims;
   try {
-    claims = await getVerifier().verifyLogoutToken(req.body?.logout_token);
+    claims = await selection.verifier.verifyLogoutToken(req.body?.logout_token);
   } catch {
     logOidcFailure('logout_token_rejected');
     return res.status(200).json({ ok: true });
   }
 
-  const subject = typeof claims.sub === 'string' ? claims.sub : null;
-  const identity = subject
-    ? userIdentitiesDb.findByIssuerAndSubject(issuerUrl(), subject)
-    : undefined;
-
-  if (identity) {
-    try {
-      revokeUserSessions(identity.user_id);
-    } catch (error) {
-      logOidcFailure('logout_revoke_failed');
-    }
-    revokeApiKeysForSsoWithdrawal(identity.user_id, 'backchannel_logout');
-  }
-
+  const revokedUserId = revokeForLogout(selection.issuer, claims);
   auditLogDb.record('oidc_backchannel_logout', {
-    userId: identity?.user_id ?? null,
+    userId: revokedUserId,
     metadata: { provider: 'oidc' },
     ipAddress: clientIp(req),
     userAgent: req.headers['user-agent'] ?? null,
@@ -1174,14 +1358,24 @@ function auditContext(req) {
 /**
  * Removes every IdP link of `userId` and bumps its password stamp in ONE
  * transaction: a failed unlink leaves the sessions untouched, and a failed
- * stamp leaves the links in place. Throws on failure.
+ * stamp leaves the links in place. With `revokeApiKeys` the account's API keys
+ * are deleted in the same transaction (T-1946): an unlinked member is no longer
+ * governed by the SSO attestation window, so a surviving key would outlive the
+ * SSO grant it was minted under. Returns how many keys were deleted; throws on
+ * failure.
+ * @param {number} userId
+ * @param {{ revokeApiKeys?: boolean }} [options]
+ * @returns {number}
  */
-function unlinkAndRevokeSessions(userId) {
+function unlinkAndRevokeSessions(userId, { revokeApiKeys = false } = {}) {
+  let revokedKeys = 0;
   getConnection().transaction(() => {
     userIdentitiesDb.unlinkAll(userId);
     stampSessionsRevoked(userId);
+    if (revokeApiKeys) revokedKeys = apiKeysDb.revokeAllForUser(userId);
   })();
   invalidateRefreshCache(userId);
+  return revokedKeys;
 }
 
 /**
@@ -1295,13 +1489,19 @@ router.delete('/link/:userId', authenticateToken, requireRole('owner'), (req, re
     return res.status(403).json({ error: 'Insufficient permissions' });
   }
 
+  let revokedKeys = 0;
   try {
-    unlinkAndRevokeSessions(userId);
+    revokedKeys = unlinkAndRevokeSessions(userId, { revokeApiKeys: true });
   } catch {
     logOidcFailure('identity_unlink_failed');
     return res.status(500).json({ error: 'Unable to unlink identity' });
   }
   revokeLiveAccessAfterUnlink(userId);
+  if (revokedKeys > 0) {
+    auditLogDb.record('api_keys_revoked_sso', {
+      userId, metadata: { trigger: 'identity_unlinked', count: revokedKeys },
+    });
+  }
 
   // A JIT account has no local credential: once unlinked it cannot sign in
   // until it is linked again or the owner resets its password (T-1939 slice 4).

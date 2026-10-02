@@ -16,7 +16,7 @@
  * "engine = GLM, model = a Claude id", the picker's check mark never matched its
  * own selection, and the chat claimed an engine it was not asking a model of.
  */
-import type { LLMProvider } from '../../../types/app';
+import type { FallbackCatalogProvider } from '../../../constants/providerModelFallbacks';
 
 import type { EngineProvider } from './engineProviderSession';
 
@@ -26,6 +26,6 @@ import type { EngineProvider } from './engineProviderSession';
  * @param engineProvider the engaged engine, or null on the official Claude path.
  * @returns the engine id while one is engaged, `'claude'` otherwise.
  */
-export function claudeSlotCatalogProvider(engineProvider: EngineProvider): LLMProvider {
+export function claudeSlotCatalogProvider(engineProvider: EngineProvider): FallbackCatalogProvider {
   return engineProvider ?? 'claude';
 }

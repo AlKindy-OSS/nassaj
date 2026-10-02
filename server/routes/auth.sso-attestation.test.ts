@@ -15,6 +15,8 @@ import type { Server } from 'node:http';
 import express from 'express';
 import jwt from 'jsonwebtoken';
 
+import { createSsoConfigDouble } from '../services/__tests__/sso-config-double.js';
+
 const url = (spec: string) => pathToFileURL(path.resolve(import.meta.dirname, spec)).href;
 
 const FIXED_SECRET = 'sso-attestation-test-secret-0123456789';
@@ -26,7 +28,7 @@ const STALE_EDGE = 12 * HOUR_MS + MINUTE_MS; // 12:01h
 
 delete process.env.JWT_SECRET;
 delete process.env.AUTH_REFRESH_GRACE_HOURS;
-delete process.env.OIDC_ATTESTATION_MAX_AGE_HOURS;
+const sso = createSsoConfigDouble();
 
 const row = {
   id: 7,
@@ -83,6 +85,7 @@ mock.module(url('../modules/database/index.js'), {
     invitesDb: {},
   },
 });
+mock.module(url('../services/sso-config.service.js'), { namedExports: sso.exports });
 mock.module(url('../modules/account-wallet/index.js'), {
   namedExports: { AccountWalletService: class {} },
 });
@@ -113,7 +116,7 @@ await new Promise<void>((resolve) => server.once('listening', resolve));
 const { port } = server.address() as AddressInfo;
 after(() => new Promise<void>((resolve) => server.close(() => resolve())));
 
-const OIDC_KEYS = ['OIDC_ENABLED', 'OIDC_ROLE_PROJECT_ID', 'MULTI_ACCOUNT_SWITCHING'] as const;
+const OIDC_KEYS = ['MULTI_ACCOUNT_SWITCHING'] as const;
 const savedEnv = Object.fromEntries(OIDC_KEYS.map((key) => [key, process.env[key]]));
 after(() => {
   for (const key of OIDC_KEYS) {
@@ -123,8 +126,7 @@ after(() => {
 });
 
 beforeEach(() => {
-  process.env.OIDC_ENABLED = 'true';
-  process.env.OIDC_ROLE_PROJECT_ID = 'proj-synth';
+  sso.setActive(true);
   delete process.env.MULTI_ACCOUNT_SWITCHING;
   row.role = 'user';
   linkCount = 1;
@@ -277,8 +279,19 @@ test('non-linked accounts are exempt', async () => {
   assert.equal((await call('GET', '/api/auth/me', bearer(tokenIssuedAgo(60)))).status, 200);
 });
 
-test('OIDC disabled: behaviour is unchanged and the attestation is never read', async () => {
-  process.env.OIDC_ENABLED = 'false';
+test('enforced but SSO unavailable: a freshly attested member is refused (ADR-194 D1)', async () => {
+  sso.state.loginAvailable = false;
+  attestedAgoMs = 0;
+  const res = await call('GET', '/api/auth/me', bearer(tokenIssuedAgo(60)));
+  assert.equal(res.status, 401);
+  assert.equal(res.body.code, 'sso_reauth_required');
+  assert.equal(authenticateWebSocket(tokenIssuedAgo(60)), null);
+  row.role = 'owner';
+  assert.equal((await call('GET', '/api/auth/me', bearer(tokenIssuedAgo(60)))).status, 200, 'owner stays local');
+});
+
+test('policy not enforced: behaviour is unchanged and the attestation is never read', async () => {
+  sso.setActive(false);
   attestedAgoMs = null;
   const token = tokenIssuedAgo(4 * DAY_S);
   const res = await call('GET', '/api/auth/me', bearer(token));

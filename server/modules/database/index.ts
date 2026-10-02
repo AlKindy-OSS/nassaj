@@ -28,6 +28,16 @@ export {
 export type { ReconcileResult } from '@/modules/database/project-reconcile.service.js';
 export { closeConnection, getConnection, getDatabasePath } from '@/modules/database/connection.js';
 export { ApiKeyInputError, apiKeysDb } from '@/modules/database/repositories/api-keys.js';
+export {
+  API_KEY_SSO_ATTESTATION_EXPIRED_CODE,
+  API_KEY_SSO_WINDOW_DEFAULT_DAYS,
+  API_KEY_SSO_WINDOW_MAX_DAYS,
+  API_KEY_SSO_WINDOW_MIN_DAYS,
+  apiKeyCredentialState,
+  apiKeySsoWindowDb,
+  parseApiKeyCredentialId,
+  parseApiKeySsoWindowDays,
+} from '@/modules/database/repositories/api-key-sso-window.js';
 export { appConfigDb } from '@/modules/database/repositories/app-config.js';
 export {
   createEngineRestampIntentRepository,

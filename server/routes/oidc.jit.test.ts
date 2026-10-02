@@ -16,13 +16,27 @@ import type { Server } from 'node:http';
 
 import express from 'express';
 
+import { createSsoRuntimeDouble } from '../services/__tests__/sso-runtime-double.js';
+import { createSsoConfigDouble, doubleMapping } from '../services/__tests__/sso-config-double.js';
+
 const url = (spec: string) => pathToFileURL(path.resolve(import.meta.dirname, spec)).href;
+const sso = createSsoConfigDouble();
+mock.module(url('../services/sso-config.service.js'), { namedExports: sso.exports });
 const passThrough = (_req: unknown, _res: unknown, next: () => void) => next();
 const ISSUER = 'https://issuer.example';
-const PROJECT = 'proj-synth';
-const ROLES_CLAIM = `urn:zitadel:iam:org:project:${PROJECT}:roles`;
+// Project-scoped roles claim in the nested-grant shape (fixture data, neutral name).
+const ROLES_CLAIM = 'urn:example:iam:org:project:proj-synth:roles';
 const ALLOWED_ORG = '300100200';
 const FOREIGN_ORG = '999888777';
+
+/** The active config's mapping: `role_grant_scope` over ROLES_CLAIM with the given scopes (D5). */
+function grantScopeMapping(scopes: string[]) {
+  return scopes.length === 0
+    ? doubleMapping({ role_claim_path: `["${ROLES_CLAIM}"]` })
+    : doubleMapping({
+      role_claim_path: `["${ROLES_CLAIM}"]`, tenant_mode: 'role_grant_scope', tenant_values_json: JSON.stringify(scopes),
+    });
+}
 
 const notifications: number[] = [];
 const provisionedDirs: number[] = [];
@@ -74,19 +88,17 @@ mock.module(url('../services/oidc-verifier.service.js'), {
   namedExports: {
     parseExactHttpsIssuer: (issuer: string) => issuer,
     idTokenAuthTimeMs: () => null,
-    createOidcVerifier: () => ({
-      getDiscovery: async () => ({ authorization_endpoint: 'https://issuer.example/authorize' }),
-      exchangeAuthorizationCode: async () => ({ id_token: 'id-token-synthetic' }),
-      verifyIdToken: async () => claims,
-      verifyLogoutToken: async () => ({ sub: 'unused' }),
-    }),
   },
 });
+// ADR-194: the routes read the SSO configuration rows, never OIDC_* env.
+const ssoRuntime = createSsoRuntimeDouble(sso, {
+  exchangeAuthorizationCode: async () => ({ id_token: 'id-token-synthetic' }),
+  verifyIdToken: async () => claims,
+  verifyLogoutToken: async () => ({ sub: 'unused' }),
+});
+mock.module(url('../services/sso-oidc-runtime.service.js'), { namedExports: ssoRuntime.exports });
 
-process.env.OIDC_ISSUER_URL = ISSUER;
-process.env.OIDC_CLIENT_ID = 'client-synthetic';
-process.env.OIDC_REDIRECT_URI = 'https://app.example/api/auth/oidc/callback';
-process.env.OIDC_ROLE_PROJECT_ID = PROJECT;
+for (const key of ['OIDC_ISSUER_URL', 'OIDC_CLIENT_ID', 'OIDC_REDIRECT_URI']) delete process.env[key];
 
 const { initializeDatabase } = await import('../modules/database/init-db.js');
 const { stopReconcileScheduler } = await import('../modules/database/project-reconcile.service.js');
@@ -122,9 +134,9 @@ beforeEach(() => {
   minted.length = 0;
   resetProvisionCap();
   claims = { sub: 'subject-new', preferred_username: 'Sara.Ali@idp.example', ...grant('member') };
-  process.env.OIDC_ENABLED = 'true';
-  process.env.OIDC_JIT_ENABLED = 'true';
-  process.env.OIDC_ALLOWED_ORG_IDS = ` ${ALLOWED_ORG} ,another-org`;
+  sso.setActive(true);
+  sso.state.jitEnabled = true;
+  sso.state.mapping = grantScopeMapping([ALLOWED_ORG, 'another-org']);
 });
 
 async function signIn(): Promise<Response> {
@@ -161,32 +173,29 @@ function assertRefused(res: Response, error: string) {
 // ---------------------------------------------------------------------------
 
 test('JIT off (default): an unknown subject is redirected with oidc_not_linked', async () => {
-  delete process.env.OIDC_JIT_ENABLED;
-  assertRefused(await signIn(), 'oidc_not_linked');
-  process.env.OIDC_JIT_ENABLED = 'TRUE';
+  sso.state.jitEnabled = false;
   assertRefused(await signIn(), 'oidc_not_linked');
   assert.ok(!auditActions().includes('oidc_provision_refused'), 'JIT off is not a provisioning event');
 });
 
-test('JIT on without an org allowlist refuses every sign-in (fail-closed)', async () => {
-  for (const value of [undefined, '', ' , ', 'bad org!']) {
-    if (value === undefined) delete process.env.OIDC_ALLOWED_ORG_IDS;
-    else process.env.OIDC_ALLOWED_ORG_IDS = value;
-    assertRefused(await signIn(), 'oidc_not_linked');
-  }
-  assert.deepEqual(refusalReasons(), Array(4).fill('allowlist_missing'));
+test('JIT on without a tenant restriction refuses every sign-in (fail-closed)', async () => {
+  sso.state.mapping = grantScopeMapping([]);
+  assertRefused(await signIn(), 'oidc_not_linked');
+  sso.state.mapping = null;
+  assertRefused(await signIn(), 'oidc_not_linked');
+  assert.deepEqual(refusalReasons(), Array(2).fill('tenant_restriction_missing'));
 });
 
 test('a role granted only by a foreign organization is refused', async () => {
   claims = { ...claims, ...grant('admin', FOREIGN_ORG) };
   assertRefused(await signIn(), 'oidc_not_authorized');
-  assert.deepEqual(refusalReasons(), ['org_not_allowed']);
+  assert.deepEqual(refusalReasons(), ['tenant_not_allowed']);
 });
 
 test('a bare role list (no granting organization) is refused', async () => {
   claims = { ...claims, [ROLES_CLAIM]: ['member'] };
   assertRefused(await signIn(), 'oidc_not_authorized');
-  assert.deepEqual(refusalReasons(), ['org_not_allowed']);
+  assert.deepEqual(refusalReasons(), ['tenant_not_allowed']);
 });
 
 test('no roles claim, or only unknown roles, is refused', async () => {
@@ -200,11 +209,28 @@ test('no roles claim, or only unknown roles, is refused', async () => {
   assert.deepEqual(refusalReasons(), ['no_role', 'no_role', 'no_role']);
 });
 
-test('OIDC disabled leaves the callback unchanged (501), JIT or not', async () => {
-  process.env.OIDC_ENABLED = 'false';
-  const res = await fetch(`${baseUrl}/api/auth/oidc/callback?state=x&code=y`, { redirect: 'manual' });
-  assert.equal(res.status, 501);
+test('SSO login unavailable refuses the callback (sso_unavailable) and creates nobody', async () => {
+  const login = await fetch(`${baseUrl}/api/auth/oidc/login`, { redirect: 'manual' });
+  const state = new URL(login.headers.get('location') ?? '').searchParams.get('state') ?? '';
+  const cookie = (login.headers.get('set-cookie') ?? '').split(';', 1)[0] ?? '';
+  sso.state.loginAvailable = false;
+  const res = await fetch(`${baseUrl}/api/auth/oidc/callback?state=${encodeURIComponent(state)}&code=y`, {
+    headers: { cookie }, redirect: 'manual',
+  });
+  assert.equal(res.headers.get('location'), '/auth/oidc/return?error=sso_unavailable');
   assert.equal(userCount(), 1);
+});
+
+test('ADR-194 D9: an apply landing before the JIT write creates nobody', async () => {
+  ssoRuntime.runtime.fenceVersion = 8;
+  try {
+    const res = await signIn();
+    assert.equal(res.headers.get('location'), '/auth/oidc/return?error=oidc_config_changed');
+    assert.equal(userCount(), 1);
+    assert.deepEqual(minted, []);
+  } finally {
+    ssoRuntime.runtime.fenceVersion = null;
+  }
 });
 
 // ---------------------------------------------------------------------------
@@ -278,7 +304,7 @@ test('an existing linked user is unaffected by JIT', async () => {
 });
 
 // ---------------------------------------------------------------------------
-// Org allowlist on every later sign-in (qa veto on slice 4)
+// Tenant restriction on every later sign-in (qa veto on slice 4)
 // ---------------------------------------------------------------------------
 
 const deniedReasons = () => auditRows()
@@ -304,14 +330,14 @@ test('a later sign-in carrying only a foreign grant is refused and audited', asy
   assert.equal(res.status, 302);
   assert.equal(res.headers.get('location'), '/auth/oidc/return?error=oidc_not_authorized');
   assert.equal(minted.length, 1, 'no credential for the refused sign-in');
-  assert.deepEqual(deniedReasons(), ['org_not_allowed']);
+  assert.deepEqual(deniedReasons(), ['tenant_not_allowed']);
   assert.equal(userDb.getUserByUsername('sara_ali')?.role, 'user');
 });
 
-test('an empty allowlist leaves linked-member sign-in unfiltered (unchanged)', async () => {
+test('tenant mode none leaves linked-member sign-in unfiltered (unchanged)', async () => {
   const member = userDb.createUser('linked_member', 'hash-m', 'user');
   userIdentitiesDb.link(member.id, ISSUER, 'subject-new');
-  process.env.OIDC_ALLOWED_ORG_IDS = '';
+  sso.state.mapping = grantScopeMapping([]);
   claims = { ...claims, ...grant('admin', FOREIGN_ORG) };
   assert.equal((await signIn()).status, 302);
   assert.deepEqual(minted, [{ id: member.id, role: 'admin' }]);

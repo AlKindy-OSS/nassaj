@@ -12,6 +12,17 @@ import type { SessionBucketProvider, SessionBuckets } from '../../shared/session
  */
 export type LLMProvider = SessionBucketProvider;
 
+/**
+ * Bodies still offered to pick from today (T-1953, finding L2 of
+ * docs/plans/retire-disabled-bodies.md). `LLMProvider` stays the wider
+ * historical-session type — a bucket cannot be dropped without making its
+ * conversations invisible (B-598) — but new selection state, pickers and
+ * settings cards must not accept a retired id. Kept in sync by hand with
+ * `shared/retiredProviders.ts`'s `RETIRED_PROVIDER_IDS` (a literal type
+ * cannot derive from a runtime `Set`).
+ */
+export type ActiveBodyProvider = Exclude<LLMProvider, 'gemini' | 'cursor' | 'hermes' | 'qwen' | 'kimi'>;
+
 export type ProviderModelOption = {
   value: string;
   label: string;

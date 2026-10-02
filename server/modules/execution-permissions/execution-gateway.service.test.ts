@@ -4,6 +4,10 @@ import test from 'node:test';
 import Database from 'better-sqlite3';
 
 import { migratePermissionExecution, PermissionStateConflictError } from '@/modules/database/index.js';
+import {
+  currentApiKeySsoUnavailableGate,
+  setApiKeySsoUnavailableGate,
+} from '@/modules/database/repositories/api-key-sso-gate.js';
 
 import { createAuthenticatedLaunchActor } from './actor.js';
 import { createExecutionPermissionGateway } from './execution-gateway.service.js';
@@ -208,6 +212,50 @@ test('CK permit binds the exact key across disable, re-enable and fresh admissio
     assert.equal(permissionGateway.authorize(
       freshActor, { ...context, launchId: 'fresh-ck' }, 'full_delegation',
     ).kind, 'authorized');
+  } finally {
+    database.close();
+  }
+});
+
+test('CK launch applies the T-1946 SSO window at authorize and at deferred consume', (t) => {
+  // This test's private database has no SSO state; the gate (ADR-194 D6) reads
+  // the application connection, so pin the plain T-1946 window (owner-disabled
+  // SSO). The SSO-unavailable refusal is covered by the D1 matrices.
+  const previousGate = currentApiKeySsoUnavailableGate();
+  setApiKeySsoUnavailableGate(() => false);
+  t.after(() => setApiKeySsoUnavailableGate(previousGate));
+  const database = setup();
+  try {
+    const DAY_MS = 24 * 60 * 60 * 1000;
+    const now = { value: Date.UTC(2026, 9, 1, 12) };
+    database.exec(`
+      CREATE TABLE app_config (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+      CREATE TABLE user_identities (id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL,
+        issuer TEXT NOT NULL, subject TEXT NOT NULL, last_attested_at INTEGER);
+      INSERT INTO users (id, username, password_hash, role) VALUES (2, 'member', 'hash', 'user');
+      INSERT INTO api_keys (id, user_id, key_digest, is_active) VALUES (12, 2, 'member-digest', 1);
+      INSERT INTO user_identities (id, user_id, issuer, subject) VALUES (5, 2, 'https://idp', 'sub');
+    `);
+    const generation = (database.prepare('SELECT authorization_generation AS generation FROM users WHERE id=2')
+      .get() as { generation: number }).generation;
+    const member = createAuthenticatedLaunchActor({
+      id: 2, role: 'user', status: 'active', is_active: 1,
+      authenticationKind: 'ck', authenticationCredentialId: 'api-key:12', authorizationGeneration: generation,
+    }, '2030-01-01T00:00:00.000Z');
+    const attest = (agoMs: number) => database.prepare('UPDATE user_identities SET last_attested_at = ? WHERE id = 5')
+      .run(now.value - agoMs);
+    const permissionGateway = gateway(database, 1, now);
+    const stale = (error: unknown) => error instanceof PermissionStateConflictError && error.code === 'IDENTITY_STALE';
+
+    attest(8 * DAY_MS);
+    assert.throws(() => permissionGateway.authorize(member, { ...context, launchId: 'stale' }, 'full_delegation'), stale);
+
+    attest(DAY_MS);
+    const admitted = permissionGateway.authorize(member, { ...context, launchId: 'fresh' }, 'full_delegation');
+    assert.equal(admitted.kind, 'authorized');
+    if (admitted.kind !== 'authorized') return;
+    now.value += 7 * DAY_MS;
+    assert.throws(() => admitted.execution.consume(), stale, 'a deferred launch re-applies the window');
   } finally {
     database.close();
   }

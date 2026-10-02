@@ -170,7 +170,7 @@ export default function ConnectorStepUpDialog({
 
   return (
     <Dialog open={open} onOpenChange={next => { if (!next) onClose(); }}>
-      <DialogContent className="w-[calc(100%-2rem)] max-w-md p-5" aria-labelledby={titleId} aria-describedby={descriptionId}>
+      <DialogContent layerClassName="z-[10000]" className="w-[calc(100%-2rem)] max-w-md p-5" aria-labelledby={titleId} aria-describedby={descriptionId}>
         <div className="flex items-start gap-3">
           <span className="rounded-lg bg-primary/10 p-2 text-primary"><ShieldCheck className="h-5 w-5" aria-hidden="true" /></span>
           <div className="min-w-0">

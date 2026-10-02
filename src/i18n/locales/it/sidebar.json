@@ -35,6 +35,8 @@
     "deleteSession": "Elimina sessione",
     "renameSession": "Rinomina sessione",
     "noSessions": "Nessuna sessione",
+    "surfacedHiddenHint_one": "+{{count}} altra conversazione con attività",
+    "surfacedHiddenHint_other": "+{{count}} altre conversazioni con attività",
     "loadingSessions": "Caricamento sessioni...",
     "unnamed": "Senza nome",
     "loading": "Caricamento...",

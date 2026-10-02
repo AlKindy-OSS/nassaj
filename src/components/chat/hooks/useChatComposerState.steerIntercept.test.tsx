@@ -175,3 +175,54 @@ describe('/steer interception (steerAvailable=false)', () => {
     expect(view.sent).toHaveLength(0);
   });
 });
+
+/**
+ * B-1469 — Enter while a reply is running (isLoading) must not silently
+ * drop the keystroke. The composer keeps the text and shows an inline hint
+ * instead (the user can only interrupt by stopping the run — no send queue).
+ * `/steer` and `/btw` still bypass this guard and reach the agent mid-run.
+ */
+describe('submit guard while isLoading (B-1469)', () => {
+  it('keeps the text and sets a hint instead of sending or dropping it', async () => {
+    const view = renderComposer({ isLoading: true });
+
+    act(() => view.result.current.setInput('one more question'));
+    await act(async () => view.result.current.handleSubmit(fakeSubmitEvent));
+
+    expect(view.sent).toHaveLength(0);
+    expect(view.result.current.input).toBe('one more question');
+    expect(view.result.current.sendError).toBe('composer.replyInProgress');
+  });
+
+  it('does not show the hint for an empty composer while isLoading', async () => {
+    const view = renderComposer({ isLoading: true });
+
+    await act(async () => view.result.current.handleSubmit(fakeSubmitEvent));
+
+    expect(view.sent).toHaveLength(0);
+    expect(view.result.current.sendError).toBeNull();
+  });
+
+  it('/steer still reaches the agent while isLoading, no hint shown', async () => {
+    const view = renderComposer({ isLoading: true });
+
+    act(() => view.result.current.setInput('/steer stop doing that'));
+    await act(async () => view.result.current.handleSubmit(fakeSubmitEvent));
+
+    expect(view.onSteerSend).toHaveBeenCalledWith('stop doing that');
+    expect(view.sent).toHaveLength(0);
+    expect(view.result.current.sendError).toBeNull();
+  });
+
+  it('/btw still reaches its own side-channel query while isLoading, no hint shown', async () => {
+    const onBtwQuery = vi.fn();
+    const view = renderComposer({ isLoading: true, onBtwQuery });
+
+    act(() => view.result.current.setInput('/btw what changed so far?'));
+    await act(async () => view.result.current.handleSubmit(fakeSubmitEvent));
+
+    expect(onBtwQuery).toHaveBeenCalledWith('what changed so far?');
+    expect(view.sent).toHaveLength(0);
+    expect(view.result.current.sendError).toBeNull();
+  });
+});

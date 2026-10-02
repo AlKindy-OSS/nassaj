@@ -1,3 +1,4 @@
+import type { ActiveBodyProvider } from '../../../../../../types/app';
 import type { AgentCategoryContentSectionProps } from '../types';
 import type { McpProject } from '../../../../../mcp/types';
 import { McpServers } from '../../../../../mcp';
@@ -23,8 +24,6 @@ export default function AgentCategoryContentSection({
   agentContextById,
   claudePermissions,
   onClaudePermissionsChange,
-  cursorPermissions,
-  onCursorPermissionsChange,
   codexPermissionMode,
   onCodexPermissionModeChange,
   onRefreshAuthStatus,
@@ -86,8 +85,11 @@ export default function AgentCategoryContentSection({
           ) : (
             <AccountContent
               agent={selectedAgent}
-              authStatus={agentContextById[selectedAgent].authStatus}
-              onLogin={agentContextById[selectedAgent].onLogin}
+              // `selectedAgent` here never names a retired body (T-1953): the
+              // two branches above already peel off claude/antigravity, and
+              // `visibleSettingsAgents()` never carries cursor/hermes/qwen/kimi.
+              authStatus={agentContextById[selectedAgent as ActiveBodyProvider].authStatus}
+              onLogin={agentContextById[selectedAgent as ActiveBodyProvider].onLogin}
               onRefreshAuthStatus={onRefreshAuthStatus}
             />
           )}
@@ -145,24 +147,6 @@ export default function AgentCategoryContentSection({
           allowVendorDelegation={claudePermissions.allowVendorDelegation}
           onAllowVendorDelegationChange={(value) => {
             onClaudePermissionsChange({ ...claudePermissions, allowVendorDelegation: value });
-          }}
-        />
-      )}
-
-      {selectedCategory === 'permissions' && selectedAgent === 'cursor' && (
-        <PermissionsContent
-          agent="cursor"
-          skipPermissions={cursorPermissions.skipPermissions}
-          onSkipPermissionsChange={(value) => {
-            onCursorPermissionsChange({ ...cursorPermissions, skipPermissions: value });
-          }}
-          allowedCommands={cursorPermissions.allowedCommands}
-          onAllowedCommandsChange={(value) => {
-            onCursorPermissionsChange({ ...cursorPermissions, allowedCommands: value });
-          }}
-          disallowedCommands={cursorPermissions.disallowedCommands}
-          onDisallowedCommandsChange={(value) => {
-            onCursorPermissionsChange({ ...cursorPermissions, disallowedCommands: value });
           }}
         />
       )}

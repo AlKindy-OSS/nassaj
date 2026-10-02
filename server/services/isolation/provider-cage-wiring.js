@@ -293,8 +293,8 @@ export const CAGE_SHARED_CREDENTIALS = Object.freeze({
  * conversation history for all users), so re-binding it read-write inside the
  * cage grants nothing a live spawn does not already have today — while leaving
  * it read-only silently drops transcripts/state (GAP 2, spike 2026-07-14:
- * a real caged claude turn completed with NO transcript persisted; hermes
- * EROFS-fails outright). Isolation is untouched: only the launching provider's
+ * a real caged claude turn completed with NO transcript persisted).
+ * Isolation is untouched: only the launching provider's
  * own store is re-bound; every other provider's store stays read-only and the
  * per-user trees stay hidden.
  *
@@ -320,9 +320,6 @@ function launchingProviderWriteStores(launching, isolated) {
       return isolated
         ? [path.join('.gemini', 'antigravity-cli', 'brain')]
         : [path.join('.gemini', 'antigravity-cli')];
-    case 'hermes':
-      // No per-user knob at all — ~/.hermes (state.db + auth) is always shared.
-      return ['.hermes'];
     case 'opencode':
       return isolated
         ? []

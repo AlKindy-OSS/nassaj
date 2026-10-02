@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 import {
   _resetSchedulerPruneClock,
   isSchedulerRunning,
+  liveSkipReason,
   runAutoUpdateTick,
   runDailySnapshotPrune,
   SNAPSHOT_PRUNE_PERIOD_MS,
@@ -75,17 +76,12 @@ test('an enabled tick attempts ONLY harnesses whose built-in updater is verified
   assert.ok(!skipped.some((s) => s.provider === 'glm' || s.provider === 'deepseek'));
 
   // Native self-updaters are ineligible without exact rollback, while the
-  // recoverable npm/git harnesses still lack verified built-in updater knobs.
+  // recoverable npm harness still lacks a verified built-in updater knob.
   assert.deepEqual(result, []);
   assert.deepEqual(attempted, result);
   assert.equal(marked.length, 1); // last-run stamped once
 
-  // hermes is recoverably updatable, so it reaches the knob gate and is
-  // skipped for that reason — not because it is "managed externally" any more.
-  const hermesSkip = skipped.find((s) => s.provider === 'hermes');
-  assert.ok(hermesSkip, 'hermes is considered by the sweep');
-  assert.equal(hermesSkip!.reason, 'autoupdater-disable-unverified');
-  // Same gate keeps qwen manual until devops verifies its knob; kimi's knob is
+  // The knob gate keeps qwen manual until devops verifies its knob; kimi's knob is
   // verified (T-1873) but kimi is button-only.
   assert.ok(skipped.some((s) => s.provider === 'qwen' && s.reason === 'autoupdater-disable-unverified'));
   assert.ok(skipped.some((s) => s.provider === 'kimi' && s.reason === 'manual-only'));
@@ -159,4 +155,16 @@ test('T-1871: snapshot retention runs at most once a day on the scheduler tick',
   now += SNAPSHOT_PRUNE_PERIOD_MS;
   assert.equal(runDailySnapshotPrune({ now: () => now, prune: () => { throw new Error('disk'); } }), true);
   _resetSchedulerPruneClock();
+});
+
+test('B-1474: a live-gate skip maps to its error code and blocker line for the skip log', () => {
+  const skip = liveSkipReason({
+    status: 'skipped_live_session',
+    error: { code: 'live_gate_unverifiable', message: 'x' },
+    log: ['Skipped: the live-session gate for qwen could not be verified (leg=unit_probe, cause=timeout).'],
+  });
+  assert.equal(skip?.reason, 'live_gate_unverifiable');
+  assert.match(skip?.detail ?? '', /leg=unit_probe, cause=timeout/);
+  assert.equal(liveSkipReason({ status: 'running', error: null, log: [] }), null);
+  assert.equal(liveSkipReason(undefined), null);
 });

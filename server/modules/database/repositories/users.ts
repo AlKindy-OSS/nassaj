@@ -8,6 +8,7 @@
  */
 
 import { getConnection } from '@/modules/database/connection.js';
+import { recordStrictAuditOnConnection } from '@/modules/database/repositories/audit-log.js';
 import { userIdentitiesDb } from '@/modules/database/repositories/user-identities.js';
 import {
   retireProjectSubjectAccess,
@@ -285,28 +286,36 @@ export const userDb = {
   /**
    * Sets a user's status (active/disabled). Used by admin management.
    *
-   * SEC-APIKEY-STATUS (defence in depth): disabling an account ALSO deactivates
-   * every API key it owns, in the SAME transaction. `validateApiKey` now checks
-   * `u.status` too, so this is the second of two independent guards — it means a
-   * suspended member's keys are dead even for a future/foreign code path that
-   * queries `api_keys` without joining `users`.
+   * SEC-APIKEY-STATUS (defence in depth): `resolveApiKey` refuses a disabled
+   * owner by `u.status`, and disabling ALSO removes every API key the account
+   * owns in the SAME transaction, so no code path that reads `api_keys` without
+   * joining `users` can ever accept one.
    *
-   * DISABLE BY FLAG, NEVER DELETE (owner rule): the rows are flipped to
-   * `is_active = 0`, so no history is destroyed and the keys stay listed in the
-   * UI. Re-activating the user does NOT auto-re-enable them — that would
-   * silently resurrect a credential an admin may have revoked on purpose.
+   * T-1946 (owner decision 2026-09-29): the keys are DELETED, no longer only
+   * flagged inactive. Re-activating the account therefore never brings a key
+   * back; the member creates new ones. A non-empty purge is audited strictly in
+   * the same transaction (`api_keys_revoked`, ids and count only), so a failed
+   * audit write rolls the suspension back.
+   *
+   * Returns how many API keys were deleted (0 when enabling).
    */
-  setStatus(userId: number, status: UserStatus): void {
+  setStatus(userId: number, status: UserStatus): number {
     const db = getConnection();
-    const apply = db.transaction((id: number, nextStatus: UserStatus): void => {
+    const apply = db.transaction((id: number, nextStatus: UserStatus): number => {
       db.prepare('UPDATE users SET status = ? WHERE id = ?').run(nextStatus, id);
-      if (nextStatus === 'disabled') {
-        db.prepare('UPDATE api_keys SET is_active = 0 WHERE user_id = ?').run(id);
+      if (nextStatus !== 'disabled') return 0;
+      const count = db.prepare('DELETE FROM api_keys WHERE user_id = ?').run(id).changes;
+      if (count > 0) {
+        recordStrictAuditOnConnection(db, 'api_keys_revoked', {
+          userId: id, metadata: { trigger: 'user_disabled', targetUserId: id, count },
+        });
       }
+      return count;
     });
-    apply(userId, status);
+    const deletedKeys = apply(userId, status);
     // T-1854: status changes rotate no project token; re-check live runs now.
     revalidateUserProjectAccess(userId);
+    return deletedKeys;
   },
 
   /** Updates a user's role (owner/admin/user). Used by owner-only management. */
@@ -509,6 +518,9 @@ export const userDb = {
    *              message_authors, invites.invited_by
    *   SET NULL → invites.accepted_by, audit_log.user_id
    *
+   * T-1946: a non-empty API key purge is audited strictly in the same
+   * transaction (`api_keys_revoked`, trigger `user_deleted`, ids and count).
+   *
    * Returns true if the user row existed and was deleted.
    */
   deleteUser(userId: number): boolean {
@@ -557,7 +569,7 @@ export const userDb = {
       db.prepare('DELETE FROM project_members WHERE user_id = ?').run(id);
       db.prepare('UPDATE projects SET created_by = NULL WHERE created_by = ?').run(id);
       db.prepare('DELETE FROM starred_sessions WHERE user_id = ?').run(id);
-      db.prepare('DELETE FROM api_keys WHERE user_id = ?').run(id);
+      const deletedKeys = db.prepare('DELETE FROM api_keys WHERE user_id = ?').run(id).changes;
       db.prepare('DELETE FROM user_credentials WHERE user_id = ?').run(id);
       db.prepare('DELETE FROM user_notification_preferences WHERE user_id = ?').run(id);
       db.prepare('DELETE FROM user_ui_preferences WHERE user_id = ?').run(id);
@@ -568,6 +580,12 @@ export const userDb = {
       db.prepare('UPDATE invites SET accepted_by = NULL WHERE accepted_by = ?').run(id);
       db.prepare('UPDATE audit_log SET user_id = NULL WHERE user_id = ?').run(id);
       const result = db.prepare('DELETE FROM users WHERE id = ?').run(id);
+      if (deletedKeys > 0) {
+        // T-1946: the account row is gone, so the id rides in metadata only.
+        recordStrictAuditOnConnection(db, 'api_keys_revoked', {
+          metadata: { trigger: 'user_deleted', targetUserId: id, count: deletedKeys },
+        });
+      }
       return { deleted: result.changes > 0, projectIds: affectedProjects.map((row) => row.project_id) };
     });
     const outcome = runDelete(userId);

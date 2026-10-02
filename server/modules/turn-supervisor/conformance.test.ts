@@ -164,7 +164,7 @@ const fakeRole: EphemeralRoleHome = Object.freeze({
   xdgData: '/var/tmp/nassaj-turn-supervisor-roles/conformance-role/data',
   xdgState: '/var/tmp/nassaj-turn-supervisor-roles/conformance-role/state',
   xdgCache: '/var/tmp/nassaj-turn-supervisor-roles/conformance-role/cache',
-  hermesHome: '/var/tmp/nassaj-turn-supervisor-roles/conformance-role/hermes', manifestPath: '/manifest',
+  manifestPath: '/manifest',
 });
 
 function extendedCliHarness(provider: ExtendedCliProvider) {
@@ -174,12 +174,10 @@ function extendedCliHarness(provider: ExtendedCliProvider) {
     versionProbe: async () => extendedCliAdapterInternals.EXACT_VERSIONS[provider] ?? '1.18.40',
     qwenCapabilityProbe: async () => true,
     opencodeCapabilityProbe: async () => true,
-    hermesToolDefinitionProbe: async () => 0,
     resolveEnv: () => ({}), createRoleHome: async () => fakeRole, cleanupRoleHome: async () => {},
     spawnCapture: async ({ args }) => {
       const model = args[args.indexOf('--model') + 1] ?? '';
-      const prompt = provider === 'qwen' ? args[args.indexOf('--prompt') + 1]
-        : provider === 'hermes' ? args[args.indexOf('--oneshot') + 1] : args.at(-1) ?? '';
+      const prompt = provider === 'qwen' ? args[args.indexOf('--prompt') + 1] : args.at(-1) ?? '';
       calls.push(model);
       let text = 'root answer';
       if (model.endsWith('-planner')) text = JSON.stringify({
@@ -242,14 +240,13 @@ test('Codex mechanical cell appears only behind its exact server flag', () => {
   assert.deepEqual(withReview?.supportedLevels, ['direct', 'delegate', 'delegate_review']);
 });
 
-test('Qwen, OpenCode, and Hermes mechanical cells are server-authoritative and default OFF', () => {
+test('Qwen and OpenCode mechanical cells are server-authoritative and default OFF', () => {
   const proved = () => true;
   const listed = (env: NodeJS.ProcessEnv) => new Set(getServerHarnessConformance(env, proved)
     .map(({ provider, runtime }) => `${provider}:${runtime}`));
   const off = listed({});
   assert.equal(off.has('qwen:qwen_cli_ephemeral'), false);
   assert.equal(off.has('opencode:opencode_cli_ephemeral'), false);
-  assert.equal(off.has('hermes:hermes_cli_ephemeral'), false);
   const on = listed({
     NASSAJ_TURN_SUPERVISOR_QWEN_CHAT: '1',
     NASSAJ_TURN_SUPERVISOR_OPENCODE_CHAT: 'true',
@@ -257,20 +254,19 @@ test('Qwen, OpenCode, and Hermes mechanical cells are server-authoritative and d
   });
   assert.equal(on.has('qwen:qwen_cli_ephemeral'), true);
   assert.equal(on.has('opencode:opencode_cli_ephemeral'), true);
-  assert.equal(on.has('hermes:hermes_cli_ephemeral'), true);
+  assert.equal(on.has('hermes:hermes_cli_ephemeral'), false, 'the deleted hermes cell is never listed');
   assert.equal(listed({ NASSAJ_TURN_SUPERVISOR_QWEN_AGENT: '1' }).has('qwen:qwen_cli_ephemeral'), false);
 });
 
-test('Qwen and Hermes are absent from the mechanical matrix when installed-binary proof fails', () => {
+test('Qwen is absent from the mechanical matrix when installed-binary proof fails', () => {
   const env = {
-    NASSAJ_TURN_SUPERVISOR_QWEN_CHAT: '1', NASSAJ_TURN_SUPERVISOR_HERMES_CHAT: '1',
+    NASSAJ_TURN_SUPERVISOR_QWEN_CHAT: '1',
   };
-  const cells = getServerHarnessConformance(env, (provider) => provider !== 'qwen' && provider !== 'hermes');
+  const cells = getServerHarnessConformance(env, (provider) => provider !== 'qwen');
   assert.equal(cells.some(({ provider }) => provider === 'qwen'), false);
-  assert.equal(cells.some(({ provider }) => provider === 'hermes'), false);
 });
 
-for (const provider of ['qwen', 'opencode', 'hermes'] as const) {
+for (const provider of ['qwen', 'opencode'] as const) {
   test(`${provider} CLI conformance crosses executeConformantTurn for all three levels`, async () => {
     const flag = `NASSAJ_TURN_SUPERVISOR_${provider.toUpperCase()}_CHAT`;
     for (const level of ['direct', 'delegate', 'delegate_review'] as const) {

@@ -9,9 +9,12 @@ import path from 'node:path';
 import test, { mock } from 'node:test';
 import { pathToFileURL } from 'node:url';
 
+import { createSsoConfigDouble } from './__tests__/sso-config-double.js';
+
 const url = (spec: string) => pathToFileURL(path.resolve(import.meta.dirname, spec)).href;
 const verifyCalls: string[] = [];
 const linked = new Set<number>();
+const sso = createSsoConfigDouble({ enforced: false, loginAvailable: false });
 const users = new Map<number, { id: number; role: string; must_change_password: number }>([
   [1, { id: 1, role: 'user', must_change_password: 0 }],
   [2, { id: 2, role: 'user', must_change_password: 0 }],
@@ -25,6 +28,7 @@ mock.module(url('./password.service.js'), {
     },
   },
 });
+mock.module(url('./sso-config.service.js'), { namedExports: sso.exports });
 mock.module(url('../modules/database/index.js'), {
   namedExports: {
     userDb: {
@@ -55,9 +59,7 @@ test('the limiter refuses the 6th attempt before argon2 runs', async () => {
 
 test('SSO-linked member and missing evidence are refused without touching the password hash', async () => {
   verifyCalls.length = 0;
-  const saved = { enabled: process.env.OIDC_ENABLED, project: process.env.OIDC_ROLE_PROJECT_ID };
-  process.env.OIDC_ENABLED = 'true';
-  process.env.OIDC_ROLE_PROJECT_ID = 'proj-synth';
+  sso.setActive(true);
   try {
     linked.add(2);
     assert.equal(await attempt(2, 'right'), 'sso_step_up_required');
@@ -65,10 +67,7 @@ test('SSO-linked member and missing evidence are refused without touching the pa
       .then(() => 'ok', (error: { code: string }) => error.code);
     assert.equal(missing, 'sso_step_up_required');
   } finally {
-    for (const [key, value] of [['OIDC_ENABLED', saved.enabled], ['OIDC_ROLE_PROJECT_ID', saved.project]] as const) {
-      if (value === undefined) delete process.env[key];
-      else process.env[key] = value;
-    }
+    sso.setActive(false);
   }
   linked.delete(2);
   const none = await verifyStepUpEvidence({} as never, { id: 2 }, 'connector_owner', undefined)

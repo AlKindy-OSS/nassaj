@@ -9,6 +9,10 @@
  * Audiences:
  *   passkey_registration  enrolling a new passkey (routes/webauthn.js)
  *   connector_owner       connector recent-auth sessions (slice 6B)
+ *   sso_config            owner SSO configuration (ADR-194 D8): local
+ *                         password or passkey ONLY — an SSO grant never
+ *                         authorizes SSO configuration, and an owner flagged
+ *                         must_change_password is refused up front
  *
  * Evidence (exactly one):
  *   { method: 'password', password }   the current local password
@@ -24,8 +28,10 @@
  * SSO-linked member may present only an oidc_grant (anything else is
  * sso_step_up_required) and nobody else may → validate the evidence shape →
  * count one attempt on the shared per-user limiter `stepup:<id>` BEFORE any
- * argon2 or signature work → verify. An oidc_grant is not counted again: its
- * IdP round trip was counted when POST /api/auth/oidc/step-up/start issued it.
+ * argon2 or signature work → verify → on a successful password or passkey
+ * verification, refund that attempt (only failures consume the quota). An
+ * oidc_grant is not counted again: its IdP round trip was counted when
+ * POST /api/auth/oidc/step-up/start issued it, and is never refunded.
  *
  * passkey_registration stays blocked for SSO-linked members: they can neither
  * sign in nor step up with a passkey, so enrolling one would be inert.
@@ -37,11 +43,14 @@ import { readBrowserTransaction } from './oidc-browser-transaction.js';
 import { oidcStepUpGrantStore } from './oidc-step-up-grant.store.js';
 import { verifyPassword } from './password.service.js';
 import { requiresSsoLogin } from './sso-only-policy.js';
-import { consumeStepUpAttempt } from './step-up-quota.js';
+import { consumeStepUpAttempt, refundStepUpAttempt } from './step-up-quota.js';
 import { webauthnChallengeStore } from './webauthn-challenge.store.js';
 import { WebAuthnError, extractClientChallenge, verifyAssertionCore } from './webauthn.service.js';
 
-export const STEP_UP_AUDIENCES = Object.freeze(['passkey_registration', 'connector_owner']);
+export const STEP_UP_AUDIENCES = Object.freeze(['passkey_registration', 'connector_owner', 'sso_config']);
+
+/** Audiences that accept local evidence only (never an oidc_grant), ADR-194 D8. */
+const LOCAL_EVIDENCE_ONLY_AUDIENCES = new Set(['sso_config']);
 
 const MAX_PASSWORD_LENGTH = 1024;
 const MAX_GRANT_LENGTH = 128;
@@ -158,6 +167,9 @@ async function verifyPasskeyEvidence(dbUser, audience, response) {
 }
 
 function verifyOidcGrantEvidence(req, user, audience, grant) {
+  if (LOCAL_EVIDENCE_ONLY_AUDIENCES.has(audience)) {
+    throw new StepUpError('step_up_invalid_request', { reason: 'oidc_grant_not_accepted' });
+  }
   const consumed = oidcStepUpGrantStore.consume(grant, {
     userId: user.id, audience, browserTransaction: readBrowserTransaction(req),
   });
@@ -168,11 +180,25 @@ function verifyOidcGrantEvidence(req, user, audience, grant) {
 }
 
 /**
+ * ADR-194 D8, `sso_config`: an owner who must change the password is refused
+ * before any evidence is read, and an oidc_grant is refused without being
+ * consumed (an SSO grant never authorizes SSO configuration).
+ */
+function localOnlyAudienceRefusal(user, audience, evidence) {
+  if (!LOCAL_EVIDENCE_ONLY_AUDIENCES.has(audience)) return null;
+  if (user.must_change_password === 1) return new StepUpError('password_change_required');
+  if (evidence?.method === 'oidc_grant') {
+    return new StepUpError('step_up_invalid_request', { reason: 'oidc_grant_not_accepted' });
+  }
+  return null;
+}
+
+/**
  * Verifies step-up evidence for `audience`.
  *
  * @param {import('express').Request} req the request (its OIDC transaction cookie binds an oidc_grant)
  * @param {{ id: number }} dbUser the authenticated principal (reloaded here)
- * @param {'passkey_registration' | 'connector_owner'} audience
+ * @param {'passkey_registration' | 'connector_owner' | 'sso_config'} audience
  * @param {unknown} evidence client-supplied evidence (see module doc)
  * @returns {Promise<{ authMethod: 'password' | 'webauthn' | 'oidc', authTimeMs: number }>}
  * @throws {StepUpError}
@@ -185,6 +211,8 @@ export async function verifyStepUpEvidence(req, dbUser, audience, evidence) {
   if (!user) {
     throw new StepUpError('step_up_failed', { reason: 'user_inactive' });
   }
+  const localOnlyRefusal = localOnlyAudienceRefusal(user, audience, evidence);
+  if (localOnlyRefusal) throw localOnlyRefusal;
   const ssoLinked = requiresSsoLogin(user);
   const oidcGrant = evidence?.method === 'oidc_grant';
   if (ssoLinked && (!oidcGrant || audience !== 'connector_owner')) {
@@ -201,7 +229,11 @@ export async function verifyStepUpEvidence(req, dbUser, audience, evidence) {
     throw new StepUpError('step_up_rate_limited', { retryAfterSeconds: verdict.retryAfterSeconds });
   }
 
-  return parsed.method === 'password'
-    ? verifyPasswordEvidence(user, parsed.password)
-    : verifyPasskeyEvidence(user, audience, parsed.response);
+  const result = parsed.method === 'password'
+    ? await verifyPasswordEvidence(user, parsed.password)
+    : await verifyPasskeyEvidence(user, audience, parsed.response);
+  // ADR-194 D8: the attempt was reserved before argon2/signature work; a
+  // successful local verification returns it, so only failures consume it.
+  refundStepUpAttempt(user.id);
+  return result;
 }

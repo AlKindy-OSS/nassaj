@@ -112,11 +112,6 @@ const agentConfig: Record<AgentProvider, AgentVisualConfig> = {
 };
 
 const INSTALL_INFO: Partial<Record<AgentProvider, { label: string; command: string; note?: string }>> = {
-  cursor: {
-    label: 'Cursor Agent is not installed',
-    command: 'curl https://cursor.com/install -fsS | bash',
-    note: 'Official installer → ~/.local/bin/cursor-agent.',
-  },
   codex: {
     label: 'Codex CLI is not installed',
     command: 'curl -fsSL https://chatgpt.com/codex/install.sh | sh',
@@ -126,20 +121,6 @@ const INSTALL_INFO: Partial<Record<AgentProvider, { label: string; command: stri
     label: 'OpenCode CLI is not installed',
     command: 'curl -fsSL https://opencode.ai/install | bash',
     note: 'Official installer → ~/.opencode/bin/opencode. An npm -g copy is not detected.',
-  },
-  qwen: {
-    label: 'Qwen Code CLI is not installed',
-    command: 'npm install --global --prefix ~/.local @qwen-code/qwen-code',
-    note: 'Must land in ~/.local/bin/qwen. A plain npm -g copy is not detected.',
-  },
-  hermes: {
-    label: 'Hermes Agent is not installed',
-    command: 'curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash',
-  },
-  kimi: {
-    label: 'Kimi Code CLI is not installed',
-    command: 'curl -fsSL https://code.kimi.com/kimi-code/install.sh | bash',
-    note: 'Official native installer → ~/.kimi-code/bin/kimi. The API-key path needs no install.',
   },
 };
 

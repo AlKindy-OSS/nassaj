@@ -21,6 +21,7 @@ import { HarnessBinaryUnresolvedError, tryResolveHarnessBinary } from '@/shared/
 import { HARNESS_UPDATE_DESCRIPTORS } from './descriptors.js';
 import { _resetHarnessLeases, isHarnessLeased } from './lease.js';
 import { loadManifest } from './snapshot/manifest.js';
+import { snapshotError } from './snapshot/errors.js';
 import { removeFixture, writeFixtureFile } from './snapshot/__tests__/fixtures.js';
 import { currentBootId, processStartToken } from './harness-lock.js';
 import { runHarnessUpdateCommand } from './run-command.js';
@@ -303,6 +304,31 @@ test('preflight refusals: 507 disk (97.1 %), 507 count cap, 423 store in use —
   assert.equal(isHarnessLeased('codex'), false, 'lease released on every refusal');
 });
 
+test('B-1468: STORE_ACCESS_UNPROVABLE during the store backup names unchecked processes on the job', async () => {
+  codexWithStores();
+  let calls = 0;
+  const unchecked = [{ pid: 21, comm: 'node', reason: 'fd_unreadable', cmdline: 'never' }];
+  _setSnapshotRuntimeOverrides({
+    ...w.rt,
+    assertNoHolders: () => {
+      calls += 1;
+      if (calls > 1) {
+        throw snapshotError('STORE_ACCESS_UNPROVABLE', { uncheckedProcesses: unchecked, uncheckedProcessCount: 30 });
+      }
+    },
+  });
+  const { final } = await run('codex');
+  assert.equal(final.status, 'failed');
+  assert.equal(final.error?.code, 'STORE_ACCESS_UNPROVABLE');
+  const shown = [{ pid: 21, comm: 'node', reason: 'fd_unreadable' }];
+  assert.deepEqual(final.error?.uncheckedProcesses, shown);
+  assert.equal(final.error?.uncheckedProcessCount, 30);
+  assert.equal(w.commands.length, 0, 'the updater never ran');
+  final.error!.uncheckedProcesses![0].comm = 'mutated';
+  final.error!.uncheckedProcesses!.push({ pid: 1, comm: 'x' });
+  assert.deepEqual(getHarnessUpdateJob(final.jobId)!.error?.uncheckedProcesses, shown);
+});
+
 test('a launcher that is not the measured layout is refused before any change', async () => {
   writeFixtureFile(launcher(), 'codex-cli 1.0.0', 0o755);
   await assert.rejects(() => startHarnessUpdate('codex', { userId: 1 }), codeOf('SNAPSHOT_LAYOUT_MISMATCH'));
@@ -382,6 +408,31 @@ test('a live session skips the update without a snapshot (scheduler retries late
   const job = await startHarnessUpdate('codex', { userId: 1 });
   assert.equal(job.status, 'skipped_live_session');
   assert.equal(fs.existsSync(path.join(w.snapshotRoot, 'codex', job.jobId)), false);
+  assert.equal(isHarnessLeased('codex'), false);
+});
+
+test('B-1474: a live workflow unit skips with live_session_active and audits a manual run', async () => {
+  installCodex(w, '1.0.0');
+  _setSnapshotRuntimeOverrides({ ...w.rt, hasUnregisteredLaunch: async () => 'live_unit' });
+  const job = await startHarnessUpdate('codex', { userId: 1 });
+  assert.equal(job.status, 'skipped_live_session');
+  assert.equal(job.error?.code, 'live_session_active');
+  assert.equal(w.commands.length, 0);
+  const skipped = w.audits.filter((a) => a.action === 'harness_update_skipped');
+  assert.deepEqual(skipped.map((a) => a.metadata), [{ provider: 'codex', kind: 'live_unit', leg: null, cause: null }]);
+});
+
+test('B-1474: a throwing presence leg is gate_unverifiable naming leg=presence', async () => {
+  installCodex(w, '1.0.0');
+  _setSnapshotRuntimeOverrides({ ...w.rt, hasLiveSession: () => { throw new Error('registry down'); } });
+  const job = await startHarnessUpdate('codex', { userId: 1 });
+  assert.equal(job.status, 'skipped_live_session');
+  assert.equal(job.error?.code, 'live_gate_unverifiable');
+  assert.match(job.log.at(-1) ?? '', /leg=presence, cause=error/);
+  assert.doesNotMatch(JSON.stringify(job), /registry down/);
+  const skipped = w.audits.filter((a) => a.action === 'harness_update_skipped');
+  assert.deepEqual(skipped.map((a) => a.metadata), [{ provider: 'codex', kind: 'gate_unverifiable', leg: 'presence', cause: 'error' }]);
+  assert.equal(w.commands.length, 0);
   assert.equal(isHarnessLeased('codex'), false);
 });
 

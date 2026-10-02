@@ -55,6 +55,7 @@ const PAGE_HEADING_OWNERS = new Set([
   'AgentsSettingsTab.tsx',
   'VendorsSettingsTab.tsx',
   'UsersSettingsTab.tsx',
+  'SsoSettingsTab.tsx',
   'NotificationsSettingsTab.tsx',
   'AppearanceSettingsTab.tsx',
   'AboutTab.tsx',

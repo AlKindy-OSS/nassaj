@@ -1,7 +1,7 @@
 import { Check, ChevronLeft, ChevronRight, Loader2 } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import type { LLMProvider } from '../../../types/app';
+import type { ActiveBodyProvider } from '../../../types/app';
 import { authenticatedFetch } from '../../../utils/api';
 import { useProviderAuthStatus } from '../../provider-auth/hooks/useProviderAuthStatus';
 import ProviderLoginModal from '../../provider-auth/view/ProviderLoginModal';
@@ -24,14 +24,14 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
   const [gitEmail, setGitEmail] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
-  const [activeLoginProvider, setActiveLoginProvider] = useState<LLMProvider | null>(null);
+  const [activeLoginProvider, setActiveLoginProvider] = useState<ActiveBodyProvider | null>(null);
   const {
     providerAuthStatus,
     checkProviderAuthStatus,
     refreshProviderAuthStatuses,
   } = useProviderAuthStatus();
 
-  const previousActiveLoginProviderRef = useRef<LLMProvider | null | undefined>(undefined);
+  const previousActiveLoginProviderRef = useRef<ActiveBodyProvider | null | undefined>(undefined);
 
   const loadGitConfig = useCallback(async () => {
     try {
@@ -71,7 +71,7 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
     }
   }, [activeLoginProvider, refreshProviderAuthStatuses]);
 
-  const handleProviderLoginOpen = (provider: LLMProvider) => {
+  const handleProviderLoginOpen = (provider: ActiveBodyProvider) => {
     setActiveLoginProvider(provider);
   };
 

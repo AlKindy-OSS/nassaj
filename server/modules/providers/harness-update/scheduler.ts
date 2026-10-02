@@ -43,10 +43,17 @@ interface SchedulerState {
 
 const state: SchedulerState = { timer: null, ticking: false, intervalMinutes: DEFAULT_INTERVAL_MINUTES, lastPruneAt: null };
 
+/** One structured skip line; `detail` names the live-gate blocker kind/leg. */
+export interface SkipEntry {
+  provider: string;
+  reason: string;
+  detail?: string;
+}
+
 export interface SchedulerDeps {
   now?: () => number;
   /** Injectable skip log (defaults to a structured console line). */
-  logSkip?: (entry: { provider: string; reason: string }) => void;
+  logSkip?: (entry: SkipEntry) => void;
   updateDeps?: UpdateServiceDeps;
   /** Injectable start so tests observe which harnesses were triggered. */
   runUpdate?: (provider: string) => Promise<unknown>;
@@ -93,7 +100,8 @@ export async function runAutoUpdateTick(deps: SchedulerDeps = {}): Promise<strin
     }
     attempted.push(descriptor.id);
     try {
-      await runUpdate(descriptor.id);
+      const skip = liveSkipReason(await runUpdate(descriptor.id));
+      if (skip) logSkip({ provider: descriptor.id, ...skip });
     } catch {
       // A conflict (already running) or transient error is fine; next tick retries.
     }
@@ -102,8 +110,17 @@ export async function runAutoUpdateTick(deps: SchedulerDeps = {}): Promise<strin
   return attempted;
 }
 
+/** Error code + blocker detail of a `skipped_live_session` job (B-1474), else null. */
+export function liveSkipReason(job: unknown): { reason: string; detail?: string } | null {
+  const j = job as { status?: unknown; error?: { code?: unknown }; log?: unknown } | null;
+  if (j?.status !== 'skipped_live_session') return null;
+  const reason = typeof j.error?.code === 'string' ? j.error.code : 'skipped_live_session';
+  const last = Array.isArray(j.log) ? j.log[j.log.length - 1] : undefined;
+  return typeof last === 'string' ? { reason, detail: last } : { reason };
+}
+
 /** Structured skip line (no secrets, no env) — one per skipped harness per tick. */
-function defaultLogSkip(entry: { provider: string; reason: string }): void {
+function defaultLogSkip(entry: SkipEntry): void {
   console.warn('[harness-autoupdate-skipped]', entry);
 }
 

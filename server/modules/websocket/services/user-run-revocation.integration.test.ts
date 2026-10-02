@@ -154,8 +154,8 @@ const supervisorCancels: unknown[] = [];
 /** Only launchHosted() routes a turn through the supervisor. */
 let hostedLaunchPending = false;
 const hostedTurnSupervisor = {
-  enabled: (input: { provider: string }) => hostedLaunchPending && input.provider === 'kimi',
-  supports: (input: { provider: string }) => hostedLaunchPending && input.provider === 'kimi',
+  enabled: (input: { provider: string }) => hostedLaunchPending && input.provider === 'deepseek',
+  supports: (input: { provider: string }) => hostedLaunchPending && input.provider === 'deepseek',
   // Like the real supervisor: cancel answers only for turns it supervises.
   cancel: (input: { sessionId: string }) => {
     if (!hostedSessions.has(input.sessionId)) return false;
@@ -178,8 +178,9 @@ const PROVIDER_COMMANDS: Record<string, string> = {
   claude: 'claude-command', codex: 'codex-command', antigravity: 'antigravity-command',
   opencode: 'opencode-command',
   // hermes, qwen: globally disabled 2026-09-28 (owner decision) — refused before any run.
-  // cursor, kimi: globally disabled 2026-09-29 (owner decision) — likewise. The kimi
-  // hosted-supervisor run (launchHosted) still bypasses the wall and stays covered.
+  // cursor, kimi: globally disabled 2026-09-29 (owner decision) — likewise. All four
+  // are retired as bodies since T-1953, so the hosted-supervisor run (launchHosted)
+  // that bypasses the disable wall is carried by deepseek, which is not retired.
 };
 
 const chatDependencies = {
@@ -196,7 +197,6 @@ const chatDependencies = {
   queryCodex: cliLike('codex'),
   spawnCursor: cliLike('cursor'),
   spawnAntigravity: cliLike('antigravity'),
-  spawnHermes: cliLike('hermes'),
   spawnOpenCode: cliLike('opencode'),
   spawnKimi: cliLike('kimi'),
   spawnQwen: cliLike('qwen'),
@@ -205,7 +205,6 @@ const chatDependencies = {
   abortCodexSession: abortBridge,
   abortCursorSession: abortBridge,
   abortAntigravitySession: abortBridge,
-  abortHermesSession: abortBridge,
   abortOpenCodeSession: abortBridge,
   abortKimiSession: abortBridge,
   abortQwenSession: abortBridge,
@@ -347,7 +346,7 @@ async function launchHosted(socket: FakeSocket, held = false): Promise<string> {
   const clientMsgId = `b1327-hosted-${held ? 'held-' : ''}${runSequence}`;
   hostedLaunchPending = true;
   socket.emit('message', Buffer.from(JSON.stringify({
-    type: 'kimi-command', command: 'hello', options: { cwd: projectPath, clientMsgId },
+    type: 'deepseek-command', command: 'hello', options: { cwd: projectPath, clientMsgId },
   })));
   const sessionId = `hosted-${clientMsgId}`;
   try {
@@ -410,7 +409,7 @@ test('disable reaches detached and supervised runs after a normal socket close',
   await admin('PATCH', `/users/${bob.id}/status`, { status: 'disabled' });
   await waitFor(() => aborted.length === 2, 'detached aborts');
   assert.deepEqual([...aborted].sort(), [detached, supervised].sort());
-  assert.deepEqual(supervisorCancels, [{ provider: 'kimi', sessionId: supervised, userId: bob.id }]);
+  assert.deepEqual(supervisorCancels, [{ provider: 'deepseek', sessionId: supervised, userId: bob.id }]);
 });
 
 test('delete: running turns of the deleted user are aborted', async () => {

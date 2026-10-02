@@ -36,6 +36,8 @@
     "messageCount_one": "{{count}} پیغام",
     "messageCount_other": "{{count}} پیغامات",
     "allClosedHidden": "بند گفتگوئیں چھپی ہوئی ہیں",
+    "surfacedHiddenHint_one": "+ایک اور سرگرم گفتگو",
+    "surfacedHiddenHint_other": "+{{count}} مزید سرگرم گفتگوئیں",
     "loadingSessions": "سیشن لوڈ ہو رہے ہیں...",
     "unnamed": "بے نام",
     "loading": "لوڈ ہو رہا ہے...",

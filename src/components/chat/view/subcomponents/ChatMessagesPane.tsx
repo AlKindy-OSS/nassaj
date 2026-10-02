@@ -57,24 +57,18 @@ interface ChatMessagesPaneProps {
   textareaRef: RefObject<HTMLTextAreaElement>;
   claudeModel: string;
   setClaudeModel: (model: string) => void;
-  cursorModel: string;
-  setCursorModel: (model: string) => void;
   codexModel: string;
   setCodexModel: (model: string) => void;
   antigravityModel: string;
   setAntigravityModel: (model: string) => void;
   opencodeModel: string;
   setOpenCodeModel: (model: string) => void;
-  hermesModel: string;
-  setHermesModel: (model: string) => void;
   kimiModel: string;
   setKimiModel: (model: string) => void;
   deepseekModel: string;
   setDeepSeekModel: (model: string) => void;
   glmModel: string;
   setGlmModel: (model: string) => void;
-  qwenModel: string;
-  setQwenModel: (model: string) => void;
   providerModelCatalog: Partial<Record<LLMProvider, ProviderModelsDefinition>>;
   providerModelsLoading: boolean;
   providerModelsRefreshing: boolean;
@@ -157,24 +151,18 @@ export default function ChatMessagesPane({
   textareaRef,
   claudeModel,
   setClaudeModel,
-  cursorModel,
-  setCursorModel,
   codexModel,
   setCodexModel,
   antigravityModel,
   setAntigravityModel,
   opencodeModel,
   setOpenCodeModel,
-  hermesModel,
-  setHermesModel,
   kimiModel,
   setKimiModel,
   deepseekModel,
   setDeepSeekModel,
   glmModel,
   setGlmModel,
-  qwenModel,
-  setQwenModel,
   providerModelCatalog,
   providerModelsLoading,
   providerModelsRefreshing,
@@ -342,24 +330,18 @@ export default function ChatMessagesPane({
           textareaRef={textareaRef}
           claudeModel={claudeModel}
           setClaudeModel={setClaudeModel}
-          cursorModel={cursorModel}
-          setCursorModel={setCursorModel}
           codexModel={codexModel}
           setCodexModel={setCodexModel}
           antigravityModel={antigravityModel}
           setAntigravityModel={setAntigravityModel}
           opencodeModel={opencodeModel}
           setOpenCodeModel={setOpenCodeModel}
-          hermesModel={hermesModel}
-          setHermesModel={setHermesModel}
           kimiModel={kimiModel}
           setKimiModel={setKimiModel}
           deepseekModel={deepseekModel}
           setDeepSeekModel={setDeepSeekModel}
           glmModel={glmModel}
           setGlmModel={setGlmModel}
-          qwenModel={qwenModel}
-          setQwenModel={setQwenModel}
           providerModelCatalog={providerModelCatalog}
           providerModelsLoading={providerModelsLoading}
           providerModelsRefreshing={providerModelsRefreshing}

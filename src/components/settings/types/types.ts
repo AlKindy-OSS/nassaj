@@ -23,7 +23,7 @@ import type { ProviderAuthStatus } from '../../provider-auth/types';
 // agent page) — none of those are command-board concerns (role access, the
 // raw-exec layer, safe/custom commands). `command-board` keeps only those;
 // `system` groups Updates/Storage/Permissions, owner-only like command-board.
-export type SettingsMainTab = 'profile' | 'agents' | 'references' | 'vendors' | 'appearance' | 'git' | 'api' | 'connectors' | 'notifications' | 'users' | 'command-board' | 'system' | 'about';
+export type SettingsMainTab = 'profile' | 'agents' | 'references' | 'vendors' | 'appearance' | 'git' | 'api' | 'connectors' | 'notifications' | 'users' | 'sso' | 'command-board' | 'system' | 'about';
 export type AgentProvider = LLMProvider;
 // `engines` (ADR-073) is a category of a BODY, not a peer tab: an agent's engines
 // belong to the agent the way its permissions do. It replaced the top-level
@@ -78,12 +78,6 @@ export type NotificationPreferencesState = {
   };
 };
 
-export type CursorPermissionsState = {
-  allowedCommands: string[];
-  disallowedCommands: string[];
-  skipPermissions: boolean;
-};
-
 export type CodeEditorSettingsState = {
   theme: 'dark' | 'light';
   wordWrap: boolean;
@@ -94,7 +88,6 @@ export type CodeEditorSettingsState = {
 
 export type SettingsStoragePayload = {
   claude: ClaudePermissionsState & { projectSortOrder: ProjectSortOrder; lastUpdated: string };
-  cursor: CursorPermissionsState & { lastUpdated: string };
   codex: { permissionMode: CodexPermissionMode; lastUpdated: string };
 };
 

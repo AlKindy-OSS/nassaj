@@ -23,8 +23,7 @@
  *     toVersion, exitCode, trigger };
  *   - post-update verification (binary present + `--version` proves a version
  *     advance) and recovery on failure (npm-prefix: reinstall
- *     the captured previous version under TMPDIR=/var/tmp; git-shallow (hermes):
- *     `git reset --hard <captured rev>` + `uv pip install -e .`).
+ *     the captured previous version under TMPDIR=/var/tmp).
  *
  * T-1871 stage 3: a harness whose descriptor carries a `snapshot` spec (claude,
  * codex, agy, cursor, opencode) runs the snapshot state machine instead
@@ -53,7 +52,6 @@ import {
   isVersionAdvance,
   npmPrefixInstallArgs,
   parseVersionOutput,
-  resolveUvBinary,
   type HarnessDescriptor,
   type HarnessUpdateArgv,
 } from './descriptors.js';
@@ -67,6 +65,7 @@ import {
   defaultRunVersion,
   runHarnessUpdateCommand,
   UPDATE_TIMEOUT_MS,
+  type UnregisteredLaunch,
 } from './run-command.js';
 import { recordJobVersionChange } from './version-drift.js';
 import { isHarnessPinRefused, invalidateInstalledVersion } from './version-status.service.js';
@@ -81,7 +80,7 @@ import type { VersionFacts } from './snapshot/manifest.js';
 import { resolveSnapshotRuntime, type SnapshotRuntime } from './snapshot-runtime.js';
 import {
   assertNotRecoveryBlocked,
-  hasLiveHarnessSession,
+  liveSessionBlocker,
   recordUpdaterGroup,
   skippedLiveSessionJob,
   startSnapshotJob,
@@ -123,7 +122,7 @@ export interface UpdateServiceDeps {
    * RPCs). Consulted in addition to `hasLiveSession` so the gate is not blind
    * to them. Async because the workflow leg asks systemd.
    */
-  hasUnregisteredLaunch?: (providerIds: string[]) => Promise<boolean>;
+  hasUnregisteredLaunch?: (providerIds: string[]) => Promise<UnregisteredLaunch>;
   pinEnabled?: () => boolean;
   cleanEnv?: () => NodeJS.ProcessEnv;
   audit?: HarnessAuditFn;
@@ -294,7 +293,7 @@ async function applyNativeStageInLease(
   return { ...combined, code: 1, stderr: `${combined.stderr}\nnative update stage was not applied (${pending.join(', ')})` };
 }
 
-/** npm-prefix / git-shallow update with exact-version recovery (T-1749). */
+/** npm-prefix update with exact-version recovery (T-1749). */
 async function startLegacyUpdate(
   descriptor: HarnessDescriptor,
   rt: SnapshotRuntime,
@@ -320,9 +319,10 @@ async function startLegacyUpdate(
     releaseHarnessLease(descriptor.id, jobId);
     throw error;
   }
-  if (await hasLiveHarnessSession(rt, descriptor)) {
+  const blocker = await liveSessionBlocker(rt, descriptor);
+  if (blocker) {
     releaseHarnessLease(descriptor.id, jobId);
-    return skippedLiveSessionJob(rt, descriptor, jobId, userId, trigger);
+    return skippedLiveSessionJob(rt, descriptor, jobId, userId, trigger, blocker);
   }
   const job = makeJob(jobId, descriptor.id, userId, trigger, 'running', 'preflight', 5);
   storeJob(job, rt.now());
@@ -358,26 +358,18 @@ async function runUpdate(
   const baseEnv: NodeJS.ProcessEnv = cleanEnv();
   let mutationStarted = false;
   let recoveryEnv = baseEnv;
-  // Capture the checkout once from the server-owned descriptor. In particular,
-  // cleanSpawnEnv intentionally strips HERMES_CHECKOUT_DIR, so re-resolving it
-  // later would update one tree and verify/rollback another.
-  const gitCheckoutDir = descriptor.installMethod === 'git-shallow'
-    ? descriptor.gitCheckoutDir
-    : undefined;
-  const resolvedBinary = gitCheckoutDir
-    ? path.join(gitCheckoutDir, 'venv', 'bin', 'hermes')
-    : descriptorBinaryOrEmpty(descriptor);
+  const resolvedBinary = descriptorBinaryOrEmpty(descriptor);
 
   try {
     // The child env is built ONCE and the SAME object is handed to
     // descriptor.updateArgv(env) and to the spawn, so the argv can never be
     // resolved against a different env than the process actually gets.
-    const argv: HarnessUpdateArgv | null = descriptor.updateArgv(baseEnv, { gitCheckoutDir });
+    const argv: HarnessUpdateArgv | null = descriptor.updateArgv(baseEnv);
     if (!argv) {
       failJob(job, 'no_update_argv', 'No update command is defined for this harness.', audit);
       return;
     }
-    // Descriptor env (TMPDIR=/var/tmp for npm, HERMES_HOME for hermes) wins over
+    // Descriptor env (TMPDIR=/var/tmp for npm) wins over
     // the sanitized base — it is code-owned data, never a request field.
     const env: NodeJS.ProcessEnv = { ...baseEnv, ...(argv.env ?? {}) };
     recoveryEnv = env;
@@ -388,39 +380,6 @@ async function runUpdate(
     if (!job.fromVersion || !isRecognizedBinary(descriptor, resolvedBinary)) {
       failJob(job, 'installation_unrecognized', 'The installed harness could not be verified.', audit);
       return;
-    }
-
-    // git-shallow (hermes): capture the exact pre-update commit so recovery can
-    // roll the checkout back to the bytes that were running.
-    if (descriptor.installMethod === 'git-shallow' && gitCheckoutDir) {
-      const rev = await runCommand('git', ['rev-parse', '--verify', 'HEAD'], {
-        env,
-        cwd: gitCheckoutDir,
-        timeoutMs: 30_000,
-      });
-      const captured = rev.code === 0 ? rev.stdout.trim().split('\n')[0]?.trim() : '';
-      if (/^[0-9a-f]{40}$/i.test(captured ?? '')) {
-        job.gitRev = captured!;
-      } else {
-        failJob(job, 'installation_unrecognized', 'The git installation has no exact recoverable revision.', audit);
-        return;
-      }
-      const [status, upstream] = await Promise.all([
-        runCommand('git', ['status', '--porcelain', '--untracked-files=normal'], {
-          env, cwd: gitCheckoutDir, timeoutMs: 30_000,
-        }),
-        runCommand('git', ['rev-parse', '--verify', '@{upstream}'], {
-          env, cwd: gitCheckoutDir, timeoutMs: 30_000,
-        }),
-      ]);
-      if (status.code !== 0 || status.stdout.trim() !== '') {
-        failJob(job, 'dirty_installation', 'The git installation has local changes.', audit);
-        return;
-      }
-      if (upstream.code !== 0 || !/^[0-9a-f]{40}$/iu.test(upstream.stdout.trim())) {
-        failJob(job, 'installation_unrecognized', 'The git installation has no verified upstream.', audit);
-        return;
-      }
     }
 
     setJob(job, { phase: 'updating', percent: 40 });
@@ -448,7 +407,7 @@ async function runUpdate(
       }
       const reason = result.timedOut ? 'timed out' : `exit code ${result.code}`;
       const recovered = await recover(
-        job, descriptor, runCommand, runVersion, env, clearRecoveryIntent, gitCheckoutDir,
+        job, descriptor, runCommand, runVersion, env, clearRecoveryIntent,
       );
       if (!recovered) {
         recoveryFailed(job, descriptor, audit, result.code);
@@ -467,7 +426,7 @@ async function runUpdate(
     if (toVersion === null) {
       // Binary vanished / unreadable after update → recover, fail.
       const recovered = await recover(
-        job, descriptor, runCommand, runVersion, env, clearRecoveryIntent, gitCheckoutDir,
+        job, descriptor, runCommand, runVersion, env, clearRecoveryIntent,
       );
       if (!recovered) {
         recoveryFailed(job, descriptor, audit, 0);
@@ -479,7 +438,7 @@ async function runUpdate(
 
     if (!isVersionAdvance(job.fromVersion, toVersion)) {
       const recovered = await recover(
-        job, descriptor, runCommand, runVersion, env, clearRecoveryIntent, gitCheckoutDir,
+        job, descriptor, runCommand, runVersion, env, clearRecoveryIntent,
       );
       if (!recovered) {
         recoveryFailed(job, descriptor, audit, 0);
@@ -523,7 +482,7 @@ async function runUpdate(
       try {
         const recovered = await recover(
           job, descriptor, runCommand, runVersion, recoveryEnv,
-          clearRecoveryIntent, gitCheckoutDir,
+          clearRecoveryIntent,
         );
         if (!recovered) {
           recoveryFailed(job, descriptor, audit, null);
@@ -561,11 +520,8 @@ function isRecognizedBinary(descriptor: HarnessDescriptor, binary: string): bool
 
 /**
  * Per-method recovery (Addendum 3). `env` is the SAME merged env the update ran
- * under, so the npm reinstall keeps TMPDIR=/var/tmp (never tmpfs) and the hermes
- * rollback keeps HERMES_HOME.
+ * under, so the npm reinstall keeps TMPDIR=/var/tmp (never tmpfs).
  *   - npm-prefix : reinstall the captured previous version into the same prefix.
- *   - git-shallow: `git reset --hard <captured rev>` then `uv pip install -e .`
- *                  into the checkout's own venv.
  *   - native     : ineligible before this function; no exact rollback exists.
  */
 async function recover(
@@ -575,7 +531,6 @@ async function recover(
   runVersion: NonNullable<UpdateServiceDeps['runVersion']>,
   env: NodeJS.ProcessEnv,
   clearRecoveryIntent: (harnessId: string) => void,
-  gitCheckoutDir?: string,
 ): Promise<boolean> {
   if (descriptor.installMethod === 'npm-prefix' && descriptor.npm && job.fromVersion) {
     setJob(job, { phase: 'recovering' });
@@ -589,38 +544,6 @@ async function recover(
     if (result.code !== 0 || result.timedOut) return false;
     const restored = parseVersionOutput(await runVersion(descriptorBinaryOrEmpty(descriptor), descriptor.versionArgs));
     if (restored !== job.fromVersion) return false;
-    try {
-      clearRecoveryIntent(descriptor.id);
-      return true;
-    } catch {
-      return false;
-    }
-  }
-  if (descriptor.installMethod === 'git-shallow' && gitCheckoutDir && job.gitRev) {
-    setJob(job, { phase: 'recovering' });
-    const cwd = gitCheckoutDir;
-    appendLog(job, `Recovery: git reset --hard ${job.gitRev}`);
-    const reset = await runCommand('git', ['reset', '--hard', job.gitRev], {
-      env, cwd, timeoutMs: UPDATE_TIMEOUT_MS,
-    });
-    appendOutput(job, reset);
-    if (reset.code !== 0 || reset.timedOut) return false;
-    appendLog(job, 'Recovery: uv pip install -e .');
-    const reinstall = await runCommand(
-      resolveUvBinary(process.env),
-      ['pip', 'install', '--python', path.join(cwd, 'venv', 'bin', 'python'), '-e', '.'],
-      { env, cwd, timeoutMs: UPDATE_TIMEOUT_MS },
-    );
-    appendOutput(job, reinstall);
-    if (reinstall.code !== 0 || reinstall.timedOut) return false;
-    const [revision, restoredRaw] = await Promise.all([
-      runCommand('git', ['rev-parse', '--verify', 'HEAD'], { env, cwd, timeoutMs: 30_000 }),
-      runVersion(path.join(cwd, 'venv', 'bin', 'hermes'), descriptor.versionArgs),
-    ]);
-    const restored = revision.code === 0
-      && revision.stdout.trim() === job.gitRev
-      && parseVersionOutput(restoredRaw) === job.fromVersion;
-    if (!restored) return false;
     try {
       clearRecoveryIntent(descriptor.id);
       return true;

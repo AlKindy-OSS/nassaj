@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import path from 'node:path';
 import { AsyncLocalStorage } from 'node:async_hooks';
 
@@ -19,6 +20,7 @@ export function setApplicationWriterGateForTests(gate) {
     // Throttle state is process-wide; a fresh fixture must start from a fresh
     // window or the first denial of the next test would be folded away.
     gateLogWindows.clear();
+    heldLeases.clear();
 }
 
 /** Retain a nested writer without reacquiring admission after its parent was admitted. */
@@ -219,12 +221,116 @@ export function reportWriterLeaseRefusal(surface, error, options = {}) {
     return { gateDenial: false, code: WRITER_LEASE_UNAVAILABLE_CODE };
 }
 
-/** Acquire the shared source-update reader lease for an application writer. */
+/**
+ * B-1448: the writer leases this process holds right now, one entry per REAL
+ * acquisition. A nested retain (below) is not an entry and a failed acquire
+ * never becomes one; an idempotent release wrapper removes the entry exactly
+ * once, so the count needs no bookkeeping at the call sites.
+ *
+ * Only in-process holders are visible here. Anything else (another process, a
+ * watcher) is still caught by the updater's own lock contention.
+ *
+ * LOCAL-MAIN UNDERCOUNTS: there every HTTP handler runs inside an
+ * `http-handler` lease, so a terminal opened by a request is a nested retain
+ * of that lease and is not recorded as a terminal. Do not reuse this reading
+ * for the local-main activation path as-is.
+ * @type {Map<symbol, { kind: string, holder: { username: string | null, detachedUntil: number | null } }>}
+ */
+const heldLeases = new Map();
+/** Monotonic id per real acquisition, so a snapshot names WHICH terminals were seen. */
+let leaseSequence = 0;
+
+/** The lease kinds that are open terminals (an interactive shell of unbounded life). */
+export const TERMINAL_WRITER_KINDS = Object.freeze(['standalone-pty', 'managed-pty']);
+
+/** A holder label: a bounded username (or null) and when a detached shell auto-closes. */
+function normalizeHolder(holder) {
+    const username = typeof holder?.username === 'string' && holder.username.trim()
+        ? holder.username.trim().slice(0, 64) : null;
+    const detachedUntil = Number.isSafeInteger(holder?.detachedUntil) ? holder.detachedUntil : null;
+    return { username, detachedUntil };
+}
+
+/** Record a real acquisition and wrap its release so the entry leaves exactly once. */
+function trackLease(kind, lease, holder) {
+    const key = Symbol(kind);
+    leaseSequence += 1;
+    const entry = { id: leaseSequence, kind, holder: normalizeHolder(holder) };
+    heldLeases.set(key, entry);
+    let released = false;
+    return {
+        ...lease,
+        release() {
+            if (released) return;
+            released = true;
+            heldLeases.delete(key);
+            lease.release();
+        },
+        /** Update the holder label (e.g. a shell detached from its socket). No-op once released. */
+        annotate(patch = {}) {
+            if (released) return;
+            entry.holder = normalizeHolder({ ...entry.holder, ...patch });
+        },
+    };
+}
+
+/**
+ * B-1448 slice 2: an opaque digest of WHICH terminal leases are open (lease id,
+ * kind, holder). A confirmed "close terminals" request must echo it, so a
+ * terminal opened after the owner looked is never closed silently. Detaching
+ * or reattaching a Shell tab does not change it.
+ * @param {string[]} members `${id}:${kind}:${username}` per open terminal lease
+ * @returns {string} 32 hex characters
+ */
+function terminalSnapshot(members) {
+    return crypto.createHash('sha256').update(members.sort().join('\n')).digest('hex').slice(0, 32);
+}
+
+/**
+ * The open terminals this process holds a writer lease for (B-1448).
+ *
+ * `detached` counts shells whose socket closed and that auto-close at
+ * `detachedClosesAt` (the latest of them); they still hold the lease until then.
+ * @param {number} [now] clock for deciding whether a detached deadline is still ahead
+ * @returns {{ count: number, attached: number, detached: number,
+ *   usernames: string[], detachedClosesAt: number | null, snapshot: string }}
+ */
+export function summarizeOpenTerminals(now = Date.now()) {
+    let attached = 0;
+    let detached = 0;
+    let detachedClosesAt = null;
+    const usernames = new Set();
+    const members = [];
+    for (const { id, kind, holder } of heldLeases.values()) {
+        if (!TERMINAL_WRITER_KINDS.includes(kind)) continue;
+        members.push(`${id}:${kind}:${holder.username ?? ''}`);
+        if (holder.username) usernames.add(holder.username);
+        if (holder.detachedUntil !== null && holder.detachedUntil > now) {
+            detached += 1;
+            detachedClosesAt = Math.max(detachedClosesAt ?? 0, holder.detachedUntil);
+        } else {
+            attached += 1;
+        }
+    }
+    return {
+        count: attached + detached, attached, detached, usernames: [...usernames].sort(), detachedClosesAt,
+        snapshot: terminalSnapshot(members),
+    };
+}
+
+/**
+ * Acquire the shared source-update reader lease for an application writer.
+ *
+ * `options.holder` ({ username }) labels the lease for summarizeOpenTerminals;
+ * it never reaches the gate.
+ */
 export function acquireApplicationWriterLease(kind, options = {}) {
+    const { holder, ...gateOptions } = options;
     const current = writerContext.getStore();
     if (current?.held) return Promise.resolve(retainContext(current));
     applicationGate ||= createUpdateMaintenanceGate({ projectPath: path.resolve(APP_ROOT) });
-    return applicationGate.acquireWriterLease({ kind, ...options });
+    return Promise.resolve(applicationGate.acquireWriterLease({ kind, ...gateOptions }))
+        .then((lease) => trackLease(kind, lease, holder));
 }
 
 /** Keep a local writer admitted through its entire async operation, including nested dispatch. */

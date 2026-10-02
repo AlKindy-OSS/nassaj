@@ -49,7 +49,7 @@ import { readOidPairServingReceipt, reconcileOidPairServingReceipt, validateOidP
 import { computeOidTripleTargetDigest } from '../../scripts/lib/oid-triple-target.mjs';
 import { tryCommonGitDir } from '../../scripts/git-control-root.mjs';
 import { hasCurrentUpdateConsent } from '../services/update-auto-activator.js';
-import { withLocalUpdateWriterLease } from '../services/update-writer-lease.js';
+import { summarizeOpenTerminals, withLocalUpdateWriterLease } from '../services/update-writer-lease.js';
 import { createRateLimiter } from '../middleware/rate-limit.js';
 import { requireRole, roleSatisfies } from '../middleware/auth.js';
 import { appConfigDb, auditLogDb, pendingServerActionsDb, projectsDb, sourceUpdateJobsDb, RESTART_DEFERRAL_REASON_CODES } from '../modules/database/index.js';
@@ -294,6 +294,12 @@ export function setServerCandidateInspectorForTests(inspector) {
     inspectActionServerCandidate = inspector || inspectServerActivationCandidate;
 }
 
+let resolveSourceUpdateActivation = (row) => findSourceUpdateActivation(row);
+/** Test seam for the route's source-activation lookup (B-1448); production never replaces it. */
+export function setSourceUpdateActivationResolverForTests(resolver) {
+    resolveSourceUpdateActivation = resolver || ((row) => findSourceUpdateActivation(row));
+}
+
 let planSourceActivation = planSourceManifest;
 /** Test seam for the pre-gate source plan (H1); production never replaces it. */
 export function setSourcePlannerForTests(planner) {
@@ -445,6 +451,39 @@ export function findSourceUpdateActivation(row, projectRoot = APP_ROOT) {
     if (crypto.createHash('sha256').update(raw.toString('utf8').trim()).digest('hex') !== row.activationIdentitySha256) return null;
     const action = readCanonicalSourceUpdateAction(actionFile, candidateRoot, expectedServerBuildId);
     return action && action.targetCommit === row.releaseCommit ? { action, maintenance } : null;
+}
+
+/**
+ * B-1448: the activation refusals that mean "not now" for a job that is still
+ * queued. Only `update_lock_contended`: a writer (an open terminal, a turn)
+ * holds the activity lock and releases it unaided. NOT `update_maintenance_active`
+ * although the gate calls it deferrable for writers: raised by beginUpdate it
+ * means the journal is not OPEN, which includes MANUAL and RECOVERING, and those
+ * never heal without a person.
+ */
+export const SOURCE_ACTIVATION_DEFERRABLE_CODES = Object.freeze(['update_lock_contended']);
+
+/** A reason code safe to put on the wire: bounded, lowercase, no path or free text. */
+const BOUNDED_REASON_CODE = /^[a-z][a-z0-9_]{0,63}$/;
+
+/** The code an activation error carries, or null when it is not a bounded code. */
+function boundedActivationReason(error) {
+    const code = typeof error?.code === 'string' && error.code ? error.code : error?.message;
+    return typeof code === 'string' && BOUNDED_REASON_CODE.test(code) ? code : null;
+}
+
+/**
+ * Whether a failed activation is a deferral: the error class is deferrable AND
+ * the job is back in (or never left) `restart_queued`. Keyed on the job state,
+ * not on which branch threw, so the release-layout path (beginUpdate before the
+ * job is claimed) and the git path (claimed, then returned) defer alike.
+ */
+function sourceActivationDeferral(error, row) {
+    const code = boundedActivationReason(error);
+    if (!code || !SOURCE_ACTIVATION_DEFERRABLE_CODES.includes(code)) return null;
+    let job = null;
+    try { job = sourceUpdateJobsDb.getById(row.sourceUpdateJobId); } catch { job = null; }
+    return job?.state === 'restart_queued' ? code : null;
 }
 
 /**
@@ -715,10 +754,18 @@ export async function executeSourceUpdateActivation(row, resolved) {
         return Object.freeze({ action, update, validation, handoff, rollback });
     } catch (error) {
         if (!update) {
+            // B-1448: a contended activity lock (an open terminal, a running
+            // turn) is "not now". The gate never closed, so the job returns to
+            // restart_queued with NO receipt: the consent clock is not reset and
+            // the caller defers. A failed CAS back falls through to `failed`.
+            if (SOURCE_ACTIVATION_DEFERRABLE_CODES.includes(activationErrorCode(error))
+                && sourceUpdateJobsDb.transitionActivation(activationJobIdentity, ['activating'], 'restart_queued')) {
+                throw error;
+            }
             // Pre-gate failure (qa-critic C2): beginUpdate refused — degraded
-            // source state, a closed gate, a contended lock — so the gate never
-            // closed for this transaction and nothing was written. The job ends
-            // `failed` with the reason instead of sitting in `activating` forever.
+            // source state, a closed gate — so the gate never closed for this
+            // transaction and nothing was written. The job ends `failed` with the
+            // reason instead of sitting in `activating` forever.
             recordActivationFailure(activationErrorCode(error), 'rollback', null);
             sourceUpdateJobsDb.transitionActivation(activationJobIdentity, ['activating'], 'failed');
             throw error;
@@ -3158,7 +3205,7 @@ async function executeActionRow(req, res, { id }) {
         // Generation-bound restarts are revalidated after the durable claim.
         // Missing manifests and unknown/sensitive changes block fail-closed.
         const sourceUpdate = row.expectedServerBuildId
-            ? findSourceUpdateActivation(row)
+            ? resolveSourceUpdateActivation(row)
             : null;
         let serverCandidate = null;
         let localPair = null;
@@ -3223,6 +3270,28 @@ async function executeActionRow(req, res, { id }) {
             ), '--json'],
             args: [path.join('dist-server', 'scripts', 'safe-restart.sh'), '--exec'],
         } : action;
+
+        // (2.65) B-1448: an open terminal holds the update's activity lock, so
+        // activating now can only contend. Defer with the count (and who holds
+        // them) before any gate is spawned. Another member's terminal blocks too
+        // (owner decision); the owner sees whose it is.
+        if (sourceUpdate) {
+            const terminals = summarizeOpenTerminals();
+            if (terminals.count > 0) {
+                return replySourceActivationDeferred(req, res, row, {
+                    reasonCode: 'open_terminals',
+                    detail: `Open terminals (${terminals.count}); activation deferred`,
+                    extra: {
+                        openTerminals: terminals.count,
+                        attachedTerminals: terminals.attached,
+                        detachedTerminals: terminals.detached,
+                        detachedClosesAt: terminals.detachedClosesAt,
+                        terminalUsers: terminals.usernames,
+                        terminalSnapshot: terminals.snapshot,
+                    },
+                });
+            }
+        }
 
         // (2.7) Two-step confirmation contract (ADR-066, T-1677). An action with
         // requiresConfirmation:true (force-restart) must NEVER run while live chat
@@ -3403,12 +3472,23 @@ async function executeActionRow(req, res, { id }) {
             try {
                 sourceActivationContext = await executeSourceUpdateActivation(row, sourceUpdate);
             } catch (error) {
+                const deferredCode = sourceActivationDeferral(error, row);
+                if (deferredCode) {
+                    return replySourceActivationDeferred(req, res, row, {
+                        reasonCode: deferredCode,
+                        detail: 'Another operation holds the update lock; activation deferred',
+                    });
+                }
+                // B-1448: the bounded cause travels with the generic code, so the
+                // client and the activator log can name it instead of "unknown".
+                const reason = boundedActivationReason(error);
                 pendingServerActionsDb.markFailed(id, 'source_update_activation_failed');
-                recordActionOutcome(req, row, 'failed', { reason: 'source_update_activation_failed' });
+                recordActionOutcome(req, row, 'failed', { reason: 'source_update_activation_failed', cause: reason });
                 broadcastPendingActionsUpdated(req);
                 return res.status(500).json({
                     status: 'error', code: 'source_update_activation_failed',
                     detail: 'The governed source update could not be activated',
+                    ...(reason ? { reason } : {}),
                 });
             }
         } else if (row.expectedServerBuildId && !oidPreview && serverCandidate?.activationKind === 'maintenance') {
@@ -3790,6 +3870,24 @@ export async function executeActionRowAs({ id, user, wss = null, trigger }) {
     };
     await executeActionRow(req, res, { id });
     return reply;
+}
+
+/**
+ * B-1448: answer a source activation that must wait. The row returns to pending
+ * (the return value is checked: a generation fence or a duplicate queued row
+ * leaves it where it is, and the reply says so), the outcome is audited, and the
+ * reply uses the `200 deferred` contract the activator and command board read.
+ */
+function replySourceActivationDeferred(req, res, row, { reasonCode, detail, extra = {} }) {
+    const requeued = pendingServerActionsDb.resetToPending(row.id, reasonCode) === 1;
+    if (!requeued) {
+        console.warn(`[system] deferred source activation ${row.id} was not returned to the queue (${reasonCode})`);
+    }
+    recordActionOutcome(req, row, 'deferred', { reason: reasonCode, requeued, ...extra });
+    broadcastPendingActionsUpdated(req);
+    return res.status(200).json({
+        status: 'deferred', reasonCode, retryable: true, requeued, detail, ...extra,
+    });
 }
 
 // POST /api/system/pending/:id/execute — execute a QUEUED action by row id.

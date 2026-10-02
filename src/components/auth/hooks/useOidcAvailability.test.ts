@@ -21,8 +21,11 @@ const oidcMock = vi.hoisted(() => ({
   detectOidcAvailability: vi.fn<() => Promise<boolean>>(),
 }));
 
+// The hook reads the full SSO status; the boolean mock drives it.
 vi.mock('../oidc', () => ({
   detectOidcAvailability: oidcMock.detectOidcAvailability,
+  detectSsoStatus: () => oidcMock.detectOidcAvailability()
+    .then((value) => ({ loginAvailable: value, state: value ? 'active' : 'off' })),
 }));
 
 // IS_PLATFORM is a module-level constant; we control it per test via the mock.

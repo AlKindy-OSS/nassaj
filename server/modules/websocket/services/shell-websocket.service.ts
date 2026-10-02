@@ -60,7 +60,6 @@ type IsolationProvider =
   | 'cursor'
   | 'agy'
   | 'opencode'
-  | 'hermes'
   | 'kimi';
 
 /**
@@ -147,7 +146,6 @@ const PROVIDER_LOGIN_COMMAND_ALLOWLIST: ReadonlySet<string> = new Set([
   'codex login',
   'codex login --device-auth',
   'opencode auth login',
-  'hermes setup --portal',
   // Kimi (ADR-062): the native `@moonshot-ai/kimi-code` CLI authenticates either
   // by KIMI_API_KEY (injected by resolveProviderEnv from the per-user encrypted
   // store) or by an interactive device-code login, which has no headless form —
@@ -181,7 +179,6 @@ const PROVIDER_CANONICAL_LOGIN_COMMANDS: ReadonlyMap<string, ReadonlySet<string>
   ['cursor', new Set(['cursor-agent login'])],
   ['codex', new Set(['codex login', 'codex login --device-auth'])],
   ['opencode', new Set(['opencode auth login'])],
-  ['hermes', new Set(['hermes setup --portal'])],
   ['kimi', new Set(['kimi login'])],
   ['agy', new Set(['agy'])],
   ['antigravity', new Set(['agy'])],
@@ -296,7 +293,7 @@ type PtySessionEntry = {
   /** Owning registered project resolved at open (realpath-aware), ADR-172 qa م2. */
   projectId?: string | null;
   sessionId: string | null;
-  writerLease: { release(): void };
+  writerLease: ShellWriterLease;
   releaseHarnessLaunch?: () => void;
   managedClaudeSelector?: string;
 };
@@ -358,12 +355,40 @@ export function terminateShellSessionsForUser(userId: string | number): number {
   return ended;
 }
 
+/**
+ * B-1448 slice 2: ends EVERY /shell PTY of every user, attached or in its
+ * detached 30-minute tail, because the owner confirmed "close terminals and
+ * update". An attached socket first gets an error frame naming the reason; 4404
+ * is a final close for the shell client, so the tab does not auto-reconnect
+ * a fresh PTY that would hold the update back again. Returns PTYs ended.
+ */
+export function terminateAllShellSessionsForUpdate(): number {
+  let ended = 0;
+  for (const [key, entry] of [...ptySessionsMap]) {
+    if (entry.ws && entry.ws.readyState === WebSocket.OPEN) {
+      try {
+        entry.ws.send(JSON.stringify({
+          type: 'error',
+          code: 'update_terminals_closed',
+          message: 'The owner closed this terminal to install an update.',
+        }));
+      } catch { /* the close below still happens */ }
+    }
+    endShellSession(key, entry, 4404, 'update_terminals_closed');
+    ended += 1;
+  }
+  return ended;
+}
+
 /** Closes the socket, kills the PTY and releases everything it held. */
 function endShellSession(key: string, entry: PtySessionEntry, code: number, reason: string): void {
   ptySessionsMap.delete(key);
   if (entry.timeoutId) clearTimeout(entry.timeoutId);
   try { entry.ws?.close(code, reason); } catch { /* already closed */ }
   try { entry.pty.kill(); } catch { /* already exited */ }
+  // B-1448 M2: the ended entry leaves the map here, so its onExit finds no
+  // session and could not release the harness-launch reservation itself.
+  entry.releaseHarnessLaunch?.();
   revokeManagedClaudeTerminal(entry.managedClaudeSelector);
   entry.writerLease.release();
 }
@@ -394,8 +419,21 @@ const TERMINAL_UTF8_LOCALE = 'C.UTF-8';
  */
 const REQUIRE_PTY_USER = true;
 
+/**
+ * A PTY writer lease. `annotate` (B-1448) labels it for the updater's
+ * open-terminal count: who holds it and, once the socket closed, when the
+ * detached shell auto-closes. Optional so test fakes stay minimal.
+ */
+type ShellWriterLease = {
+  release(): void;
+  annotate?(patch: { detachedUntil?: number | null }): void;
+};
+
 type ShellWebSocketDependencies = {
-  acquireWriterLease: (kind: string) => { release(): void } | Promise<{ release(): void }>;
+  acquireWriterLease: (
+    kind: string,
+    holder?: { username: string | null },
+  ) => ShellWriterLease | Promise<ShellWriterLease>;
   getSessionById: (sessionId: string) => { cliSessionId?: string } | null | undefined;
   stripAnsiSequences: (content: string) => string;
   normalizeDetectedUrl: (url: string) => string | null;
@@ -470,7 +508,6 @@ const PTY_LOGIN_COMMAND_HARNESS: ReadonlyMap<string, HarnessBinaryId> = new Map(
   ['agy', 'antigravity'],
   ['cursor-agent', 'cursor'],
   ['opencode', 'opencode'],
-  ['hermes', 'hermes'],
   ['kimi', 'kimi'],
 ]);
 
@@ -752,9 +789,7 @@ function readIsolationProvider(provider: string): IsolationProvider {
   // resolveProviderEnv, NOT via CLAUDE_CONFIG_DIR. Falling through to the
   // 'claude' default made a non-owner's `opencode auth login` terminal write
   // auth.json under the SHARED operator tree (XDG untouched) instead of the
-  // user's isolated tree — the exact isolation bug this maps out. hermes has no
-  // per-user knob (auth in ~/.hermes, shared), so it must resolve to base env
-  // too rather than wrongly inherit claude's CLAUDE_CONFIG_DIR override.
+  // user's isolated tree — the exact isolation bug this maps out.
   // kimi (SL-5/ADR-062): the native CLI reads AND WRITES credential + session
   // state to disk under KIMI_CODE_HOME. Falling through to the 'claude' default
   // would hand an interactive `kimi login` the CLAUDE_CONFIG_DIR knob instead —
@@ -765,7 +800,6 @@ function readIsolationProvider(provider: string): IsolationProvider {
     || provider === 'codex'
     || provider === 'cursor'
     || provider === 'opencode'
-    || provider === 'hermes'
     || provider === 'kimi'
   ) {
     return provider;
@@ -809,6 +843,8 @@ export function handleShellConnection(
   // SEC-SHELL-ROLE: the JWT-verified role, read the same way the terminal
   // service reads it (verifyWebSocketClient stamps request.user).
   const userRole = (request?.user as { role?: string } | undefined)?.role ?? null;
+  // B-1448: labels this shell's writer lease so the updater can name who holds it.
+  const userName = (request?.user as { username?: string } | undefined)?.username ?? null;
 
   let shellProcess: IPty | null = null;
   let ptySessionKey: string | null = null;
@@ -854,7 +890,8 @@ export function handleShellConnection(
           (!!initialCommand && !hasSession) ||
           provider === 'plain-shell';
 
-        // T-1853: a deleted provider must never reach command construction or pty.spawn.
+        // T-1853/T-1953: a provider retired as a body must never reach command
+        // construction or pty.spawn — neither its PTY nor its login command.
         if (isRetiredProvider(provider)) {
           ws.send(JSON.stringify({
             type: 'error',
@@ -1025,6 +1062,7 @@ export function handleShellConnection(
           if (existingSession.timeoutId) {
             clearTimeout(existingSession.timeoutId);
           }
+          existingSession.writerLease.annotate?.({ detachedUntil: null });
 
           ws.send(
             JSON.stringify({
@@ -1169,10 +1207,18 @@ export function handleShellConnection(
           cwd: resolvedProjectPath,
         });
 
-        let writerLease: { release(): void };
+        let writerLease: ShellWriterLease;
         try {
-          const acquiredLease = dependencies.acquireWriterLease('managed-pty');
+          const acquiredLease = dependencies.acquireWriterLease('managed-pty', { username: userName });
           writerLease = acquiredLease instanceof Promise ? await acquiredLease : acquiredLease;
+          // B-1448 T5: the socket closed while the lease was awaited. Its close
+          // handler found no session to detach, so a PTY spawned now would have
+          // no socket and no kill timer — an orphan holding the update back.
+          if (ws.readyState !== WebSocket.OPEN) {
+            writerLease.release();
+            revokeManagedClaudeTerminal(broker?.selector);
+            return;
+          }
         } catch (leaseError) {
           // The denial used to be silent on BOTH ends: no server log and an
           // unlabelled frame, so a terminal that stayed blank had no
@@ -1337,13 +1383,18 @@ export function handleShellConnection(
           }
         });
 
+        // B-1448 M2: compare with THIS pty, not the connection's `shellProcess`,
+        // which a later spawn on the same socket reassigns; the old PTY's exit
+        // must never release or delete the newer session under the same key.
+        const exitingPty = shellProcess;
         shellProcess.onExit((exitCode) => {
           if (!ptySessionKey) {
             return;
           }
 
           const session = ptySessionsMap.get(ptySessionKey);
-          if (session && session.pty !== shellProcess) {
+          if (!session || session.pty !== exitingPty) {
+            if (shellProcess === exitingPty) shellProcess = null;
             return;
           }
 
@@ -1362,12 +1413,12 @@ export function handleShellConnection(
             clearTimeout(session.timeoutId);
           }
 
-          session?.writerLease.release();
-          session?.releaseHarnessLaunch?.();
-          revokeManagedClaudeTerminal(session?.managedClaudeSelector);
+          session.writerLease.release();
+          session.releaseHarnessLaunch?.();
+          revokeManagedClaudeTerminal(session.managedClaudeSelector);
 
           ptySessionsMap.delete(ptySessionKey);
-          shellProcess = null;
+          if (shellProcess === exitingPty) shellProcess = null;
         });
 
         // Same rule as the error frame: everything interpolated into a pane
@@ -1475,6 +1526,7 @@ export function handleShellConnection(
     }
 
     session.ws = null;
+    session.writerLease.annotate?.({ detachedUntil: Date.now() + PTY_SESSION_TIMEOUT });
     session.timeoutId = setTimeout(() => {
       if (ptySessionsMap.get(ptySessionKey as string) !== session) {
         return;

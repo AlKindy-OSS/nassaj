@@ -687,16 +687,13 @@ test('409 returns the winning tab active identity without replaying a stale swit
   assert.equal(deviceAccountSessionsDb.resolve(f.device.secret)?.principal.slotId, second.slotId);
 });
 
-/** T-1939: toggles a live OIDC config (oidcEnabled() reads env per call). */
-async function withOidcEnabled(enabled: boolean, run: () => Promise<void>) {
-  const saved = { enabled: process.env.OIDC_ENABLED, project: process.env.OIDC_ROLE_PROJECT_ID };
-  process.env.OIDC_ENABLED = enabled ? 'true' : 'false';
-  process.env.OIDC_ROLE_PROJECT_ID = 'proj-synth';
+/** T-1939 / ADR-194 D1: runs with legacy env present (no SSO row), i.e. the `paused` state. */
+async function withLegacyOidcEnv(run: () => Promise<void>) {
+  const saved = process.env.OIDC_ENABLED;
+  process.env.OIDC_ENABLED = 'true';
   try { await run(); } finally {
-    for (const [key, value] of [['OIDC_ENABLED', saved.enabled], ['OIDC_ROLE_PROJECT_ID', saved.project]] as const) {
-      if (value === undefined) delete process.env[key];
-      else process.env[key] = value;
-    }
+    if (saved === undefined) delete process.env.OIDC_ENABLED;
+    else process.env.OIDC_ENABLED = saved;
   }
 }
 
@@ -711,7 +708,7 @@ test('T-1939: with SSO live a linked member is refused on password login and wal
     body: JSON.stringify({ username, password: 'correct horse battery staple' }),
   });
 
-  await withOidcEnabled(true, async () => {
+  await withLegacyOidcEnv(async () => {
     const refused = await loginAs(f.email);
     assert.equal(refused.status, 403, 'never 401: the SPA must not read it as a lost session');
     assert.equal((await refused.json()).code, 'sso_required');
@@ -735,12 +732,21 @@ test('T-1939: with SSO live a linked member is refused on password login and wal
     assert.equal(ownerLogin.status, 200, 'the owner stays local (break-glass) even when linked');
   });
 
-  await withOidcEnabled(false, async () => {
-    // /login shares one IP limiter with the rest of this file, so the OIDC-off
-    // password path is asserted in auth.sso-only.test.ts; wallet add here.
-    const added = await f.mutate('/accounts/add', 'add', {
-      email: f.email, password: 'correct horse battery staple', expectedGeneration: 1,
-    });
-    assert.equal(added.status, 201, 'OIDC off: a linked account is added with its password as before');
+  // ADR-194 D1: without any env the non-owner link alone keeps the policy on.
+  const stillRefused = await f.mutate('/accounts/add', 'add', {
+    email: f.email, password: 'correct horse battery staple', expectedGeneration: 1,
   });
+  assert.equal(stillRefused.status, 403, 'a non-owner link enforces SSO with no row and no env');
+  assert.equal((await stillRefused.json()).code, 'sso_required');
+
+  // Only the owner's explicit disable lifts it. /login shares one IP limiter
+  // with the rest of this file, so the password path is asserted in
+  // auth.sso-only.test.ts; wallet add here.
+  const { disableSso } = await import('../services/sso-lifecycle.service.js');
+  const disabled = disableSso({ actorUserId: f.device.principal.userId, afterCommit: () => {} });
+  assert.equal(disabled.linkedRevoked, 1, 'the linked member is revoked; the linked owner is not');
+  const added = await f.mutate('/accounts/add', 'add', {
+    email: f.email, password: 'correct horse battery staple', expectedGeneration: 1,
+  });
+  assert.equal(added.status, 201, 'SSO disabled: a linked account is added with its password as before');
 });

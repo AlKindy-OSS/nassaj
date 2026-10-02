@@ -2,15 +2,15 @@
  * اختبارات المُستخرِجات المبنيّة على قواعد SQLite.
  *
  * **الـfixtures هنا ليست مخترَعة**: جُملة `CREATE TABLE` منسوخة حرفياً من
- * `sqlite_master` في القاعدتين الحيّتين على هذا الجهاز
- * (‏`~/.local/share/opencode/opencode.db` و`~/.hermes/state.db`، 2026-07-28)،
+ * `sqlite_master` في القاعدة الحيّة على هذا الجهاز
+ * (‏`~/.local/share/opencode/opencode.db`، 2026-07-28)،
  * والصفوف المُدرَجة صفوف حقيقية بقيمها كما هي — بما فيها `cost = 0` المضلّل،
  * ونموذج `opencode/big-pickle` الذي لا سعر رسمي له. الدرس مدفوع الثمن في هذا
  * المستودع: اختبار أخضر على fixture مصطنع لا يقول شيئاً عن الإنتاج.
  *
- * وما أُنشئ منها إنشاءً — جلسةٌ ابنة (‏`parent_id`) وصفّ Hermes بتوكنز تفكير
- * غير صفرية — مُعلَّم في موضعه: البنية حقيقية والقيمة مبنيّة، لأن هذا الجهاز
- * لا يحمل نظيرها بعد ولا يجوز أن تبقى القاعدة بلا اختبار.
+ * وما أُنشئ منها إنشاءً — جلسةٌ ابنة (‏`parent_id`) — مُعلَّم في موضعه: البنية
+ * حقيقية والقيمة مبنيّة، لأن هذا الجهاز لا يحمل نظيرها بعد ولا يجوز أن تبقى
+ * القاعدة بلا اختبار.
  */
 
 import assert from 'node:assert/strict';
@@ -22,7 +22,6 @@ import test from 'node:test';
 import Database from 'better-sqlite3';
 
 import {
-  collectHermesCycleUsage,
   collectOpenCodeCycleUsage,
   databaseSignature,
   extractOpenCodeSessionUsage,
@@ -73,43 +72,6 @@ const OPENCODE_MESSAGE_DDL = `CREATE TABLE \`message\` (
           \`time_updated\` integer NOT NULL,
           \`data\` text NOT NULL
         )`;
-
-/** ‏`select sql from sqlite_master where name='sessions'` على state.db. */
-const HERMES_SESSIONS_DDL = `CREATE TABLE sessions (
-    id TEXT PRIMARY KEY,
-    source TEXT NOT NULL,
-    user_id TEXT,
-    model TEXT,
-    model_config TEXT,
-    system_prompt TEXT,
-    parent_session_id TEXT,
-    started_at REAL NOT NULL,
-    ended_at REAL,
-    end_reason TEXT,
-    message_count INTEGER DEFAULT 0,
-    tool_call_count INTEGER DEFAULT 0,
-    input_tokens INTEGER DEFAULT 0,
-    output_tokens INTEGER DEFAULT 0,
-    cache_read_tokens INTEGER DEFAULT 0,
-    cache_write_tokens INTEGER DEFAULT 0,
-    reasoning_tokens INTEGER DEFAULT 0,
-    cwd TEXT,
-    billing_provider TEXT,
-    billing_base_url TEXT,
-    billing_mode TEXT,
-    estimated_cost_usd REAL,
-    actual_cost_usd REAL,
-    cost_status TEXT,
-    cost_source TEXT,
-    pricing_version TEXT,
-    title TEXT,
-    api_call_count INTEGER DEFAULT 0,
-    handoff_state TEXT,
-    handoff_platform TEXT,
-    handoff_error TEXT,
-    rewind_count INTEGER NOT NULL DEFAULT 0,
-    archived INTEGER NOT NULL DEFAULT 0
-)`;
 
 // ---------------------------------------------------------------------------
 // صفوف حقيقية
@@ -234,65 +196,6 @@ function buildOpenCodeDatabase(
     insertMessage.run(row[0], row[1], row[2], row[2], row[3]);
   }
 
-  db.close();
-}
-
-type HermesRow = {
-  id: string;
-  model: string | null;
-  startedAt: number;
-  input: number;
-  output: number;
-  cacheRead: number;
-  cacheWrite: number;
-  reasoning: number;
-};
-
-/** صفوف Hermes الحقيقية (بقيمها كما هي، وكلها `reasoning_tokens = 0`). */
-const HERMES_ROWS: HermesRow[] = [
-  {
-    id: '20260624_193817_89d4c2',
-    model: 'stepfun/step-3.7-flash:free',
-    startedAt: 1782319098.5122657,
-    input: 13880,
-    output: 28,
-    cacheRead: 2688,
-    cacheWrite: 0,
-    reasoning: 0,
-  },
-  {
-    id: '20260625_125816_50fe7e',
-    model: 'stepfun/step-3.7-flash:free',
-    startedAt: 1782381497.7637446,
-    input: 15668,
-    output: 38,
-    cacheRead: 896,
-    cacheWrite: 0,
-    reasoning: 0,
-  },
-  {
-    id: '20260627_123406_4750ef',
-    model: 'nous/glm-5.2',
-    startedAt: 1782552848.306589,
-    input: 0,
-    output: 0,
-    cacheRead: 0,
-    cacheWrite: 0,
-    reasoning: 0,
-  },
-];
-
-function buildHermesDatabase(file: string, extraRows: HermesRow[] = []): void {
-  const db = new Database(file);
-  db.exec(HERMES_SESSIONS_DDL);
-  const insert = db.prepare(
-    `INSERT INTO sessions (id, source, model, started_at, input_tokens, output_tokens,
-                           cache_read_tokens, cache_write_tokens, reasoning_tokens)
-     VALUES (?, 'cli', ?, ?, ?, ?, ?, ?, ?)`,
-  );
-  for (const row of [...HERMES_ROWS, ...extraRows]) {
-    insert.run(row.id, row.model, row.startedAt, row.input, row.output, row.cacheRead, row.cacheWrite, row.reasoning);
-  }
   db.close();
 }
 
@@ -530,88 +433,6 @@ test('قاعدة opencode غائبة تعود «غير متاح» لا مجمو�
     const outcome = collectOpenCodeCycleUsage(path.join(root, 'absent.db'), { since: 0 });
     assert.equal(outcome.available, false);
     assert.ok(!outcome.available && outcome.reason.includes('absent.db'));
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Hermes
-// ---------------------------------------------------------------------------
-
-test('دورة Hermes: صفوف حقيقية، والنسبة بطابع `started_at` بالثواني', async () => {
-  await withTempDir(async (root) => {
-    const file = path.join(root, 'state.db');
-    buildHermesDatabase(file);
-
-    const all = collectHermesCycleUsage(file, { since: 0 });
-    assert.ok(all.available);
-    // الصفّ الثالث بلا استهلاك إطلاقاً ⇒ لا يُعدّ محادثةً مساهِمة.
-    assert.equal(all.sessions.length, 2);
-    const [first] = all.sessions;
-    assert.equal(first.provider, 'hermes');
-    assert.equal(first.perModel[0].model, 'stepfun/step-3.7-flash:free');
-    assert.deepEqual(first.perModel[0].totals, {
-      input: 13880,
-      output: 28,
-      cacheWrite5m: 0,
-      cacheWrite1h: 0,
-      cacheRead: 2688,
-    });
-
-    // النافذة: `started_at` ثوانٍ عشرية ⇒ تُضرب في ألف قبل المقارنة.
-    const secondOnly = collectHermesCycleUsage(file, { since: 1782381497.7 * 1000 });
-    assert.ok(secondOnly.available);
-    assert.equal(secondOnly.sessions.length, 1);
-    assert.equal(secondOnly.sessions[0].perModel[0].totals.input, 15668);
-
-    const none = collectHermesCycleUsage(file, { since: 0, until: 1782319098 * 1000 });
-    assert.ok(none.available);
-    assert.deepEqual(none.sessions, []);
-  });
-});
-
-test('تفكير Hermes جزءٌ من مخرجاته فلا يُضاف إليها', async () => {
-  await withTempDir(async (root) => {
-    const file = path.join(root, 'state.db');
-    // القيمة مبنيّة هنا (كل صفوف هذا الجهاز `reasoning_tokens = 0`)، والقاعدة
-    // مأخوذة من كود Hermes نفسه: `output_tokens_details.reasoning_tokens`
-    // بدلالة OpenAI جزءٌ من `output_tokens`، وتسعير Hermes لا يضيفه.
-    buildHermesDatabase(file, [
-      {
-        id: '20260627_150000_aaaaaa',
-        model: 'nous/glm-5.2',
-        startedAt: 1782561600,
-        input: 1000,
-        output: 500,
-        cacheRead: 200,
-        cacheWrite: 100,
-        reasoning: 400,
-      },
-    ]);
-
-    const outcome = collectHermesCycleUsage(file, { since: 1782561000 * 1000 });
-    assert.ok(outcome.available);
-    assert.equal(outcome.sessions.length, 1);
-    assert.deepEqual(outcome.sessions[0].perModel[0].totals, {
-      input: 1000,
-      output: 500,
-      cacheWrite5m: 100,
-      cacheWrite1h: 0,
-      cacheRead: 200,
-    });
-
-    // وبادئة الحامل تسقط عند المطابقة فيُسعَّر النموذج الأصلي.
-    const { calculateSessionCost } = await import('@/modules/providers/services/cost/cost-calculator.js');
-    const cost = calculateSessionCost(outcome.sessions[0]);
-    assert.equal(cost.perModel[0].model, 'nous/glm-5.2');
-    assert.ok((cost.perModel[0].costUsd ?? 0) > 0, 'glm-5.2 مُسعَّر رغم بادئة الحامل');
-  });
-});
-
-test('قاعدة Hermes غائبة: سببٌ مكتوب لا صفر', async () => {
-  await withTempDir(async (root) => {
-    const outcome = collectHermesCycleUsage(path.join(root, 'state.db'), { since: 0 });
-    assert.equal(outcome.available, false);
-    assert.ok(!outcome.available && /Hermes/.test(outcome.reason));
   });
 });
 

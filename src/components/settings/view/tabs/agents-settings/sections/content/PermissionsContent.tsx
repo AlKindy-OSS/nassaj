@@ -57,21 +57,6 @@ const COMMON_CLAUDE_TOOLS = [
   'WebSearch',
 ];
 
-const COMMON_CURSOR_COMMANDS = [
-  'Shell(ls)',
-  'Shell(mkdir)',
-  'Shell(cd)',
-  'Shell(cat)',
-  'Shell(echo)',
-  'Shell(git status)',
-  'Shell(git diff)',
-  'Shell(git log)',
-  'Shell(npm install)',
-  'Shell(npm run)',
-  'Shell(python)',
-  'Shell(node)',
-];
-
 const addUnique = (items: string[], value: string): string[] => {
   const normalizedValue = value.trim();
   if (!normalizedValue || items.includes(normalizedValue)) {
@@ -363,137 +348,6 @@ function SkipPermissionsWarning() {
   );
 }
 
-type CursorPermissionsProps = {
-  agent: 'cursor';
-  skipPermissions: boolean;
-  onSkipPermissionsChange: (value: boolean) => void;
-  allowedCommands: string[];
-  onAllowedCommandsChange: (value: string[]) => void;
-  disallowedCommands: string[];
-  onDisallowedCommandsChange: (value: string[]) => void;
-};
-
-function CursorPermissions({
-  skipPermissions,
-  onSkipPermissionsChange,
-  allowedCommands,
-  onAllowedCommandsChange,
-  disallowedCommands,
-  onDisallowedCommandsChange,
-}: Omit<CursorPermissionsProps, 'agent'>) {
-  const { t } = useTranslation('settings');
-  const [newAllowedCommand, setNewAllowedCommand] = useState('');
-  const [newDisallowedCommand, setNewDisallowedCommand] = useState('');
-
-  const handleAddAllowedCommand = (command: string) => {
-    const updated = addUnique(allowedCommands, command);
-    if (updated.length === allowedCommands.length) {
-      return;
-    }
-
-    onAllowedCommandsChange(updated);
-    setNewAllowedCommand('');
-  };
-
-  const handleAddDisallowedCommand = (command: string) => {
-    const updated = addUnique(disallowedCommands, command);
-    if (updated.length === disallowedCommands.length) {
-      return;
-    }
-
-    onDisallowedCommandsChange(updated);
-    setNewDisallowedCommand('');
-  };
-
-  const removeLabel = t('permissions.actions.remove');
-
-  return (
-    <div className="space-y-8">
-      <SettingsSection icon={ShieldAlert} tone="warning" title={t('permissions.title')}>
-        <SettingsGroup>
-          <SettingsRow
-            label={t('permissions.skipPermissions.label')}
-            description={t('permissions.skipPermissions.cursorDescription')}
-          >
-            <SettingsToggle
-              checked={skipPermissions}
-              onChange={onSkipPermissionsChange}
-              ariaLabel={t('permissions.skipPermissions.label')}
-            />
-          </SettingsRow>
-        </SettingsGroup>
-
-        {skipPermissions && <SkipPermissionsWarning />}
-      </SettingsSection>
-
-      <SettingsSection
-        icon={ShieldCheck}
-        tone="success"
-        title={t('permissions.allowedCommands.title')}
-        description={t('permissions.allowedCommands.description')}
-        boxed
-      >
-        <FieldWithAction
-          id="cursor-allowed-command"
-          technical
-          label={t('permissions.allowedCommands.addLabel')}
-          value={newAllowedCommand}
-          onChange={setNewAllowedCommand}
-          onSubmit={() => handleAddAllowedCommand(newAllowedCommand)}
-          actionLabel={t('permissions.actions.add')}
-          placeholder={t('permissions.allowedCommands.placeholder')}
-        />
-        <QuickAdd
-          label={t('permissions.allowedCommands.quickAdd')}
-          items={COMMON_CURSOR_COMMANDS}
-          isAdded={(command) => allowedCommands.includes(command)}
-          onAdd={handleAddAllowedCommand}
-        />
-        <PatternList
-          items={allowedCommands}
-          onRemove={(command) => onAllowedCommandsChange(removeValue(allowedCommands, command))}
-          emptyLabel={t('permissions.allowedCommands.empty')}
-          removeLabel={removeLabel}
-        />
-      </SettingsSection>
-
-      <SettingsSection
-        icon={ShieldX}
-        tone="danger"
-        title={t('permissions.blockedCommands.title')}
-        description={t('permissions.blockedCommands.description')}
-        boxed
-      >
-        <FieldWithAction
-          id="cursor-blocked-command"
-          technical
-          label={t('permissions.blockedCommands.addLabel')}
-          value={newDisallowedCommand}
-          onChange={setNewDisallowedCommand}
-          onSubmit={() => handleAddDisallowedCommand(newDisallowedCommand)}
-          actionLabel={t('permissions.actions.add')}
-          placeholder={t('permissions.blockedCommands.placeholder')}
-        />
-        <PatternList
-          items={disallowedCommands}
-          onRemove={(command) => onDisallowedCommandsChange(removeValue(disallowedCommands, command))}
-          emptyLabel={t('permissions.blockedCommands.empty')}
-          removeLabel={removeLabel}
-        />
-      </SettingsSection>
-
-      <SettingsCollapsible summary={t('permissions.shellExamples.title')}>
-        <ul className="space-y-1">
-          <li><PatternSample value='"Shell(ls)"' /> {t('permissions.shellExamples.ls')}</li>
-          <li><PatternSample value='"Shell(git status)"' /> {t('permissions.shellExamples.gitStatus')}</li>
-          <li><PatternSample value='"Shell(npm install)"' /> {t('permissions.shellExamples.npmInstall')}</li>
-          <li><PatternSample value='"Shell(rm -rf)"' /> {t('permissions.shellExamples.rmRf')}</li>
-        </ul>
-      </SettingsCollapsible>
-    </div>
-  );
-}
-
 /**
  * وصفُ الوضع المحدَّد، تحت المنتقي مباشرة.
  *
@@ -663,17 +517,12 @@ function AntigravityPermissions() {
 
 type PermissionsContentProps =
   | ClaudePermissionsProps
-  | CursorPermissionsProps
   | CodexPermissionsProps
   | AntigravityPermissionsProps;
 
 export default function PermissionsContent(props: PermissionsContentProps) {
   if (props.agent === 'claude') {
     return <ClaudePermissions {...props} />;
-  }
-
-  if (props.agent === 'cursor') {
-    return <CursorPermissions {...props} />;
   }
 
   if (props.agent === 'antigravity') {

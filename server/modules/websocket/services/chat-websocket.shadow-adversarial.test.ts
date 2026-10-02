@@ -69,7 +69,6 @@ function dependencies(input: {
     spawnCursor: unused,
     spawnAntigravity: unused,
     spawnOpenCode: unused,
-    spawnHermes: unused,
     spawnKimi: unused,
     spawnDeepSeek: unused,
     spawnGlm: unused,

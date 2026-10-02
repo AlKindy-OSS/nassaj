@@ -427,6 +427,12 @@ test('missing, invalid, and production-loopback origins are skipped with a block
     { NASSAJ_CONNECTOR_AUTO_SETUP: '1' },
     { NASSAJ_CONNECTOR_AUTO_SETUP: '1', NASSAJ_PUBLIC_ORIGIN: 'not-a-url' },
     { NASSAJ_CONNECTOR_AUTO_SETUP: '1', NASSAJ_PUBLIC_ORIGIN: 'https://localhost', NODE_ENV: 'production' },
+    // B-1461 L1: same rules as the setup proposal — padded values are invalid, not trimmed,
+    // and no other config source (OIDC / WebAuthn) is ever adopted here.
+    { NASSAJ_CONNECTOR_AUTO_SETUP: '1', NASSAJ_PUBLIC_ORIGIN: ` ${VALID_ORIGIN} ` },
+    { NASSAJ_CONNECTOR_AUTO_SETUP: '1', NASSAJ_PUBLIC_ORIGIN: `${VALID_ORIGIN}\n` },
+    { NASSAJ_CONNECTOR_AUTO_SETUP: '1', OIDC_ENABLED: 'true', OIDC_REDIRECT_URI: `${VALID_ORIGIN}/cb`,
+      WEBAUTHN_ORIGIN: VALID_ORIGIN },
   ]) {
     const h = harness();
     try {

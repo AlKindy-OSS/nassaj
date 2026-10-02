@@ -393,12 +393,10 @@
     "providerInfo": {
       "anthropic": "Anthropic製",
       "openai": "OpenAI製",
-      "cursorEditor": "AIコードエディタ",
       "google": "Google製"
     },
     "readyPrompt": {
       "claude": "{{model}}でClaudeを使用する準備ができました。下にメッセージを入力してください。",
-      "cursor": "{{model}}でCursorを使用する準備ができました。下にメッセージを入力してください。",
       "codex": "{{model}}でCodexを使用する準備ができました。下にメッセージを入力してください。",
       "antigravity": "Antigravity (agy) を {{model}} で使用する準備ができました。下にメッセージを入力してください。",
       "opencode": "{{model}}でOpenCodeを使用する準備ができました。下にメッセージを入力してください。",
@@ -568,6 +566,9 @@
     "turns_other": "{{count}} ターン",
     "harnessLine": "ハーネス: {{harness}}",
     "olderModels_other": "以前のモデル {{count}} 件"
+  },
+  "composer": {
+    "replyInProgress": "エージェントが現在応答中です。応答が終わるまで待つか、停止してからメッセージを送信してください。"
   },
   "ws": {
     "statusConnected": "接続済み",

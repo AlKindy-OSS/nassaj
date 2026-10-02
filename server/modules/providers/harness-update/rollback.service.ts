@@ -49,8 +49,8 @@ import { resumeStoreRestore, storeCheckPaths } from './snapshot/store-backup.js'
 import { resolveDescriptorBinary, resolveSnapshotRuntime, type SnapshotRuntime } from './snapshot-runtime.js';
 import {
   assertNotRecoveryBlocked,
-  hasLiveHarnessSession,
   holdHarness,
+  liveSessionBlocker,
   skippedLiveSessionJob,
   startSnapshotJob,
   type HarnessHold,
@@ -152,9 +152,10 @@ export async function startManualRollback(req: ManualRollbackRequest, perCall: P
   const hold = holdHarness(rt, d.id, trackingId);
   try {
     assertNotRecoveryBlocked(rt, d.id);
-    if (await hasLiveHarnessSession(rt, d)) {
+    const blocker = await liveSessionBlocker(rt, d);
+    if (blocker) {
       hold.release();
-      return skippedLiveSessionJob(rt, d, trackingId, req.userId, 'manual');
+      return skippedLiveSessionJob(rt, d, trackingId, req.userId, 'manual', blocker);
     }
     if (scope === 'binary+data' && target.m.stores) rt.assertNoHolders(storeCheckPaths(target.m.stores));
     return beginManualRestore(rt, d, { ...target, scope, trackingId, hold, userId: req.userId });

@@ -1,3 +1,121 @@
+## 2.3.0.13 — 2026-09-30
+
+**تحذير قبل الترقية:** هذه القفزة (من 2.3.0.12 إلى 2.3.0.13) تُنفَّذ بمحدِّث 2.3.0.12 القديم، فعيب
+طرفية مفتوحة تُفشل التحديث ما زال حاضراً فيها بالذات. أغلق كل الطرفيات وتبويبات Shell المفتوحة على
+هذه العقدة، على أجهزة كل الأعضاء، قبل الضغط على تحديث.
+
+**Warning before updating:** this hop (2.3.0.12 → 2.3.0.13) runs the old 2.3.0.12 updater, so the
+open-terminal update failure this release fixes is still live for this hop specifically. Close every
+open terminal and Shell tab on this node, on every member's device, before pressing update.
+
+طرفية أو تبويب Shell مفتوح كان يُفشل تحديث النظام بخطأ عام بعد إغلاق البوابة 30 ثانية ثم إيقاف
+المحاولة التلقائية حتى تأكيد المالك؛ صار الآن يؤجَّل التحديث ويُعرض عدد الطرفيات المفتوحة (وأصحابها
+للمالك) بدل الفشل، مع أخذ قفل النشاط قبل إغلاق البوابة (انتظار ثانية واحدة)، وتراجع أُسّي للمحاولات
+المتكرّرة (30 ثانية حتى 10 دقائق) (B-1448).
+
+An open terminal or Shell tab used to fail an update with a generic error, after a 30 s gate closure,
+then stop auto-activation until the owner re-confirmed. The update now defers instead, showing the
+open-terminal count (and, to the owner, who holds them), takes the activity lock before closing the
+gate (1 s wait), and backs off exponentially on repeated contention (30 s up to 10 min) (B-1448).
+See ADR-190. The 2.3.0.12 → 2.3.0.13 hop above is the one unprotected case.
+
+وصار للمالك زرّ «أغلق N طرفية وحدّث» يعرض أصحاب الطرفيات ويطلب تأكيداً، ولا يعمل إلا حين تكون الطرفيات
+وحدها ما يؤخّر التحديث؛ الطرفيات المغلقة تُحذف مع مخرجاتها، ويُبلَّغ أصحابها بالسبب (B-1448).
+
+The owner now has a "Close N terminals and update" button. It lists who holds them, asks for
+confirmation, and only acts when terminals are the sole thing holding the update. Closed terminals
+are deleted with their output, and their users are told why (B-1448).
+
+شريط توجيه الدور («Steer») كان يبقى ظاهراً بعد انتهاء الدور فعلياً؛ يختفي الآن مع انتهاء الدور (B-1449).
+وزرّ الإرسال لأمر ‎/steer‎ صار قابلاً للنقر على اللمس أثناء دورك الجاري، لا لوحة المفاتيح فقط (B-1450).
+
+The steer status strip used to stay visible after a turn had actually ended; it now clears with the
+turn (B-1449). The `/steer` send button is now tappable during your own running turn, not just
+reachable from the keyboard (B-1450).
+
+تقاعد أربعة أجساد دردشة لا تحمل محوراً آخر: cursor، hermes، qwen، kimi (ADR-192). التغييرات: `POST
+/api/agent`‎ وتوليد رسالة الـcommit و‎/api/cursor/*‎ تُرفض بـ400؛ عميل kimi الأصلي وخلايا المشرف
+المستضافة له غير قابلة للوصول؛ ‎active-model‎ يرجع 400 لمحادثة تابعة لجسد متقاعد؛ تسجيل الدخول لهذه
+الأجساد غاب من الواجهة؛ قياس تكلفة/استهلاك Hermes توقّف (T-1953).
+
+Retired four chat bodies with no other axis: cursor, hermes, qwen, kimi (ADR-192). Changes: `POST
+/api/agent`, generate-commit-message, and `/api/cursor/*` now refuse with 400; the native kimi agent
+and its supervisor's hosted cells are unreachable; `active-model` returns 400 for a conversation
+belonging to a retired body; the logins for these bodies are gone from the UI; Hermes cost/usage
+metering has stopped (T-1953).
+
+كان محدِّث الأجساد يرفض تشغيلاً طبيعياً بخطأ «تعذّر إثبات عزل المخزن» زوراً؛ صار يميّز الآن بين «المخزن
+قيد الاستخدام» و«تعذّر إثبات الوصول» فعلاً (B-1468، لجنات 8b010cc4c و492db32a7).
+
+The harness updater used to falsely refuse a normal session with "store access unprovable"; it now
+tells "store in use" apart from a genuine "access unprovable" (B-1468, commits 8b010cc4c and
+492db32a7).
+
+صور المساعد المضمَّنة صارت تعمل على عُقَد umask-002 (مجلدات 775 مملوكة لمجموعة خاصة مُبرهَنة) (B-1471،
+لجنة d0ed4b16c).
+
+Assistant inline images now work on umask-002 hosts (775 dirs owned by a proven private group)
+(B-1471, commit d0ed4b16c).
+
+رسالتك الأولى في جلسة جديدة تماماً كانت قد تختفي بعد إرسالها بسبب إعادة تركيب واجهة الدردشة عند أول
+انتقال لمسارها؛ أُصلح (B-1469). إرسال رسالة أثناء ردّ جارٍ لم يعد يُسقَط بصمت؛ يبقى نصّك مع ملاحظة
+لإيقاف الدور أولاً.
+
+Your first message in a brand-new conversation could vanish after sending because the chat view
+remounted on the first navigation into that session; fixed (B-1469). Sending while a reply runs is
+no longer silently dropped; your text stays with a hint to stop the run first.
+
+توجيه الدور («Steer») كان يتعطّل من الدور الثاني فصاعداً بسبب حالة قديمة متبقية؛ أُصلح (B-1470)، وشرحه
+الثابت صار تلميحاً عند التحويم بدل سطر دائم (T-1956).
+
+`/steer` used to stop working from the second turn onward due to a stale leftover status; fixed
+(B-1470), and its permanent explanation is now a hover tooltip (T-1956).
+
+محدِّث الأجساد كان يرفض كل تحديث للأبد على عقدة بلا مدير systemd للمستخدم؛ أُصلح (B-1474).
+
+The harness updater used to permanently refuse every update on a host without a running user
+systemd manager; fixed (B-1474).
+
+إعداد جديد للمالك: مدة صلاحية مفاتيح API لأعضاء دخول SSO (1 حتى 365 يوماً، افتراضياً 7)؛ تُحذف المفاتيح
+تلقائياً عند التعليق أو الإزالة أو فكّ الربط (T-1946).
+
+New owner setting: validity window for SSO-linked members' API keys (1–365 days, default 7); keys
+are deleted automatically on suspension, removal, or unlink (T-1946).
+
+معالج إعداد الموصلات كان يتعطّل بلا رابط عام مضبوط؛ صار يقترحه من إعداد الخادم الموثوق (B-1461، ADR-193).
+
+The connector setup wizard used to get stuck with no public origin set; it now proposes one from
+trusted server configuration (B-1461, ADR-193).
+
+بعض نوافذ الإعدادات كانت تُفتح خلف نافذة الإعدادات نفسها؛ أُصلح (B-1459).
+
+Some Settings dialogs used to open behind the Settings window itself; fixed (B-1459).
+
+بطاقات أدوات Codex الجارية لم تعد تعلق على «يعمل» (B-1482)؛ اختيار نموذج قبل إنشاء الجلسة لم يعد
+يُستبدَل بالافتراضي (B-1483)؛ وحقل «غيره» في سؤال الوكيل صار نصّه مرئياً (لجنة d97214f3c).
+
+Running Codex tool cards no longer get stuck on "running" (B-1482); a model picked before a session
+exists is no longer overwritten by the default (B-1483); and the agent-question "Other" field's typed
+text is now visible (commit d97214f3c).
+
+تحسين إضافي لصفوف جلسات الشريط الجانبي خارج الصفحة المحمَّلة: لا تختفي أو تومض، وعبء شبكة أقل (T-1951).
+وأُعيد ترتيب شريط أدوات المشروع (قرار المالك).
+
+Further polish to sidebar sessions surfaced from beyond the loaded page: no flicker or disappearing,
+lower network load (T-1951). The project toolbar was also reordered (owner decision).
+
+أعضاء الفريق يستطيعون الآن الدخول إلى نسّاج بحسابات مزوّد هوية موحّد خارجي (OIDC)، بلا كلمة مرور
+منفصلة؛ المالك يختاره ويضبط القواعس من صفحة إعدادات موجّهة بلا إعادة تشغيل سيرفر. عند التفعيل تُرفض
+محاولات الدخول المحلي للأعضاء المرتبطين، والأعضاء الأيتام (بعد تغيير issuer) يفقدون الوصول ما لم
+يُستبقوا، والمالك يدخل محلياً دائماً. عُقَد `OIDC_*` القديمة تظهر "مستوقف" مع زرّ استيراد (T-1962،
+ADR-194).
+
+Team members can now sign in to Nassaj with accounts from an external OIDC identity provider, no
+separate password, configured by the owner from a guided Settings page with no server restart. Once
+enabled, linked members' local sign-in is refused, orphaned members (after an issuer change) lose
+access unless kept, and the owner always signs in locally. Nodes with legacy `OIDC_*` env show
+"Paused" with an import button (T-1962, ADR-194).
+
 ## 2.3.0.12 — 2026-09-30
 
 صار بوسع من بدأ الدور أن يوجّه دوره الجاري بنفسه (T-1903): توجيه صاحب الدور يُقبل بسياسة المشرف وحدها،

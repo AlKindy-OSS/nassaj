@@ -11,6 +11,7 @@ import Database from 'better-sqlite3';
 import express from 'express';
 
 /* eslint-disable boundaries/dependencies -- integration test exercises real migration and persistence owners. */
+import { getConnection } from '../database/connection.js';
 import { migrateConnectorAuthSchema } from '../database/connector-auth.migration.js';
 import {
   CONNECTOR_POLICY_V2_SUBSTRATE_TABLES,
@@ -18,6 +19,7 @@ import {
   migrateConnectorPolicyV2Substrate,
 } from '../database/connector-policy-v2.migration.js';
 import { createConnectorAuthDb } from '../database/repositories/connector-auth.db.js';
+import { migrateSsoOidcConfig } from '../database/sso-oidc-config.migration.js';
 /* eslint-enable boundaries/dependencies */
 
 import { createConnectorOwnerAuthSessionAdapter,
@@ -102,6 +104,57 @@ test('production effect gate opens only the exact signed certified and locally a
       /activation_required/u, 'legacy operation-only calls cannot inherit ambient flags');
   } finally {
     initializeConnectorPolicyV2SubstrateOnly(f.database, '/proc/nassaj-connector-runtime-authority.json');
+    f.database.close(); rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('B-1461: production wiring proposes the OIDC redirect origin and shows it to the owner only', async () => {
+  const f = databaseFixture(); const directory = mkdtempSync('/var/tmp/nassaj-origin-oidc-');
+  const keys = ['NASSAJ_PUBLIC_ORIGIN', 'OIDC_ENABLED', 'OIDC_REDIRECT_URI', 'WEBAUTHN_ORIGIN'];
+  const prior = keys.map(key => [key, process.env[key]] as const);
+  for (const key of keys) delete process.env[key];
+  Object.assign(process.env, { OIDC_ENABLED: 'true',
+    OIDC_REDIRECT_URI: 'https://sso-node.example/api/auth/oidc/callback' });
+  f.database.exec(`INSERT INTO users (id,role,is_active,status) VALUES (9,'user',1,'active')`);
+  // ADR-194 D1: legacy env counts only after a successful read of the SSO table
+  // on the application database, which this fixture does not otherwise create.
+  migrateSsoOidcConfig(getConnection());
+  const app = express(); app.use((req, _res, next) => {
+    (req as express.Request & { user: { id: number } }).user = { id: Number(req.get('x-user')) }; next();
+  });
+  app.use('/setup', connectorPolicyV2OwnerSetupRoutes);
+  const server = app.listen(0, '127.0.0.1');
+  try {
+    assert.deepEqual(initializeConnectorPolicyV2SubstrateOnly(f.database, join(directory, 'authority.json')),
+      { ready: true, reason: 'ready' });
+    assert.equal(connectorOwnerSessionOrigin(), 'https://sso-node.example');
+    await new Promise<void>((resolve, reject) => { server.once('listening', resolve); server.once('error', reject); });
+    const get = (user: number) => fetch(`http://127.0.0.1:${(server.address() as AddressInfo).port}/setup`,
+      { headers: { 'x-user': String(user) } });
+    const owner = await get(7);
+    assert.equal(owner.status, 200);
+    assert.deepEqual(((await owner.json()) as { originProposal: unknown }).originProposal,
+      { canonicalOrigin: 'https://sso-node.example', source: 'oidc_redirect_uri' });
+    assert.equal((await get(9)).status, 404);
+    process.env.NASSAJ_PUBLIC_ORIGIN = 'https://sso-node.example/';
+    assert.equal(connectorOwnerSessionOrigin(), null, 'an invalid NASSAJ_PUBLIC_ORIGIN never falls through');
+    assert.deepEqual(((await (await get(7)).json()) as { originProposal: unknown }).originProposal,
+      { canonicalOrigin: null, source: 'invalid_public_origin' });
+    delete process.env.NASSAJ_PUBLIC_ORIGIN; process.env.OIDC_ENABLED = 'false';
+    assert.equal(connectorOwnerSessionOrigin(), null, 'OIDC off: the redirect URI is not a source');
+    process.env.OIDC_ENABLED = 'true';
+    // ADR-194 D1: once ANY SSO row exists (a draft too), OIDC_REDIRECT_URI is never read.
+    getConnection().prepare(`INSERT INTO sso_oidc_config (slot, issuer, client_id, client_auth, role_claim_path,
+      role_rules_json, tenant_mode, config_hash) VALUES ('draft', 'https://idp.example', 'c', 'none', '', '[]',
+      'none', 'h')`).run();
+    assert.equal(connectorOwnerSessionOrigin(), null, 'a draft row ends the legacy redirect proposal');
+    getConnection().exec("DELETE FROM sso_oidc_config WHERE slot = 'draft'");
+    getConnection().exec('DROP TABLE sso_oidc_config');
+    assert.equal(connectorOwnerSessionOrigin(), null, 'an unreadable SSO table is not legacy env (I1)');
+  } finally {
+    for (const [key, value] of prior) { if (value === undefined) delete process.env[key]; else process.env[key] = value; }
+    await new Promise<void>(resolve => server.close(() => resolve()));
+    initializeConnectorPolicyV2SubstrateOnly(f.database, '/proc/nassaj-connector-runtime-authority.json', () => NOW);
     f.database.close(); rmSync(directory, { recursive: true, force: true });
   }
 });
@@ -345,8 +398,10 @@ test('ready substrate serves schema two and fenced origin write advances policy 
     { cookie: () => undefined, clearCookie: () => undefined } as unknown as express.Response,
     7, 'password',
   );
-  const priorPublicOrigin = process.env.NASSAJ_PUBLIC_ORIGIN;
-  delete process.env.NASSAJ_PUBLIC_ORIGIN;
+  // Every trusted origin-proposal source (B-1461) is cleared so the host env cannot leak in.
+  const proposalKeys = ['NASSAJ_PUBLIC_ORIGIN', 'OIDC_ENABLED', 'OIDC_REDIRECT_URI', 'WEBAUTHN_ORIGIN'];
+  const priorProposalEnv = proposalKeys.map(key => [key, process.env[key]] as const);
+  for (const key of proposalKeys) delete process.env[key];
   const app = express(); app.use(express.json());
   app.use((req, _res, next) => {
     (req as express.Request & { user: { id: number } }).user = { id: 7 }; next();
@@ -373,8 +428,8 @@ test('ready substrate serves schema two and fenced origin write advances policy 
         'content-type': 'application/json', origin: 'https://nassaj.example',
         'x-csrf-token': csrf, cookie: `__Host-nassaj_connector_recent_auth=${token}`,
       }, body: JSON.stringify({ canonicalOrigin: 'https://nassaj.example', expectedOriginRevision: 0 }) });
-      assert.equal(unnamed.status, 403, 'no stored or proposed origin: no cookie can be trusted');
-      assert.deepEqual(await unnamed.json(), { code: 'CONNECTOR_RECENT_AUTH_OR_CSRF_REQUIRED' });
+      assert.equal(unnamed.status, 403, 'no stored or proposed origin: nothing can be bound');
+      assert.deepEqual(await unnamed.json(), { code: 'CONNECTOR_ORIGIN_PROPOSAL_MISMATCH' });
       process.env.NASSAJ_PUBLIC_ORIGIN = 'https://nassaj.example';
       return '__Host-nassaj_connector_recent_auth';
     })();
@@ -402,8 +457,9 @@ test('ready substrate serves schema two and fenced origin write advances policy 
     assert.deepEqual(policy, { ...policy, originRevision: 2, writerEpoch: 2 });
     assert.equal(control.writerEpoch, 2); assert.equal(control.floor, 1);
   } finally {
-    if (priorPublicOrigin === undefined) delete process.env.NASSAJ_PUBLIC_ORIGIN;
-    else process.env.NASSAJ_PUBLIC_ORIGIN = priorPublicOrigin;
+    for (const [key, value] of priorProposalEnv) {
+      if (value === undefined) delete process.env[key]; else process.env[key] = value;
+    }
     await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
     initializeConnectorPolicyV2SubstrateOnly(f.database, '/proc/nassaj-connector-runtime-authority.json', () => NOW);
     f.database.close(); rmSync(directory, { recursive: true, force: true });

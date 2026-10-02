@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import type { ActiveBodyProvider } from '../../../types/app';
+
 import ProviderLoginModal from '../../provider-auth/view/ProviderLoginModal';
 import SettingsSidebar from '../view/SettingsSidebar';
 import AgentsSettingsTab from '../view/tabs/agents-settings/AgentsSettingsTab';
@@ -11,6 +13,7 @@ import NotificationsSettingsTab from '../view/tabs/NotificationsSettingsTab';
 import AboutTab from '../view/tabs/AboutTab';
 import ProfileSettingsTab from '../view/tabs/profile-settings/ProfileSettingsTab';
 import UsersSettingsTab from '../view/tabs/users-settings/UsersSettingsTab';
+import SsoSettingsTab from '../view/tabs/sso-settings/SsoSettingsTab';
 import ReferencesSettingsTab from '../view/tabs/references-settings/ReferencesSettingsTab';
 import VendorsSettingsTab from '../view/tabs/vendors-settings/VendorsSettingsTab';
 import CommandBoardSettingsTab from '../view/tabs/CommandBoardSettingsTab';
@@ -64,8 +67,6 @@ function Settings({ isOpen, onClose, projects = [], initialTab = 'agents', deepL
     setClaudePermissions,
     notificationPreferences,
     setNotificationPreferences,
-    cursorPermissions,
-    setCursorPermissions,
     codexPermissionMode,
     setCodexPermissionMode,
     providerAuthStatus,
@@ -250,7 +251,9 @@ function Settings({ isOpen, onClose, projects = [], initialTab = 'agents', deepL
     return null;
   }
 
-  const isAuthenticated = Boolean(loginProvider && providerAuthStatus[loginProvider].authenticated);
+  const isAuthenticated = Boolean(
+    loginProvider && providerAuthStatus[loginProvider as ActiveBodyProvider]?.authenticated,
+  );
 
   return (
     <div className="modal-backdrop fixed inset-0 z-[9999] flex items-center justify-center bg-background/80 backdrop-blur-sm md:p-4">
@@ -313,8 +316,6 @@ function Settings({ isOpen, onClose, projects = [], initialTab = 'agents', deepL
                   onRefreshAuthStatus={(provider) => { void checkProviderAuthStatus(provider); }}
                   claudePermissions={claudePermissions}
                   onClaudePermissionsChange={setClaudePermissions}
-                  cursorPermissions={cursorPermissions}
-                  onCursorPermissionsChange={setCursorPermissions}
                   codexPermissionMode={codexPermissionMode}
                   onCodexPermissionModeChange={setCodexPermissionMode}
                   projects={projects}
@@ -356,6 +357,8 @@ function Settings({ isOpen, onClose, projects = [], initialTab = 'agents', deepL
 
               {activeTab === 'users' && canManageUsers && <UsersSettingsTab />}
 
+              {activeTab === 'sso' && user?.role === 'owner' && <SsoSettingsTab onNavigateTab={handleMainTabChange} />}
+
               {activeTab === 'command-board' && user?.role === 'owner' && (
                 <CommandBoardSettingsTab />
               )}
@@ -380,7 +383,7 @@ function Settings({ isOpen, onClose, projects = [], initialTab = 'agents', deepL
         key={loginProvider || 'claude'}
         isOpen={showLoginModal}
         onClose={() => setShowLoginModal(false)}
-        provider={loginProvider || 'claude'}
+        provider={(loginProvider || 'claude') as ActiveBodyProvider}
         onComplete={handleLoginComplete}
         isAuthenticated={isAuthenticated}
       />

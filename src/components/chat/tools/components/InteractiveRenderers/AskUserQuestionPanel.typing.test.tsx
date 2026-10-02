@@ -177,4 +177,31 @@ describe('AskUserQuestionPanel — Other input typing', () => {
     // The badge must carry the Tailwind class that neutralises pointer events
     expect(kbd.className).toContain('pointer-events-none');
   });
+
+  it('Other input never carries outline-none (measured paint-invisible bug)', async () => {
+    // Root cause (2026-09-30): measured live in the real production build in
+    // a real Chromium — Tailwind's `outline-none` utility on this exact input
+    // (`outline: 2px solid transparent; outline-offset: 2px`) made its value
+    // and placeholder paint nothing at all: DOM value, computed color and
+    // layout were all correct, but pixel-sampling the rendered box found
+    // zero dark pixels at the text position. A clean two-page A/B test that
+    // changed only this one class confirmed it (0 dark pixels with the
+    // class present, ~1700 with it removed). jsdom cannot reproduce the
+    // paint failure itself, so this guards the CSS contract instead: the
+    // class must never reappear. The focus ring is drawn separately by
+    // `ring-1`/`focus:ring-2` (box-shadow, not outline), so this class was
+    // always redundant here.
+    render(
+      <AskUserQuestionPanel
+        request={makeRequest(false) as never}
+        onDecision={vi.fn()}
+      />,
+    );
+
+    const otherBtn = screen.getByText(/غير ذلك/);
+    await act(async () => { fireEvent.click(otherBtn); });
+
+    const input = screen.getByRole<HTMLInputElement>('textbox');
+    expect(input.className.split(/\s+/)).not.toContain('outline-none');
+  });
 });

@@ -46,7 +46,7 @@ export type StepUpEvidence =
   | { method: 'passkey'; response: unknown };
 
 /** Step-up audiences the server accepts (services/step-up.service.js). */
-export type StepUpAudience = 'passkey_registration' | 'connector_owner';
+export type StepUpAudience = 'passkey_registration' | 'connector_owner' | 'sso_config';
 
 export type WebAuthnLoginResult =
   | { success: true }

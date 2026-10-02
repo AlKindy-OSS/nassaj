@@ -1,24 +1,24 @@
 import { useEffect, useState } from 'react';
 
 import { IS_PLATFORM } from '../../../constants/config';
-import { detectOidcAvailability } from '../oidc';
+import { detectSsoStatus, type SsoStatus } from '../oidc';
 
 /**
- * True once the server is known to have OIDC enabled. Starts `false` so the SSO
- * affordance never flashes on a server where it is off, and stays `false` on
- * the platform build (which has no local sign-in at all).
+ * The server's SSO status (ADR-194 D1) once known, else `null`. Stays `null`
+ * on the platform build (which has no local sign-in at all) and while the
+ * probe runs, so the SSO affordance never flashes on a server where it is off.
  */
-export function useOidcAvailability(): boolean {
-  const [isEnabled, setIsEnabled] = useState(false);
+export function useSsoStatus(): SsoStatus | null {
+  const [status, setStatus] = useState<SsoStatus | null>(null);
 
   useEffect(() => {
     if (IS_PLATFORM) {
       return undefined;
     }
     let isActive = true;
-    void detectOidcAvailability().then((value) => {
+    void detectSsoStatus().then((value) => {
       if (isActive) {
-        setIsEnabled(value);
+        setStatus(value);
       }
     }).catch(() => {
       // Detection failure keeps the SSO affordance hidden.
@@ -28,5 +28,10 @@ export function useOidcAvailability(): boolean {
     };
   }, []);
 
-  return isEnabled;
+  return status;
+}
+
+/** True once the server is known to accept an SSO sign-in right now. */
+export function useOidcAvailability(): boolean {
+  return useSsoStatus()?.loginAvailable === true;
 }

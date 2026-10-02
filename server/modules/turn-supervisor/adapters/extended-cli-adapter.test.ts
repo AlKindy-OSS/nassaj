@@ -14,17 +14,16 @@ const ROLE: EphemeralRoleHome = Object.freeze({
   xdgData: '/var/tmp/nassaj-turn-supervisor-roles/role-test/data',
   xdgState: '/var/tmp/nassaj-turn-supervisor-roles/role-test/state',
   xdgCache: '/var/tmp/nassaj-turn-supervisor-roles/role-test/cache',
-  hermesHome: '/var/tmp/nassaj-turn-supervisor-roles/role-test/hermes', manifestPath: '/manifest',
+  manifestPath: '/manifest',
 });
 
 const output = {
   qwen: `${JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: 'qwen answer' } })}\n`,
   opencode: `${JSON.stringify({ type: 'text', part: { type: 'text', text: 'opencode answer' } })}\n`,
-  hermes: 'hermes answer\n',
 } as const;
 
 describe('extended CLI mechanical adapters', () => {
-  for (const provider of ['qwen', 'opencode', 'hermes'] as const) {
+  for (const provider of ['qwen', 'opencode'] as const) {
     it(`${provider} pins, cages and capture-only executes`, async () => {
       let spec: IsolatedCliProcessSpec | undefined;
       let cleaned = false;
@@ -33,7 +32,6 @@ describe('extended CLI mechanical adapters', () => {
         versionProbe: async () => extendedCliAdapterInternals.EXACT_VERSIONS[provider] ?? '1.18.40',
         qwenCapabilityProbe: async () => true,
         opencodeCapabilityProbe: async () => true,
-        hermesToolDefinitionProbe: async () => 0,
         resolveEnv: () => ({ PROVIDER_SECRET: 'server-only' }),
         createRoleHome: async () => ROLE,
         cleanupRoleHome: async (role) => { assert.equal(role, ROLE); cleaned = true; },
@@ -69,19 +67,16 @@ describe('extended CLI mechanical adapters', () => {
         assert.deepEqual(args.slice(args.indexOf('--max-tool-calls'), args.indexOf('--max-tool-calls') + 2), ['--max-tool-calls', '0']);
         assert.ok(args.includes('--safe-mode')); assert.ok(args.includes('--approval-mode'));
         assert.ok(args.join(' ').includes('subagent'));
-      } else if (provider === 'opencode') {
+      } else {
         assert.ok(args.includes('--pure')); assert.ok(args.includes('supervisor'));
         const config = JSON.parse(String(spec?.env.OPENCODE_CONFIG_CONTENT)) as { tools: Record<string, boolean>; agent: Record<string, { tools: Record<string, boolean> }> };
         assert.equal(config.tools['*'], false); assert.equal(config.tools.task, false);
         assert.equal(config.agent.supervisor.tools['*'], false);
-      } else {
-        assert.ok(args.includes('--safe-mode')); assert.deepEqual(args.slice(args.indexOf('--toolsets'), args.indexOf('--toolsets') + 2), ['--toolsets', '']);
-        assert.ok(spec?.env.HERMES_SYSTEM_PROMPT?.includes('zero tools'));
       }
     });
   }
 
-  it('fails closed without exact pins, Hermes zero-tool probe, or a successful prior probe', async () => {
+  it('fails closed without the exact pin or a successful prior probe', async () => {
     const common = {
       executableProbe: async () => true, versionProbe: async () => 'wrong',
       createRoleHome: async () => ROLE, cleanupRoleHome: async () => {},
@@ -93,10 +88,6 @@ describe('extended CLI mechanical adapters', () => {
       provider: 'qwen', userId: 1, model: 'x', prompt: 'x', persist: false,
       writer: { capture() {} },
     }), /not pinned and probed/u);
-    const hermes = createExtendedCliAdapter('hermes', {
-      ...common, versionProbe: async () => '0.17.0', hermesToolDefinitionProbe: async () => 16,
-    });
-    assert.equal(await hermes.probe({ provider: 'hermes', userId: 1 }), false);
   });
 
   it('accepts any reporting opencode release but refuses a silent or missing binary', async () => {

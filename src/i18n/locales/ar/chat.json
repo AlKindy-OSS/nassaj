@@ -546,12 +546,10 @@
     "providerInfo": {
       "anthropic": "من Anthropic",
       "openai": "من OpenAI",
-      "cursorEditor": "محرر أكواد بالذكاء الاصطناعي",
       "google": "من Google"
     },
     "readyPrompt": {
       "claude": "جاهز لاستخدام Claude مع {{model}}. ابدأ بكتابة رسالتك أدناه.",
-      "cursor": "جاهز لاستخدام Cursor مع {{model}}. ابدأ بكتابة رسالتك أدناه.",
       "codex": "جاهز لاستخدام Codex مع {{model}}. ابدأ بكتابة رسالتك أدناه.",
       "antigravity": "جاهز لاستخدام Antigravity ‏(agy) بنموذج {{model}}. اكتب رسالتك بالأسفل.",
       "opencode": "جاهز لاستخدام OpenCode مع {{model}}. ابدأ بكتابة رسالتك أدناه.",
@@ -560,7 +558,6 @@
       "deepseek": "جاهز لاستخدام DeepSeek مع {{model}}. ابدأ بكتابة رسالتك أدناه.",
       "glm": "جاهز لاستخدام GLM مع {{model}}. ابدأ بكتابة رسالتك أدناه.",
       "claudeEngine": "جاهز: محرّك Claude يعمل على {{provider}} بنموذج {{model}}. ابدأ بكتابة رسالتك أدناه.",
-      "hermes": "جاهز لاستخدام Hermes مع {{model}}. ابدأ بكتابة رسالتك أدناه.",
       "sakana": "جاهز لاستخدام Sakana. ابدأ بكتابة رسالتك أدناه."
     },
     "antigravity": {
@@ -815,6 +812,9 @@
     "olderModels_few": "{{count}} نماذج سبقته",
     "olderModels_many": "{{count}} نموذجاً سبقته",
     "olderModels_other": "{{count}} نموذج سبقه"
+  },
+  "composer": {
+    "replyInProgress": "الوكيل يعمل الآن — انتظر انتهاء الرد أو أوقفه لإرسال رسالتك"
   },
   "ws": {
     "statusConnected": "متصل",
@@ -1215,6 +1215,7 @@
     },
     "composerNote": "يُحتسب على حصة {{starter}}",
     "composerNoteSelf": "اكتب ‎/steer‎ متبوعًا برسالتك لإيصالها إلى دورك الجاري.",
+    "hintLabel": "تلميح التوجيه",
     "errors": {
       "invalid_request": "تعذّر إرسال التوجيه — طلب غير صالح.",
       "not_writable": "لا تملك صلاحية الكتابة في هذه الجلسة.",

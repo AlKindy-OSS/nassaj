@@ -5,6 +5,7 @@ import test from 'node:test';
 import type express from 'express';
 
 import { RECENT_AUTH_MAX_AGE_MS } from './connector-auth-security.js';
+import { connectorOriginProposalFromConfig } from './connector-installation-origin-resolver.js';
 import {
   configureConnectorOwnerAuthSessionProduction,
   connectorOwnerSessionAvailable,
@@ -224,4 +225,18 @@ test('recent-auth origin: persisted wins, environment only when none is persiste
   proposal = () => 'https://env.example';
   persisted = () => { throw new Error('connector_origin_database_tampered'); };
   assert.equal(source(), null, 'a tampered persisted origin never falls back to the environment');
+});
+
+test('B-1461: a persisted origin beats every config proposal; an unreadable one never falls back', () => {
+  const env = { OIDC_REDIRECT_URI: 'https://sso.example/api/auth/oidc/callback',
+    WEBAUTHN_ORIGIN: 'https://passkey.example' };
+  const readProposal = () => connectorOriginProposalFromConfig(env,
+    { allowLoopback: false, legacyRedirectProposal: true })?.canonicalOrigin ?? null;
+  let persisted: () => string | null = () => 'https://stored.example';
+  const source = createRecentAuthOriginSource({ readPersisted: () => persisted(), readProposal });
+  assert.equal(source(), 'https://stored.example');
+  persisted = () => null;
+  assert.equal(source(), 'https://sso.example', 'nothing persisted: the OIDC redirect origin is proposed');
+  persisted = () => { throw new Error('connector_origin_database_tampered'); };
+  assert.equal(source(), null, 'a throwing persisted read is null, never a config value');
 });

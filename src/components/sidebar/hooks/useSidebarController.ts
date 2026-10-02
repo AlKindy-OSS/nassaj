@@ -40,7 +40,7 @@ import { SESSION_BUCKET_KEYS } from '../../../../shared/sessionBuckets';
 import {
   computeSurfacedSessionsForProject,
   useSurfacedSessionsDriver,
-  useSurfacedSessionsRenderTick,
+  useSurfacedSessionsSignature,
 } from '../../../stores/surfacedSessionsStore';
 
 import { useSidebarMessageSearch } from './useSidebarMessageSearch';
@@ -115,10 +115,18 @@ export function useSidebarController({
   const [expandedProjects, setExpandedProjects] = useState<Set<string>>(new Set());
 
   // B-1431/T-1949: fetches session-context for indicator ids outside an
-  // expanded project's loaded page, and forces a re-render whenever an
-  // indicator/surfaced-store change could add, drop, or re-rank a row.
-  useSurfacedSessionsDriver(projects, expandedProjects, SESSION_BUCKET_KEYS);
-  useSurfacedSessionsRenderTick();
+  // expanded project's loaded page. `selectedSession?.id` lets the driver (and
+  // its context-pruning pass, T-1951) exempt the row the owner is currently
+  // reading from both the refetch-on-cooldown-recovery path and the
+  // no-longer-a-candidate prune.
+  useSurfacedSessionsDriver(projects, expandedProjects, SESSION_BUCKET_KEYS, selectedSession?.id ?? null);
+  // T-1951: forces a re-render only when the surfaced ROW set (id+state) for a
+  // currently EXPANDED project actually changes — not on every emit of the
+  // four stores backing it (e.g. a workflow's callCount ticking with no row
+  // impact), which used to re-render this whole controller, and with it
+  // `computeSurfacedSessionsForProject` + its sort for every project,
+  // including collapsed ones.
+  useSurfacedSessionsSignature(expandedProjects);
   const [editingProject, setEditingProject] = useState<string | null>(null);
   const [showNewProject, setShowNewProject] = useState(false);
   const [editingName, setEditingName] = useState('');
@@ -810,6 +818,26 @@ export function useSidebarController({
     [getProjectSessions, selectedSession?.id],
   );
 
+  /**
+   * The "+N" hint's count for one project (T-1951). Pulled out of
+   * `getProjectSessionsWithSurfaced` so `SidebarProjectSessions` no longer
+   * needs its OWN subscription to the surfaced/indicator stores just to
+   * re-derive a number the controller already computes.
+   */
+  const getSurfacedHiddenCount = useCallback(
+    (project: Project): number => {
+      // qa-critic fix: `SidebarProjectList` calls this for EVERY filtered
+      // project, not only the expanded ones — a collapsed project's "+N" hint
+      // is never rendered, so both `getProjectSessions` (the loaded page) and
+      // `computeSurfacedSessionsForProject`'s own candidate scan and sort ran
+      // for nothing on every collapsed row, every render.
+      if (!expandedProjects.has(project.projectId)) return 0;
+      const loadedIds = new Set(getProjectSessions(project).map((session) => session.id));
+      return computeSurfacedSessionsForProject(project.projectId, loadedIds, selectedSession?.id ?? null).hiddenCount;
+    },
+    [expandedProjects, getProjectSessions, selectedSession?.id],
+  );
+
   const getSearchVisibleSessions = useCallback(
     (project: Project): SessionWithProvider[] => {
       const searchVisible = selectSearchVisibleSessions(project, getProjectSessionsWithSurfaced(project), {
@@ -1432,6 +1460,7 @@ export function useSidebarController({
     isSessionStarred,
     getProjectSessions,
     getSearchVisibleSessions,
+    getSurfacedHiddenCount,
     loadMoreSessionsForProject,
     startEditing,
     cancelEditing,

@@ -5,7 +5,6 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import ts from 'typescript';
 
 import {
   buildMeasuredCodexCandidate,
@@ -13,6 +12,10 @@ import {
   resolveMeasurementRuntime, readInstalledIdentity, identityDigest,
 } from './permission-parity-measure-codex.mjs';
 import { createCodexMachineFixture } from '../server/shared/tests/codex-release-fixture.js';
+import { compileModuleClosure, emitTranspiled } from './lib/compile-module-closure.mjs';
+
+const PROJECT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const REGISTRY_ENTRY = 'server/modules/execution-permissions/capability-registry.ts';
 
 // T-1872: measurement targets the machine Codex release; a fixture stands in for it.
 const codexMachineRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'measure-codex-machine-'));
@@ -108,25 +111,15 @@ test('Codex probe quotes shell metacharacters in its disk-backed paths literally
 
 
 test('compiled runtime measurement matches compiled registry instead of source byte fingerprints', async () => {
-  const project = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+  const project = PROJECT_ROOT;
   const artifactParent = path.join(project, '.artifacts');
   fs.mkdirSync(artifactParent, { recursive: true });
   const root = fs.mkdtempSync(path.join(artifactParent, 'codex-compiled-proof-'));
-  const emit = relative => {
-    const source = fs.readFileSync(path.join(project, relative), 'utf8');
-    const target = path.join(root, relative.replace(/\.ts$/u, '.js'));
-    fs.mkdirSync(path.dirname(target), { recursive: true });
-    fs.writeFileSync(target, ts.transpileModule(source, {
-      compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext },
-    }).outputText);
-  };
   try {
-    for (const filename of ['server/shared/codex-executable.js', 'server/openai-codex.js',
-      'server/shared/harness-binaries.ts', 'server/shared/claude-cli-path.ts',
-      ...['capability-registry', 'parity', 'types', 'validation'].map(name => `server/modules/execution-permissions/${name}.ts`)]) emit(filename);
-    const fixture = 'server/modules/execution-permissions/fixtures/permission-capabilities.v1.json';
-    fs.mkdirSync(path.dirname(path.join(root, fixture)), { recursive: true });
-    fs.copyFileSync(path.join(project, fixture), path.join(root, fixture));
+    compileModuleClosure({ sourceRoot: project, destinationRoot: root, entries: [REGISTRY_ENTRY] });
+    // Not imported: the registry fingerprints this adapter's bytes, and the compiled bytes must
+    // differ from the source bytes for the last assertion to prove which tree was measured.
+    emitTranspiled(path.join(project, 'server/openai-codex.js'), path.join(root, 'server/openai-codex.js'));
     const compiled = await import(pathToFileURL(path.join(root, 'server/modules/execution-permissions/capability-registry.js')).href);
     const runtime = await resolveMeasurementRuntime(root);
     const compiledHelper = await import(pathToFileURL(path.join(root, 'server/shared/codex-executable.js')).href);
@@ -169,21 +162,7 @@ test('measurement integration rejects bad evidence and preserves unrelated body 
   const seal = value => `sha256:${crypto.createHash('sha256').update(JSON.stringify(canonical(value))).digest('hex')}`;
   const root = fs.mkdtempSync(path.resolve('.artifacts/codex-integration-test-'));
   try {
-    for (const name of ['parity', 'types', 'validation', 'capability-registry']) {
-      const relative = `server/modules/execution-permissions/${name}`;
-      fs.mkdirSync(path.dirname(path.join(root, relative)), { recursive: true });
-      fs.writeFileSync(path.join(root, `${relative}.js`), ts.transpileModule(fs.readFileSync(`${relative}.ts`, 'utf8'), {
-        compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext },
-      }).outputText);
-    }
-    fs.mkdirSync(path.join(root, 'server/shared'), { recursive: true });
-    fs.copyFileSync('server/shared/codex-executable.js', path.join(root, 'server/shared/codex-executable.js'));
-    for (const name of ['harness-binaries', 'claude-cli-path']) {
-      fs.writeFileSync(path.join(root, `server/shared/${name}.js`), ts.transpileModule(
-        fs.readFileSync(`server/shared/${name}.ts`, 'utf8'),
-        { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } },
-      ).outputText);
-    }
+    compileModuleClosure({ sourceRoot: PROJECT_ROOT, destinationRoot: root, entries: [REGISTRY_ENTRY] });
     const validators = await loadMeasurementValidators(root);
     const artifact = JSON.parse(fs.readFileSync('server/modules/execution-permissions/fixtures/permission-capabilities.v1.json'));
     const now = artifact.reference.evidence.measuredAt;

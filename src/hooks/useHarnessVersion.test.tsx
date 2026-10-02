@@ -152,6 +152,54 @@ describe('useHarnessVersion authorization and fencing', () => {
     expect(result.current.state).toMatchObject({ status: 'failed', reason: 'STORE_IN_USE', retryReady: false });
   });
 
+  it('B-1468: a 423 STORE_ACCESS_UNPROVABLE threads its unchecked details through actionError', async () => {
+    fetchMock.mockImplementation((_url: string, init?: RequestInit) => (init?.method === 'POST'
+      ? response({ code: 'STORE_ACCESS_UNPROVABLE', message: 'unprovable', uncheckedProcesses: [{ pid: 4242, comm: 'sqlite3' }] }, 423)
+      : response(statusBody)));
+    const { result } = renderHook(() => useHarnessVersion('codex', true));
+    await waitFor(() => expect(result.current.state.status).toBe('update-available'));
+    await act(async () => result.current.startUpdate());
+    expect(result.current.actionError).toEqual({
+      code: 'STORE_ACCESS_UNPROVABLE', message: 'unprovable',
+      unchecked: { processes: [{ pid: 4242, comm: 'sqlite3' }], total: 1 },
+    });
+  });
+
+  it('B-1468: a 423 STORE_ACCESS_UNPROVABLE with no processes carries none (store-privacy refusal)', async () => {
+    fetchMock.mockImplementation((_url: string, init?: RequestInit) => (init?.method === 'POST'
+      ? response({ code: 'STORE_ACCESS_UNPROVABLE', message: 'unprovable' }, 423)
+      : response(statusBody)));
+    const { result } = renderHook(() => useHarnessVersion('codex', true));
+    await waitFor(() => expect(result.current.state.status).toBe('update-available'));
+    await act(async () => result.current.startUpdate());
+    expect(result.current.actionError).toEqual({ code: 'STORE_ACCESS_UNPROVABLE', message: 'unprovable' });
+    expect(result.current.actionError?.unchecked).toBeUndefined();
+  });
+
+  it('B-1468: a job that fails with STORE_ACCESS_UNPROVABLE carries job.error details into state', async () => {
+    const jobError = {
+      code: 'STORE_ACCESS_UNPROVABLE', message: 'unprovable', messageAr: 'x',
+      uncheckedProcesses: [{ pid: 7, comm: 'sqlite3', reason: 'fd_unreadable' }, { pid: 8, comm: 'bad', reason: 'nope' }],
+      uncheckedProcessCount: 5,
+    };
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => {
+      if (init?.method === 'POST') return response({ jobId: 'job-f', provider: 'codex', status: 'queued' }, 202);
+      if (url.includes('/update-jobs/')) return response({ jobId: 'job-f', provider: 'codex', status: 'failed', phase: 'done', percent: 100, log: [], fromVersion: '1', toVersion: '2', error: jobError });
+      return response(statusBody);
+    });
+    const { result } = renderHook(() => useHarnessVersion('codex', true));
+    await waitFor(() => expect(result.current.state.status).toBe('update-available'));
+    await act(async () => result.current.startUpdate());
+    await waitFor(() => expect(result.current.state.status).toBe('failed'));
+    expect(result.current.actionError).toBeNull();
+    expect(result.current.state).toMatchObject({
+      reason: 'STORE_ACCESS_UNPROVABLE',
+      // An unknown reason value is dropped, not shown.
+      unchecked: { processes: [{ pid: 7, comm: 'sqlite3', reason: 'fd_unreadable' }, { pid: 8, comm: 'bad' }], total: 5 },
+    });
+    expect(result.current.state.unchecked?.processes[1]).not.toHaveProperty('reason');
+  });
+
   it('restore-compatible and rollback post their own routes and bodies', async () => {
     fetchMock.mockImplementation((url: string, init?: RequestInit) => {
       if (init?.method === 'POST' && url.endsWith('/restore-compatible')) return response({ jobId: 'job-rc', provider: 'opencode', status: 'queued' }, 202);

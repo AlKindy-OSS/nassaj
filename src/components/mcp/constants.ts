@@ -23,7 +23,12 @@ export const MCP_PROVIDER_NAMES: Record<McpProvider, string> = {
 // real-reader contract and the matching backend capability.
 export const MCP_SUPPORTED_SCOPES: Record<McpProvider, McpScope[]> = {
   claude: ['user', 'project', 'local'],
-  cursor: ['user', 'project'],
+  // cursor is a retired body (T-1953): no MCP panel is reachable for it
+  // (MCP_PANEL_AGENTS, SETTINGS_AGENT_ORDER) and `globalManualTargets` must
+  // never write its `.cursor/mcp.json` again — zeroed like the other retired/
+  // dormant ids below rather than dropped from `McpProvider` (a wide,
+  // feature-spanning type this narrowed step does not touch).
+  cursor: [],
   codex: ['user'],
   antigravity: [],
   // Backend adapter is contract-tested but rollout-disabled by default.
@@ -38,7 +43,7 @@ export const MCP_SUPPORTED_SCOPES: Record<McpProvider, McpScope[]> = {
 
 export const MCP_SUPPORTED_TRANSPORTS: Record<McpProvider, McpTransport[]> = {
   claude: ['stdio', 'http', 'sse'],
-  cursor: ['stdio', 'http'],
+  cursor: [], // retired body (T-1953) — see MCP_SUPPORTED_SCOPES.cursor
   codex: ['stdio', 'http'],
   antigravity: [],
   opencode: [],

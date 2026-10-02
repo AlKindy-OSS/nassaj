@@ -31,7 +31,6 @@ test('Claude coordination input is narrowed by the websocket boundary', async ()
     spawnCursor: async () => {},
     queryCodex: async () => {},
     spawnAntigravity: async () => {},
-    spawnHermes: async () => {},
     spawnKimi: async () => {},
     spawnDeepSeek: async () => {},
     spawnGlm: async () => {},

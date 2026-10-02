@@ -1,5 +1,5 @@
 import { filterDisabledProviders } from '../../../shared/disabledProviders';
-import type { LLMProvider } from '../../types/app';
+import type { ActiveBodyProvider } from '../../types/app';
 
 import type { ProviderAuthStatus, ProviderAuthStatusMap } from './types';
 
@@ -64,9 +64,9 @@ export function shouldResetProvider(status: ProviderAuthStatus): boolean {
  * is the last-resort default — it is never globally disabled.
  */
 export function resolveFallbackProvider(
-  order: readonly LLMProvider[],
+  order: readonly ActiveBodyProvider[],
   status: ProviderAuthStatusMap,
-): LLMProvider {
+): ActiveBodyProvider {
   const selectable = filterDisabledProviders(order);
   return selectable.find((provider) => status[provider]?.installed !== false) ?? 'claude';
 }

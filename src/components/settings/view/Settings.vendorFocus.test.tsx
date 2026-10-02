@@ -63,8 +63,6 @@ vi.mock('../hooks/useSettingsController', () => ({
     setClaudePermissions: () => {},
     notificationPreferences: { channels: {} },
     setNotificationPreferences: () => {},
-    cursorPermissions: {},
-    setCursorPermissions: () => {},
     codexPermissionMode: 'default',
     setCodexPermissionMode: () => {},
     providerAuthStatus: {},

@@ -1,11 +1,12 @@
 /**
  * SSO-only policy for linked team accounts (T-1939 slice 2).
  *
- * When OIDC is live (oidcEnabled()), the IdP is the single team identity: a
- * NON-OWNER account that holds an IdP link may no longer sign in with a local
- * credential (password, wallet add, passkey), and invites may no longer create
- * local-password accounts. The owner stays local (break-glass) regardless.
- * With OIDC off every predicate here is false, so nothing changes.
+ * While the SSO policy is enforced (ssoPolicyEnforced(), ADR-194 D1), the IdP
+ * is the single team identity: a NON-OWNER account that holds an IdP link may
+ * no longer sign in with a local credential (password, wallet add, passkey),
+ * and invites may no longer create local-password accounts. The owner stays
+ * local (break-glass) regardless. Enforcement does not depend on login being
+ * available: a broken or paused SSO config keeps these gates closed.
  *
  * Callers that check a password must run the full verification FIRST and apply
  * this gate only on a correct password, so the refusal never reveals whether
@@ -15,7 +16,7 @@
 // mocks, and a named import of an absent binding would fail at link time.
 import * as databaseModule from '../modules/database/index.js';
 
-import { oidcEnabled } from './oidc-config.js';
+import { ssoPolicyEnforced } from './sso-config.service.js';
 
 /** Error code returned to clients when an account must use SSO. */
 export const SSO_REQUIRED_CODE = 'sso_required';
@@ -28,7 +29,7 @@ export const SSO_REQUIRED_FOR_NEW_ACCOUNTS_CODE = 'sso_required_for_new_accounts
  * @returns {boolean}
  */
 export function requiresSsoLogin(user) {
-  if (!user || user.role === 'owner' || !oidcEnabled()) {
+  if (!user || user.role === 'owner' || !ssoPolicyEnforced()) {
     return false;
   }
   return databaseModule.userIdentitiesDb.hasAnyLink(user.id);
@@ -39,7 +40,7 @@ export function requiresSsoLogin(user) {
  * @returns {boolean}
  */
 export function localAccountCreationClosed() {
-  return oidcEnabled();
+  return ssoPolicyEnforced();
 }
 
 /**

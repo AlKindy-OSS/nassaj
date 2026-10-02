@@ -35,6 +35,8 @@
     "deleteSession": "删除会话",
     "renameSession": "重命名会话",
     "noSessions": "暂无会话",
+    "surfacedHiddenHint_one": "+还有 {{count}} 个有活动的会话",
+    "surfacedHiddenHint_other": "+还有 {{count}} 个有活动的会话",
     "loadingSessions": "加载会话中...",
     "unnamed": "未命名",
     "loading": "加载中...",

@@ -112,6 +112,16 @@ export function createOidcCodeStore({ ttlMs, maxEntries } = {}) {
       return { token: entry.token, userId: entry.userId };
     },
 
+    /**
+     * Drops an unredeemed code (ADR-194 D9: the config changed between mint
+     * and redirect). True when a code was removed.
+     * @param {string} code
+     * @returns {boolean}
+     */
+    discard(code) {
+      return typeof code === 'string' && codes.delete(code);
+    },
+
     /** Number of outstanding (possibly expired, not yet pruned) codes. */
     get size() {
       return codes.size;

@@ -13,11 +13,12 @@ import { isProviderGloballyDisabled } from "../../../../../shared/disabledProvid
 import { engineProviderLabel } from "../../../../../shared/engineProviders";
 import SessionProviderLogo from "../../../llm-logo-provider/SessionProviderLogo";
 import type {
+  ActiveBodyProvider,
   ProjectSession,
   LLMProvider,
   ProviderModelsDefinition,
 } from "../../../../types/app";
-import { PLACEHOLDER_FALLBACK_MODELS } from "../../../../constants/providerModelFallbacks";
+import { PLACEHOLDER_FALLBACK_MODELS, type FallbackCatalogProvider } from "../../../../constants/providerModelFallbacks";
 import type { ProviderAuthStatusMap } from "../../../provider-auth/types";
 import type { SettingsDeepLink } from "../../../settings/types/types";
 import { isProviderVisible, isProviderDisabled } from "../../../provider-auth/providerAuthFilter";
@@ -54,15 +55,11 @@ import { useFavoriteModels } from "../../../../hooks/useFavoriteModels";
 // Globally disabled providers (T-864, shared/disabledProviders.ts) never make
 // it into the picker: the full list stays here for upstream-sync friendliness
 // and the filter below drops the disabled ids.
-export const ALL_PROVIDER_META: { id: LLMProvider; name: string }[] = [
+export const ALL_PROVIDER_META: { id: ActiveBodyProvider; name: string }[] = [
   { id: "claude", name: "Anthropic" },
   { id: "codex", name: "Codex" },
   { id: "antigravity", name: "Antigravity (agy)" },
-  { id: "cursor", name: "Cursor" },
   { id: "opencode", name: "OpenCode" },
-  { id: "qwen", name: "Qwen Code" },
-  { id: "hermes", name: "Hermes (Nous)" },
-  { id: "kimi", name: "Kimi" },
   { id: "deepseek", name: "DeepSeek" },
   { id: "glm", name: "GLM" },
 ];
@@ -127,24 +124,18 @@ type ProviderSelectionEmptyStateProps = {
   textareaRef: React.RefObject<HTMLTextAreaElement>;
   claudeModel: string;
   setClaudeModel: (model: string) => void;
-  cursorModel: string;
-  setCursorModel: (model: string) => void;
   codexModel: string;
   setCodexModel: (model: string) => void;
   antigravityModel: string;
   setAntigravityModel: (model: string) => void;
   opencodeModel: string;
   setOpenCodeModel: (model: string) => void;
-  hermesModel: string;
-  setHermesModel: (model: string) => void;
   kimiModel: string;
   setKimiModel: (model: string) => void;
   deepseekModel: string;
   setDeepSeekModel: (model: string) => void;
   glmModel: string;
   setGlmModel: (model: string) => void;
-  qwenModel?: string;
-  setQwenModel?: (model: string) => void;
   providerModelCatalog: Partial<Record<LLMProvider, ProviderModelsDefinition>>;
   providerModelsLoading: boolean;
   providerModelsRefreshing: boolean;
@@ -173,8 +164,11 @@ function getModelConfig(
   return entry ?? { OPTIONS: [], DEFAULT: "" };
 }
 
-function getCurrentModel(p: LLMProvider, models: Record<LLMProvider, string>): string {
-  return models[p];
+function getCurrentModel(
+  p: LLMProvider,
+  models: Record<FallbackCatalogProvider, string>,
+): string | undefined {
+  return models[p as FallbackCatalogProvider];
 }
 
 /**
@@ -247,24 +241,18 @@ export default function ProviderSelectionEmptyState({
   textareaRef,
   claudeModel,
   setClaudeModel,
-  cursorModel,
-  setCursorModel,
   codexModel,
   setCodexModel,
   antigravityModel,
   setAntigravityModel,
   opencodeModel,
   setOpenCodeModel,
-  hermesModel,
-  setHermesModel,
   kimiModel,
   setKimiModel,
   deepseekModel,
   setDeepSeekModel,
   glmModel,
   setGlmModel,
-  qwenModel = 'qwen3-coder-plus',
-  setQwenModel = () => undefined,
   providerModelCatalog,
   providerModelsLoading,
   providerModelsRefreshing,
@@ -459,37 +447,35 @@ export default function ProviderSelectionEmptyState({
   }, [antigravityActiveLoading, antigravityActiveError, antigravityActiveLabel, t]);
 
 
-  const modelByProvider = useMemo<Record<LLMProvider, string>>(
+  // T-1953: keyed by FallbackCatalogProvider, not the wider LLMProvider — a
+  // retired body (cursor/hermes/qwen) has no picker model state left to index.
+  // A historical session displaying one of them falls back to `claudeModel`
+  // below, same as `getCurrentModel`'s default for any id absent from the map.
+  const modelByProvider = useMemo<Record<FallbackCatalogProvider, string>>(
     () => ({
       claude: claudeModel,
-      cursor: cursorModel,
       codex: codexModel,
       antigravity: antigravityModel,
       opencode: opencodeModel,
-      hermes: hermesModel,
       kimi: kimiModel,
       deepseek: deepseekModel,
       glm: glmModel,
-      qwen: qwenModel,
       // sakana has no dedicated state/prop in this component yet; seed with
-      // the placeholder default so Record<LLMProvider, string> is exhaustive.
+      // the placeholder default so Record<FallbackCatalogProvider, string> is exhaustive.
       sakana: PLACEHOLDER_FALLBACK_MODELS.DEFAULT,
     }),
     [
       claudeModel,
-      cursorModel,
       codexModel,
       antigravityModel,
       opencodeModel,
-      hermesModel,
       kimiModel,
       deepseekModel,
       glmModel,
-      qwenModel,
     ],
   );
 
-  const currentModel = getCurrentModel(provider, modelByProvider);
+  const currentModel = getCurrentModel(provider, modelByProvider) ?? claudeModel;
 
   const currentModelLabel = useMemo(() => {
     // In engine-on-vendor mode the active model id is a vendor model, so resolve
@@ -517,9 +503,6 @@ export default function ProviderSelectionEmptyState({
       } else if (providerId === "opencode") {
         setOpenCodeModel(modelValue);
         localStorage.setItem("opencode-model", modelValue);
-      } else if (providerId === "hermes") {
-        setHermesModel(modelValue);
-        localStorage.setItem("hermes-model", modelValue);
       } else if (providerId === "kimi") {
         setKimiModel(modelValue);
         localStorage.setItem("kimi-model", modelValue);
@@ -529,25 +512,20 @@ export default function ProviderSelectionEmptyState({
       } else if (providerId === "glm") {
         setGlmModel(modelValue);
         localStorage.setItem("glm-model", modelValue);
-      } else if (providerId === "qwen") {
-        setQwenModel(modelValue);
-        localStorage.setItem("qwen-model", modelValue);
-      } else {
-        setCursorModel(modelValue);
-        localStorage.setItem("cursor-model", modelValue);
       }
+      // A retired body (cursor/hermes/qwen, T-1953) is never reachable here:
+      // the picker no longer offers them, so `providerId` never names one on a
+      // live selection. No fallback branch — silently writing to a deleted
+      // provider's storage key would be as wrong as picking one at random.
     },
     [
       setClaudeModel,
-      setCursorModel,
       setCodexModel,
       setAntigravityModel,
       setOpenCodeModel,
-      setHermesModel,
       setKimiModel,
       setDeepSeekModel,
       setGlmModel,
-      setQwenModel,
     ],
   );
 
@@ -590,7 +568,7 @@ export default function ProviderSelectionEmptyState({
           claudeModel === row.model
         );
       }
-      const rowBody = row.key.split(":")[0] as LLMProvider;
+      const rowBody = row.key.split(":")[0] as FallbackCatalogProvider;
       return (
         provider === rowBody &&
         modelByProvider[rowBody] === row.model &&
@@ -1121,9 +1099,6 @@ export default function ProviderSelectionEmptyState({
                 claude: t("providerSelection.readyPrompt.claude", {
                   model: claudeModel,
                 }),
-                cursor: t("providerSelection.readyPrompt.cursor", {
-                  model: cursorModel,
-                }),
                 codex: t("providerSelection.readyPrompt.codex", {
                   model: codexModel,
                 }),
@@ -1134,10 +1109,6 @@ export default function ProviderSelectionEmptyState({
                 opencode: t("providerSelection.readyPrompt.opencode", {
                   model: opencodeModel,
                   defaultValue: "Ready with OpenCode {{model}}",
-                }),
-                hermes: t("providerSelection.readyPrompt.hermes", {
-                  model: hermesModel,
-                  defaultValue: "Ready with Hermes {{model}}",
                 }),
                 kimi: t("providerSelection.readyPrompt.kimi", {
                   model: kimiModel,
@@ -1151,14 +1122,16 @@ export default function ProviderSelectionEmptyState({
                   model: glmModel,
                   defaultValue: "Ready to use GLM with {{model}}. Start typing your message below.",
                 }),
-                qwen: t("providerSelection.readyPrompt.qwen", {
-                  model: qwenModel,
-                  defaultValue: "Ready with Qwen Code {{model}}",
-                }),
                 sakana: t("providerSelection.readyPrompt.sakana", {
                   defaultValue: "Ready with Sakana",
                 }),
-              }[provider]
+                // A retired body (cursor/hermes/qwen, T-1953) has no entry: the
+                // picker never selects one, and an empty historical session of
+                // theirs falls back to the Claude prompt below rather than a
+                // missing-key lookup.
+              }[provider as FallbackCatalogProvider] ?? t("providerSelection.readyPrompt.claude", {
+                model: claudeModel,
+              })
             }
           </p>
 

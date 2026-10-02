@@ -541,16 +541,6 @@ describe('cageMountPlan (T-898)', () => {
     }
   });
 
-  it('hermes (no per-user knob, policy-shared): ~/.hermes rw incl. its auth; other creds masked', () => {
-    const { deps } = allExist((p) => p !== 'hermes');
-    const plan = cageMountPlan({ provider: 'hermes', userId: 7 }, deps);
-    assert.ok(!plan.maskFiles.includes(CRED.hermesAuth));
-    assert.ok(plan.writePaths.includes(path.join(HOME, '.hermes')), 'hermes state dir must be rw');
-    for (const f of [CRED.claudeCred, CRED.claudeJson, CRED.codexAuth, CRED.agyToken, CRED.opencodeAuth]) {
-      assert.ok(plan.maskFiles.includes(f), `${f} must be masked inside the hermes cage`);
-    }
-  });
-
   it('existsSync-filters everything: nothing to mask/bind on a bare host', () => {
     const { deps } = allExist();
     const bare = { ...deps, existsSync: () => false };

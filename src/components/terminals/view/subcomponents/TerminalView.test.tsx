@@ -58,3 +58,22 @@ describe('TerminalView keyboard focus', () => {
     expect(focus).toHaveBeenCalledTimes(2);
   });
 });
+
+describe('TerminalView closed for an update (B-1448)', () => {
+  it('says the owner closed it for an update, with no reopen button', () => {
+    vi.mocked(useTerminalConnection).mockReturnValue({
+      terminalContainerRef: createRef<HTMLDivElement>(),
+      state: 'closedForUpdate',
+      truncated: false,
+      exitInfo: null,
+      errorMessage: null,
+      reconnect: vi.fn(),
+      focus: vi.fn(),
+    });
+    const { getByRole, queryByRole } = render(
+      <TerminalView terminal={terminal} isActive onRequestListRefresh={vi.fn()} />,
+    );
+    expect(getByRole('alert').textContent).toBe('errors.closedForUpdate');
+    expect(queryByRole('button')).toBeNull();
+  });
+});

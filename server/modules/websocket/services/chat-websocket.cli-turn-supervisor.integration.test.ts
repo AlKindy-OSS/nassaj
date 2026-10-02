@@ -33,7 +33,7 @@ function harness(supported: boolean, enabled = supported) {
   };
   const dependencies = {
     queryClaudeSDK: spawn, queryCodex: spawn, spawnCursor: spawn,
-    spawnAntigravity: spawn, spawnHermes: spawn, spawnOpenCode: spawn,
+    spawnAntigravity: spawn, spawnOpenCode: spawn,
     spawnKimi: spawn, spawnDeepSeek: spawn, spawnGlm: spawn, spawnQwen: spawn,
     getSessionProvider: () => null,
     cliTurnSupervisor: {
@@ -98,7 +98,7 @@ test('disabled or unsupported CLI cells preserve legacy dispatch', async () => {
 
 // cursor is globally disabled (owner decision 2026-09-29): an OFF cell leaves it on
 // the legacy path, which is now the disable wall — refused, never launched.
-test('an OFF CLI cell leaves disabled cursor refused before any launcher', async () => {
+test('an OFF CLI cell leaves retired cursor refused before any launcher', async () => {
   const ctx = harness(false, false);
   await dispatchProviderCommand('cursor-command', {
     command: 'request', options: { clientMsgId: 'cmid-cursor', coordinationLevel: 'delegate' },
@@ -106,7 +106,8 @@ test('an OFF CLI cell leaves disabled cursor refused before any launcher', async
   assert.equal(ctx.calls.legacy, 0);
   assert.equal(ctx.calls.execute, 0);
   assert.equal(ctx.sent[0]?.notStarted, true);
-  assert.match(String(ctx.sent[0]?.error), /disabled on this deployment/);
+  // T-1953: cursor is retired as a body; the typed refusal replaces the disabled wording.
+  assert.equal(ctx.sent[0]?.code, 'provider_removed');
 });
 
 test('an enabled Codex cell never falls back when its requested level lacks capability', async () => {
@@ -120,7 +121,7 @@ test('an enabled Codex cell never falls back when its requested level lacks capa
   assert.equal(ctx.sent[0]?.notStarted, true);
 });
 
-test('armed Qwen/Hermes cells with failed binary probes refuse before legacy invocation', async () => {
+test('armed Qwen/Hermes cells are unreachable: the retired refusal precedes the supervisor (T-1953)', async () => {
   for (const [messageType, provider] of [['qwen-command', 'qwen'], ['hermes-command', 'hermes']] as const) {
     const ctx = harness(false, true);
     await dispatchProviderCommand(messageType, {
@@ -128,12 +129,14 @@ test('armed Qwen/Hermes cells with failed binary probes refuse before legacy inv
     } as never, ctx.writer as never, ctx.dependencies as never, 41);
     assert.equal(ctx.calls.legacy, 0, provider);
     assert.equal(ctx.calls.execute, 0, provider);
-    assert.equal(ctx.sent[0]?.code, 'cli_turn_supervisor_unsupported', provider);
+    // Both bodies are retired: the refusal is decided before any CLI cell is
+    // consulted, so an armed cell can no longer start (or even probe) them.
+    assert.equal(ctx.sent[0]?.code, 'provider_removed', provider);
     assert.equal(ctx.sent[0]?.notStarted, true, provider);
   }
 });
 
-test('CLI abort bridge is identity scoped to the four supervised providers', () => {
+test('CLI abort bridge is identity scoped to the three supervised providers', () => {
   const seen: unknown[] = [];
   const supervisor = {
     supports: () => true, execute: async () => { throw new Error('unused'); },
@@ -143,6 +146,6 @@ test('CLI abort bridge is identity scoped to the four supervised providers', () 
   assert.deepEqual(seen, [{ provider: 'codex', sessionId: 's-1', userId: 41 }]);
   assert.equal(abortCliSupervisedTurn(supervisor as never, 'qwen', 's-2', 41), true);
   assert.equal(abortCliSupervisedTurn(supervisor as never, 'opencode', 's-3', 41), true);
-  assert.equal(abortCliSupervisedTurn(supervisor as never, 'hermes', 's-4', 41), true);
+  assert.equal(abortCliSupervisedTurn(supervisor as never, 'hermes', 's-4', 41), false, 'the hermes cell is deleted');
   assert.equal(abortCliSupervisedTurn(supervisor as never, 'cursor', 's-1', 41), false);
 });

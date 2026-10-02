@@ -18,6 +18,7 @@ import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 
+import { UserUnitProbeError } from '@/modules/workflow-supervisor/index.js';
 import { AppError } from '@/shared/utils.js';
 
 import type { HarnessUpdateJob } from '../../../../shared/harness-update.contract.js';
@@ -42,6 +43,7 @@ import {
   type ManifestKind,
   type VersionFacts,
 } from './snapshot/manifest.js';
+import { uncheckedDetailsOf } from './snapshot/open-handles.js';
 import { ensurePrivateDir, jobSnapshotDir } from './snapshot/paths.js';
 import { assertDiskHeadroom, assertSnapshotCountWithinCap, SNAPSHOT_MAX_AGE_MS } from './snapshot/retention.js';
 import {
@@ -140,25 +142,92 @@ export function assertNotRecoveryBlocked(rt: SnapshotRuntime, harness: string): 
   }
 }
 
-/** The atomic cross-user live-session gate, taken UNDER the lease; fails closed. */
-export async function hasLiveHarnessSession(rt: SnapshotRuntime, d: HarnessDescriptor): Promise<boolean> {
+/** Why the live-session gate refused a run (B-1474: the failing leg is named). */
+export type LiveBlocker =
+  | { kind: 'live_run' | 'live_launch' | 'live_unit' }
+  | { kind: 'gate_unverifiable'; leg: 'presence' | 'launch_registry' | 'unit_probe'; cause: string };
+
+/** Short machine cause of a leg failure (never raw stderr). */
+function gateCause(error: unknown): string {
+  if (error instanceof UserUnitProbeError) return error.reason;
+  return 'error';
+}
+
+/** Server-side detail of a leg failure, bounded for logs. */
+function gateDetail(error: unknown): string {
+  if (error instanceof UserUnitProbeError) return error.detail;
+  return (error instanceof Error ? error.message : String(error)).slice(0, 200);
+}
+
+/**
+ * The atomic cross-user live-session gate, taken UNDER the lease; fails closed.
+ * Returns null when the harness is free, else the blocker (a leg that cannot
+ * answer yields `gate_unverifiable` naming that leg).
+ */
+export async function liveSessionBlocker(rt: SnapshotRuntime, d: HarnessDescriptor): Promise<LiveBlocker | null> {
   try {
-    return rt.hasLiveSession(d.runProviders) || await rt.hasUnregisteredLaunch(d.runProviders);
-  } catch {
-    return true;
+    if (rt.hasLiveSession(d.runProviders)) return { kind: 'live_run' };
+  } catch (error) {
+    return unverifiable('presence', error, d);
+  }
+  try {
+    const launch = await rt.hasUnregisteredLaunch(d.runProviders);
+    return launch ? { kind: launch } : null;
+  } catch (error) {
+    return unverifiable(error instanceof UserUnitProbeError ? 'unit_probe' : 'launch_registry', error, d);
   }
 }
 
-/** Terminal `skipped_live_session` job (the scheduler simply retries later). */
-export function skippedLiveSessionJob(rt: SnapshotRuntime, d: HarnessDescriptor, jobId: string, userId: number | null, trigger: UpdateTrigger): HarnessUpdateJob {
-  const job = makeJob(jobId, d.id, userId, trigger, 'skipped_live_session', 'done', 100);
-  appendLog(job, `Skipped: a live ${d.id} session is in progress.`);
-  job.error = {
+function unverifiable(
+  leg: 'presence' | 'launch_registry' | 'unit_probe',
+  error: unknown,
+  d: HarnessDescriptor,
+): LiveBlocker {
+  const cause = gateCause(error);
+  console.warn('[harness-live-gate-unverifiable]', { provider: d.id, leg, cause, detail: gateDetail(error) });
+  return { kind: 'gate_unverifiable', leg, cause };
+}
+
+function blockerLogLine(d: HarnessDescriptor, blocker: LiveBlocker): string {
+  if (blocker.kind === 'gate_unverifiable') {
+    return `Skipped: the live-session gate for ${d.id} could not be verified (leg=${blocker.leg}, cause=${blocker.cause}).`;
+  }
+  return `Skipped: a live ${d.id} session is in progress (kind=${blocker.kind}).`;
+}
+
+function blockerError(d: HarnessDescriptor, blocker: LiveBlocker): NonNullable<HarnessUpdateJob['error']> {
+  if (blocker.kind === 'gate_unverifiable') {
+    return {
+      code: 'live_gate_unverifiable',
+      message: `Could not verify that no ${d.id} session is active; the update was skipped. Try again later.`,
+      messageAr: `تعذّر التحقق من خلوّ ${d.id} من جلسات نشطة، فتُخطّي التحديث. أعد المحاولة لاحقاً.`,
+    };
+  }
+  return {
     code: 'live_session_active',
     message: `A live ${d.id} session is in progress; the update was skipped.`,
     messageAr: `توجد جلسة ${d.id} نشطة الآن، فتُخطّي التحديث.`,
   };
+}
+
+/** Terminal `skipped_live_session` job (the scheduler simply retries later). */
+export function skippedLiveSessionJob(
+  rt: SnapshotRuntime,
+  d: HarnessDescriptor,
+  jobId: string,
+  userId: number | null,
+  trigger: UpdateTrigger,
+  blocker: LiveBlocker,
+): HarnessUpdateJob {
+  const job = makeJob(jobId, d.id, userId, trigger, 'skipped_live_session', 'done', 100);
+  appendLog(job, blockerLogLine(d, blocker));
+  job.error = blockerError(d, blocker);
   finishNow(job, rt.now);
+  if (trigger !== 'scheduler') {
+    const leg = blocker.kind === 'gate_unverifiable' ? blocker.leg : null;
+    const cause = blocker.kind === 'gate_unverifiable' ? blocker.cause : null;
+    rt.audit('harness_update_skipped', { provider: d.id, kind: blocker.kind, leg, cause }, userId);
+  }
   return toPublic(job);
 }
 
@@ -214,9 +283,10 @@ export async function startSnapshotJob(d: HarnessDescriptor, opts: SnapshotJobOp
   const hold = holdHarness(rt, d.id, jobId);
   try {
     assertNotRecoveryBlocked(rt, d.id);
-    if (await hasLiveHarnessSession(rt, d)) {
+    const blocker = await liveSessionBlocker(rt, d);
+    if (blocker) {
       hold.release();
-      return skippedLiveSessionJob(rt, d, jobId, opts.userId, opts.trigger);
+      return skippedLiveSessionJob(rt, d, jobId, opts.userId, opts.trigger, blocker);
     }
     const pre = preflight(rt, d);
     const from = await readLiveFacts(rt, d, pre.layout);
@@ -300,7 +370,7 @@ function takeSnapshot(ctx: SnapshotJobContext): boolean {
     ctx.manifest = transitionManifest(ctx.dir, { ...ctx.manifest, binary, stores }, 'snapshotted', rt.now());
     return true;
   } catch (error) {
-    abandon(ctx, codeOf(error, 'snapshot_failed'));
+    abandon(ctx, codeOf(error, 'snapshot_failed'), error);
     return false;
   }
 }
@@ -342,8 +412,11 @@ export function recordUpdaterGroup(ctx: SnapshotJobContext, pid: number): void {
   writeManifest(ctx.dir, ctx.manifest);
 }
 
-/** Deletes the snapshot payload, records `abandoned` and fails the job. */
-function abandon(ctx: SnapshotJobContext, code: string): void {
+/**
+ * Deletes the snapshot payload, records `abandoned` and fails the job. A
+ * STORE_ACCESS_UNPROVABLE `cause` forwards its unchecked processes to the job.
+ */
+function abandon(ctx: SnapshotJobContext, code: string, cause?: unknown): void {
   const { rt } = ctx;
   for (const sub of ['binary', 'stores']) fs.rmSync(path.join(ctx.dir, sub), { recursive: true, force: true });
   try {
@@ -352,7 +425,9 @@ function abandon(ctx: SnapshotJobContext, code: string): void {
     fs.rmSync(ctx.dir, { recursive: true, force: true });
   }
   clearFence(ctx);
-  failJob(ctx.job, code, 'The harness action was abandoned before any change.', rt.audit);
+  const extra = code === 'STORE_ACCESS_UNPROVABLE' && cause instanceof AppError
+    ? uncheckedDetailsOf(cause.details) ?? {} : {};
+  failJob(ctx.job, code, 'The harness action was abandoned before any change.', rt.audit, null, extra);
 }
 
 function clearFence(ctx: SnapshotJobContext): void {

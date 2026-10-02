@@ -1,14 +1,14 @@
 /**
- * استخراج الاستهلاك من مزوّدات تحفظه في **قاعدة SQLite** لا في JSONL.
+ * استخراج الاستهلاك من مزوّد يحفظه في **قاعدة SQLite** لا في JSONL (‏opencode).
  *
  * هذه الطبقة توأم `usage-extractors.ts` شكلاً ومسؤوليةً: تُخرج نفس
  * `SessionUsage` بنفس عدّادات `TokenTotals`، ويتولّى `cost-calculator` تسعيرها.
  * لا سعر واحد هنا ولا معادلة — الفصل نفسه المقصود في ADR-078.
  *
- * كل قاعدة أدناه **مقيسة على قاعدتي هذا الجهاز الحيّتين** (2026-07-28)، لا
+ * كل قاعدة أدناه **مقيسة على قاعدة هذا الجهاز الحيّة** (2026-07-28)، لا
  * مفترَضة من توثيق:
  *
- *  • **القراءة للقراءة فقط.** هاتان قاعدتا تطبيقين آخرين قد يكتبان فيهما الآن.
+ *  • **القراءة للقراءة فقط.** هذه قاعدة تطبيق آخر قد يكتب فيها الآن.
  *    كل فتح هنا `{ readonly: true, fileMustExist: true }`، وكل اتصال يُغلق في
  *    `finally`. قفلٌ منّا على قاعدة حيّة يُعطِّل جلسة جارية لغيرنا.
  *
@@ -30,34 +30,20 @@
  *    رسالة حقيقية فيها `output:128` و`reasoning:553`، والتفكير أكبر من
  *    المخرجات فيستحيل أن يكون داخلها؛ و`total` يساوي مجموع البنود الخمسة في
  *    كل رسالة مقيسة. ⇒ المخرجات المُحاسَبة = `output + reasoning`.
- *    **وعكسه لدى Hermes**: مصدره `output_tokens_details.reasoning_tokens`
- *    (‏`agent/usage_pricing.py`) وهو **جزء من** `output_tokens` بدلالة OpenAI،
- *    وتسعير Hermes نفسه لا يضيفه. ⇒ لا يُضاف. الفرق حقيقي، وخلطه يضخّم أغلى
- *    بنود الفاتورة أو يُسقطه.
  *
- *  • **‏`input` في القاعدتين لا يشمل المخبّأ** (بخلاف كودكس): صفّ حقيقي فيه
+ *  • **‏`input` لا يشمل المخبّأ** (بخلاف كودكس): صفّ حقيقي فيه
  *    `input = 5008` و`cache_read = 6784`، والمدخلات أصغر من القراءة فيستحيل
- *    أن تكون شاملةً لها؛ ويؤكّده كود Hermes نفسه (يطرح المخبّأ صراحةً).
- *    ⇒ لا طرح هنا، بخلاف `extractCodexSessionUsage`.
+ *    أن تكون شاملةً لها. ⇒ لا طرح هنا، بخلاف `extractCodexSessionUsage`.
  *
- *  • **دقّة النسبة الزمنية تختلف بين القاعدتين، وتُقال كما هي**:
- *    ‏opencode يحفظ **رسالةً رسالةً** بطابع لكل واحدة ⇒ نافذة الدورة تُرشَّح
- *    بطابع الرسالة تماماً كما في كلود. أما Hermes فلا يحفظ توكنز الرسالة
- *    (‏`messages.token_count` رقم واحد لا يفصل مدخلاً عن مخرج)، والعدّادات على
- *    مستوى الجلسة وحدها ⇒ **النسبة خشنة**: الجلسة كلّها تُنسب إلى لحظة
- *    `started_at`. جلسة Hermes ممتدّة عبر حدّ الدورة تقع كاملةً في دورة
- *    بدايتها. خشونة معلنة مقبولة، وخشونة صامتة ليست كذلك.
+ *  • **النسبة الزمنية**: ‏opencode يحفظ **رسالةً رسالةً** بطابع لكل واحدة ⇒
+ *    نافذة الدورة تُرشَّح بطابع الرسالة تماماً كما في كلود.
  */
 
 import { stat } from 'node:fs/promises';
-import os from 'node:os';
-import path from 'node:path';
 
 import Database from 'better-sqlite3';
 
 import { resolveOpenCodeDatabasePathForUser } from '@/modules/providers/list/opencode/opencode-home.js';
-import { resolveProviderEnv } from '@/services/isolation/resolve-provider-env.js';
-import { readOptionalString } from '@/shared/utils.js';
 
 import { emptyTotals, type ModelUsage, type SessionUsage, type UsageWindow } from './usage-extractors.js';
 
@@ -78,17 +64,6 @@ export type DbCycleUsageOutcome =
 /** بصمة قاعدة على القرص — مفتاح إبطال الكاش لدى المستدعي. */
 export type DatabaseSignature = { newestMs: number; size: number };
 
-/**
- * لماذا لا تُقاس كلفة **محادثة Hermes بعينها** رغم أن أرقامها على القرص:
- * نسّاج يولّد مُعرِّف المحادثة بنفسه (`crypto.randomUUID()` في `hermes-cli.js`)
- * لأن `hermes -z` لا يُعيد مُعرِّفه الداخلي إطلاقاً، بينما `state.db` تُرقّم
- * جلساتها `YYYYMMDD_HHMMSS_xxxxxx`. لا مفتاح وصل بين الاثنين — والمطابقة
- * بالتقارب الزمني تخمينٌ يُعرض كأنه قياس. مجموع الدورة يبقى مقيساً لأنه لا
- * يحتاج ربطاً بمحادثة بعينها.
- */
-export const HERMES_SESSION_UNLINKABLE_REASON =
-  'Hermes stores its token counts in ~/.hermes/state.db, but it never reports its internal session id back to nassaj, so this conversation cannot be matched to a usage row. The subscription cycle total is still measured.';
-
 const missingDatabaseReason = (provider: string, databasePath: string): string =>
   `No ${provider} usage database was found at ${databasePath}, so cost cannot be measured.`;
 
@@ -103,22 +78,6 @@ const missingDatabaseReason = (provider: string, databasePath: string): string =
  */
 export function resolveOpenCodeCostDatabasePath(userId: string | number | null): string {
   return resolveOpenCodeDatabasePathForUser(userId);
-}
-
-/**
- * قاعدة Hermes لهذا المستخدم: `<HOME>/.hermes/state.db`. اعتماد Hermes مشترك
- * اليوم (‏`resolveProviderEnv` لا تُفرد له فرعاً فتعود ببيئة المشغّل)، فالمسار
- * واحد للجميع — والمرور بالمُحلِّل رغم ذلك مقصود: يوم يُعزل بـ`HOME` يتبعه هذا
- * القارئ بلا تعديل.
- */
-export function resolveHermesCostDatabasePath(userId: string | number | null): string {
-  let home: string | undefined;
-  try {
-    home = readOptionalString(resolveProviderEnv(userId, 'hermes', process.env).HOME);
-  } catch {
-    // فشل حلّ البيئة لا يمنع المسار الافتراضي أدناه.
-  }
-  return path.join(home ?? os.homedir(), '.hermes', 'state.db');
 }
 
 /**
@@ -404,72 +363,4 @@ export function collectOpenCodeCycleUsage(databasePath: string, window: UsageWin
   });
 
   return outcome ?? { available: false, reason: missingDatabaseReason('OpenCode', databasePath) };
-}
-
-// ---------------------------------------------------------------------------
-// Hermes
-// ---------------------------------------------------------------------------
-
-type HermesSessionRow = {
-  id: string;
-  model: string | null;
-  started_at: number;
-  input_tokens: number;
-  output_tokens: number;
-  cache_read_tokens: number;
-  cache_write_tokens: number;
-};
-
-/**
- * كل جلسات Hermes التي بدأت داخل النافذة.
- *
- * `started_at` بالثواني العشرية (لا ملّي ثانية) — وهي **لحظة النسبة الوحيدة
- * المتاحة**: `ended_at` فارغ في كل صفّ مقيس، وعدّادات الرسائل لا تفصل مدخلاً
- * عن مخرج. الخشونة معلنة في رأس الملف وفي تقرير الميزة.
- *
- * ‏`reasoning_tokens` **لا يُضاف** إلى المخرجات: مصدره لدى Hermes نفسه
- * `output_tokens_details.reasoning_tokens` وهو جزءٌ منها بدلالة OpenAI.
- */
-export function collectHermesCycleUsage(databasePath: string, window: UsageWindow): DbCycleUsageOutcome {
-  const outcome = withReadOnlyDatabase(databasePath, (db): DbCycleUsageOutcome => {
-    const rows = db
-      .prepare<[], HermesSessionRow>(
-        `SELECT id, model, started_at, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens
-           FROM sessions`,
-      )
-      .all();
-
-    const sessions: SessionUsage[] = [];
-    for (const row of rows) {
-      if (!withinWindow(readNumber(row.started_at) * 1000, window)) {
-        continue;
-      }
-
-      const totals = emptyTotals();
-      totals.input = readNumber(row.input_tokens);
-      totals.output = readNumber(row.output_tokens);
-      totals.cacheRead = readNumber(row.cache_read_tokens);
-      totals.cacheWrite5m = readNumber(row.cache_write_tokens);
-
-      const consumed =
-        totals.input + totals.output + totals.cacheRead + totals.cacheWrite5m;
-      const model = (row.model ?? '').trim();
-      if (consumed === 0 || !model) {
-        continue; // جلسة بلا استهلاك أو بلا نموذج: لا رقم يُنسب ولا اسم يُعرض.
-      }
-
-      sessions.push({
-        provider: 'hermes',
-        // طلب واحد لكل جلسة: القاعدة لا تحفظ عدد نداءات الـAPI مفصّلاً بعدّاداتها.
-        perModel: [{ model, totals, requests: 1 }],
-        subagentRequests: 0,
-        workDurationMs: null,
-        skipped: { synthetic: 0, duplicates: 0 },
-      });
-    }
-
-    return { available: true, sessions };
-  });
-
-  return outcome ?? { available: false, reason: missingDatabaseReason('Hermes', databasePath) };
 }

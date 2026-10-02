@@ -12,6 +12,11 @@ import {
   digestApiKey,
 } from '@/modules/database/api-key-digest.js';
 import { getConnection } from '@/modules/database/connection.js';
+import {
+  apiKeyCredentialState,
+  apiKeySsoAttestationClause,
+  type ApiKeyCredentialState,
+} from '@/modules/database/repositories/api-key-sso-window.js';
 
 type ApiKeyRow = {
   id: number;
@@ -46,6 +51,11 @@ type ValidatedApiKeyUser = {
   api_key_id: number;
   authorization_generation: number;
 };
+
+/** Outcome of resolveApiKey: the owning user, or why the key was refused. */
+export type ApiKeyResolution =
+  | { ok: true; user: ValidatedApiKeyUser }
+  | { ok: false; reason: 'invalid' | 'sso_attestation_expired' };
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -105,28 +115,26 @@ export const apiKeysDb = {
   },
 
   /**
-   * Validates an API key and resolves the owning user.
-   * If the key is valid, its `last_used` timestamp is updated as a side effect.
-   * Returns undefined when the key is invalid, disabled, or its owner is not a
-   * fully active account.
+   * Resolves an API key to its owning user, or says why it is refused.
+   * `last_used` is stamped only on success.
    *
-   * SEC-APIKEY-STATUS: the predicate used to be `ak.is_active = 1 AND
-   * u.is_active = 1` — it checked the LEGACY `is_active` column only. Account
-   * suspension, however, is expressed through `users.status` (userDb.setStatus
-   * writes `status` and nothing else), and every JWT path already requires BOTH
-   * (`userDb.getUserById`: `is_active = 1 AND status = 'active'`). The two
-   * predicates therefore disagreed: disabling a departing member killed their
-   * tokens but left every API key of theirs valid — on /api/agent, which runs
-   * with permissionMode:'bypassPermissions'. The `u.status = 'active'` clause
-   * below makes the API-key path match the JWT path exactly.
+   * SEC-APIKEY-STATUS: the owner must be fully active (`is_active = 1 AND
+   * status = 'active'`), exactly like every JWT path (`userDb.getUserById`).
+   *
+   * T-1946: an SSO-linked non-owner is refused with `sso_attestation_expired`
+   * once their newest SSO sign-in is older than the owner's window (see
+   * api-key-sso-window.ts). The key itself is untouched, so the next SSO
+   * sign-in makes it work again.
    */
-  validateApiKey(apiKey: string): ValidatedApiKeyUser | undefined {
+  resolveApiKey(apiKey: string, nowMs: number = Date.now()): ApiKeyResolution {
     const keyDigest = digestApiKey(apiKey);
-    if (!keyDigest) return undefined;
+    if (!keyDigest) return { ok: false, reason: 'invalid' };
     const db = getConnection();
+    const clause = apiKeySsoAttestationClause(db, nowMs);
     const row = db
       .prepare(
-        `SELECT u.id, u.username, u.role, u.authorization_generation, ak.id as api_key_id
+        `SELECT u.id, u.username, u.role, u.authorization_generation, ak.id as api_key_id,
+                CASE WHEN ${clause.sql} THEN 1 ELSE 0 END AS sso_attested
          FROM api_keys ak
          JOIN users u ON ak.user_id = u.id
          WHERE ak.key_digest = ?
@@ -134,35 +142,51 @@ export const apiKeysDb = {
            AND u.is_active = 1
            AND u.status = 'active'`
       )
-      .get(keyDigest) as ValidatedApiKeyUser | undefined;
+      .get(...clause.params, keyDigest) as
+      | (ValidatedApiKeyUser & { sso_attested: number })
+      | undefined;
 
-    if (row) {
-      db.prepare(
-        'UPDATE api_keys SET last_used = CURRENT_TIMESTAMP WHERE id = ?'
-      ).run(row.api_key_id);
-    }
-
-    return row;
+    if (!row) return { ok: false, reason: 'invalid' };
+    if (row.sso_attested !== 1) return { ok: false, reason: 'sso_attestation_expired' };
+    db.prepare('UPDATE api_keys SET last_used = CURRENT_TIMESTAMP WHERE id = ?').run(row.api_key_id);
+    return {
+      ok: true,
+      user: {
+        id: row.id,
+        username: row.username,
+        role: row.role,
+        api_key_id: row.api_key_id,
+        authorization_generation: row.authorization_generation,
+      },
+    };
   },
 
-  /** Revalidates the exact credential row and its immutable owning principal. */
+  /**
+   * Revalidates the exact credential row and its immutable owning principal,
+   * including the SSO attestation window (T-1946).
+   */
   isAuthenticationPrincipalCurrent(
     apiKeyId: number,
     userId: number,
     authorizationGeneration: number,
   ): boolean {
-    if (!Number.isSafeInteger(apiKeyId) || apiKeyId <= 0
-      || !Number.isSafeInteger(userId) || userId <= 0
-      || !Number.isSafeInteger(authorizationGeneration) || authorizationGeneration <= 0) {
-      return false;
+    return apiKeysDb.authenticationPrincipalState(apiKeyId, userId, authorizationGeneration)
+      === 'current';
+  },
+
+  /**
+   * Same check as isAuthenticationPrincipalCurrent, but says why a principal is
+   * refused, so a caller can answer `api_key_sso_attestation_expired`.
+   */
+  authenticationPrincipalState(
+    apiKeyId: number,
+    userId: number,
+    authorizationGeneration: number,
+  ): ApiKeyCredentialState {
+    if (!Number.isSafeInteger(authorizationGeneration) || authorizationGeneration <= 0) {
+      return 'invalid';
     }
-    const row = getConnection().prepare(`SELECT 1
-      FROM api_keys ak
-      JOIN users u ON u.id = ak.user_id
-      WHERE ak.id = ? AND ak.user_id = ? AND ak.is_active = 1
-        AND u.is_active = 1 AND u.status = 'active'
-        AND u.authorization_generation = ?`).get(apiKeyId, userId, authorizationGeneration);
-    return row !== undefined;
+    return apiKeyCredentialState(getConnection(), { apiKeyId, userId, authorizationGeneration });
   },
 
   /** Permanently removes an API key. Returns true if a row was deleted. */

@@ -393,12 +393,10 @@
     "providerInfo": {
       "anthropic": "Anthropic 제공",
       "openai": "OpenAI 제공",
-      "cursorEditor": "AI 코드 에디터",
       "google": "Google 제공"
     },
     "readyPrompt": {
       "claude": "{{model}} 모델로 Claude를 사용할 준비가 되었습니다. 아래에 메시지를 입력하세요.",
-      "cursor": "{{model}} 모델로 Cursor를 사용할 준비가 되었습니다. 아래에 메시지를 입력하세요.",
       "codex": "{{model}} 모델로 Codex를 사용할 준비가 되었습니다. 아래에 메시지를 입력하세요.",
       "antigravity": "Antigravity (agy)를 {{model}}(으)로 사용할 준비가 되었습니다. 아래에 메시지를 입력하세요.",
       "opencode": "{{model}} 모델로 OpenCode를 사용할 준비가 되었습니다. 아래에 메시지를 입력하세요.",
@@ -568,6 +566,9 @@
     "turns_other": "{{count}}회 턴",
     "harnessLine": "하네스: {{harness}}",
     "olderModels_other": "이전 모델 {{count}}개"
+  },
+  "composer": {
+    "replyInProgress": "에이전트가 현재 응답 중입니다. 응답이 끝날 때까지 기다리거나 중지한 후 메시지를 보내세요."
   },
   "ws": {
     "statusConnected": "연결됨",

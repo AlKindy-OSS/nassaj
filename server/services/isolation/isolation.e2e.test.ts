@@ -248,7 +248,6 @@ describe('provider-sharing config round-trip', () => {
       agy: 'isolated',
       cursor: 'isolated',
       opencode: 'isolated',
-      hermes: 'isolated',
       kimi: 'isolated',
       deepseek: 'isolated',
       glm: 'isolated',

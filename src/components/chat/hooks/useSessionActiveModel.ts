@@ -28,7 +28,10 @@
  */
 
 import { useState, useEffect, useRef, useCallback } from 'react';
+
 import { authenticatedFetch } from '../../../utils/api';
+
+import { consumePendingModelStamp } from './pendingModelStamp';
 
 interface ActiveModelApiResponse {
   success: boolean;
@@ -81,6 +84,12 @@ export function useSessionActiveModel(
   const [isLoading, setIsLoading] = useState(false);
   const [changed, setChanged] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
+  /**
+   * B-1483: tracks the previous (trimmed) sessionId seen by Effect-1 below.
+   * Starts empty so the very first run with a real sessionId is treated the
+   * same as a null→id transition — see the pending-stamp check there.
+   */
+  const prevSidRef = useRef<string>('');
 
   /** يُعيد ضبط الحالة بعد مسح تثبيت الجلسة — بلا جلب. */
   const resetOverride = useCallback((model: string) => {
@@ -93,12 +102,37 @@ export function useSessionActiveModel(
     const sid = typeof sessionId === 'string' ? sessionId.trim() : '';
 
     if (!sid || !provider) {
+      prevSidRef.current = '';
       // لا sessionId → عرض المنتقي العام فوراً بلا جلب
       setDisplayModel(fallbackModel);
       setIsLoading(false);
       setChanged(false);
       return;
     }
+
+    // B-1483: a session that was just minted from THIS TAB's own new-
+    // conversation send already has its model settled — it's exactly the
+    // value `writePendingModelStamp` recorded right before dispatch (see
+    // pendingModelStamp.ts). Consuming it here (one-shot) and skipping the
+    // network fetch entirely for this transition closes the race where the
+    // GET for a session that is milliseconds old returns the server's
+    // provider-current default (no override persisted yet for a brand-new
+    // session) and clobbers the optimistic selection a moment after
+    // `session_created`. Only applies on a null→id transition (`prevSidRef`
+    // was empty) — switching between two ALREADY-open sessions always falls
+    // through to the normal fetch below, and opening an existing session
+    // directly never finds a stamp here (nothing wrote one this tab).
+    if (!prevSidRef.current) {
+      const stamped = consumePendingModelStamp();
+      if (stamped) {
+        prevSidRef.current = sid;
+        setDisplayModel(stamped);
+        setIsLoading(false);
+        setChanged(false);
+        return;
+      }
+    }
+    prevSidRef.current = sid;
 
     // إلغاء أي جلبة سابقة (تغيّر سريع في الجلسة)
     abortRef.current?.abort();

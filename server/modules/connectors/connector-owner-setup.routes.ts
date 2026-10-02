@@ -7,6 +7,7 @@ import express from 'express';
 import { ConnectorOwnerSetupError, type ConnectorOwnerSetupService } from './connector-owner-setup.service.js';
 import { RECENT_AUTH_MAX_AGE_MS } from './connector-auth-security.js';
 import { authorizedOwnerOperation } from './connector-owner-operation-gate.js';
+import { connectorOriginBootstrapRefusal } from './connector-origin-bootstrap-refusal.js';
 
 type Identity = Readonly<{ userId: number; role: string }>;
 type RecentSession = Readonly<{ installationId: string; userId: number; authTimeMs: number;
@@ -44,6 +45,13 @@ const current = (req: express.Request, res: express.Response): boolean => {
   res.status(409).json({ code: 'IDENTITY_CHANGED' });
   return false;
 };
+/** Service refusals keep their code; a bootstrap refusal is 409 with its reason (B-1461 H3). */
+const sendWriteError = (res: express.Response, error: unknown): void => {
+  if (error instanceof ConnectorOwnerSetupError) { res.status(error.status).json({ code: error.code }); return; }
+  const bootstrap = connectorOriginBootstrapRefusal(error);
+  if (bootstrap) { res.status(bootstrap.status).json(bootstrap.body); return; }
+  res.status(503).json({ code: 'CONNECTOR_SETUP_UNAVAILABLE' });
+};
 
 /** Builds routes without mounting any provider activation or I/O adapter. */
 export const createConnectorOwnerSetupRoutes = (deps: Dependencies): express.Router => {
@@ -73,6 +81,10 @@ export const createConnectorOwnerSetupRoutes = (deps: Dependencies): express.Rou
     const status = deps.service.status();
     const proposed = typeof (req.body as Record<string, unknown>).canonicalOrigin === 'string'
       ? String((req.body as Record<string, unknown>).canonicalOrigin) : null;
+    // B-1461 H2: before the first bind the body must equal the trusted-config proposal.
+    if (proposed !== null && !status.origin && proposed !== status.originProposal?.canonicalOrigin) {
+      res.status(403).json({ code: 'CONNECTOR_ORIGIN_PROPOSAL_MISMATCH' }); return;
+    }
     const expectedOrigin = status.origin?.canonicalOrigin ?? proposed;
     // Origin is checked on its own so a wrong-origin request is never reported
     // (or retried by the client) as an expired step-up.
@@ -89,10 +101,7 @@ export const createConnectorOwnerSetupRoutes = (deps: Dependencies): express.Rou
       res.json(await effect(req.body as Record<string, unknown>, { ownerUserId: identity.userId,
         idempotencyKey: key, expectedRevision: revision, requestOrigin: expectedOrigin!,
         authTimeMs: session.authTimeMs, expiresAtMs: Math.min(session.expiresAtMs, nowMs + 30_000), nowMs }, res));
-    } catch (error) {
-      if (error instanceof ConnectorOwnerSetupError) { res.status(error.status).json({ code: error.code }); return; }
-      res.status(503).json({ code: 'CONNECTOR_SETUP_UNAVAILABLE' });
-    }
+    } catch (error) { sendWriteError(res, error); }
   };
 
   router.put('/origin', write(

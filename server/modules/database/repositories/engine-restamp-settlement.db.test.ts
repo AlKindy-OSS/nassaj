@@ -31,6 +31,7 @@ mock.method(fs, 'copyFileSync', (source, destination) => {
 });
 
 const database = await import('@/modules/database/index.js');
+const ssoConfigRepository = await import('@/modules/database/repositories/sso-oidc-config.js');
 const access = await import('@/modules/database/repositories/project-access.js');
 const settlement = await import('./engine-restamp-settlement.db.js');
 const authority = await import('./engine-restamp-authority.js');
@@ -202,6 +203,28 @@ test('CK credential must remain the exact active key', () => {
   const credential = (fixture.intent.actor as Extract<EngineRestampIntent['actor'], { kind: 'ck' }>).authenticationCredentialId;
   fixture.db.prepare('UPDATE api_keys SET is_active = 0 WHERE id = ?').run(Number(credential.split(':')[1]));
   assertBlocked(fixture);
+});
+
+test('CK credential follows the T-1946 SSO window of a linked member', (t) => {
+  const DAY_MS = 24 * 60 * 60 * 1000;
+  // ADR-194 S8 Q1: the plain window applies while SSO is owner-disabled.
+  const { writeDisabledRecordOn, deleteDisabledRecordOn } = ssoConfigRepository;
+  writeDisabledRecordOn(database.getConnection(), 'owner', Date.now());
+  t.after(() => deleteDisabledRecordOn(database.getConnection()));
+  for (const [attestedAgoMs, blocked] of [[DAY_MS, false], [8 * DAY_MS, true]] as const) {
+    const fixture = createFixture('ck');
+    const generation = database.userDb.getRawById(fixture.actorUser)!.authorization_generation;
+    const linkId = database.userIdentitiesDb.link(fixture.actorUser, 'https://idp.example',
+      `restamp-${fixture.sessionId}`);
+    database.userIdentitiesDb.markAttested(linkId, fixture.actorUser, Date.now() - attestedAgoMs);
+    assert.equal(database.userDb.getRawById(fixture.actorUser)!.authorization_generation, generation,
+      'linking must not be what blocks the settlement');
+    if (blocked) assertBlocked(fixture);
+    else {
+      assert.equal(settlement.commitEngineRestampTarget(fixture.captured, fixture.intent,
+        fixture.canonical), undefined);
+    }
+  }
 });
 
 test('participant and controller rows are independently required', () => {

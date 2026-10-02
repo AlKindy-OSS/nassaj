@@ -2,6 +2,7 @@ import { Server } from 'lucide-react';
 
 import { cn } from '../../../../../../lib/utils';
 import SessionProviderLogo from '../../../../../llm-logo-provider/SessionProviderLogo';
+import type { ActiveBodyProvider } from '../../../../../../types/app';
 import type { AgentProvider } from '../../../../types/types';
 import { COMING_SOON_SETTINGS_PROVIDERS } from '../visibleAgents';
 import type { AgentSelectorSectionProps } from '../types';
@@ -102,7 +103,9 @@ export default function AgentSelectorSection({
       <div className="grid grid-cols-3 gap-1.5 sm:grid-cols-5 xl:grid-cols-9">
         {agents.map((agent) => {
           const isActive = !localModelsSelected && selectedAgent === agent;
-          const isConnected = agentContextById[agent].authStatus.authenticated;
+          // `agents` is always `visibleSettingsAgents()`, which never carries
+          // a retired body (T-1953) — safe to key ActiveBodyProvider-only map.
+          const isConnected = agentContextById[agent as ActiveBodyProvider].authStatus.authenticated;
           // Coming-soon providers (T-1760): no status dot — they have no
           // connection state to report; the dot would always show "not connected"
           // which is misleading for a provider that is not yet wired up at all.

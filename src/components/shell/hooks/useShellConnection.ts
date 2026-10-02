@@ -15,6 +15,7 @@ import {
   isFinalShellRefusalClose,
   isIntentionalShellClose,
   shouldRetryReconnect,
+  UPDATE_TERMINALS_CLOSED_REASON,
 } from '../utils/reconnect';
 
 const ANSI_ESCAPE_REGEX =
@@ -70,6 +71,8 @@ type UseShellConnectionResult = {
   isConnecting: boolean;
   /** True while an abnormal drop is being auto re-attached (backoff in flight). */
   isReconnecting: boolean;
+  /** True after the owner closed this shell to install an update (B-1448). */
+  closedForUpdate: boolean;
   closeSocket: () => void;
   connectToShell: (options?: { forceRestart?: boolean }) => void;
   disconnectFromShell: (options?: { suppressAutoConnect?: boolean }) => void;
@@ -96,6 +99,7 @@ export function useShellConnection({
   const [isConnected, setIsConnected] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
   const [isReconnecting, setIsReconnecting] = useState(false);
+  const [closedForUpdate, setClosedForUpdate] = useState(false);
   const connectingRef = useRef(false);
   const forceRestartOnInitRef = useRef(false);
   const suppressAutoConnectRef = useRef(false);
@@ -200,6 +204,9 @@ export function useShellConnection({
           `\r\n\u001b[1;33m${sanitizeTerminalText(text)}${suffix}\u001b[0m\r\n`,
         );
         hasShellErrorRef.current = true;
+        if (code === UPDATE_TERMINALS_CLOSED_REASON) {
+          setClosedForUpdate(true);
+        }
         onShellErrorRef?.current?.({ message: text, code });
         return;
       }
@@ -290,6 +297,7 @@ export function useShellConnection({
           // round-trip and then flash it back.
           if (!isReconnectAttemptRef.current) {
             clearShellError();
+            setClosedForUpdate(false);
           }
 
           window.setTimeout(() => {
@@ -378,6 +386,9 @@ export function useShellConnection({
           // still re-attach, or the release that fixes the terminal would
           // strand it after every update.
           if (isFinalShellRefusalClose(event.code)) {
+            if (event.reason === UPDATE_TERMINALS_CLOSED_REASON) {
+              setClosedForUpdate(true);
+            }
             setIsReconnecting(false);
             clearReconnectTimer();
             reconnectAttemptsRef.current = 0;
@@ -530,6 +541,7 @@ export function useShellConnection({
     isConnected,
     isConnecting,
     isReconnecting,
+    closedForUpdate,
     closeSocket,
     connectToShell,
     disconnectFromShell,

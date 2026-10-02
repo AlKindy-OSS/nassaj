@@ -36,6 +36,8 @@
     "messageCount_one": "{{count}} پیام",
     "messageCount_other": "{{count}} پیام",
     "allClosedHidden": "گفتگوهای بسته‌شده پنهان هستند",
+    "surfacedHiddenHint_one": "+یک گفتگوی دیگر با فعالیت",
+    "surfacedHiddenHint_other": "+{{count}} گفتگوی دیگر با فعالیت",
     "loadingSessions": "در حال بارگذاری نشست‌ها...",
     "unnamed": "بی‌نام",
     "loading": "در حال بارگذاری...",

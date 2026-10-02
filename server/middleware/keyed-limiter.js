@@ -12,7 +12,8 @@
  * (the step-up service calls it BEFORE any expensive verification).
  *
  * @param {{ windowMs?: number, max?: number }} [options]
- * @returns {{ hit(key: string): { allowed: boolean, retryAfterSeconds: number } }}
+ * @returns {{ hit(key: string): { allowed: boolean, retryAfterSeconds: number },
+ *   refund(key: string): void }}
  */
 export function createKeyedLimiter({ windowMs, max } = {}) {
   const windowSize = windowMs ?? 60_000;
@@ -33,6 +34,16 @@ export function createKeyedLimiter({ windowMs, max } = {}) {
       }
       entry.count += 1;
       return { allowed: true, retryAfterSeconds: 0 };
+    },
+
+    /**
+     * Returns one attempt to `bucketKey` (a verification that succeeded). Only
+     * a live entry inside its window with count > 0 is decremented; an expired
+     * or absent entry is left as is, so a refund never pre-credits a window.
+     */
+    refund(bucketKey) {
+      const entry = buckets.get(bucketKey);
+      if (entry && Date.now() <= entry.resetAt && entry.count > 0) entry.count -= 1;
     },
   };
 }

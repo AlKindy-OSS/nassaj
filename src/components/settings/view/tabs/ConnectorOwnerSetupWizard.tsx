@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent } from 'react';
 import { AlertCircle, Check, FileKey2, Loader2, RefreshCw, ShieldCheck } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 
 import { Button, Input } from '../../../../shared/view/ui';
 
@@ -54,6 +55,15 @@ const readBoundedJson = async (file: File, limit: number): Promise<unknown> => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('file_invalid');
   return value;
 };
+/** i18n key (under connectorsSettings.ownerSetup.origin) explaining an origin-write refusal (B-1461). */
+const ORIGIN_ERROR_KEYS: Record<string, string> = {
+  CONNECTOR_ORIGIN_PROPOSAL_MISMATCH: 'errors.proposalMismatch',
+  CONNECTOR_ORIGIN_BOOTSTRAP_REFUSED: 'errors.bootstrapRefused',
+  'CONNECTOR_ORIGIN_BOOTSTRAP_REFUSED:startup_profile': 'errors.bootstrapStartupProfile',
+  'CONNECTOR_ORIGIN_BOOTSTRAP_REFUSED:existing_installation_effects': 'errors.bootstrapExistingEffects',
+};
+const originErrorKey = (error: string): string | undefined =>
+  ORIGIN_ERROR_KEYS[error] ?? ORIGIN_ERROR_KEYS[error.split(':')[0]];
 const actionableCandidate = (candidate: ConnectorOwnerSetupStatus['activationCandidates'][number]) =>
   candidate.certification === 'certified'
     && candidate.blockerCodes.every(code => code === 'CONNECTOR_ACTIVATION_REQUIRED')
@@ -62,6 +72,8 @@ const actionableCandidate = (candidate: ConnectorOwnerSetupStatus['activationCan
 export default function ConnectorOwnerSetupWizard({ owner, csrfToken, recentAuthRequired, onRequestStepUp, language, onReadyChange }: Props) {
   const ar = language.startsWith('ar');
   const say = (en: string, arabic: string) => ar ? arabic : en;
+  const { t } = useTranslation('settings');
+  const originText = (key: string) => t(`connectorsSettings.ownerSetup.origin.${key}`);
   const [status, setStatus] = useState<ConnectorOwnerSetupStatus | null>(null);
   const [origin, setOrigin] = useState('');
   const [trustFile, setTrustFile] = useState<File | null>(null);
@@ -74,7 +86,8 @@ export default function ConnectorOwnerSetupWizard({ owner, csrfToken, recentAuth
   const failWith = useCallback((reason: unknown) => {
     const code = reason instanceof ConnectorOwnerSetupRequestError ? reason.code : 'CONNECTOR_SETUP_UNAVAILABLE';
     if (CONNECTOR_RECENT_AUTH_CODES.has(code) && onRequestStepUp) { onRequestStepUp(code); return; }
-    setError(code);
+    // A refinement (e.g. the bootstrap-refusal reason) travels as `code:reason`.
+    setError(reason instanceof ConnectorOwnerSetupRequestError && reason.reason ? `${code}:${reason.reason}` : code);
   }, [onRequestStepUp]);
   const generation = useRef(0);
   const controller = useRef<AbortController | null>(null);
@@ -96,7 +109,10 @@ export default function ConnectorOwnerSetupWizard({ owner, csrfToken, recentAuth
     try {
       const next = await loadConnectorOwnerSetup(abort.signal);
       if (callGeneration !== generation.current || abort.signal.aborted || !owner) return;
-      setStatus(next); setOrigin(next.origin?.canonicalOrigin ?? window.location.origin);
+      // B-1461: the server's trusted-config proposal is a pre-fill only; saving stays explicit.
+      // Without a usable proposal nothing can be bound, so nothing is pre-filled either.
+      setStatus(next);
+      setOrigin(next.origin?.canonicalOrigin ?? next.originProposal?.canonicalOrigin ?? '');
       setChanges(Object.fromEntries(next.activationCandidates.map(candidate => [
         `${candidate.providerId}\0${candidate.serviceId}\0${candidate.operation}`, candidate.enabled,
       ])));
@@ -206,6 +222,8 @@ export default function ConnectorOwnerSetupWizard({ owner, csrfToken, recentAuth
     }
     return [...providers.values()];
   }, [status]);
+  // B-1461 L2: before the first bind the server accepts only its own proposal.
+  const originBlocked = Boolean(status && !status.origin && !status.originProposal?.canonicalOrigin);
   const changed = certified.filter(candidate => changes[
     `${candidate.providerId}\0${candidate.serviceId}\0${candidate.operation}`] !== candidate.enabled);
   const labels: Record<OwnerSetupStep, [string, string]> = {
@@ -227,7 +245,7 @@ export default function ConnectorOwnerSetupWizard({ owner, csrfToken, recentAuth
       )}</span>
       {onRequestStepUp && <Button variant="outline" onClick={() => onRequestStepUp()}><ShieldCheck className="h-4 w-4" aria-hidden="true"/>{say("Confirm it's you", 'تأكيد هويتك')}</Button>}
     </div>}
-    {error && <div role="alert" className="flex items-start gap-2 rounded-md border border-danger/30 bg-danger/5 p-3 text-sm text-danger"><AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true"/><span className="min-w-0 flex-1">{say('Setup could not continue', 'تعذر متابعة الإعداد')} <code dir="ltr">{error}</code></span><Button variant="outline" onClick={() => void refresh()}>{say('Retry', 'إعادة المحاولة')}</Button></div>}
+    {error && <div role="alert" className="flex items-start gap-2 rounded-md border border-danger/30 bg-danger/5 p-3 text-sm text-danger"><AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true"/><span className="min-w-0 flex-1">{say('Setup could not continue', 'تعذر متابعة الإعداد')} {originErrorKey(error) && <span className="block">{originText(originErrorKey(error)!)}</span>}<code dir="ltr">{error}</code></span><Button variant="outline" onClick={() => void refresh()}>{say('Retry', 'إعادة المحاولة')}</Button></div>}
     {!status && !error ? <div className="flex min-h-24 items-center justify-center"><Loader2 className="animate-spin" aria-label={say('Loading setup', 'جارٍ تحميل الإعداد')} /></div> : status && <>
       {packWarning && <div role="alert" aria-live="polite" className={`flex items-start gap-2 rounded-md border p-3 text-sm${packWarning === 'expired' ? ' border-danger/30 bg-danger/5 text-danger' : ' border-warning/30 bg-warning/5 text-warning'}`}>
         <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true"/>
@@ -262,10 +280,15 @@ export default function ConnectorOwnerSetupWizard({ owner, csrfToken, recentAuth
           onChange={event => setOrigin(event.target.value)}
           onBlur={event => commitNormalizedOrigin(event.target.value)}
           onPaste={handleOriginPaste}
-          disabled={busy}/>
+          disabled={busy || originBlocked}/>
+        {!status.origin && !status.originProposal && <p role="alert" className="text-[13px] text-warning">
+          {t('connectorsSettings.stepUp.errors.originUnconfiguredOwner')} <code dir="ltr">{window.location.origin}</code></p>}
+        {status.originProposal && (status.originProposal.canonicalOrigin === null
+          ? <p role="alert" className="text-[13px] text-warning">{originText('invalidPublicOrigin')}</p>
+          : <p className="text-[13px] text-muted-foreground">{originText(`proposalSource.${status.originProposal.source}`)}</p>)}
         <p className="text-[13px] text-muted-foreground">{say('No path or trailing slash. OAuth callback:', 'دون مسار أو شرطة أخيرة. رابط OAuth:')} <code dir="ltr">{validOrigin(normalizedOrigin) ? `${normalizedOrigin}/connectors/oauth/callback` : '—'}</code></p>
         {origin.endsWith('/') && !validOrigin(normalizedOrigin) && <p role="status" className="text-[13px] text-warning">{say('Remove the trailing slash from the address.', 'أزل الشرطة الأخيرة (/) من العنوان.')}</p>}
-        <Button className="w-full sm:w-auto" disabled={!csrfToken || busy || !validOrigin(normalizedOrigin)} onClick={() => {
+        <Button className="w-full sm:w-auto" disabled={!csrfToken || busy || originBlocked || !validOrigin(normalizedOrigin)} onClick={() => {
           commitNormalizedOrigin(origin);
           void mutate('origin', 'PUT', status.origin?.originRevision ?? 0, { canonicalOrigin: normalizedOrigin, expectedOriginRevision: status.origin?.originRevision ?? 0 });
         }}>{busy && <Loader2 className="animate-spin"/>}{say('Save and continue', 'حفظ ومتابعة')}</Button>
