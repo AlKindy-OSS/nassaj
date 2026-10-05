@@ -93,6 +93,9 @@ function check(name, condition, detail) {
     } else {
         fail++;
         console.error(`  FAIL ${name}${detail ? `\n       ${detail}` : ''}`);
+        // B-1436: a TAP line on stdout, inside this file's section, so the release
+        // gate names the failing check instead of only the file's exit code.
+        console.log(`not ok ${pass + fail} - ${String(name).replace(/\s+/g, ' ').trim()}`);
     }
 }
 

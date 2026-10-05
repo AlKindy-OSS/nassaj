@@ -33,3 +33,14 @@ export function isReservedSteerCommand(input: string): boolean {
   const token = input.trimStart().split(/\s/u, 1)[0]?.toLowerCase();
   return token === '/steer';
 }
+
+/**
+ * يضمن بادئة «/steer » في الإدخال دون تكرارها ودون إتلاف نصٍّ مكتوب:
+ * إدخال يبدأ أصلاً برمز «/steer» يُعاد كما هو (نقرة ثانية لا تُضيف شيئاً)،
+ * وإلا تُسبَق البادئة للنصّ الموجود (فارغ ← «/steer »).
+ */
+export function withSteerPrefix(input: string): string {
+  const current = typeof input === 'string' ? input : '';
+  if (isReservedSteerCommand(current)) return current;
+  return STEER_PREFIX + current.replace(/^\s+/, '');
+}

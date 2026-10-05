@@ -14,7 +14,7 @@
  * `additionalContext` and fires on `source: 'compact'` right after compaction.
  *
  * REUSE: this composes the ground-truth module's LOAD-BEARING fail-safe readers
- * (`readRecentCommits` + `readGovernanceOpenTasks`) rather than its top-level
+ * (`readRecentCommits` + `readBoardOpenTasks`) rather than its top-level
  * `buildGroundTruthContext`, because that function's rendered block carries a
  * DELEGATION-specific closing note ("if your delegation prompt matches …") that is
  * meaningless at session start (there is no delegation here). The valuable,
@@ -32,7 +32,7 @@
  *    total-line cap here.
  */
 
-import { readRecentCommits, readGovernanceOpenTasks, resolveSessionRepoRoot } from './coordinator-ground-truth.js';
+import { readRecentCommits, readBoardOpenTasks, resolveSessionRepoRoot } from './coordinator-ground-truth.js';
 
 const MAX_TOTAL_LINES = 40;
 
@@ -67,9 +67,9 @@ export function isRelevantSource(source) {
  * @param {unknown} [args.source] SDK SessionStart `source`.
  * @param {string} [args.repoRoot] the session's own project root — the only
  *   accepted source (shared rule: `resolveSessionRepoRoot`).
- * @param {string} [args.projectId] logical governance project id
+ * @param {string} [args.projectId] the session's project id (projects.project_id)
  * @param {string|number} [args.actorId] authenticated actor id
- * @param {Function} [args.governanceResolver] injected resolver (test seam)
+ * @param {Function} [args.projectPathLookup] injected project lookup (test seam)
  * @returns {Promise<string|null>} null when the session's project root is
  *   unknown — never an env override, never the shared server process's
  *   `process.cwd()` (T-1810, B-1250).
@@ -79,7 +79,7 @@ export async function buildSessionStartContext({
   repoRoot,
   projectId,
   actorId,
-  governanceResolver,
+  projectPathLookup,
 } = {}) {
   try {
     if (!isRelevantSource(source)) return null;
@@ -91,11 +91,12 @@ export async function buildSessionStartContext({
     // "what am I mid-way through" snapshot should show.
     const [commits, tasks] = await Promise.all([
       readRecentCommits(root),
-      readGovernanceOpenTasks({
+      readBoardOpenTasks({
+        repoRoot: root,
         projectId,
         actorId,
         keywords: [],
-        resolver: governanceResolver,
+        projectPathLookup,
       }),
     ]);
 

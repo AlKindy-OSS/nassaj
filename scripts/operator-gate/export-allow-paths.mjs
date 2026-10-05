@@ -86,10 +86,12 @@ const OPS_ALLOW = new Set([
 ]);
 
 // Repo-root files that ship verbatim (build/lint config, licence, examples).
+// Every HTML entry vite.config.js builds (index.html, and share.html for the
+// isolated public share viewer) must be listed, or the export cannot build.
 const ROOT_ALLOW = new Set([
     'package.json', 'package-lock.json', 'tsconfig.json', 'tsconfig.preview.json',
     'vite.config.js', 'tailwind.config.js', 'postcss.config.js', 'eslint.config.js',
-    'commitlint.config.js', 'index.html', '.nvmrc',
+    'commitlint.config.js', 'index.html', 'share.html', '.nvmrc',
     'eslint-style-lock-plugin.js', 'STYLE_LOCK.md',
     '.gitignore', '.npmignore', '.release-it.json', 'release.sh',
     '.env.example', 'ecosystem.config.example.cjs',

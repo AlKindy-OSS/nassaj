@@ -418,7 +418,7 @@ test('the gate scans only paths the public export ships', () => {
   for (const shipped of [
     'src/app.tsx', 'server/index.js', 'shared/util.ts', 'scripts/build.mjs',
     'scripts/operator-gate/export-allow.mjs', 'scripts/operator-gate/export-allow-paths.mjs',
-    'docs/team-wiki/guide.md', 'README.md', 'package.json',
+    'docs/team-wiki/guide.md', 'README.md', 'package.json', 'index.html', 'share.html',
   ]) assert.equal(isPublicExportPath(shipped), true, shipped);
   // Never-exported operator paths are excluded, so a marker there cannot fail here.
   for (const excluded of [
@@ -430,6 +430,20 @@ test('the gate scans only paths the public export ships', () => {
     'automation/ai-news-daily/run.mjs', '.github/workflows/release.yml',
     'server/modules/database/deletion-writer-inventory.test.ts',
   ]) assert.equal(isPublicExportPath(excluded), false, excluded);
+});
+
+test('every HTML entry vite.config.js builds ships in the public export', async () => {
+  // Release run 4 failed in the tested = shipped build: vite.config.js built
+  // share.html, but the export allow-list did not ship it. Derive the entries from
+  // the config itself so a future entry cannot be forgotten the same way.
+  const config = await fs.readFile(path.join(root, 'vite.config.js'), 'utf8');
+  const entries = [...new Set([...config.matchAll(/['"]([A-Za-z0-9_.-]+\.html)['"]/g)]
+    .map(match => match[1]))];
+  assert.ok(entries.includes('share.html'), 'the share viewer entry is detected');
+  for (const entry of ['index.html', ...entries]) {
+    await fs.access(path.join(root, entry));
+    assert.equal(isPublicExportPath(entry), true, entry);
+  }
 });
 
 test('only explicit synthetic values are admitted', () => {

@@ -6,6 +6,16 @@ import test from 'node:test';
 import Database from 'better-sqlite3';
 
 import { migrateCompatibleForwardPermissionReceipt } from './compatible-forward-permission-receipt.migration.js';
+import { migratePermissionExecution } from './permission-execution.migration.js';
+import {
+  claimPermissionLease,
+  createPermissionAdmission,
+  digestPermissionWorkspace,
+  listPermissionEffectFences,
+  markPermissionEffectStarted,
+  reconcileExpiredPermissionExecutions,
+  settlePermissionEffect,
+} from './repositories/permission-execution.js';
 
 // Independent contract oracle, transcribed from reviewed candidate 10caa51f / B952 ADR.
 // Do not import migration SQL or change the immutable predecessor fixture.
@@ -153,5 +163,82 @@ test('reviewed fence checks, composite scope uniqueness and restrictive decision
     db.prepare('DELETE FROM permission_admission_leases WHERE decision_id=?').run('decision');
     db.prepare('DELETE FROM permission_generation_blocks WHERE decision_id=?').run('decision');
     assert.throws(() => db.prepare('DELETE FROM permission_launch_decisions WHERE decision_id=?').run('decision'), /FOREIGN KEY/);
+  } finally { db.close(); }
+});
+
+test('T-1910: in-process read leases run on the forward-migrated predecessor with zero schema delta', () => {
+  const db = baseline();
+  try {
+    migrate(db);
+    const forwardSchema = schema(db);
+    const owner = { pid: 4242, bootId: 'boot-before-restart', startTicks: '77' };
+    // Rows written with predecessor + forward/v1 columns only, as a 2.3.0.x node holds them.
+    const admit = (id: string, provider: string, effectFootprint: 'local' | 'external') => {
+      // Generation 2: the predecessor fixture carries a legacy block on generation 1.
+      db.prepare(`INSERT INTO permission_launch_decisions
+        (decision_id,user_id,principal_id,authentication_kind,authorization_generation,launch_id,
+        project_id,workspace_digest,provider,body,engine,entrypoint,purpose,requested_profile,
+        contract_version,profile_digest,capability_digest,release_build,protocol_generation,verdict,
+        state,created_at_ms,updated_at_ms) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+        .run(id, 91, 'fixture', 'session', 1, id, 'system:provider-quota', 'workspace-digest', provider, provider,
+          `${provider}_quota`, 'provider.routes.quota', 'quota', 'full_delegation', 'v1', 'p', 'c', 'r', 2,
+          'authorized', 'authorized', 10, 10);
+      db.prepare(`INSERT INTO permission_admission_leases
+        (lease_id,decision_id,purpose,protocol_generation,owner_id,owner_pid,owner_boot_id,owner_start_ticks,
+        effect_identity,status,expires_at_ms,created_at_ms,updated_at_ms,effect_footprint)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+        .run(`lease-${id}`, id, 'quota', 2, 'server', owner.pid, owner.bootId, owner.startTicks,
+          `effect-${id}`, 'issued', 100, 10, 10, effectFootprint);
+      claimPermissionLease(db, `lease-${id}`, 1, 11);
+    };
+    admit('settled', 'codex', 'local');
+    settlePermissionEffect(db, 'settled', 'timed_out',
+      markPermissionEffectStarted(db, 'settled', 2, 12, owner, { selfEffect: true }), 13);
+    admit('interrupted', 'codex', 'local');
+    markPermissionEffectStarted(db, 'interrupted', 2, 12, owner, { selfEffect: true });
+    admit('claude', 'claude', 'external');
+    markPermissionEffectStarted(db, 'claude', 2, 12);
+    const summary = reconcileExpiredPermissionExecutions(db, 200, () => false, () => false);
+    assert.equal(summary.notStarted, 1); // the predecessor's own issued lease
+    assert.equal(summary.unknownLocal, 1);
+    assert.equal(summary.unknownExternal, 1);
+    assert.deepEqual(listPermissionEffectFences(db).map(fence => fence.scopeKey), ['91:claude:quota']);
+    assert.deepEqual(schema(db), forwardSchema);
+    assert.deepEqual(db.pragma('foreign_key_check'), []);
+  } finally { db.close(); }
+});
+
+// B-1536: a governed (admitted) boot never runs runMigrations / migratePermissionExecution
+// (init-db.ts initializeAdmittedDatabase), and forward/v1 does not add the device_* decision
+// columns that createPermissionAdmission writes. These two tests run the REAL admission path.
+const realAdmission = (db: Database.Database, id: string) => createPermissionAdmission(db, {
+  decisionId: id, leaseId: `lease-${id}`, userId: 91, principalId: 'fixture', authenticationKind: 'session',
+  authorizationGeneration: 1, launchId: id, projectId: 'system:provider-quota',
+  workspaceDigest: digestPermissionWorkspace('/workspace'), provider: 'codex', body: 'codex',
+  engine: 'codex_quota', entrypoint: 'provider.routes.quota.in_process_read', purpose: 'quota',
+  effectFootprint: 'local', requestedProfile: 'full_delegation', contractVersion: 'v1', profileDigest: 'p',
+  capabilityDigest: 'c', releaseBuild: 'r', protocolGeneration: 2, ownerId: 'server', ownerPid: 4242,
+  ownerBootId: 'boot', ownerStartTicks: '77', effectIdentity: `effect-${id}`, expiresAtMs: 100, nowMs: 10,
+});
+
+test('B-1536 evidence: real admission on a forward/v1-only node fails; the ordinary migration repairs it', () => {
+  const db = baseline();
+  try {
+    migrate(db);
+    assert.throws(() => realAdmission(db, 'forward-only'), /no column named device_session_id/);
+    assert.equal(db.prepare('SELECT COUNT(*) FROM permission_launch_decisions WHERE decision_id = ?')
+      .pluck().get('forward-only'), 0);
+    migratePermissionExecution(db);
+    realAdmission(db, 'after-ordinary-migration');
+  } finally { db.close(); }
+});
+
+test('B-1536 release gate: real admission succeeds on a forward/v1-only node', {
+  todo: 'B-1536: admitted boot must add the device_* decision columns (signed forward step)',
+}, () => {
+  const db = baseline();
+  try {
+    migrate(db);
+    realAdmission(db, 'forward-only');
   } finally { db.close(); }
 });

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { isReservedSteerCommand, parseSteerText } from './steerCommand';
+import { isReservedSteerCommand, parseSteerText, withSteerPrefix } from './steerCommand';
 
 describe('isReservedSteerCommand', () => {
   it('is true for "/steer" alone and "/steer <text>"', () => {
@@ -28,5 +28,28 @@ describe('parseSteerText', () => {
 
   it('returns empty for non-steer input', () => {
     expect(parseSteerText('/btw focus on the bug')).toBe('');
+  });
+});
+
+describe('withSteerPrefix', () => {
+  it('inserts the prefix into an empty composer', () => {
+    expect(withSteerPrefix('')).toBe('/steer ');
+  });
+
+  it('is idempotent when the command is already present', () => {
+    expect(withSteerPrefix('/steer ')).toBe('/steer ');
+    expect(withSteerPrefix('/steer hello')).toBe('/steer hello');
+    expect(withSteerPrefix('/steer')).toBe('/steer');
+    expect(withSteerPrefix(withSteerPrefix('x'))).toBe('/steer x');
+  });
+
+  it('prepends to existing text without wiping it', () => {
+    expect(withSteerPrefix('fix X')).toBe('/steer fix X');
+    expect(withSteerPrefix('/steering')).toBe('/steer /steering');
+  });
+
+  it('respects leading whitespace', () => {
+    expect(withSteerPrefix('  /steer hi')).toBe('  /steer hi');
+    expect(withSteerPrefix('   fix X')).toBe('/steer fix X');
   });
 });

@@ -274,7 +274,7 @@ export default function SidebarProjectSessions({
               <KanbanSquare aria-hidden="true" className="size-3.5" />
             </button>
           )}
-          {onOpenProjectTool && <div className="flex shrink-0 items-center">
+          {onOpenProjectTool && <div className="-ms-1 flex shrink-0 items-center">
             {([['git', GitBranch], ['files', Folder]] as const).map(([tool, Icon]) => (
               <button key={tool} type="button" data-project-tool={tool}
                 aria-pressed={activeProjectTool === tool}

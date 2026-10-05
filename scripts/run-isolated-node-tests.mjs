@@ -98,6 +98,9 @@ try {
     if (result.error?.code === 'ETIMEDOUT' || result.signal) {
       console.error(`## test file ${file} exceeded ${FILE_TIMEOUT_MS}ms or died by ${result.signal ?? 'timeout'}`);
     }
+    // B-1436: one exit line per file, at line start on stdout, so the release gate
+    // names a file that failed without any `not ok` (a crash on import, a hook).
+    console.log(`## test file ${file} exited ${result.status ?? result.signal ?? 'unknown'}`);
     if (result.status !== 0) failed = true;
     rmSync(caseRoot, { recursive: true, force: true });
   }

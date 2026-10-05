@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
+import { initialComposerPermissionMode } from '../utils/codexPermissionMode';
 import { authenticatedFetch } from '../../../utils/api';
 import { ENGINE_VENDOR_PROVIDERS, type VendorProvider } from '../../provider-auth/vendorProviders';
 import type { PendingPermissionRequest, PermissionMode } from '../types/types';
@@ -557,7 +558,11 @@ export function useChatProviderState({ selectedSession, selectedProject }: UseCh
   }, [providerModelCatalog.glm, glmModel]);
 
   useEffect(() => {
+    // B-472: the Settings panel's Codex mode is the INITIAL composer mode, so
+    // the composer shows what will run. A new chat re-seeds on provider change
+    // only; cycling the mode never re-runs this effect.
     if (!selectedSession?.id) {
+      setPermissionMode(initialComposerPermissionMode(provider, localStorage.getItem('codex-settings')));
       return;
     }
 
@@ -569,7 +574,9 @@ export function useChatProviderState({ selectedSession, selectedProject }: UseCh
     const sessionProvider = selectedSession.__provider ?? provider;
     const savedMode = localStorage.getItem(`permissionMode-${selectedSession.id}`) as PermissionMode | null;
     const validModes = getPermissionModesForProvider(sessionProvider);
-    setPermissionMode(savedMode && validModes.includes(savedMode) ? savedMode : 'default');
+    setPermissionMode(savedMode && validModes.includes(savedMode)
+      ? savedMode
+      : initialComposerPermissionMode(sessionProvider, localStorage.getItem('codex-settings')));
 
     // T-915 (privacy fix): engineProvider (ADR-037) must be scoped to the OPEN
     // SESSION exactly like permissionMode above, never inherited from the

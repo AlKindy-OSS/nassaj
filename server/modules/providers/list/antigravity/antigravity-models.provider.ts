@@ -62,13 +62,19 @@ export class AntigravityProviderModels implements IProviderModels {
    * provider-models service caches a live/CLI catalog for the normal multi-day
    * TTL and a degraded fallback only briefly, so the authoritative source
    * recovers soon and the subprocess runs rarely (never on the chat hot path).
+   *
+   * B-1284: both live sources run as `userId` — under their own agy tree, on
+   * their own token. When isolation is unavailable for them, each source answers
+   * "nothing" without spawning or reading the operator's files, and the caller
+   * gets the degraded fallback.
    */
-  async getSupportedModels(): Promise<ProviderModelsDefinition> {
-    const cliCatalog = await readAntigravityModelsFromCli();
+  async getSupportedModels(userId?: string | number | null): Promise<ProviderModelsDefinition> {
+    const identity = userId ?? null;
+    const cliCatalog = await readAntigravityModelsFromCli(identity);
     if (cliCatalog) {
       return cliCatalog;
     }
-    return getAntigravityModelCatalog();
+    return getAntigravityModelCatalog(identity);
   }
 
   async getCurrentActiveModel(): Promise<ProviderCurrentActiveModel> {

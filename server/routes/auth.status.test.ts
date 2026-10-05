@@ -64,6 +64,11 @@ mock.module(url('./webauthn.js'), { defaultExport: emptyRouter });
 mock.module(url('./oidc.js'), { defaultExport: emptyRouter });
 
 delete process.env.MULTI_ACCOUNT_SWITCHING;
+// The flag only takes effect with an explicit https origin that CORS also serves
+// (ADR-163 amendment 1, D1/M5).
+const WALLET_ORIGIN = 'https://nassaj.test';
+process.env.NASSAJ_PUBLIC_ORIGIN = WALLET_ORIGIN;
+process.env.ALLOWED_ORIGINS = WALLET_ORIGIN;
 
 const { default: authRouter } = await import('./auth.js');
 const app = express();
@@ -75,6 +80,8 @@ const baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 
 after(async () => {
   await new Promise<void>((resolve) => server.close(() => resolve()));
+  delete process.env.NASSAJ_PUBLIC_ORIGIN;
+  delete process.env.ALLOWED_ORIGINS;
 });
 
 async function status() {
@@ -112,6 +119,19 @@ test('/status exposes the exact device-account-session route gate', async () => 
   process.env.MULTI_ACCOUNT_SWITCHING = '1';
   assert.equal((await status()).deviceAccountSessionsEnabled, false);
   delete process.env.MULTI_ACCOUNT_SWITCHING;
+});
+
+test('/status keeps device sessions off when the flag has no usable origin (T1/T2)', async () => {
+  process.env.MULTI_ACCOUNT_SWITCHING = 'true';
+  try {
+    delete process.env.NASSAJ_PUBLIC_ORIGIN;
+    assert.equal((await status()).deviceAccountSessionsEnabled, false);
+    process.env.NASSAJ_PUBLIC_ORIGIN = 'https://not-in-cors.test';
+    assert.equal((await status()).deviceAccountSessionsEnabled, false);
+  } finally {
+    process.env.NASSAJ_PUBLIC_ORIGIN = WALLET_ORIGIN;
+    delete process.env.MULTI_ACCOUNT_SWITCHING;
+  }
 });
 
 test('/status offers SSO login only in the active state (ADR-194 D1)', async () => {

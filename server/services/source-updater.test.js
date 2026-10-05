@@ -6,7 +6,7 @@ import { execFileSync, spawn } from 'child_process';
 import test from 'node:test';
 
 import { createUpdateMaintenanceGate } from './update-maintenance-gate.js';
-import { assertUpdateStorage, evaluateUpdateStorage, publicStorageFigures, createSourceUpdater as createSourceUpdaterImpl, defaultGitCheckoutProbe as defaultGitCheckoutProbeExport, releaseGitEnvironment, resolveCandidateScript, resolveGovernedSshCommand, resolveUpdateHostCapability, runFile, SourceUpdateError, sourceUpdateErrorPayload } from './source-updater.js';
+import { assertUpdateStorage, defaultSourceUpdateControlRoot, evaluateUpdateStorage, publicStorageFigures, createSourceUpdater as createSourceUpdaterImpl, defaultGitCheckoutProbe as defaultGitCheckoutProbeExport, releaseGitEnvironment, resolveCandidateScript, resolveGovernedSshCommand, resolveUpdateHostCapability, runFile, SourceUpdateError, sourceUpdateErrorPayload } from './source-updater.js';
 
 // A non-tmpfs device with ample free space keeps the T-1553 storage gate out of
 // the way for tests that exercise other behaviour; the gate itself is covered
@@ -49,6 +49,36 @@ test('candidate runner resolves compiled-only in dist and rejects missing or sym
         assert.equal(entry, 'scripts/source-update-candidate.mjs');
         return resolved;
     }), resolved);
+});
+
+test('the default control root follows the git common dir, also from a linked worktree (B-1334)', () => {
+    const base = fs.mkdtempSync(path.join(process.env.TMPDIR || '/var/tmp', 'nassaj-control-root-'));
+    try {
+        const main = path.join(base, 'main');
+        const linked = path.join(base, 'linked');
+        const git = (cwd, ...args) => execFileSync('git', args, { cwd, stdio: 'ignore',
+            env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@x',
+                GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@x' } });
+        fs.mkdirSync(main);
+        git(main, 'init', '-q', '-b', 'main');
+        git(main, 'commit', '-q', '--allow-empty', '-m', 'init');
+        git(main, 'worktree', 'add', '-q', '--detach', linked);
+        const expected = path.join(fs.realpathSync(main), '.git', 'nassaj-source-update');
+        assert.equal(defaultSourceUpdateControlRoot(main), expected);
+        assert.equal(defaultSourceUpdateControlRoot(linked), expected, 'a linked worktree shares the main control root');
+        const nested = path.join(main, 'nested');
+        fs.mkdirSync(nested);
+        assert.equal(defaultSourceUpdateControlRoot(nested), path.join(nested, '.git', 'nassaj-source-update'),
+            'a directory inside another checkout does not borrow its control root');
+        assert.equal(defaultSourceUpdateControlRoot(path.join(base, 'absent')),
+            path.join(base, 'absent', '.git', 'nassaj-source-update'));
+        const seen = [];
+        resolveUpdateHostCapability({ appRoot: linked, env: {}, gitProbe: () => ({ ready: false, reason: 'x' }),
+            detector: (input) => { seen.push(input.context.controlRoot); return 'unsupported'; } });
+        assert.deepEqual(seen, [expected]);
+    } finally {
+        fs.rmSync(base, { recursive: true, force: true });
+    }
 });
 
 test('host updater strategy comes only from the verified capability detector', () => {
@@ -480,9 +510,16 @@ test('stages only the exact fast-forward commit and builds both runtime artifact
             NASSAJ_RELEASE_CHANNEL: 'legacy',
             NASSAJ_SOURCE_REPOSITORY_URL: 'https://github.com/example/legacy-release',
         },
+        loadedRuntimeCommit: () => 'c'.repeat(40),
     });
     const result = await update('1.42.0.1');
     assert.equal(result.commit, fake.release);
+    // B-1264: the immutable activation action records the runtime a rollback restores.
+    const candidates = path.join(appRoot, '.git', 'nassaj-source-update', 'candidates');
+    const actions = fs.readdirSync(candidates).map((id) => path.join(candidates, id, 'activation-action.json'))
+        .filter((file) => fs.existsSync(file)).map((file) => JSON.parse(fs.readFileSync(file, 'utf8')));
+    assert.equal(actions.length, 1);
+    assert.equal(actions[0].previousRuntimeOid, 'c'.repeat(40));
     assert.equal(fake.calls.some(({ args }) => args.includes('merge') || args.includes('reset') || args.includes('clean')), false);
     assert.equal(result.restartActionQueued, true);
     assert.match(result.candidateManifestSha256, /^[0-9a-f]{64}$/);

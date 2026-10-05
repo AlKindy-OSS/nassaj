@@ -151,7 +151,7 @@ describe('Markdown — اتجاه أساس واحد للرسالة (bidi)', () =
     const { container } = render(<Markdown>{arabicMessage}</Markdown>);
     const codes = Array.from(container.querySelectorAll('code'));
     expect(codes.length).toBeGreaterThan(5);
-    expect(codes.every((c) => c.getAttribute('dir') === 'ltr')).toBe(true);
+    expect(codes.every((c) => c.closest('[dir="ltr"]') !== null)).toBe(true);
   });
 
   it('رسالة إنجليزية حقيقية تُحسب ltr كاملةً', () => {

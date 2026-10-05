@@ -35,8 +35,19 @@ test('OIDC hand-off code is browser-bound, single-use, and hard-capped', () => {
   assert.equal(store.consume('code-a', browserA), null);
 
   assert.equal(store.store('code-b', { token: 'jwt-b', userId: 8, browserTransaction: browserA }), true);
-  assert.deepEqual(store.consume('code-b', browserA), { token: 'jwt-b', userId: 8 });
+  assert.deepEqual(store.consume('code-b', browserA), { token: 'jwt-b', userId: 8, configVersion: null });
   assert.equal(store.consume('code-b', browserA), null);
+});
+
+test('A-1: a wallet-mode hand-off code carries the config version and never a JWT', () => {
+  const store = createOidcCodeStore();
+  const browser = transaction('W');
+
+  assert.equal(store.store('code-w', { configVersion: 4, userId: 9, browserTransaction: browser }), true);
+  assert.deepEqual(store.consume('code-w', browser), { token: null, userId: 9, configVersion: 4 });
+  assert.equal(store.store('both', { token: 'jwt', configVersion: 4, userId: 9, browserTransaction: browser }), false);
+  assert.equal(store.store('neither', { userId: 9, browserTransaction: browser }), false);
+  assert.equal(store.store('bad-version', { configVersion: '4', userId: 9, browserTransaction: browser } as never), false);
 });
 
 test('T-1939 slice 5: a PKCE entry carries its purpose; login is the default and binds no user', () => {

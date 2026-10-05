@@ -326,32 +326,80 @@ export const claimPermissionLease = (
   return revision.revision;
 }).immediate();
 
-/** Marks provider evidence as started using a compare-and-swap transition. */
+const assertChildIdentity = (child: PermissionChildIdentity): void => {
+  if (!Number.isSafeInteger(child.pid) || child.pid <= 0) {
+    throw new PermissionStateConflictError('INVALID_CHILD_IDENTITY');
+  }
+  assertToken(child.bootId, 'child_boot_id');
+  assertToken(child.startTicks, 'child_start_ticks');
+};
+
+type LeaseIdentityRow = Readonly<{
+  footprint: PermissionEffectFootprint;
+  ownerPid: number;
+  ownerBootId: string;
+  ownerStartTicks: string;
+  childPid: number | null;
+  childBootId: string | null;
+  childStartTicks: string | null;
+}>;
+
+const sameProcess = (
+  child: Readonly<{ pid: number | null; bootId: string | null; startTicks: string | null }>,
+  row: Pick<LeaseIdentityRow, 'ownerPid' | 'ownerBootId' | 'ownerStartTicks'>,
+): boolean => child.pid === row.ownerPid && child.bootId === row.ownerBootId
+  && child.startTicks === row.ownerStartTicks;
+
+/**
+ * T-1910: an in-process read lease is a local effect whose recorded carrier is the owning
+ * server process itself. Only the gateway's in-process read helper can mint one, and both
+ * fence sites (in-process settlement and boot reconciliation) classify it with this predicate.
+ */
+export const isInProcessReadLease = (row: LeaseIdentityRow): boolean => row.footprint === 'local'
+  && sameProcess({ pid: row.childPid, bootId: row.childBootId, startTicks: row.childStartTicks }, row);
+
+const readLeaseIdentity = (database: Database, decisionId: string): LeaseIdentityRow | undefined =>
+  database.prepare(`SELECT effect_footprint AS footprint, owner_pid AS ownerPid,
+    owner_boot_id AS ownerBootId, owner_start_ticks AS ownerStartTicks,
+    effect_child_pid AS childPid, effect_child_boot_id AS childBootId,
+    effect_child_start_ticks AS childStartTicks
+    FROM permission_admission_leases WHERE decision_id = ? AND status = 'active'`)
+    .get(decisionId) as LeaseIdentityRow | undefined;
+
+/**
+ * Marks provider evidence as started using a compare-and-swap transition. A child equal to
+ * the lease owner is refused unless `selfEffect` is set, which the gateway allows only for
+ * its in-process read helper and only on a local-footprint lease (T-1910).
+ */
 export const markPermissionEffectStarted = (
   database: Database,
   decisionId: string,
   expectedRevision: number,
   nowMs: number,
   child?: PermissionChildIdentity,
+  options: Readonly<{ selfEffect?: boolean }> = {},
 ): number => database.transaction(() => {
   const result = database.prepare(`UPDATE permission_launch_decisions
     SET state = 'started', revision = revision + 1, updated_at_ms = ?
     WHERE decision_id = ? AND state = 'effect_claimed' AND revision = ?`)
     .run(nowMs, decisionId, expectedRevision);
   if (result.changes !== 1) throw new PermissionStateConflictError('DECISION_NOT_STARTABLE');
+  if (options.selfEffect && !child) throw new PermissionStateConflictError('INVALID_CHILD_IDENTITY');
   if (child) {
-    if (!Number.isSafeInteger(child.pid) || child.pid <= 0) {
-      throw new PermissionStateConflictError('INVALID_CHILD_IDENTITY');
+    assertChildIdentity(child);
+    const lease = readLeaseIdentity(database, decisionId);
+    if (!lease) throw new PermissionStateConflictError('CHILD_IDENTITY_NOT_RECORDABLE');
+    if (sameProcess(child, lease) !== Boolean(options.selfEffect)
+      || (options.selfEffect && lease.footprint !== 'local')) {
+      throw new PermissionStateConflictError('SELF_EFFECT_IDENTITY_REFUSED');
     }
-    assertToken(child.bootId, 'child_boot_id');
-    assertToken(child.startTicks, 'child_start_ticks');
     // Same CAS as the decision: the child identity is the only proof a local effect ended.
-    const lease = database.prepare(`UPDATE permission_admission_leases
+    const updated = database.prepare(`UPDATE permission_admission_leases
       SET effect_child_pid = ?, effect_child_boot_id = ?, effect_child_start_ticks = ?,
         revision = revision + 1, updated_at_ms = ?
       WHERE decision_id = ? AND status = 'active'`)
       .run(child.pid, child.bootId, child.startTicks, nowMs, decisionId);
-    if (lease.changes !== 1) throw new PermissionStateConflictError('CHILD_IDENTITY_NOT_RECORDABLE');
+    if (updated.changes !== 1) throw new PermissionStateConflictError('CHILD_IDENTITY_NOT_RECORDABLE');
   }
   return expectedRevision + 1;
 }).immediate();
@@ -363,24 +411,72 @@ export const attachPermissionEffectChild = (
   child: PermissionChildIdentity,
   nowMs: number,
 ): void => database.transaction(() => {
-  if (!Number.isSafeInteger(child.pid) || child.pid <= 0) {
-    throw new PermissionStateConflictError('INVALID_CHILD_IDENTITY');
-  }
-  assertToken(child.bootId, 'child_boot_id');
-  assertToken(child.startTicks, 'child_start_ticks');
+  assertChildIdentity(child);
+  // T-1910: the owner itself is never attachable; only the atomic start may record it.
   const result = database.prepare(`UPDATE permission_admission_leases
     SET effect_child_pid = ?, effect_child_boot_id = ?, effect_child_start_ticks = ?,
       revision = revision + 1, updated_at_ms = ?
     WHERE decision_id = ? AND status = 'active'
       AND effect_child_pid IS NULL AND effect_child_boot_id IS NULL
       AND effect_child_start_ticks IS NULL
+      AND NOT (owner_pid = ? AND owner_boot_id = ? AND owner_start_ticks = ?)
       AND EXISTS (SELECT 1 FROM permission_launch_decisions decision
         WHERE decision.decision_id = permission_admission_leases.decision_id
           AND decision.state = 'started')`)
-    .run(child.pid, child.bootId, child.startTicks, nowMs, decisionId);
+    .run(child.pid, child.bootId, child.startTicks, nowMs, decisionId,
+      child.pid, child.bootId, child.startTicks);
   if (result.changes !== 1) {
     throw new PermissionStateConflictError('CHILD_IDENTITY_NOT_RECORDABLE');
   }
+}).immediate();
+
+/** Provider session ids (Claude and Codex) are canonical UUIDs; nothing else is bindable. */
+const BINDABLE_SESSION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
+
+/**
+ * T-1910 S2 (B-1202): binds a new-chat sdk_turn decision to its provider session exactly once.
+ * The CAS moves `session_id` from NULL to the id, so a crash after it fences `session:<id>`
+ * instead of the user-wide key. Refused when the id is malformed, the decision is already
+ * bound, settled, or not an sdk_turn, or the session is attributable to another user or project
+ * (an existing session row of another project, a participant row of another user, or another
+ * decision of another user/project already naming it). The decision revision is not bumped: the
+ * gateway's claim/start/settle CAS chain keeps its expected revisions.
+ */
+export const bindPermissionDecisionSession = (
+  database: Database,
+  decisionId: string,
+  sessionId: string,
+  nowMs: number,
+): void => database.transaction(() => {
+  if (typeof sessionId !== 'string' || !BINDABLE_SESSION_ID.test(sessionId)) {
+    throw new PermissionStateConflictError('INVALID_SESSION_ID');
+  }
+  const decision = database.prepare(`SELECT user_id AS userId, project_id AS projectId,
+    session_id AS sessionId, purpose, state FROM permission_launch_decisions
+    WHERE decision_id = ?`).get(decisionId) as
+    | { userId: number; projectId: string; sessionId: string | null; purpose: string; state: string }
+    | undefined;
+  if (!decision) throw new PermissionStateConflictError('DECISION_MISSING');
+  if (decision.sessionId !== null) throw new PermissionStateConflictError('SESSION_ALREADY_BOUND');
+  if (decision.purpose !== 'sdk_turn') throw new PermissionStateConflictError('SESSION_BIND_PURPOSE_REFUSED');
+  if (!['authorized', 'effect_claimed', 'started'].includes(decision.state)) {
+    throw new PermissionStateConflictError('DECISION_NOT_BINDABLE');
+  }
+  const foreign = database.prepare(`SELECT 1 FROM sessions session
+      JOIN projects project ON project.project_path = session.project_path
+      WHERE session.session_id = @sessionId AND project.project_id != @projectId
+    UNION ALL SELECT 1 FROM session_participants participant
+      WHERE participant.session_id = @sessionId AND participant.user_id != @userId
+    UNION ALL SELECT 1 FROM permission_launch_decisions other
+      WHERE other.session_id = @sessionId AND other.decision_id != @decisionId
+        AND (other.user_id != @userId OR other.project_id != @projectId)
+    LIMIT 1`).get({ sessionId, projectId: decision.projectId, userId: decision.userId, decisionId });
+  if (foreign) throw new PermissionStateConflictError('SESSION_FOREIGN');
+  const bound = database.prepare(`UPDATE permission_launch_decisions
+    SET session_id = ?, updated_at_ms = ?
+    WHERE decision_id = ? AND session_id IS NULL
+      AND state IN ('authorized', 'effect_claimed', 'started')`).run(sessionId, nowMs, decisionId);
+  if (bound.changes !== 1) throw new PermissionStateConflictError('SESSION_BIND_CAS_LOST');
 }).immediate();
 
 /** Terminates an issued permit which provably never reached the provider boundary. */
@@ -500,13 +596,16 @@ export const settlePermissionEffect = (
     if (decision.changes !== 1) {
       throw new PermissionStateConflictError('DECISION_NOT_SETTLEABLE');
     }
+    const identity = readLeaseIdentity(database, decisionId);
     const lease = database.prepare(`UPDATE permission_admission_leases
       SET status = 'terminal', terminal_at_ms = ?, revision = revision + 1, updated_at_ms = ?
       WHERE decision_id = ? AND status = 'active'`).run(nowMs, nowMs, decisionId);
-    if (lease.changes !== 1) throw new PermissionStateConflictError('LEASE_NOT_SETTLEABLE');
-    if (outcome === 'reconciled_unknown') {
+    if (lease.changes !== 1 || !identity) throw new PermissionStateConflictError('LEASE_NOT_SETTLEABLE');
+    if (outcome === 'reconciled_unknown' && !isInProcessReadLease(identity)) {
       // T-1593: an unknown settled in-process cannot prove its child died, so it fences
       // its own scope (session, or user+provider+purpose), never the whole generation.
+      // T-1910: an in-process read is carried by this process alone and is classified
+      // exactly as boot reconciliation classifies it: never fenced.
       fencePermissionEffectScopeForDecision(database, decisionId, 'RECONCILED_EFFECT_UNKNOWN', nowMs);
     }
   }).immediate();
@@ -717,7 +816,9 @@ export const reconcileExpiredPermissionExecutions = (
     const child = row.childPid && row.childBootId && row.childStartTicks
       ? { pid: row.childPid, bootId: row.childBootId, startTicks: row.childStartTicks }
       : null;
-    const childProvenDead = child !== null && !childAlive(child);
+    // T-1910: an in-process read lease's child is its owner, already proven dead above;
+    // the shared predicate keeps this site and in-process settlement in parity.
+    const childProvenDead = child !== null && (isInProcessReadLease(row) || !childAlive(child));
     if (row.footprint === 'local' && childProvenDead) {
       unknownLocal += 1;
       continue;

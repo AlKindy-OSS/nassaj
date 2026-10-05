@@ -246,14 +246,29 @@ describe('ClaudeStatus — /steer hint indicator (T-1956)', () => {
         showSteerHint
       />,
     );
-    const indicator = screen.getByRole('img', { name: 'Steering hint' });
+    const indicator = screen.getByRole('button', { name: 'Steering hint' });
     expect(indicator.getAttribute('aria-label')).not.toMatch(HINT);
-    expect(screen.queryByRole('tooltip')).toBeNull();
-    const trigger = indicator.parentElement as HTMLElement;
-    expect(trigger.tabIndex).toBe(0);
-    fireEvent.focus(trigger);
-    expect(screen.getByRole('tooltip').textContent).toMatch(HINT);
-    expect(trigger.getAttribute('aria-describedby')).toBe(screen.getByRole('tooltip').id);
+    // The sentence is exposed as the button's description (not read twice).
+    const descId = indicator.getAttribute('aria-describedby') as string;
+    expect(document.getElementById(descId)?.textContent).toMatch(HINT);
+    // A real button is a single tab stop (the tooltip wrapper adds none).
+    expect(indicator.parentElement?.tabIndex).not.toBe(0);
+  });
+
+  it('clicking the hint calls onSteerClick', () => {
+    const onSteerClick = vi.fn();
+    render(
+      <ClaudeStatus
+        status={{ text: 'Thinking', can_interrupt: true }}
+        isLoading
+        provider="claude"
+        onAbort={vi.fn()}
+        showSteerHint
+        onSteerClick={onSteerClick}
+      />,
+    );
+    fireEvent.click(screen.getByTestId('run-status-steer-hint'));
+    expect(onSteerClick).toHaveBeenCalledTimes(1);
   });
 
   it('renders no hint indicator when showSteerHint is not set (viewer or not steerable)', () => {

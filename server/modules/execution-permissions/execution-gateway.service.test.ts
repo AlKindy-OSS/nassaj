@@ -33,7 +33,7 @@ const setup = (): Database.Database => {
       id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL, key_digest TEXT,
       is_active INTEGER NOT NULL DEFAULT 1
     );
-    INSERT INTO users (id, username, password_hash) VALUES (1, 'owner', 'hash');
+    INSERT INTO users (id, username, password_hash, role) VALUES (1, 'owner', 'hash', 'owner');
   `);
   migratePermissionExecution(database);
   return database;
@@ -232,14 +232,14 @@ test('CK launch applies the T-1946 SSO window at authorize and at deferred consu
       CREATE TABLE app_config (key TEXT PRIMARY KEY, value TEXT NOT NULL);
       CREATE TABLE user_identities (id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL,
         issuer TEXT NOT NULL, subject TEXT NOT NULL, last_attested_at INTEGER);
-      INSERT INTO users (id, username, password_hash, role) VALUES (2, 'member', 'hash', 'user');
+      INSERT INTO users (id, username, password_hash, role) VALUES (2, 'member', 'hash', 'admin');
       INSERT INTO api_keys (id, user_id, key_digest, is_active) VALUES (12, 2, 'member-digest', 1);
       INSERT INTO user_identities (id, user_id, issuer, subject) VALUES (5, 2, 'https://idp', 'sub');
     `);
     const generation = (database.prepare('SELECT authorization_generation AS generation FROM users WHERE id=2')
       .get() as { generation: number }).generation;
     const member = createAuthenticatedLaunchActor({
-      id: 2, role: 'user', status: 'active', is_active: 1,
+      id: 2, role: 'admin', status: 'active', is_active: 1,
       authenticationKind: 'ck', authenticationCredentialId: 'api-key:12', authorizationGeneration: generation,
     }, '2030-01-01T00:00:00.000Z');
     const attest = (agoMs: number) => database.prepare('UPDATE user_identities SET last_attested_at = ? WHERE id = 5')

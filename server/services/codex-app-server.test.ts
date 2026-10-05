@@ -225,6 +225,87 @@ test('Codex /btw interrupt targets the forked turn and terminates App Server', a
   assert.equal(child.killed, true);
 });
 
+const PAGINATED_FORK_ERROR = 'ephemeral paginated thread/fork requires `excludeTurns: true`';
+
+/** Marks a mocked App Server response as a JSON-RPC error. */
+class RpcFailure {
+  constructor(readonly message: string) {}
+}
+
+async function runSideQueryAgainst(child: ReturnType<typeof createRpcChild>) {
+  const chunks: string[] = [];
+  const errors: Array<[string, string]> = [];
+  let completed: string | null = null;
+  await spawnCodexSideQuery(
+    { sessionId: 'paginated-source', question: 'What did I ask?', userId: 21 },
+    {
+      onChunk: (text: string) => chunks.push(text),
+      onError: (code: string, message: string) => errors.push([code, message]),
+      onComplete: (answer: string) => { completed = answer; },
+    },
+    {
+      spawnImpl: () => child,
+      authorizeImpl: () => ({ project_path: '/authorized/project', provider: 'codex' }),
+      envResolver: () => process.env,
+      governanceImpl: () => ({ ok: true }),
+    },
+  );
+  return { chunks, errors, completed };
+}
+
+test('Codex /btw retries a paginated source fork once with excludeTurns (B-1553)', async () => {
+  const requests: Record<string, any>[] = [];
+  const child = createRpcChild((request) => {
+    requests.push(request);
+    if (request.method === 'thread/fork') {
+      return request.params.excludeTurns ? { thread: { id: 'paged-fork' } } : new RpcFailure(PAGINATED_FORK_ERROR);
+    }
+    if (request.method === 'turn/start') {
+      setImmediate(() => {
+        child.stdout.write(`${JSON.stringify({
+          method: 'item/agentMessage/delta',
+          params: { threadId: 'paged-fork', turnId: 'paged-turn', itemId: 'a', delta: 'Kept context' },
+        })}\n`);
+        child.stdout.write(`${JSON.stringify({
+          method: 'turn/completed',
+          params: { threadId: 'paged-fork', turn: { id: 'paged-turn', status: 'completed' } },
+        })}\n`);
+      });
+      return { turn: { id: 'paged-turn' } };
+    }
+    return {};
+  });
+
+  const result = await runSideQueryAgainst(child);
+
+  assert.deepEqual(requests.map((request) => request.method), [
+    'initialize', 'initialized', 'thread/fork', 'thread/fork', 'turn/start',
+  ]);
+  const [first, retry] = requests.filter((request) => request.method === 'thread/fork').map((r) => r.params);
+  assert.equal('excludeTurns' in first, false, 'the first attempt keeps the legacy-safe fork path');
+  assert.deepEqual(retry, { threadId: 'paginated-source', ephemeral: true, excludeTurns: true });
+  assert.equal(requests.find((request) => request.method === 'turn/start')?.params.threadId, 'paged-fork');
+  assert.deepEqual(result.errors, []);
+  assert.deepEqual(result.chunks, ['Kept context']);
+  assert.equal(result.completed, 'Kept context');
+});
+
+test('Codex /btw does not retry other thread/fork errors', async () => {
+  const requests: Record<string, any>[] = [];
+  const child = createRpcChild((request) => {
+    requests.push(request);
+    if (request.method === 'thread/fork') return new RpcFailure('thread not found: paginated-source');
+    return {};
+  });
+
+  const result = await runSideQueryAgainst(child);
+
+  assert.deepEqual(requests.map((request) => request.method), ['initialize', 'initialized', 'thread/fork']);
+  assert.deepEqual(result.errors, [['sdk_error', 'thread not found: paginated-source']]);
+  assert.equal(result.completed, null);
+  assert.equal(child.killed, true);
+});
+
 function createRpcChild(onRequest: (request: Record<string, any>) => unknown = () => ({})) {
   const child = new EventEmitter() as EventEmitter & Record<string, any>;
   child.stdin = new PassThrough();
@@ -238,7 +319,9 @@ function createRpcChild(onRequest: (request: Record<string, any>) => unknown = (
       if (!raw) continue;
       const request = JSON.parse(raw) as Record<string, any>;
       const result = onRequest(request);
-      if (request.id != null) {
+      if (request.id != null && result instanceof RpcFailure) {
+        child.stdout.write(`${JSON.stringify({ id: request.id, error: { code: -32600, message: result.message } })}\n`);
+      } else if (request.id != null) {
         child.stdout.write(`${JSON.stringify({ id: request.id, result })}\n`);
       }
     }

@@ -13,6 +13,17 @@
   "overallProgress": "Overall progress",
   "error": "Failed to load the project board.",
   "stateError": "project-state.json is invalid — showing the last valid version.",
+  "unavailable": {
+    "title": "The project board cannot be shown",
+    "invalid_json": "The project state file exists but is not valid JSON; fix it for the board to appear.",
+    "too_large": "The project state file is larger than the allowed limit ({{limit}} MB).",
+    "too_large_nolimit": "The project state file is larger than the allowed limit.",
+    "outside_project": "The project state file is a link pointing outside the project folder, so the board does not read it to protect other files.",
+    "external_source_unconfigured": "This project's board is kept in the governance repository and has not been linked to this server yet.",
+    "unreadable": "The project state file could not be read; try again.",
+    "staleSuffix": "Showing the last valid version.",
+    "notVisible": "This project is not available to you or no longer exists."
+  },
   "empty": {
     "title": "No project board yet",
     "description": "This project has no project state file. Create it to get a live board of phases, tasks and issues.",

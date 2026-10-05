@@ -38,7 +38,7 @@ export function readArchivedClientAsset(root, generationId, relative) {
             names.add(entry.path);
         }
         const entry = manifest.entries.find(item => item.path === relative);
-        if (!entry || /(?:^|\/)(?:index\.html|BUILD_PROVENANCE\.json|CLIENT_ASSET_MANIFEST\.json)$/.test(relative)) throw new Error('client_asset_not_found');
+        if (!entry || /(?:^|\/)(?:index\.html|share\.html|BUILD_PROVENANCE\.json|CLIENT_ASSET_MANIFEST\.json)$/.test(relative)) throw new Error('client_asset_not_found');
         return openRelative(root, `${generation}/${relative}`, fd => {
             const metadata = fs.fstatSync(fd);
             if (!metadata.isFile() || metadata.nlink !== 1 || metadata.size !== entry.size || metadata.size > 64 * 1024 * 1024) throw new Error('client_asset_identity_invalid');

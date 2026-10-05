@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
-import { resolveProviderEnv } from '@/services/isolation/resolve-provider-env.js';
+import { resolveCatalogEnv, resolveProviderEnv } from '@/services/isolation/resolve-provider-env.js';
 
 /**
  * Read-only reader for the Antigravity (agy) OAuth access token.
@@ -58,7 +58,11 @@ type AntigravityTokenFile = {
  * Resolved per call so a test-time `os.homedir` patch is always honoured.
  */
 export function getAntigravityTokenPath(userId: string | number | null): string {
-  const env = resolveProviderEnv(userId, 'agy', process.env);
+  return tokenPathUnder(resolveProviderEnv(userId, 'agy', process.env));
+}
+
+/** The token file under a resolved agy env (operator home only when that env has no HOME). */
+function tokenPathUnder(env: NodeJS.ProcessEnv): string {
   const home = typeof env.HOME === 'string' && env.HOME.trim() ? env.HOME : os.homedir();
   return path.join(home, ANTIGRAVITY_TOKEN_RELATIVE_PATH);
 }
@@ -75,7 +79,19 @@ export function getAntigravityTokenPath(userId: string | number | null): string 
 export async function readAntigravityAccessToken(
   userId: string | number | null,
 ): Promise<string | null> {
-  const tokenPath = getAntigravityTokenPath(userId);
+  // B-1284: resolved fail-closed. When isolation is unavailable for this caller
+  // the answer is "no token" — never the operator's file under the same name.
+  let env: NodeJS.ProcessEnv | null;
+  try {
+    env = resolveCatalogEnv(userId, 'agy', process.env);
+  } catch {
+    // The member tree could not be provisioned (EACCES, …): no token either.
+    return null;
+  }
+  if (!env) {
+    return null;
+  }
+  const tokenPath = tokenPathUnder(env);
 
   let raw: string;
   try {

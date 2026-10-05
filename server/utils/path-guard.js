@@ -23,6 +23,8 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { realpath } from 'node:fs/promises';
 
+import { isForbiddenProjectRoot, isSecretPath } from '@/shared/secret-path-guard.js';
+
 /**
  * Canonicalize a client-supplied path against a project root and confirm — after
  * following symlinks — that it stays strictly inside the tree. For READ endpoints
@@ -40,12 +42,19 @@ import { realpath } from 'node:fs/promises';
  *
  * @param {string} projectRoot     Absolute project root directory.
  * @param {string} requestedPath   Client-supplied path (absolute or project-relative).
+ * B-1373: a root that is (or contains) the service user's home or a secret
+ * location is refused outright (FORBIDDEN_ROOT), and a target resolving into a
+ * secret location is refused even under an allowed root (SECRET_PATH).
+ *
  * @returns {Promise<
  *   { valid: true, resolved: string, realResolved: string } |
- *   { valid: false, code: 'OUTSIDE_ROOT' | 'SYMLINK_ESCAPE' | 'ENOENT', error: string }
+ *   { valid: false, code: 'OUTSIDE_ROOT' | 'SYMLINK_ESCAPE' | 'ENOENT' | 'FORBIDDEN_ROOT' | 'SECRET_PATH', error: string }
  * >}
  */
 export async function resolveReadPathInProject(projectRoot, requestedPath) {
+  if (isForbiddenProjectRoot(projectRoot)) {
+    return { valid: false, code: 'FORBIDDEN_ROOT', error: 'Project root is not allowed' };
+  }
   const rootAbs = path.resolve(projectRoot);
   const resolved = path.isAbsolute(requestedPath)
     ? path.resolve(requestedPath)
@@ -79,6 +88,10 @@ export async function resolveReadPathInProject(projectRoot, requestedPath) {
     return { valid: false, code: 'SYMLINK_ESCAPE', error: 'Path must be under project root' };
   }
 
+  if (isSecretPath(resolved) || isSecretPath(realResolved)) {
+    return { valid: false, code: 'SECRET_PATH', error: 'Path must be under project root' };
+  }
+
   return { valid: true, resolved, realResolved };
 }
 
@@ -109,6 +122,10 @@ export async function resolveReadPathInProject(projectRoot, requestedPath) {
  * where it really lands, so an in-tree link stays allowed and an escaping link
  * stays rejected. Only "entry exists but has no realpath" flipped true -> false.
  *
+ * B-1373: always false for a forbidden root (the service user's home, or one
+ * containing a secret location) and for a target resolving into a secret
+ * location.
+ *
  * Returns true only when the path is provably inside the (real) project root.
  *
  * @param {string} projectRoot    Absolute project root directory.
@@ -116,6 +133,9 @@ export async function resolveReadPathInProject(projectRoot, requestedPath) {
  * @returns {boolean}
  */
 export function isResolvedPathInsideRootReal(projectRoot, resolvedTarget) {
+  if (isForbiddenProjectRoot(projectRoot) || isSecretPath(resolvedTarget)) {
+    return false;
+  }
   let realRoot;
   try {
     realRoot = fs.realpathSync(path.resolve(projectRoot));
@@ -128,6 +148,7 @@ export function isResolvedPathInsideRootReal(projectRoot, resolvedTarget) {
   for (;;) {
     try {
       const real = fs.realpathSync(probe);
+      if (isSecretPath(real)) return false;
       return real === realRoot || real.startsWith(realRoot + path.sep);
     } catch (err) {
       if (err && err.code === 'ENOENT') {

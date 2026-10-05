@@ -156,25 +156,35 @@ function fixture() {
 }
 
 /** A real exchanged fixture plus the exact durable proof left before the terminal database CAS. */
-function recoveredFixture(withRealSource = false) {
+function recoveredFixture(withRealSource = false, {
+    olderRuntime = false, recordPreviousRuntime = olderRuntime, liveBuiltFrom = 'previous',
+} = {}) {
     const value = fixture();
     const { validation } = value;
     let originalHead = 'd'.repeat(40);
+    let previousRuntimeOid = null;
     if (withRealSource) {
         const git = (...args) => execFileSync('git', args, { cwd: value.projectRoot, encoding: 'utf8' }).trim();
+        const commit = (message) => git('-c', 'user.name=Test', '-c', 'user.email=test@example.invalid',
+            'commit', '--allow-empty', '-qm', message);
         git('init', '-q', '-b', 'main');
-        git('-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '--allow-empty', '-qm', 'previous');
+        commit('previous');
+        previousRuntimeOid = git('rev-parse', 'HEAD');
+        // B-1264: the source advanced past the loaded runtime without a rebuild.
+        if (olderRuntime) commit('source advanced without a rebuild');
         originalHead = git('rev-parse', 'HEAD');
+        const liveCommit = liveBuiltFrom === 'original' ? originalHead : previousRuntimeOid;
         for (const name of ['client', 'server']) {
             const file = path.join(validation.live[name], 'BUILD_PROVENANCE.json');
-            writeFileSync(file, JSON.stringify({ ...JSON.parse(readFileSync(file)), commit: originalHead }));
+            writeFileSync(file, JSON.stringify({ ...JSON.parse(readFileSync(file)), commit: liveCommit }));
         }
     }
     const sha = (text) => createHash('sha256').update(text).digest('hex');
     const action = { schema: 'nassaj-source-update-activation/v1', transactionId: value.transactionId,
         originalHead, targetCommit: validation.manifest.releaseCommit,
         version: validation.manifest.version, manifestPath: validation.manifestPath,
-        manifestSha256: sha(readFileSync(validation.manifestPath)), expectedServerBuildId: validation.manifest.serverBuildId };
+        manifestSha256: sha(readFileSync(validation.manifestPath)), expectedServerBuildId: validation.manifest.serverBuildId,
+        ...(recordPreviousRuntime ? { previousRuntimeOid } : {}) };
     writeFileSync(path.join(value.candidateRoot, 'activation-action.json'), `${JSON.stringify(action)}\n`, { mode: 0o600 });
     exchangeGenerations(validation, { exchange: swap });
     const identities = verifyRuntimeIdentities(validation);
@@ -209,6 +219,57 @@ test('B-1147: a proven rollback releases the job, but an unknown database keeps 
         value.runtime = { commit: value.action.originalHead, serverBuildId: 'f'.repeat(64), clientBuildId: 'e'.repeat(64) };
         assert.equal(inspectGitRuntimeRecovery(value).next, 'rolled_back');
         value.journal.databaseState = 'UNKNOWN';
+        assert.equal(inspectGitRuntimeRecovery(value).next, null);
+    } finally { rmSync(value.projectRoot, { recursive: true, force: true }); }
+});
+
+test('B-1264: a rollback settles by the previously loaded runtime when the source was ahead of it', () => {
+    const value = recoveredFixture(true, { olderRuntime: true });
+    try {
+        rollbackGenerations(value.validation, { exchange: swap });
+        assert.notEqual(value.action.previousRuntimeOid, value.action.originalHead);
+        value.journal = { state: 'OPEN', gateClosed: false, phase: null, transactionId: null, databaseState: 'PRE_CANDIDATE' };
+        value.runtime = { commit: value.action.previousRuntimeOid, serverBuildId: 'f'.repeat(64), clientBuildId: 'e'.repeat(64) };
+        assert.equal(inspectGitRuntimeRecovery(value).next, 'rolled_back');
+        value.runtime.commit = value.action.originalHead;
+        assert.equal(inspectGitRuntimeRecovery(value).next, null, 'the loaded process must be the previous runtime');
+    } finally { rmSync(value.projectRoot, { recursive: true, force: true }); }
+});
+
+test('B-1264: dist-server rebuilt from originalHead without a restart still settles once that build is loaded', () => {
+    const value = recoveredFixture(true, { olderRuntime: true, liveBuiltFrom: 'original' });
+    try {
+        rollbackGenerations(value.validation, { exchange: swap });
+        value.journal = { state: 'OPEN', gateClosed: false, phase: null, transactionId: null, databaseState: 'PRE_CANDIDATE' };
+        value.runtime = { commit: value.action.originalHead, serverBuildId: 'f'.repeat(64), clientBuildId: 'e'.repeat(64) };
+        assert.equal(inspectGitRuntimeRecovery(value).next, 'rolled_back');
+        value.runtime.commit = value.action.previousRuntimeOid;
+        assert.equal(inspectGitRuntimeRecovery(value).next, null, 'the loaded process must match the restored tree');
+    } finally { rmSync(value.projectRoot, { recursive: true, force: true }); }
+});
+
+test('B-1264: without a recorded previous runtime the old originalHead rule still applies', () => {
+    const value = recoveredFixture(true, { olderRuntime: true, recordPreviousRuntime: false });
+    try {
+        rollbackGenerations(value.validation, { exchange: swap });
+        value.journal = { state: 'OPEN', gateClosed: false, phase: null, transactionId: null, databaseState: 'PRE_CANDIDATE' };
+        for (const commit of [value.action.originalHead, 'a'.repeat(40)]) {
+            value.runtime = { commit, serverBuildId: 'f'.repeat(64), clientBuildId: 'e'.repeat(64) };
+            assert.equal(inspectGitRuntimeRecovery(value).next, null);
+        }
+    } finally { rmSync(value.projectRoot, { recursive: true, force: true }); }
+});
+
+test('B-1264: a malformed previousRuntimeOid in the action leaves the job fenced', () => {
+    const value = recoveredFixture(true, { olderRuntime: true });
+    try {
+        const sha = (text) => createHash('sha256').update(text).digest('hex');
+        const action = { ...value.action, previousRuntimeOid: 'not-a-commit' };
+        writeFileSync(path.join(value.candidateRoot, 'activation-action.json'), `${JSON.stringify(action)}\n`, { mode: 0o600 });
+        value.job.activation_identity_sha256 = sha(JSON.stringify(action));
+        rollbackGenerations(value.validation, { exchange: swap });
+        value.journal = { state: 'OPEN', gateClosed: false, phase: null, transactionId: null, databaseState: 'PRE_CANDIDATE' };
+        value.runtime = { commit: value.action.previousRuntimeOid, serverBuildId: 'f'.repeat(64), clientBuildId: 'e'.repeat(64) };
         assert.equal(inspectGitRuntimeRecovery(value).next, null);
     } finally { rmSync(value.projectRoot, { recursive: true, force: true }); }
 });

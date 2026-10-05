@@ -1291,13 +1291,29 @@
   color: var(--project-muted-foreground, hsl(var(--muted-foreground)));
   background: transparent; box-shadow: none; pointer-events: auto;
 }
-.sidebar-project-tool[aria-pressed="true"] {
-  color: var(--project-accent, hsl(var(--primary)));
+.sidebar-rename-save { color: var(--project-accent, hsl(var(--primary))); }
+.sidebar-rename-action:hover {
   background: var(--project-session-selected, hsl(var(--accent)));
 }
-.sidebar-rename-save { color: var(--project-accent, hsl(var(--primary))); }
-.sidebar-rename-action:hover, .sidebar-project-tool:hover {
-  background: var(--project-session-selected, hsl(var(--accent)));
+/* Project toolbar icons: no background at rest (also when pressed/active);
+   rest = muted at reduced opacity, hover = full foreground + subtle accent
+   background. Active state is carried by the foreground color only. The
+   negative inline margin tightens the visual pitch (28px box -> 24px) while
+   keeping each button's own 28px box. */
+.sidebar-project-tool {
+  margin-inline: -2px;
+  color: hsl(var(--muted-foreground) / 0.7);
+  transition: color 120ms ease, background-color 120ms ease;
+}
+.sidebar-project-tool[aria-pressed="true"] {
+  color: var(--project-accent, hsl(var(--primary)));
+}
+.sidebar-project-tool:hover {
+  color: hsl(var(--foreground));
+  background: hsl(var(--accent));
+}
+@media (prefers-reduced-motion: reduce) {
+  .sidebar-project-tool { transition: none; }
 }
 .sidebar-rename-input:focus-visible, .sidebar-rename-action:focus-visible, .sidebar-project-tool:focus-visible {
   outline: 2px solid var(--project-accent, hsl(var(--ring))); outline-offset: 1px;

@@ -32,6 +32,11 @@ export type ChatActionsContextValue = {
    * null خارج رسائل المساعد أو عند غياب جلسة نشطة.
    */
   sessionId: string | null;
+  /**
+   * وقت الرسالة الحاوية. يُستعمل ليُنسَب سجلّ التنفيذ الدائم إلى الكتلة التي سبقته
+   * فقط: كتلة بالنصّ نفسه في رسالة أحدث لم تُنفَّذ بعد. غيابه ⇒ يبقى الزرّ ظاهراً.
+   */
+  messageTimestamp?: string | number | Date | null;
   /** Trusted project context supplied by the UI, never by the model's link. */
   shareProjectId?: string;
   onShareFileOpen?: (relativePath: string) => void;

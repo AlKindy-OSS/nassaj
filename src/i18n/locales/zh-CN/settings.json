@@ -5,7 +5,8 @@
     "permissions": "权限",
     "mcpServers": "MCP 服务器",
     "skills": "技能",
-    "appearance": "外观"
+    "appearance": "外观",
+    "update": "更新"
   },
   "skills": {
     "title": "技能",
@@ -721,32 +722,6 @@
       "authenticatedUser": "已认证用户",
       "billingPage": "账单页面",
       "billingPageNewTab": "在新标签页中打开"
-    },
-    "account": {
-      "claude": {
-        "description": "Anthropic Claude AI 助手"
-      },
-      "cursor": {
-        "description": "Cursor AI 驱动的代码编辑器"
-      },
-      "codex": {
-        "description": "OpenAI Codex AI 助手"
-      },
-      "antigravity": {
-        "description": "通过 agy CLI 使用 Google AI Pro"
-      },
-      "opencode": {
-        "description": "OpenCode CLI 助手"
-      },
-      "kimi": {
-        "description": "通过 API 密钥使用 Moonshot Kimi"
-      },
-      "deepseek": {
-        "description": "通过 API 密钥使用 DeepSeek"
-      },
-      "glm": {
-        "description": "通过 API 密钥使用 Zhipu / Z.ai GLM"
-      }
     },
     "connectionStatus": "连接状态",
     "login": {

@@ -3,7 +3,13 @@ import jwt from 'jsonwebtoken';
 import * as databaseModule from '../modules/database/index.js';
 import { IS_PLATFORM } from '../constants/config.js';
 import { clientIp } from '../utils/client-ip.js';
+import { multiAccountSwitchingEnabled } from '../utils/trusted-origin.js';
 import { enforceCookieMutationGuard } from '../modules/account-wallet/request-csrf.js';
+import {
+  clearPasswordChangeCookie,
+  PASSWORD_CHANGE_COOKIE,
+  renewDeviceCookie,
+} from '../modules/account-wallet/issue-device-session.js';
 import { refuseStaleAttestation, userSsoAttestationFresh } from '../services/sso-attestation.js';
 
 import { recordAuthRejection } from './auth-rejection-audit.js';
@@ -11,7 +17,6 @@ import { recordAuthRejection } from './auth-rejection-audit.js';
 const { userDb, appConfigDb, auditLogDb } = databaseModule;
 const deviceAccountSessionsDb = databaseModule.deviceAccountSessionsDb;
 const DEVICE_COOKIE = databaseModule.DEVICE_COOKIE ?? '__Host-nassaj_device';
-const PASSWORD_CHANGE_COOKIE = '__Host-nassaj_password_change';
 
 /**
  * Best-effort UNVERIFIED decode of a JWT for diagnostics only (T-182). Used on
@@ -410,7 +415,7 @@ const authenticateToken = async (req, res, next) => {
   const deviceMatch = String(req.headers.cookie || '').match(new RegExp(`(?:^|;\\s*)${DEVICE_COOKIE}=([^;]+)`));
   let deviceSecret = null;
   try {
-    deviceSecret = process.env.MULTI_ACCOUNT_SWITCHING === 'true' && deviceMatch
+    deviceSecret = multiAccountSwitchingEnabled() && deviceMatch
       ? decodeURIComponent(deviceMatch[1])
       : null;
   } catch {
@@ -440,6 +445,7 @@ const authenticateToken = async (req, res, next) => {
     req.user.deviceGeneration = resolved.principal.generation;
     req.devicePrincipal = resolved.principal;
     if (!enforceCookieMutationGuard(req, res, JWT_SECRET)) return;
+    renewDeviceCookie(res, deviceSecret, resolved.principal.deviceSessionId);
     installIdentityFence(req, res);
     return next();
   }
@@ -608,50 +614,99 @@ const authenticateToken = async (req, res, next) => {
   }
 };
 
-/** Accepts a single-purpose forced-rotation cookie, otherwise uses normal auth. */
+/**
+ * Device-cookie bridge for routes that verify Bearer themselves (session and
+ * document shares; ADR-163 amendment 1, inventory M4). With switching on, a
+ * device cookie and no Authorization header, the single authenticateToken
+ * resolves the cookie (origin + CSRF on mutations, identity fence). Any other
+ * request passes untouched to the route's own verifier, which keeps its
+ * Bearer path and its own refusal of a cookie beside a Bearer.
+ */
+const authenticateDeviceCookieIfPresent = (req, res, next) => {
+  if (!multiAccountSwitchingEnabled() || req.headers.authorization) return next();
+  const cookies = String(req.headers.cookie || '');
+  if (!new RegExp(`(?:^|;\\s*)${DEVICE_COOKIE}=`).test(cookies)) return next();
+  return authenticateToken(req, res, next);
+};
+
+/**
+ * Resolves the forced-rotation cookie value to its user, or null when the cookie is
+ * malformed, expired, of another purpose, or superseded (the rotation already happened).
+ */
+const resolvePasswordChangeUser = (rawValue) => {
+  try {
+    const decoded = jwt.verify(decodeURIComponent(rawValue), JWT_SECRET, JWT_VERIFY_OPTIONS);
+    if (decoded.purpose !== 'password_change'
+        || !Number.isSafeInteger(decoded.userId)
+        || !Number.isSafeInteger(decoded.pwd_iat)) return null;
+    const user = userDb.getUserById(decoded.userId);
+    if (!user || user.must_change_password !== 1
+        || user.password_changed_at !== decoded.pwd_iat) return null;
+    return user;
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * True when the Authorization header carries a current session JWT: valid signature,
+ * not expired, no purpose claim, live user, not superseded by a password change or an
+ * authorization-generation bump. authenticateToken still makes the final decision.
+ */
+const hasCurrentBearer = (authorization) => {
+  const [scheme, token] = String(authorization).split(' ');
+  if (scheme !== 'Bearer' || !token) return false;
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET, JWT_VERIFY_OPTIONS);
+    if (!decoded || typeof decoded !== 'object' || Object.hasOwn(decoded, 'purpose')) return false;
+    const user = userDb.getUserById(decoded.userId);
+    return Boolean(user)
+      && !(user.password_changed_at && decoded.pwd_iat < user.password_changed_at)
+      && decoded.auth_gen === user.authorization_generation;
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * Accepts a single-purpose forced-rotation cookie, otherwise uses normal auth.
+ * W1: the cookie lives for the browser session while its JWT lasts ten minutes, so a
+ * leftover one must not lock a signed-in user out. An unusable cookie is cleared and
+ * the request authenticates normally; a current Bearer beside a live cookie wins and
+ * the cookie is cleared. Only a live cookie beside a non-current Bearer is ambiguous.
+ */
 const authenticatePasswordChange = async (req, res, next) => {
   const cookieMatch = String(req.headers.cookie || '')
     .match(new RegExp(`(?:^|;\\s*)${PASSWORD_CHANGE_COOKIE}=([^;]+)`));
   if (!cookieMatch) return authenticateToken(req, res, next);
+  const user = resolvePasswordChangeUser(cookieMatch[1]);
+  if (!user || (req.headers.authorization && hasCurrentBearer(req.headers.authorization))) {
+    clearPasswordChangeCookie(res);
+    return authenticateToken(req, res, next);
+  }
   if (req.headers.authorization) {
     return res.status(400).json({
       error: 'Ambiguous authentication', code: 'ambiguous_authentication',
     });
   }
-  try {
-    const token = decodeURIComponent(cookieMatch[1]);
-    const decoded = jwt.verify(token, JWT_SECRET, JWT_VERIFY_OPTIONS);
-    if (decoded.purpose !== 'password_change'
-        || !Number.isSafeInteger(decoded.userId)
-        || !Number.isSafeInteger(decoded.pwd_iat)) {
-      return res.status(401).json({ error: 'Invalid password change session' });
-    }
-    const user = userDb.getUserById(decoded.userId);
-    if (!user || user.must_change_password !== 1
-        || user.password_changed_at !== decoded.pwd_iat) {
-      return res.status(401).json({ error: 'Invalid password change session' });
-    }
-    // T-1939 slice 3: /me/password issues a JWT or device session, so the
-    // forced-rotation cookie must not outlive the member's SSO attestation.
-    if (!userSsoAttestationFresh(user)) {
-      recordAuthRejection({
-        reason: 'sso_attestation_stale', transport: 'rest', userId: user.id,
-        ipAddress: clientIp(req), userAgent: req.headers['user-agent'] ?? null,
-      });
-      return refuseStaleAttestation(res);
-    }
-    req.user = user;
-    req.user.userId = user.id;
-    req.user.mustChangePassword = true;
-    req.user.authenticationKind = 'password_change';
-    req.user.authorizationGeneration = user.authorization_generation;
-    req.passwordChangeSession = true;
-    if (!enforceCookieMutationGuard(req, res, JWT_SECRET)) return;
-    installIdentityFence(req, res);
-    return next();
-  } catch {
-    return res.status(401).json({ error: 'Invalid password change session' });
+  // T-1939 slice 3: /me/password issues a JWT or device session, so the
+  // forced-rotation cookie must not outlive the member's SSO attestation.
+  if (!userSsoAttestationFresh(user)) {
+    recordAuthRejection({
+      reason: 'sso_attestation_stale', transport: 'rest', userId: user.id,
+      ipAddress: clientIp(req), userAgent: req.headers['user-agent'] ?? null,
+    });
+    return refuseStaleAttestation(res);
   }
+  req.user = user;
+  req.user.userId = user.id;
+  req.user.mustChangePassword = true;
+  req.user.authenticationKind = 'password_change';
+  req.user.authorizationGeneration = user.authorization_generation;
+  req.passwordChangeSession = true;
+  if (!enforceCookieMutationGuard(req, res, JWT_SECRET)) return;
+  installIdentityFence(req, res);
+  return next();
 };
 
 // Role hierarchy (owner ⊇ admin ⊇ user). Higher rank = more privilege. This is
@@ -805,7 +860,7 @@ const authenticateWebSocket = (token) => {
 // Device-session websocket authentication. Cookie parsing and ambiguity checks
 // stay in the upgrade verifier; this function only resolves a server principal.
 const authenticateDeviceWebSocket = (secret) => {
-  if (IS_PLATFORM || process.env.MULTI_ACCOUNT_SWITCHING !== 'true' || !secret) return null;
+  if (!multiAccountSwitchingEnabled() || !secret) return null;
   const resolved = deviceAccountSessionsDb.resolve(secret);
   if (!resolved) return null;
   const user = userDb.getUserById(resolved.principal.userId);
@@ -826,6 +881,7 @@ const authenticateDeviceWebSocket = (secret) => {
 export {
   validateApiKey,
   authenticateToken,
+  authenticateDeviceCookieIfPresent,
   authenticatePasswordChange,
   requireRole,
   roleSatisfies,

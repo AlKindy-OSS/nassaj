@@ -13,7 +13,7 @@
  */
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 
 import type { OutboxEntry } from '../../utils/messageOutbox';
 
@@ -21,6 +21,13 @@ import OutboxCard from './OutboxCard';
 
 let mockRole: string | null = 'member';
 const openSettingsSpy = vi.fn();
+const fetchMock = vi.fn<(url: string, init?: { method?: string }) => Promise<unknown>>(
+  async () => ({ ok: false, status: 404, json: async () => ({}) }),
+);
+
+vi.mock('../../../../utils/api', () => ({
+  authenticatedFetch: (...args: unknown[]) => fetchMock(...(args as [string, { method?: string }?])),
+}));
 
 vi.mock('react-i18next', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
@@ -168,5 +175,36 @@ describe('B-1076 «تعديل» يُخفى لكل رمزٍ قاطع، بغضّ �
     render(<OutboxCard entry={entry} onRetry={noop} onEdit={noop} onDelete={noop} onVerify={noop} />);
     expect(screen.queryByText('outbox.edit')).toBeNull();
     expect(screen.getByText('outbox.delete')).toBeTruthy();
+  });
+});
+
+describe('T-1910 S4 «أكمل من هنا» داخل البطاقة', () => {
+  const entry = baseEntry({
+    reasonCode: 'effect_scope_fenced',
+    permanentlyBlocked: true,
+    fence: { scopeKind: 'session', reasonCode: 'unknown_effect' },
+  });
+
+  it('عند النجاح يستدعي onEdit بمعرّف الإدخال (يعيد النصّ ويزيل البطاقة)', async () => {
+    fetchMock.mockImplementation(async (_url: string, init?: { method?: string }) => (init?.method === 'POST'
+      ? { ok: true, status: 200, json: async () => ({ lifted: true }) }
+      : { ok: true, status: 200, json: async () => ({ fenced: true, scope: 'session', canAcknowledge: true }) }));
+    const onEdit = vi.fn();
+    render(<OutboxCard entry={entry} onRetry={noop} onEdit={onEdit} onDelete={noop} onVerify={noop} />);
+    fireEvent.click(await screen.findByText('outbox.continueHere.action'));
+    fireEvent.click(screen.getByText('outbox.continueHere.confirm'));
+    await waitFor(() => expect(onEdit).toHaveBeenCalledWith('m1'));
+  });
+
+  it('نطاق المزوّد لا يطلب الخادم ولا يعرض الزرّ', () => {
+    fetchMock.mockClear();
+    const providerEntry = baseEntry({
+      reasonCode: 'effect_scope_fenced',
+      permanentlyBlocked: true,
+      fence: { scopeKind: 'user_provider_purpose', reasonCode: 'unknown_effect' },
+    });
+    render(<OutboxCard entry={providerEntry} onRetry={noop} onEdit={noop} onDelete={noop} onVerify={noop} />);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(screen.queryByText('outbox.continueHere.action')).toBeNull();
   });
 });

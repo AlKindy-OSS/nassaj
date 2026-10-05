@@ -2,7 +2,7 @@ import { clientGenerationAssets, generationBase, publicAssetPaths } from './scri
 import { fileURLToPath, URL } from 'node:url'
 import { readFileSync, globSync, lstatSync, realpathSync, readdirSync, statSync } from 'node:fs'
 import { resolve as resolvePath, dirname as dirnamePath, isAbsolute as pathIsAbsolute } from 'node:path'
-import { defineConfig, loadEnv } from 'vite'
+import { build as viteBuild, defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
 import { getConnectableHost, normalizeLoopbackHost } from './shared/networkHosts.js'
 
@@ -148,6 +148,39 @@ function contentRoots() {
   return [...new Set(roots)]
 }
 
+/**
+ * Build the isolated public share viewer (share.html + src/share) into the SAME
+ * output directory and generation as the app, as a second, separate Vite build.
+ *
+ * Why not a second rollup input: inputs of one build share chunks, which would pull
+ * the app's vendor/common chunks (and the app stylesheet) into the public viewer.
+ * The viewer must stay a tiny graph of its own, so it is built on its own, after the
+ * app bundle is written (writeBundle is awaited), with `emptyOutDir: false`. One
+ * `vite build` still yields one output directory, so the atomic builders (staging,
+ * asset manifest, closure check, promotion) treat share.html like index.html.
+ */
+function shareViewerBuild({ outDir, base, cacheDir }) {
+  return {
+    name: 'nassaj-share-viewer-build',
+    apply: 'build',
+    async writeBundle() {
+      await viteBuild({
+        configFile: false,
+        root: PROJECT_ROOT,
+        base,
+        cacheDir: resolvePath(cacheDir, 'share'),
+        logLevel: 'warn',
+        build: {
+          outDir,
+          emptyOutDir: false,
+          copyPublicDir: false,
+          rollupOptions: { input: resolvePath(PROJECT_ROOT, 'share.html') },
+        },
+      })
+    },
+  }
+}
+
 // Single source of truth for BUILD_ID — used in both the inline asset plugin
 // and the define constant so dist/version.json and __BUILD_ID__ are guaranteed
 // to be identical.
@@ -186,6 +219,11 @@ export default defineConfig(({ command, mode }) => {
     plugins: [
       clientGenerationAssets({ publicDirectory: resolvePath(PROJECT_ROOT, 'public'), generationId: process.env.NASSAJ_CLIENT_GENERATION_ID }),
       react(),
+      command === 'build' ? shareViewerBuild({
+        outDir: requestedOutDir,
+        base: generationBase(process.env.NASSAJ_CLIENT_GENERATION_ID),
+        cacheDir: resolveClientCacheDir(PROJECT_ROOT, requestedOutDir),
+      }) : null,
       // Emits dist/version.json at build time with the same BUILD_ID baked into
       // the bundle via define.__BUILD_ID__ — guarantees both values are identical.
       {

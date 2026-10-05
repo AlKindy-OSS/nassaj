@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  __agyModelsCliCircuitSize,
+  __resetAgyModelsCliCircuit,
   __setAgyModelsRunnerForTests,
   parseAgyModelsOutput,
   readAntigravityModelsFromCli,
@@ -78,9 +80,10 @@ test('parseAgyModelsOutput: returns null for empty / whitespace / non-string', (
 // ---------------- readAntigravityModelsFromCli (injected runner) ----------------
 
 test('readAntigravityModelsFromCli: parses the injected runner stdout', async () => {
+  __resetAgyModelsCliCircuit();
   __setAgyModelsRunnerForTests(async () => AGY_MODELS_STDOUT);
   try {
-    const result = await readAntigravityModelsFromCli();
+    const result = await readAntigravityModelsFromCli(null);
     assert.ok(result);
     assert.ok(result.OPTIONS.some((o) => o.label === 'GPT-OSS 120B (Medium)'));
   } finally {
@@ -91,7 +94,7 @@ test('readAntigravityModelsFromCli: parses the injected runner stdout', async ()
 test('readAntigravityModelsFromCli: returns null when the runner yields null (binary missing/timeout)', async () => {
   __setAgyModelsRunnerForTests(async () => null);
   try {
-    assert.equal(await readAntigravityModelsFromCli(), null);
+    assert.equal(await readAntigravityModelsFromCli(null), null);
   } finally {
     __setAgyModelsRunnerForTests(null);
   }
@@ -102,8 +105,48 @@ test('readAntigravityModelsFromCli: never throws even if the runner rejects', as
     throw new Error('spawn EACCES');
   });
   try {
-    assert.equal(await readAntigravityModelsFromCli(), null);
+    assert.equal(await readAntigravityModelsFromCli(null), null);
   } finally {
     __setAgyModelsRunnerForTests(null);
+  }
+});
+
+// ---------------- per-identity CLI breaker (B-1284) ----------------
+
+test('B-1284: three CLI failures for one caller stop THEIR spawn, never another caller\'s', async () => {
+  __resetAgyModelsCliCircuit();
+  const calls: Array<string | undefined> = [];
+  __setAgyModelsRunnerForTests(async (env) => {
+    calls.push(env.HOME);
+    return env.HOME === '/member-ok' ? AGY_MODELS_STDOUT : null;
+  });
+  try {
+    // The operator (null) has no usable CLI catalog here: three failures open its breaker.
+    for (let index = 0; index < 3; index += 1) {
+      assert.equal(await readAntigravityModelsFromCli(null), null);
+    }
+    const spawnsBefore = calls.length;
+    assert.equal(await readAntigravityModelsFromCli(null), null);
+    assert.equal(calls.length, spawnsBefore, 'an open breaker must not run the CLI again');
+    assert.equal(__agyModelsCliCircuitSize(), 1, 'only the failing identity is tracked');
+  } finally {
+    __setAgyModelsRunnerForTests(null);
+    __resetAgyModelsCliCircuit();
+  }
+});
+
+test('B-1284: a CLI success deletes that caller\'s breaker entry', async () => {
+  __resetAgyModelsCliCircuit();
+  let fail = true;
+  __setAgyModelsRunnerForTests(async () => (fail ? null : AGY_MODELS_STDOUT));
+  try {
+    assert.equal(await readAntigravityModelsFromCli(null), null);
+    assert.equal(__agyModelsCliCircuitSize(), 1);
+    fail = false;
+    assert.ok(await readAntigravityModelsFromCli(null));
+    assert.equal(__agyModelsCliCircuitSize(), 0, 'success must delete, so the map never grows');
+  } finally {
+    __setAgyModelsRunnerForTests(null);
+    __resetAgyModelsCliCircuit();
   }
 });

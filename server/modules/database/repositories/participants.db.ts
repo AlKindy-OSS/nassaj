@@ -59,6 +59,18 @@ export function resolveStrictSpawnOwnerUserId(sessionId: string): number | null 
 }
 
 /**
+ * Every recorded participant id of a session, including rows whose user was
+ * since deleted (no users JOIN). Share authorship checks (ADR-196) need the
+ * raw count: a vanished participant must still count, never shrink the list.
+ */
+export function listParticipantUserIdsStrict(sessionId: string): number[] {
+  if (!sessionId) return [];
+  const rows = getConnection().prepare(`SELECT DISTINCT user_id AS userId
+    FROM session_participants WHERE session_id = ? ORDER BY user_id`).all(sessionId) as Array<{ userId: number }>;
+  return rows.map((row) => row.userId);
+}
+
+/**
  * A real spawn arriving on a session whose only owner is an inferred row takes
  * the badge from it. This is the fix for the opencode race (B-477), where the
  * synchronizer sees the session in the shared data dir and claims it ~2 seconds

@@ -11,6 +11,7 @@ import type {
   ProjectRepositoryRow,
   WorkspacePathValidationResult,
 } from '@/shared/types.js';
+import { isForbiddenProjectRoot } from '@/shared/secret-path-guard.js';
 import { AppError, normalizeProjectPath, validateWorkspacePath } from '@/shared/utils.js';
 
 import { emptySessionBuckets, type SessionBuckets } from '../../../../shared/sessionBuckets.js';
@@ -144,6 +145,14 @@ export async function createProject(
   }
 
   const resolvedProjectPath = normalizeProjectPath(pathValidation.resolvedPath);
+  // B-1373: the service user's home (or any root holding credentials) is never a
+  // project — registering it would let members read every secret under it.
+  if (isForbiddenProjectRoot(resolvedProjectPath)) {
+    throw new AppError('Project root is not allowed', {
+      code: 'PROJECT_ROOT_FORBIDDEN',
+      statusCode: 400,
+    });
+  }
   const createdBy = Number.isInteger(input.createdBy) ? (input.createdBy as number) : null;
   // Authorize BEFORE any existence lookup or filesystem write (B-1423): the
   // 409 below is reachable only by callers who may already see the project.

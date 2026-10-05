@@ -670,7 +670,7 @@
     "cropHint": "Usa i tasti freccia per spostare o ridimensionare l'area di ritaglio"
   },
   "inlineCode": {
-    "openLink": "Apri link — Clic destro per copiare",
+    "copyLink": "Copia link",
     "copyHint": "Copia"
   }
 }

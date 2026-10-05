@@ -121,6 +121,12 @@
     "warning": "رفع الحجب لا يثبت أن العملية القديمة انتهت بسلام. قد تكون أحدثت أثراً خارج هذا الجهاز. ارفعه فقط إن تحققت أو قبلت هذا الاحتمال.",
     "filteredWarning": "المعروض هنا حجبُ هذه المحادثة وحدها. قبل الرفع راجع سجلّها ومساحة عملها (git status وأي دفعٍ سابق) للتأكد من أثر الجولة المنقطعة.",
     "showAll": "عرض كل الحجوب",
+    "recentTitle": "إقرارات حديثة من المحادثات",
+    "recentEmpty": "لا إقرارات حديثة",
+    "recentUnavailable": "سجل الإقرارات غير موثوق حالياً",
+    "recentRow": "{{when}} · المحادثة {{session}} · المُقِرّ {{actor}} · مالك القرار {{owner}}",
+    "committed": "مُنفَّذ",
+    "notCommitted": "غير مُنفَّذ",
     "none": "لا حجوب قائمة",
     "kindGeneration": "كل التشغيلات موقوفة (الجيل {{generation}})",
     "kindScoped": "نطاق موقوف: {{scope}}",
@@ -184,7 +190,8 @@
     "instructions": "التعليمات",
     "mcpServers": "خوادم MCP",
     "skills": "المهارات",
-    "appearance": "المظهر"
+    "appearance": "المظهر",
+    "update": "التحديث"
   },
   "skills": {
     "title": "المهارات",
@@ -747,17 +754,6 @@
     "banner": "اشتراكك بـ Claude غير مرتبط بعد. يلزم ربطه قبل استخدام Claude في جلساتك.",
     "bannerHint": "اضغط الزر أدناه لفتح الطرفية وإكمال تدفّق تسجيل الدخول عبر",
     "linkButton": "ربط حساب Claude",
-    "tokenInput": {
-      "stepHint": "اضغط «{{button}}» في هذه البطاقة لتشغيل <cmd>claude setup-token</cmd>، ثم الصق هنا الرمز الذي يطبعه — فهو يُعرض مرّةً واحدة.",
-      "notWritable": "اعتماد Claude مشترك على هذا الخادم، فيضبطه المالك أو المشرف وحده. لا تشغّل claude setup-token: الرمز يُعرض مرّةً واحدة ولن يُقبل حفظه هنا.",
-      "placeholder": "sk-ant-oat01-…",
-      "ariaLabel": "رمز الإعداد",
-      "save": "حفظ الرمز",
-      "saving": "جارٍ الحفظ…",
-      "saved": "تم حفظ الرمز",
-      "emptyError": "الرمز مطلوب",
-      "saveError": "فشل حفظ الرمز. حاول مرة أخرى."
-    },
     "incompleteLink": "ربط Claude ناقص — لا يقرأ الاستخدام وقد يتوقّف عن العمل. أعِد الربط بتسجيل دخول كامل لإتمامه.",
     "relinkButton": "إعادة الربط"
   },
@@ -1264,38 +1260,6 @@
       "cycleRenews": "يتجدّد الاشتراك في {{date}}",
       "billingPage": "صفحة الفوترة",
       "billingPageNewTab": "يفتح في تبويب جديد"
-    },
-    "account": {
-      "claude": {
-        "description": ""
-      },
-      "cursor": {
-        "description": "محرر أكواد Cursor المدعوم بالذكاء الاصطناعي"
-      },
-      "codex": {
-        "description": "مساعد OpenAI Codex الذكي"
-      },
-      "antigravity": {
-        "description": "Google AI Pro عبر أداة agy CLI"
-      },
-      "opencode": {
-        "description": "مساعد OpenCode عبر سطر الأوامر"
-      },
-      "qwen": {
-        "description": "Alibaba ModelStudio عبر Coding Plan أو Token Plan"
-      },
-      "kimi": {
-        "description": "Moonshot Kimi — عبر واجهة سطر الأوامر الأصيلة (دخول برمز جهاز) أو مفتاح API"
-      },
-      "deepseek": {
-        "description": "DeepSeek عبر مفتاح API"
-      },
-      "glm": {
-        "description": "GLM من Zhipu / Z.ai عبر مفتاح API"
-      }
-    },
-    "antigravity": {
-      "modelPickerNote": "اختر النموذج من منتقي النماذج؛ و«agy default» يترك الاختيار لـagy."
     },
     "authPaths": {
       "subscription": {

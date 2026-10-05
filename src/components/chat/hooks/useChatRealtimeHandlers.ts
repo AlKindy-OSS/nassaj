@@ -1,4 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef } from 'react';
+import {
+  applyPendingCodexPermissionStamp, carryPermissionModeToSession, clearPendingCodexPermissionStamp,
+} from '../utils/codexPermissionMode';
 import type { Dispatch, MutableRefObject, SetStateAction } from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -497,6 +500,7 @@ export function useChatRealtimeHandlers({
         // بطاقةً. وبمعرّفٍ صحيح = قبولٌ مؤكَّد (الجولة بدأت والرسالة في سجلّها)
         // ⇒ يُحذف الإدخال وكائن صوره معه، فلا تتراكم بطاقاتُ «نجحت».
         if (!newSessionId) {
+          clearPendingCodexPermissionStamp();
           // sessionId=null means the provider failed to mint a session. This
           // used to break silently, leaving the user on a dead, spinning view.
           // Clear the active-view spinner and surface the failure (T-83). The
@@ -511,6 +515,19 @@ export function useChatRealtimeHandlers({
             onServerError?.(message);
           }
           break;
+        }
+
+        // B-472: a Codex send keeps its composer mode on the session it mints, even
+        // when this event arrives while the view is on another session (the later
+        // branches may `break`). Gated on the event's own provider, not the screen's;
+        // safe because the stamp is bound to the send's clientMsgId.
+        const eventProvider = (msg as { provider?: string }).provider;
+        const isCodexEvent = eventProvider ? eventProvider === 'codex' : provider === 'codex';
+        if (isCodexEvent) {
+          applyPendingCodexPermissionStamp(
+            newSessionId,
+            typeof msg.clientMsgId === 'string' ? msg.clientMsgId : null,
+          );
         }
 
         // B-1297: correlate session_created to this tab's pending send by clientMsgId,
@@ -584,6 +601,7 @@ export function useChatRealtimeHandlers({
               newSessionId,
               typeof msg.clientMsgId === 'string' ? msg.clientMsgId : undefined,
             );
+            if (isCodexEvent) carryPermissionModeToSession(currentSessionId, newSessionId);
             sessionStorage.setItem('pendingSessionId', newSessionId);
             if (pendingViewSessionRef.current) {
               pendingViewSessionRef.current.sessionId = newSessionId;
@@ -635,6 +653,7 @@ export function useChatRealtimeHandlers({
           if (provider === 'claude') {
             stampSessionEngineProvider(newSessionId, readSessionEngineProvider(currentSessionId));
           }
+          if (isCodexEvent) carryPermissionModeToSession(currentSessionId, newSessionId);
           setCurrentSessionId(newSessionId);
           setPendingPermissionRequests((prev) =>
             prev.map((r) => ({ ...r, sessionId: newSessionId })),
@@ -1177,7 +1196,7 @@ export function useChatRealtimeHandlers({
       if ('incomplete' in entry && entry.incomplete) continue;
       // ADR-041: this path is authoritative for stream frames, so it must move
       // the reconnect replay floor before `latestMessage` skips the same frame.
-      sessionStore.recordSeq(sessionId, entry.frame?.sequence);
+      sessionStore.recordSeq(sessionId, entry.frame?.sequence, responseRunId(entry.frame));
       const finalId = entry.frame?.kind === 'text' ? entry.frame.id : `stream_${sessionId}_${entry.seq}`;
       const slot = sessionStore.getSessionSlot?.(sessionId);
       if (entry.ended && finalId && slot
@@ -1276,7 +1295,7 @@ export function useChatRealtimeHandlers({
     // active view and the non-persisted control kinds bypass appendRealtime, so we
     // cover them here. No-op when `sequence` is absent (registry flag off / legacy).
     if (sid) {
-      sessionStore.recordSeq(sid, (msg as NormalizedMessage).sequence);
+      sessionStore.recordSeq(sid, (msg as NormalizedMessage).sequence, responseRunId(msg));
     }
     // True only when the event belongs to the session currently on screen.
     // Mirror events for background sessions must NOT mutate the active view

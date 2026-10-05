@@ -119,7 +119,8 @@ describe('AgentStatusCard (MergedCard) — starter vs viewer', () => {
 });
 
 describe('AgentStatusCard (MergedCard) — /steer hint indicator (T-1956)', () => {
-  it("shows the hint on the starter's own merged card; a tap opens it without toggling the card", () => {
+  it("shows the hint on the starter's own merged card; a click calls onSteerClick without toggling the card", () => {
+    const onSteerClick = vi.fn();
     render(
       <AgentStatusCard
         agents={[AGENT]}
@@ -130,15 +131,13 @@ describe('AgentStatusCard (MergedCard) — /steer hint indicator (T-1956)', () =
         runStartedAt={null}
         progress={null}
         showSteerHint
+        onSteerClick={onSteerClick}
       />,
     );
     const indicator = screen.getByTestId('run-status-steer-hint');
-    const trigger = indicator.parentElement as HTMLElement;
     const expandedBefore = document.querySelectorAll('[aria-expanded="true"]').length;
-    fireEvent.touchStart(trigger, { touches: [{ clientX: 5, clientY: 5 }] });
-    fireEvent.touchEnd(trigger, { changedTouches: [{ clientX: 5, clientY: 5 }] });
-    fireEvent.click(trigger);
-    expect(screen.getByRole('tooltip').textContent).toMatch(/\/steer/);
+    fireEvent.click(indicator);
+    expect(onSteerClick).toHaveBeenCalledTimes(1);
     expect(document.querySelectorAll('[aria-expanded="true"]').length).toBe(expandedBefore);
   });
 

@@ -390,3 +390,41 @@ export function resolveProviderEnv(userId, provider, baseEnv = process.env, mode
   const resolved = resolveIsolatedProviderEnv(userId, provider, baseEnv, mode, honorGrants);
   return sanitizeHostSecretEnv(applyHarnessUpdaterPolicy(provider, resolved));
 }
+
+/**
+ * B-1284 — the environment a MODEL-CATALOG probe runs under, fail-closed.
+ *
+ * A catalog read (`agy models`, `opencode models`, the agy token for the live
+ * catalog) must see exactly the credential tree the member's real turn would
+ * run on — otherwise every member is shown, and spends, the operator's account.
+ * So this is `resolveProviderEnv` in chat mode with credential grants honoured
+ * (the picker must match the spawn, which honours grants too), plus one
+ * contract: it never throws a policy refusal at a reader.
+ *
+ * When isolation is UNAVAILABLE for this caller (`resolveProviderEnv` throws
+ * `AppError` — provider outside the policy, or with no isolation case) the
+ * answer is `null`, NOT the operator's environment. The caller treats `null` as
+ * "no catalog for you": it serves its degraded fallback and spawns nothing.
+ * A deliberately SHARED provider (admin policy) still returns the operator env:
+ * that is the spawn's own answer for the same caller, so catalog and turn agree.
+ *
+ * Any other error (EACCES while provisioning the member tree, …) propagates —
+ * the readers already turn a throw into a degraded catalog, never a spawn.
+ *
+ * Side effect, accepted on review: like every isolated spawn, resolving an
+ * isolated member provisions their tree (idempotent) and may refresh a grant
+ * home; without it the CLI finds no tree and the catalog is a false empty.
+ *
+ * @param {string|number|null} userId caller (null = operator, stated explicitly)
+ * @param {ProviderName} provider isolation key ('agy' for antigravity)
+ * @param {NodeJS.ProcessEnv} [baseEnv] base environment (defaults to process.env)
+ * @returns {NodeJS.ProcessEnv|null} sanitized env, or null when isolation is unavailable
+ */
+export function resolveCatalogEnv(userId, provider, baseEnv = process.env) {
+  try {
+    return resolveProviderEnv(userId, provider, baseEnv, 'chat', { honorGrants: true });
+  } catch (error) {
+    if (error instanceof AppError) return null;
+    throw error;
+  }
+}

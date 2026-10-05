@@ -25,6 +25,14 @@
  *   node scripts/public-page-publish.mjs rollback --site <id> --to <revision>
  *   node scripts/public-page-publish.mjs withdraw --site <id>
  *   node scripts/public-page-publish.mjs restore  --site <id>
+ *   node scripts/public-page-publish.mjs prune    --site <id> [--keep <n>]
+ *
+ * Storage is bounded per site (B-1228): a publish that would exceed
+ * NASSAJ_PUBLIC_SITE_MAX_REVISIONS revisions (default 20) or
+ * NASSAJ_PUBLIC_SITE_MAX_BYTES stored bytes (default 256 MiB) is refused and the
+ * live revision stays as it is. Republishing identical content reuses its
+ * revision and costs nothing. `prune` is the only deletion: it removes the
+ * oldest revisions beyond `--keep` (default 5) and never the live one.
  *
  * `--root <path>` overrides the resolved content root for every command.
  */
@@ -47,6 +55,10 @@ const POINTER_SCHEMA = 'nassaj-public-page-pointer/v1';
 const SITE_MANIFEST_SCHEMA = 'nassaj-public-site-manifest/v1';
 const TOMBSTONE_SCHEMA = 'nassaj-public-page-tombstone/v1';
 const TOTAL_MAX_BYTES = 32 * 1024 * 1024;
+const DEFAULT_MAX_REVISIONS = 20;
+const DEFAULT_MAX_SITE_BYTES = 256 * 1024 * 1024;
+const DEFAULT_PRUNE_KEEP = 5;
+const REVISION_NAME = /^[a-f0-9]{64}$/;
 const DIRECTORY_MODE = 0o700;
 const FILE_MODE = 0o600;
 
@@ -208,12 +220,58 @@ function refuseSourceInsideRoot(root, sourceDirectory) {
     }
 }
 
+/** A positive integer from the environment, or the default. */
+function limitFromEnv(name, fallback) {
+    const raw = process.env[name];
+    if (raw === undefined || raw === '') return fallback;
+    if (!/^[1-9]\d{0,14}$/.test(raw)) fail(`${name} must be a positive integer`);
+    return Number(raw);
+}
+
+/** Stored revisions of a site, oldest first, each with its stored byte count. */
+function storedRevisions(places, siteId) {
+    const publication = path.join(places.bundles, siteId);
+    let names = [];
+    try { names = readdirSync(publication).filter((name) => REVISION_NAME.test(name)); } catch { return []; }
+    return names.map((revision) => {
+        const directory = path.join(publication, revision);
+        let bytes = 0;
+        try {
+            const manifest = readFileSync(path.join(directory, 'manifest.json'));
+            bytes = manifest.length + Object.values(JSON.parse(manifest.toString('utf8')).files ?? {})
+                .reduce((sum, entry) => sum + (Number.isSafeInteger(entry?.bytes) ? entry.bytes : 0), 0);
+        } catch { /* an unreadable manifest still counts as a revision */ }
+        return { revision, directory, bytes, mtimeMs: statSync(directory).mtimeMs };
+    }).sort((a, b) => a.mtimeMs - b.mtimeMs || (a.revision < b.revision ? -1 : 1));
+}
+
+/**
+ * Refuse a NEW revision that would exceed the per-site caps (B-1228). Nothing is
+ * deleted here, so the live revision (last good) keeps serving; `prune` frees room.
+ */
+function assertWithinSiteCaps(places, siteId, revision, incomingBytes) {
+    const stored = storedRevisions(places, siteId);
+    if (stored.some((entry) => entry.revision === revision)) return;
+    const maxRevisions = limitFromEnv('NASSAJ_PUBLIC_SITE_MAX_REVISIONS', DEFAULT_MAX_REVISIONS);
+    const maxBytes = limitFromEnv('NASSAJ_PUBLIC_SITE_MAX_BYTES', DEFAULT_MAX_SITE_BYTES);
+    const prune = `run: public-page-publish.mjs prune --site ${siteId}`;
+    if (stored.length + 1 > maxRevisions) {
+        fail(`${siteId} already stores ${stored.length} revisions (cap ${maxRevisions}); the live revision is unchanged; ${prune}`);
+    }
+    const storedBytes = stored.reduce((sum, entry) => sum + entry.bytes, 0);
+    if (storedBytes + incomingBytes > maxBytes) {
+        fail(`${siteId} would store ${storedBytes + incomingBytes} bytes (cap ${maxBytes}); the live revision is unchanged; ${prune}`);
+    }
+}
+
 async function publish(places, siteId, sourceDirectory) {
     refuseSourceInsideRoot(places.root, sourceDirectory);
     const files = collect(sourceDirectory);
     const digestible = Object.fromEntries([...files].map(([relative, file]) => [relative, file.entry]));
     const revision = sha256(canonical({ publicationId: siteId, files: digestible }));
+    const incomingBytes = [...files.values()].reduce((sum, file) => sum + file.bytes.length, 0);
     return withLock(places, siteId, () => {
+        assertWithinSiteCaps(places, siteId, revision, incomingBytes);
         const { target, reused } = stage(places, siteId, files, revision);
         const manifestSha256 = sha256(readFileSync(path.join(target, 'manifest.json')));
         const pointer = pointAt(places, siteId, revision, manifestSha256);
@@ -244,6 +302,25 @@ async function restore(places, siteId) {
         try { unlinkSync(path.join(places.tombstones, siteId)); } catch { fail(`${siteId} is not withdrawn`); }
         syncDirectory(places.tombstones);
         return { action: 'restored', publicationId: siteId };
+    });
+}
+
+/** Delete the oldest stored revisions beyond `keep`, never the live revision. */
+async function prune(places, siteId, keepText) {
+    const keep = keepText === undefined ? DEFAULT_PRUNE_KEEP
+        : (/^[1-9]\d{0,5}$/.test(keepText) ? Number(keepText) : fail('--keep must be a positive integer'));
+    return withLock(places, siteId, () => {
+        const live = currentPointer(places, siteId)?.revision ?? null;
+        const stored = storedRevisions(places, siteId);
+        const keepNewest = new Set(stored.slice(-keep).map((entry) => entry.revision));
+        const removed = [];
+        for (const entry of stored) {
+            if (entry.revision === live || keepNewest.has(entry.revision)) continue;
+            rmSync(entry.directory, { recursive: true, force: true });
+            removed.push(entry.revision);
+        }
+        if (removed.length) syncDirectory(path.join(places.bundles, siteId));
+        return { action: 'pruned', publicationId: siteId, live, removed, kept: stored.length - removed.length };
     });
 }
 
@@ -293,7 +370,8 @@ export async function run(argv) {
         case 'withdraw': return withdraw(places, siteId);
         case 'restore': return restore(places, siteId);
         case 'list': return list(places, siteId);
-        default: return fail('usage: public-page-publish.mjs <publish|list|rollback|withdraw|restore> …');
+        case 'prune': return prune(places, siteId, options.keep);
+        default: return fail('usage: public-page-publish.mjs <publish|list|rollback|withdraw|restore|prune> …');
     }
 }
 

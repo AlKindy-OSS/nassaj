@@ -2,10 +2,10 @@
  * شارات الكود السطري (backtick واحد) القابلة للنقر.
  *
  * يتحقق أن:
- * - رابط http(s) وحيد: النقر الأيسر يفتحه في تبويب جديد (بعد مهلة قصيرة تُلغى
- *   بنقرة ثانية) بـnoopener/noreferrer، والنقر الأيمن ينسخه بدل القائمة الافتراضية.
- * - نقر مزدوج على رابط لا يفتح تبويباً.
- * - نصّ عادي: كلا النقرتين تنسخ.
+ * - رابط http(s) صريح أو نطاق عارٍ صارم: <a> حقيقي بـtarget=_blank وnoopener،
+ *   وبجانبه زرّ نسخ؛ أسماء الملفات والمخطّطات الخطرة نصّ عادي.
+ * - النقر الأيمن والضغط المطوّل لا يُعترَضان أبداً.
+ * - نصّ عادي: النقر الأيسر ينسخ.
  * - النسخ يُظهر تلميحاً مرئياً مؤقّتاً (شارة حيّة + وصفٌ دائم منفصل عن اسم العنصر).
  * - كتل الكود المسيّجة، والكتلة المسنَّدة بأربع مسافات من سطر واحد، والسياج غير
  *   المغلَق أثناء البثّ — كلّها لا تتأثر (لا شارة نقر عليها).
@@ -79,42 +79,112 @@ function renderMd(md: string) {
   return render(<Markdown>{md}</Markdown>);
 }
 
-describe('شارة الكود السطري — رابط http(s) وحيد', () => {
-  it('النقر الأيسر يفتح الرابط في تبويب جديد بأمان (بعد المهلة القصيرة)', () => {
-    vi.useFakeTimers();
-    renderMd('`http://100.105.15.53:3030/org/Life-Trip/settings`');
-    const pill = screen.getByText('http://100.105.15.53:3030/org/Life-Trip/settings');
-    fireEvent.click(pill);
-    expect(window.open).not.toHaveBeenCalled(); // مؤجَّل، لا فوري
-    vi.advanceTimersByTime(300);
-    expect(window.open).toHaveBeenCalledWith(
-      'http://100.105.15.53:3030/org/Life-Trip/settings',
-      '_blank',
-      'noopener,noreferrer',
-    );
+describe('شارة الكود السطري — رابط', () => {
+  it('رابط http(s) صريح يصير <a> يفتح في تبويب جديد بأمان', () => {
+    renderMd('`http://100.64.0.10:3030/org/demo-org/settings`');
+    const link = screen.getByRole('link');
+    expect(link.getAttribute('href')).toBe('http://100.64.0.10:3030/org/demo-org/settings');
+    expect(link.getAttribute('target')).toBe('_blank');
+    expect(link.getAttribute('rel')).toBe('noopener noreferrer');
+    fireEvent.click(link);
     expect(writeText).not.toHaveBeenCalled();
   });
 
-  it('النقر الأيمن ينسخ الرابط فوراً ويمنع القائمة الافتراضية', () => {
-    renderMd('`https://example.com/x`');
-    const pill = screen.getByText('https://example.com/x');
-    const event = fireEvent.contextMenu(pill);
-    expect(event).toBe(false); // preventDefault() called ⇒ fireEvent returns false
-    expect(writeText).toHaveBeenCalledWith('https://example.com/x');
-    expect(window.open).not.toHaveBeenCalled();
+  it('نطاق عارٍ يصير رابط https', () => {
+    renderMd('`docs.example.com`');
+    expect(screen.getByRole('link').getAttribute('href')).toBe('https://docs.example.com/');
   });
 
-  it('نقر مزدوج على رابط لا يفتح تبويباً', () => {
-    vi.useFakeTimers();
-    renderMd('`https://example.com/dbl`');
-    const pill = screen.getByText('https://example.com/dbl');
-    // نقرة أولى (detail=1) تُجدوِل الفتح المؤجَّل...
-    fireEvent.click(pill, { detail: 1 });
-    // ...ثم نقرة ثانية سريعة (detail=2، كما يُصدرها المتصفّح فعلياً) تُلغيه.
-    fireEvent.click(pill, { detail: 2 });
-    fireEvent.doubleClick(pill);
-    vi.advanceTimersByTime(500);
+  it('نطاق عارٍ بمسار يصير رابط https', () => {
+    renderMd('`example.io/docs/a`');
+    expect(screen.getByRole('link').getAttribute('href')).toBe('https://example.io/docs/a');
+  });
+
+  it('رابط بمخطّط بأحرف كبيرة وبمنفذ واستعلام يُقبل ويُطبَّع href', () => {
+    renderMd('`HTTPS://Example.com:8443/a?x=1&y=2`');
+    expect(screen.getByRole('link').getAttribute('href')).toBe('https://example.com:8443/a?x=1&y=2');
+  });
+
+  it('نطاق عارٍ بمنفذ واستعلام يصير رابطاً', () => {
+    renderMd('`api.example.com:8080/v1?q=1`');
+    expect(screen.getByRole('link').getAttribute('href')).toBe('https://api.example.com:8080/v1?q=1');
+  });
+
+  it('logo.ai مقبول رابطاً عمداً (ai ضمن القائمة المسموحة)', () => {
+    renderMd('`logo.ai`');
+    expect(screen.getByRole('link').getAttribute('href')).toBe('https://logo.ai/');
+  });
+
+  it.each(['Safari.app', 'Xcode.app', 'v1.2.app', 'user@example.com', '192.168.1.1', '10.0.0.1:3000'])(
+    '%s نصّ عادي لا رابط',
+    (text) => {
+      renderMd('`' + text + '`');
+      expect(screen.queryByRole('link')).toBeNull();
+    },
+  );
+
+  it('رابط ماركداون يحوي شارة كود لا يولّد <a> متداخلاً ولا زرّاً داخله', () => {
+    const { container } = renderMd('[`docs.example.com`](https://docs.example.com/deep/page)');
+    expect(container.querySelector('a a')).toBeNull();
+    expect(container.querySelector('a button')).toBeNull();
+    expect(container.querySelectorAll('a')).toHaveLength(1);
+    const code = screen.getByText('docs.example.com');
+    expect(code.getAttribute('role')).toBeNull();
+    fireEvent.click(code);
+    expect(writeText).not.toHaveBeenCalled();
+  });
+
+  it('النقر على الرابط لا يُمنَع افتراضياً (يترك المتصفّح يفتحه)', () => {
+    renderMd('`https://example.com/x`');
+    expect(fireEvent.click(screen.getByRole('link'))).toBe(true);
+  });
+
+  it('زرّ النسخ يعمل بلوحة المفاتيح (Enter)', () => {
+    renderMd('`https://example.com/x`');
+    const btn = screen.getByRole('button', { name: 'نسخ الرابط' });
+    fireEvent.keyDown(btn, { key: 'Enter' });
+    fireEvent.click(btn); // المتصفّح يحوّل Enter على الزرّ إلى click
+    expect(writeText).toHaveBeenCalledWith('https://example.com/x');
+  });
+
+  it.each(['config.json', 'foo.ts', 'a.md', 'Markdown.tsx', 'run.sh', 'x.py'])(
+    'اسم الملف %s ليس رابطاً',
+    (name) => {
+      renderMd('`' + name + '`');
+      expect(screen.queryByRole('link')).toBeNull();
+      fireEvent.click(screen.getByText(name));
+      expect(writeText).toHaveBeenCalledWith(name);
+    },
+  );
+
+  it.each(['javascript:alert(1)', 'data:text/html,hi', 'ftp://example.com/x'])(
+    'المخطّط غير http(s) %s نصّ عادي',
+    (text) => {
+      renderMd('`' + text + '`');
+      expect(screen.queryByRole('link')).toBeNull();
+    },
+  );
+
+  it('النقر الأيمن لا يُعترَض ولا ينسخ', () => {
+    renderMd('`https://example.com/x`');
+    const event = fireEvent.contextMenu(screen.getByText('https://example.com/x'));
+    expect(event).toBe(true); // لم يُستدعَ preventDefault
+    expect(writeText).not.toHaveBeenCalled();
+  });
+
+  it('النقر الأيمن على نصّ عادي لا يُعترَض أيضاً', () => {
+    renderMd('`life-trip`');
+    const event = fireEvent.contextMenu(screen.getByText('life-trip'));
+    expect(event).toBe(true);
+    expect(writeText).not.toHaveBeenCalled();
+  });
+
+  it('زرّ النسخ بجانب الرابط ينسخ الرابط الظاهر ولا يفتح شيئاً', async () => {
+    renderMd('`https://example.com/x`');
+    fireEvent.click(screen.getByRole('button', { name: 'نسخ الرابط' }));
+    expect(writeText).toHaveBeenCalledWith('https://example.com/x');
     expect(window.open).not.toHaveBeenCalled();
+    expect(await screen.findByRole('status')).toBeTruthy();
   });
 });
 
@@ -124,12 +194,6 @@ describe('شارة الكود السطري — نصّ عادي', () => {
     fireEvent.click(screen.getByText('life-trip'));
     expect(writeText).toHaveBeenCalledWith('life-trip');
     expect(window.open).not.toHaveBeenCalled();
-  });
-
-  it('النقر الأيمن ينسخ النصّ أيضاً', () => {
-    renderMd('`Life Trip`');
-    fireEvent.contextMenu(screen.getByText('Life Trip'));
-    expect(writeText).toHaveBeenCalledWith('Life Trip');
   });
 
   it('Enter من لوحة المفاتيح ينسخ (الفعل الأساسي لنصّ غير رابط)', () => {

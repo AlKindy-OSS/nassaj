@@ -25,7 +25,7 @@ const patchHomeDir = (nextHomeDir: string) => {
 
 async function withIsolatedDatabase(runTest: () => void | Promise<void>): Promise<void> {
   const previousDatabasePath = process.env.DATABASE_PATH;
-  const tempDirectory = await mkdtemp(path.join(os.tmpdir(), 'opencode-dedup-db-'));
+  const tempDirectory = await mkdtemp('/var/tmp/opencode-dedup-db-');
   const databasePath = path.join(tempDirectory, 'auth.db');
 
   closeConnection();
@@ -143,7 +143,7 @@ const createOpenCodeDatabase = async (
 };
 
 test('B-172: opencode child sessions (non-null parent_id) are folded, never indexed as own rows', { concurrency: false }, async () => {
-  const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'opencode-dedup-'));
+  const tempRoot = await mkdtemp('/var/tmp/opencode-dedup-');
   const workspacePath = path.join(tempRoot, 'workspace');
   await mkdir(workspacePath, { recursive: true });
   const restoreHomeDir = patchHomeDir(tempRoot);
@@ -202,7 +202,7 @@ test('B-172: opencode child sessions (non-null parent_id) are folded, never inde
 });
 
 test('B-172: an idempotent rescan never inflates rows and a folded child never creates a row', { concurrency: false }, async () => {
-  const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'opencode-dedup-rescan-'));
+  const tempRoot = await mkdtemp('/var/tmp/opencode-dedup-rescan-');
   const workspacePath = path.join(tempRoot, 'workspace');
   await mkdir(workspacePath, { recursive: true });
   const restoreHomeDir = patchHomeDir(tempRoot);
@@ -246,7 +246,7 @@ test('B-172: an idempotent rescan never inflates rows and a folded child never c
 });
 
 test('B-172: an ORPHAN child (parent absent) is folded silently and creates no row', { concurrency: false }, async () => {
-  const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'opencode-dedup-orphan-'));
+  const tempRoot = await mkdtemp('/var/tmp/opencode-dedup-orphan-');
   const workspacePath = path.join(tempRoot, 'workspace');
   await mkdir(workspacePath, { recursive: true });
   const restoreHomeDir = patchHomeDir(tempRoot);
@@ -279,7 +279,7 @@ test('B-172: an ORPHAN child (parent absent) is folded silently and creates no r
 
 test('T-1906: a Coding Plan key in a title or first prompt never reaches the session name', { concurrency: false }, async () => {
   const KEY = ['sk', 'sp-title-secret-0123456789'].join('-');
-  const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'opencode-title-redaction-'));
+  const tempRoot = await mkdtemp('/var/tmp/opencode-title-redaction-');
   const workspacePath = path.join(tempRoot, 'workspace');
   await mkdir(workspacePath, { recursive: true });
   const restoreHomeDir = patchHomeDir(tempRoot);

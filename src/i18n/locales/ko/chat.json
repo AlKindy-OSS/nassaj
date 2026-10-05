@@ -668,7 +668,7 @@
     "cropHint": "화살표 키를 사용하여 자르기 영역을 이동하거나 조정하세요"
   },
   "inlineCode": {
-    "openLink": "링크 열기 — 마우스 오른쪽 클릭으로 복사",
+    "copyLink": "링크 복사",
     "copyHint": "복사"
   }
 }

@@ -73,6 +73,7 @@ vi.mock('../hooks/useProjectBoard', () => ({
     },
     isLoading: false,
     loadError: null,
+    notFound: false,
   }),
 }));
 

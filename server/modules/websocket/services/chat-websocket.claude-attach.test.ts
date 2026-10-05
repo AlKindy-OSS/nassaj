@@ -7,7 +7,8 @@
 // isClaudeSDKSessionActive on a separate SESSION_REGISTRY_claude-gated registry).
 
 import assert from 'node:assert/strict';
-import test from 'node:test';
+import fs from 'node:fs';
+import test, { after } from 'node:test';
 
 import { initializeDatabase, sessionsDb } from '@/modules/database/index.js';
 
@@ -16,6 +17,15 @@ import { handleChatConnection } from './chat-websocket.service.js';
 // 5ec5556c5: realtime session paths fail closed on unknown ids, so every session a
 // test reconnects to is persisted first (unregistered project, membership enforcement off).
 await initializeDatabase();
+
+// B-1373 (55e7c933f) refuses protected roots (the service home, including the
+// passwd home when $HOME is overridden, and anything under its hidden entries) as
+// project roots. Neither the checkout cwd nor os.tmpdir() is safe: the release
+// preflight runs under ~/.nassaj-release-work, the release gate points TMPDIR into
+// ~/.nassaj-release-gate, and a login shell may set TMPDIR=~/.cache/tmp. A fixed,
+// non-hidden on-disk root outside the home keeps the session row registrable.
+const PROJECT_PATH = fs.mkdtempSync('/var/tmp/chat-attach-project-');
+after(() => fs.rmSync(PROJECT_PATH, { recursive: true, force: true }));
 
 // Inline replay double mirroring the SessionRegistry attach contract (seq>lastSeq,
 // read-only). The real registry internals are covered by session-registry.test.ts;
@@ -145,7 +155,7 @@ function sendCheckStatus(
   sessionId: string,
   lastSeq?: number,
 ) {
-  sessionsDb.createSession(sessionId, 'claude', process.cwd());
+  sessionsDb.createSession(sessionId, 'claude', PROJECT_PATH);
   ws.emit(
     'message',
     JSON.stringify({

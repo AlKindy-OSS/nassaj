@@ -30,6 +30,7 @@ import { probeSessionWorkspaceAlias } from '@/modules/session-workspaces/index.j
 import { requireStartupAdmission } from '../../bootstrap-startup-context.js';
 
 import { migrateDocumentShares } from './document-shares.js';
+import { migrateSessionShares } from './session-shares.js';
 import { migrateDeviceAccountSessions } from './device-account-sessions.migration.js';
 import { inspectExistingSecurityState } from './existing-security-state.js';
 import { migrateSsoOidc } from './sso-oidc-config.migration.js';
@@ -58,6 +59,8 @@ export const initializeAdmittedDatabase = (db: ReturnType<typeof getConnection>,
     migrateAdmittedScheduledMessages(db);
     migrateDeviceAccountSessions(db);
     migrateDocumentShares(db);
+    // ADR-196 (T-1970): additive, one statement per exec (reviewed startup SQL).
+    migrateSessionShares(db);
     // ADR-194 (T-1962): without these tables the SSO state model reads a
     // missing table and locks every linked member out (enforced, unavailable).
     migrateSsoOidc(db);
@@ -90,6 +93,7 @@ export const initializeDatabase = async () => {
             runMigrations(db);
             migrateDeviceAccountSessions(db);
             migrateDocumentShares(db);
+            migrateSessionShares(db);
             // Idempotent; also inside runMigrations. Kept explicit so both boot
             // paths name the T-1962 tables (ADR-194).
             migrateSsoOidc(db);

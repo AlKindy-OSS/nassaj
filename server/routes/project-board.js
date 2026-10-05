@@ -2,16 +2,18 @@
  * PROJECT BOARD API ROUTES
  * ========================
  *
- * Read-only projection of product architecture plus optional governance state.
- * "Project Board" UI (spec: ~/.claude/wiki/project-board.md):
+ * Read-only projection of a project's board, read from the project's OWN
+ * folder (B-1524). "Project Board" UI (spec: ~/.claude/wiki/project-board.md):
  *
- *   governance:project-state  — structured phases/tasks/issues/decisions
+ *   docs/project-state.json   — structured phases/tasks/issues/decisions
  *   docs/ARCHITECTURE.md      — technical architecture (Mermaid diagrams)
  *   docs/ARCHITECTURE_AR.md   — simplified owner-facing architecture
  *
- * Product architecture is local and versioned. Governance state is selected by
- * logical projectId/kind through the server-only resolver and never through a
- * product path or symlink. Architecture changes retain the existing watcher.
+ * Whoever may enter a project sees its board and nobody else: the visibility
+ * guard runs first and yields the project root; every file is then read through
+ * project-board-reader, which refuses anything that resolves outside that root
+ * (except an operator-declared external binding for this exact projectId's
+ * state file — NASSAJ_BOARD_EXTERNAL_BINDINGS).
  *
  * Resilience contract: an invalid project-state.json NEVER breaks the board.
  * The route keeps the last successfully parsed state in memory and returns it
@@ -29,24 +31,30 @@ import {
 } from '../modules/projects/services/project-visibility-guard.service.js';
 import { AppError } from '../shared/utils.js';
 import {
-    readProductVersionedContent,
-    tryResolveGovernanceContent,
-} from '../services/governance-content-resolver.js';
+    ARCHITECTURE_AR_FILE,
+    ARCHITECTURE_FILE,
+    BOARD_STATE_FILE,
+    getExternalBinding,
+    isExternalStatePath,
+    readProjectBoardState,
+    readProjectFile,
+    STATE_MAX_BYTES,
+} from '../services/project-board-reader.js';
 
 const router = express.Router();
-
-const ARCHITECTURE_FILE = 'docs/ARCHITECTURE.md';
-const ARCHITECTURE_AR_FILE = 'docs/ARCHITECTURE_AR.md';
 
 // Safety valve: never accumulate watchers without bound on a long-lived server.
 const MAX_WATCHED_PROJECTS = 50;
 const BROADCAST_DEBOUNCE_MS = 250;
+// The state-file cap in MiB, sent so the client can name the limit on too_large.
+const STATE_LIMIT_MB = STATE_MAX_BYTES / (1024 * 1024);
 
 /**
  * Per-project runtime cache.
  * projectId -> {
  *   projectPath: string,
  *   watcher: chokidar.FSWatcher | null,
+ *   externalTarget: string | null,  // bound state file watched outside the root
  *   lastGoodState: object | null,   // last successfully parsed project-state.json
  *   debounceTimer: NodeJS.Timeout | null,
  * }
@@ -76,34 +84,45 @@ function broadcastBoardUpdate(wss, projectId) {
     });
 }
 
+function closeEntryWatcher(entry) {
+    if (entry.debounceTimer) {
+        clearTimeout(entry.debounceTimer);
+        entry.debounceTimer = null;
+    }
+    if (entry.watcher) {
+        entry.watcher.close().catch(() => {});
+        entry.watcher = null;
+    }
+    entry.externalTarget = null;
+}
+
 function getBoardEntry(projectId, projectPath) {
     let entry = boards.get(projectId);
     if (!entry) {
-        entry = { projectPath, watcher: null, lastGoodState: null, debounceTimer: null };
+        entry = {
+            projectPath, watcher: null, externalTarget: null, lastGoodState: null, debounceTimer: null,
+        };
         boards.set(projectId, entry);
     }
     // Project paths can change (project re-created); keep the entry honest.
     if (entry.projectPath !== projectPath) {
         entry.projectPath = projectPath;
-        if (entry.watcher) {
-            entry.watcher.close().catch(() => {});
-            entry.watcher = null;
-        }
+        closeEntryWatcher(entry);
         entry.lastGoodState = null;
     }
     return entry;
 }
 
 /**
- * Lazily start a chokidar watcher for the two product-versioned architecture files.
- * chokidar tracks not-yet-existing architecture paths through their parent.
+ * Lazily start a chokidar watcher for the three board files.
+ * chokidar tracks not-yet-existing paths through their parent.
  */
 function ensureWatcher(entry, projectId, wss) {
     if (entry.watcher || boards.size > MAX_WATCHED_PROJECTS) {
         return;
     }
 
-    const targets = [ARCHITECTURE_FILE, ARCHITECTURE_AR_FILE]
+    const targets = [BOARD_STATE_FILE, ARCHITECTURE_FILE, ARCHITECTURE_AR_FILE]
         .map((relative) => path.join(entry.projectPath, relative));
 
     const watcher = chokidar.watch(targets, {
@@ -112,6 +131,8 @@ function ensureWatcher(entry, projectId, wss) {
         awaitWriteFinish: { stabilityThreshold: 150, pollInterval: 50 },
     });
 
+    // The debounce also coalesces the double event a symlinked state file
+    // produces (its link path and its bound external target both fire).
     const notify = () => {
         if (entry.debounceTimer) {
             clearTimeout(entry.debounceTimer);
@@ -132,12 +153,46 @@ function ensureWatcher(entry, projectId, wss) {
     entry.watcher = watcher;
 }
 
-async function readProductFileOrNull(projectPath, relativePath) {
-    try {
-        return readProductVersionedContent(projectPath, relativePath).content;
-    } catch {
-        return null;
+/**
+ * Keep the watcher on the bound external state file (if any) in step with the
+ * file the last read actually resolved to. Added once, swapped on change.
+ */
+function syncExternalTarget(entry, stateRead) {
+    if (!entry.watcher) {
+        return;
     }
+    const next = stateRead.realPath && isExternalStatePath(stateRead.realPath, stateRead.rootReal)
+        ? stateRead.realPath
+        : null;
+    if (next === entry.externalTarget) {
+        return;
+    }
+    if (entry.externalTarget) {
+        entry.watcher.unwatch(entry.externalTarget);
+    }
+    if (next) {
+        entry.watcher.add(next);
+    }
+    entry.externalTarget = next;
+}
+
+function readArchitecture(projectPath, relativePath) {
+    const read = readProjectFile(projectPath, relativePath);
+    return read.status === 'ok' ? read.content : null;
+}
+
+/** Turn a state read into the response's state fields, honouring lastGoodState. */
+function projectState(entry, stateRead) {
+    if (stateRead.status === 'ok') {
+        entry.lastGoodState = stateRead.value;
+        return { available: true, state: stateRead.value, stateError: false };
+    }
+    if (stateRead.status === 'invalid_json') {
+        // Invalid JSON: serve the last good copy and flag the problem.
+        return { available: true, state: entry.lastGoodState, stateError: true };
+    }
+    entry.lastGoodState = null;
+    return { available: false, state: null, stateError: false };
 }
 
 /**
@@ -146,66 +201,42 @@ async function readProductFileOrNull(projectPath, relativePath) {
  * Response shape (all fields always present):
  * {
  *   projectId,
- *   available,        // governance project-state exists (even if invalid)
+ *   available,        // project-state exists (even if invalid JSON)
  *   state,            // parsed JSON, or last good copy on parse error, or null
  *   stateError,       // true when the file exists but is invalid JSON
+ *   stateReason,      // 'ok'|'missing'|'invalid_json'|'too_large'|'outside_project'
+ *                     // |'external_source_unconfigured'|'unreadable'
+ *   stateLimitMb,     // the project-state.json size cap in MiB (always sent)
  *   architecture: { technical, simplified }  // raw markdown or null
  * }
  */
 router.get('/:projectId', async (req, res) => {
     try {
         const { projectId } = req.params;
-        // B-PRIV guard: the board is project CONTENT — governance project-state
-        // carries the full task/issue/decision history and the two ARCHITECTURE
-        // files are read verbatim off disk — so it must not be readable for any
-        // projectId that happens to be guessed or enumerated. assertProjectVisible
-        // resolves the path itself and throws a 404 (not 403) when the project is
-        // not visible, so a private project's existence is never disclosed.
-        // The whole router is mounted behind authenticateToken (index.js), so
-        // req.user is the authenticated caller.
+        // B-PRIV guard: the board is project CONTENT, so it must not be readable
+        // for any projectId that is guessed or enumerated. assertProjectVisible
+        // throws a 404 (not 403) before any file is touched, so a hidden
+        // project's existence is never disclosed. The router is mounted behind
+        // authenticateToken (index.js), so req.user is the authenticated caller.
         const projectPath = assertProjectVisible(projectId, coerceUserId(req.user?.id ?? null));
 
         const entry = getBoardEntry(projectId, projectPath);
         ensureWatcher(entry, projectId, req.app.locals.wss);
 
-        const actorId = coerceUserId(req.user?.id ?? null);
-        const governanceResolver = req.app.locals.governanceContentResolver
-            ?? tryResolveGovernanceContent;
-        const stateRead = governanceResolver({
-            projectId,
-            actorId,
-            kind: 'project-state',
+        const stateRead = readProjectBoardState(projectPath, {
+            externalBinding: getExternalBinding(projectId),
         });
-        const [technical, simplified] = await Promise.all([
-            readProductFileOrNull(projectPath, ARCHITECTURE_FILE),
-            readProductFileOrNull(projectPath, ARCHITECTURE_AR_FILE),
-        ]);
-
-        let state = null;
-        let stateError = stateRead.reason === 'invalid_json';
-
-        if (stateRead.available) {
-            try {
-                state = stateRead.value ?? JSON.parse(stateRead.content);
-                entry.lastGoodState = state;
-            } catch {
-                // Invalid JSON: serve the last good copy and flag the problem.
-                state = entry.lastGoodState;
-                stateError = true;
-            }
-        } else if (!stateError) {
-            entry.lastGoodState = null;
-        }
+        syncExternalTarget(entry, stateRead);
 
         res.json({
             projectId,
-            available: stateRead.available || stateError,
-            state,
-            stateError,
-            architecture: { technical, simplified },
-            governance: stateRead.available
-                ? { available: true, provenance: stateRead.provenance }
-                : { available: false, reason: stateRead.reason ?? 'unavailable' },
+            ...projectState(entry, stateRead),
+            stateReason: stateRead.status,
+            stateLimitMb: STATE_LIMIT_MB,
+            architecture: {
+                technical: readArchitecture(projectPath, ARCHITECTURE_FILE),
+                simplified: readArchitecture(projectPath, ARCHITECTURE_AR_FILE),
+            },
         });
     } catch (error) {
         // The visibility guard signals refusal as an AppError(404); surface its
@@ -217,6 +248,19 @@ router.get('/:projectId', async (req, res) => {
         console.error('Error building project board response:', error);
         res.status(500).json({ error: 'Failed to load project board' });
     }
+});
+
+/** Test seam: close every watcher so a real-chokidar test can exit cleanly. */
+export const __test__ = Object.freeze({
+    async closeAll() {
+        const closing = [...boards.values()].map((entry) => entry.watcher?.close());
+        for (const entry of boards.values()) {
+            entry.watcher = null;
+            closeEntryWatcher(entry);
+        }
+        boards.clear();
+        await Promise.allSettled(closing);
+    },
 });
 
 export default router;

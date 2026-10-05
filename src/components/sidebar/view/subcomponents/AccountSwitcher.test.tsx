@@ -2,7 +2,12 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import type { TFunction } from 'i18next';
 import { afterEach, expect, it, vi } from 'vitest';
 
-import { getIdentityBarrierSnapshot, stabilizeIdentityBarrier } from '../../../auth/accountIdentityBarrier';
+import {
+  consumeExpectedWalletRevocation,
+  getIdentityBarrierSnapshot,
+  stabilizeIdentityBarrier,
+  subscribeIdentityBarrier,
+} from '../../../auth/accountIdentityBarrier';
 
 import AccountSwitcher from './AccountSwitcher';
 
@@ -61,6 +66,8 @@ it('mints operation-scoped CSRF and switches without setting Origin', async () =
 });
 
 it('adds a local account without retaining credentials or changing active identity', async () => {
+  const phases: string[] = [];
+  const unsubscribe = subscribeIdentityBarrier(() => phases.push(getIdentityBarrierSnapshot().phase));
   localStorage.setItem('draft_input_project-a', 'keep this draft');
   localStorage.setItem('nassaj_outbox_owner', '[{"id":"queued"}]');
   const added = { slotId: 'slot-c', displayName: 'Sara', isActive: false, lastUsedAt: null };
@@ -72,21 +79,67 @@ it('adds a local account without retaining credentials or changing active identi
   renderSwitcher();
   fireEvent.click(screen.getByRole('button', { name: 'account.switcherLabel:Nawras' }));
   fireEvent.click(await screen.findByRole('menuitem', { name: 'account.add' }));
-  fireEvent.change(screen.getByRole('textbox', { name: 'account.email' }), { target: { value: 'sara@example.com' } });
+  fireEvent.change(screen.getByRole('textbox', { name: 'account.identifier' }), { target: { value: ' sara_ali ' } });
   const password = document.querySelector('input[type="password"]') as HTMLInputElement;
   fireEvent.change(password, { target: { value: 'local-secret' } });
   fireEvent.click(screen.getByRole('button', { name: 'account.add' }));
 
-  await waitFor(() => expect(screen.queryByRole('textbox', { name: 'account.email' })).toBeNull());
+  await waitFor(() => expect(screen.queryByRole('textbox', { name: 'account.identifier' })).toBeNull());
   expect(fetchMock.mock.calls[1][0]).toBe('/api/auth/accounts/csrf?action=add');
   expect(JSON.parse(fetchMock.mock.calls[2][1].body)).toEqual({
-    email: 'sara@example.com', password: 'local-secret', expectedGeneration: 7,
+    identifier: 'sara_ali', password: 'local-secret', expectedGeneration: 7,
   });
-  expect(localStorage.getItem('sara@example.com')).toBeNull();
+  expect(localStorage.getItem('sara_ali')).toBeNull();
   expect(localStorage.getItem('local-secret')).toBeNull();
   expect(localStorage.getItem('draft_input_project-a')).toBe('keep this draft');
   expect(localStorage.getItem('nassaj_outbox_owner')).toContain('queued');
-  expect(getIdentityBarrierSnapshot().reason).toBe('wallet_generation_changed');
+  // B-1531: adding never starts an identity transition; only the expected
+  // generation revocation of this device's realtime sockets is announced.
+  unsubscribe();
+  expect(phases).toEqual([]);
+  expect(getIdentityBarrierSnapshot().phase).toBe('stable');
+  expect(consumeExpectedWalletRevocation()).toBe(true);
+  expect(fetchMock.mock.calls[2][1].signal).toBeInstanceOf(AbortSignal);
+});
+
+it('B-1534: a duplicate add keeps the dialog open with an explicit message and no transition', async () => {
+  const phases: string[] = [];
+  const unsubscribe = subscribeIdentityBarrier(() => phases.push(getIdentityBarrierSnapshot().phase));
+  fetchMock
+    .mockResolvedValueOnce(response(wallet))
+    .mockResolvedValueOnce(response({ csrfToken: 'csrf-add' }))
+    .mockResolvedValueOnce(response({ code: 'account_already_added' }, 409))
+    .mockResolvedValueOnce(response(wallet));
+  vi.stubGlobal('fetch', fetchMock);
+  renderSwitcher();
+  fireEvent.click(screen.getByRole('button', { name: 'account.switcherLabel:Nawras' }));
+  fireEvent.click(await screen.findByRole('menuitem', { name: 'account.add' }));
+  fireEvent.change(screen.getByRole('textbox', { name: 'account.identifier' }), { target: { value: 'maha' } });
+  fireEvent.change(document.querySelector('input[type="password"]')!, { target: { value: 'secret' } });
+  fireEvent.click(screen.getByRole('button', { name: 'account.add' }));
+  expect((await screen.findByRole('alert')).textContent).toBe('account.errors.account_already_added');
+  expect(screen.getByRole('textbox', { name: 'account.identifier' })).toBeTruthy();
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(4));
+  unsubscribe();
+  expect(phases).toEqual([]);
+});
+
+it('a wallet edit that unexpectedly changed the active account takes the revocation path', async () => {
+  const moved = { ...wallet, generation: 8, activeSlotId: 'slot-b',
+    accounts: wallet.accounts.map((account) => ({ ...account, isActive: account.slotId === 'slot-b' })) };
+  fetchMock
+    .mockResolvedValueOnce(response(wallet))
+    .mockResolvedValueOnce(response({ csrfToken: 'csrf-add' }))
+    .mockResolvedValueOnce(response(moved));
+  vi.stubGlobal('fetch', fetchMock);
+  renderSwitcher();
+  fireEvent.click(screen.getByRole('button', { name: 'account.switcherLabel:Nawras' }));
+  fireEvent.click(await screen.findByRole('menuitem', { name: 'account.add' }));
+  fireEvent.change(screen.getByRole('textbox', { name: 'account.identifier' }), { target: { value: 'sara' } });
+  fireEvent.change(document.querySelector('input[type="password"]')!, { target: { value: 'secret' } });
+  fireEvent.click(screen.getByRole('button', { name: 'account.add' }));
+  await waitFor(() => expect(getIdentityBarrierSnapshot().reason).toBe('identity_revoked'));
+  expect(getIdentityBarrierSnapshot().phase).toBe('committed');
 });
 
 it('removing a non-active account preserves drafts and outbox', async () => {
@@ -104,7 +157,9 @@ it('removing a non-active account preserves drafts and outbox', async () => {
   fireEvent.click(screen.getByRole('button', { name: 'account.remove' }));
   const removeButtons = await screen.findAllByRole('button', { name: 'account.remove' });
   fireEvent.click(removeButtons[removeButtons.length - 1]!);
-  await waitFor(() => expect(getIdentityBarrierSnapshot().reason).toBe('wallet_generation_changed'));
+  await waitFor(() => expect(fetchMock.mock.calls.filter(([url]) => url === '/api/auth/accounts/slot-b')).toHaveLength(1));
+  await waitFor(() => expect(screen.queryByText(/account.removeDescription/)).toBeNull());
+  expect(getIdentityBarrierSnapshot().phase).toBe('stable');
   expect(localStorage.getItem('draft_input_project-a')).toBe('keep this draft');
   expect(localStorage.getItem('nassaj_outbox_owner')).toContain('queued');
   expect(fetchMock.mock.calls.filter(([url]) => url === '/api/auth/accounts/slot-b')).toHaveLength(1);
@@ -136,11 +191,11 @@ it('releases the barrier after a rejected pre-commit mutation', async () => {
   renderSwitcher();
   fireEvent.click(screen.getByRole('button', { name: 'account.switcherLabel:Nawras' }));
   fireEvent.click(await screen.findByRole('menuitem', { name: 'account.add' }));
-  fireEvent.change(screen.getByRole('textbox', { name: 'account.email' }), { target: { value: 'missing@example.com' } });
+  fireEvent.change(screen.getByRole('textbox', { name: 'account.identifier' }), { target: { value: 'missing@example.com' } });
   fireEvent.change(document.querySelector('input[type="password"]')!, { target: { value: 'wrong-secret' } });
   fireEvent.click(screen.getByRole('button', { name: 'account.add' }));
-  await waitFor(() => expect(getIdentityBarrierSnapshot().phase).toBe('stable'));
   expect(await screen.findByRole('alert')).toBeTruthy();
+  expect(getIdentityBarrierSnapshot().phase).toBe('stable');
 });
 
 it('reconciles instead of unlocking when the mutation outcome is unknown', async () => {

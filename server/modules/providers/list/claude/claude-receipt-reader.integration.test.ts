@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { tmpdir } from 'node:os';
 import test from 'node:test';
 
 import { closeConnection, getConnection, initializeDatabase, sessionsDb, messageCoordinationDb } from '@/modules/database/index.js';
@@ -12,7 +11,7 @@ import { ClaudeSessionsProvider } from './claude-sessions.provider.js';
 import { claudeTextPayloadHash, projectClaudeHistoryReceipts } from './claude-receipt-identity.js';
 
 test('real Claude reader and shared cache count all UUID records before filtering and project fresh owner evidence', async () => {
-  const directory = await mkdtemp(path.join(process.env.NASSAJ_TEST_TMP || tmpdir(), 'claude-reader-'));
+  const directory = await mkdtemp('/var/tmp/claude-reader-');
   process.env.DATABASE_PATH = path.join(directory, 'db.sqlite');
   await writeFile(process.env.DATABASE_PATH, ''); closeConnection(); await initializeDatabase();
   try {
@@ -50,7 +49,7 @@ test('real Claude reader and shared cache count all UUID records before filterin
 });
 
 test('B-1078: real coordination rows pair for display through claimed, started and error without the deletion proof', async () => {
-  const directory = await mkdtemp(path.join(process.env.NASSAJ_TEST_TMP || tmpdir(), 'claude-b1078-'));
+  const directory = await mkdtemp('/var/tmp/claude-b1078-');
   process.env.DATABASE_PATH = path.join(directory, 'db.sqlite');
   await writeFile(process.env.DATABASE_PATH, ''); closeConnection(); await initializeDatabase();
   try {

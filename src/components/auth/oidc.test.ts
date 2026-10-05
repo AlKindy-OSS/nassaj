@@ -78,6 +78,26 @@ describe('exchangeOidcCode', () => {
     await expect(exchangeOidcCode('x')).resolves.toEqual({ ok: false, reason: 'provider_unavailable' });
   });
 
+  it('returns the wallet when the exchange issued a device session (ADR-163 amendment 1)', async () => {
+    const wallet = {
+      generation: 3,
+      activeSlotId: 'slot-a',
+      accounts: [{ slotId: 'slot-a', displayName: 'linked', isActive: true, lastUsedAt: 1 }],
+    };
+    apiMock.exchange.mockResolvedValue(json({ wallet, csrfToken: 'csrf-synthetic' }));
+    await expect(exchangeOidcCode('one-time')).resolves.toEqual({ ok: true, wallet });
+  });
+
+  it('rejects a malformed wallet answer as a provider failure', async () => {
+    apiMock.exchange.mockResolvedValue(json({ wallet: { generation: -1, activeSlotId: null, accounts: [] } }));
+    await expect(exchangeOidcCode('x')).resolves.toEqual({ ok: false, reason: 'provider_unavailable' });
+  });
+
+  it('classifies a wallet-mode origin refusal (403) as a generic provider failure', async () => {
+    apiMock.exchange.mockResolvedValue(json({ error: 'Request rejected', code: 'origin_rejected' }, 403));
+    await expect(exchangeOidcCode('x')).resolves.toEqual({ ok: false, reason: 'provider_unavailable' });
+  });
+
   it('reports a network failure without throwing', async () => {
     apiMock.exchange.mockRejectedValue(new TypeError('Failed to fetch'));
     await expect(exchangeOidcCode('x')).resolves.toEqual({ ok: false, reason: 'network' });
@@ -100,6 +120,18 @@ describe('fetchOidcIdentity', () => {
     });
     expect(setItem).not.toHaveBeenCalled();
     setItem.mockRestore();
+  });
+
+  it('without a token reads the identity through the device cookie, no Authorization', async () => {
+    const fetchMock = vi.fn(async () => json({ user: { id: 12, username: 'linked' }, isMultiUser: false }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(fetchOidcIdentity()).resolves.toEqual({
+      ok: true,
+      user: { id: 12, username: 'linked' },
+      isMultiUser: false,
+    });
+    expect(fetchMock).toHaveBeenCalledWith('/api/auth/user', { credentials: 'same-origin', cache: 'no-store' });
   });
 
   it('fails with session_failed when the identity cannot be loaded', async () => {

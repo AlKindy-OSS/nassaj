@@ -364,7 +364,8 @@ describe('عنوان الورشة الخلفية', () => {
 
     const text = container.textContent ?? '';
     assert.equal(/0\/3 running/.test(text), false, `الملخّص ما يزال يقول running: ${text}`);
-    assert.equal(text.includes('1/3 done'), true, text);
+    assert.equal(text.includes('1/3'), true, text);
+    assert.equal(text.includes('1/3 done'), false, 'العدّ المنتهي يظهر في الشارة وحدها لا بنصّ مكرَّر');
   });
 
   it('الحزمة الحقيقية: مفتاح unknown لا يترجم إلى «running»', async () => {

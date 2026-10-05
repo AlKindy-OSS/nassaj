@@ -7,6 +7,7 @@ import { useConversationClosed } from '../chat/hooks/useConversationClosed';
 import CloseConversationButton from '../chat/view/subcomponents/CloseConversationButton';
 import ConversationCostChip from '../chat/view/subcomponents/ConversationCostChip';
 import ConversationResourceChip from '../chat/view/subcomponents/ConversationResourceChip';
+import SessionShareButton from '../session-sharing/SessionShareButton';
 
 import ParticipantAvatarStack from './ParticipantAvatarStack';
 import SessionAgentsChip from './SessionAgentsChip';
@@ -152,6 +153,7 @@ export default function SessionParticipantsBar({
       <div className="flex shrink-0 items-center gap-1.5">
         <ConversationCostChip workDurationMs={workDurationMs} />
         <ConversationResourceChip sessionId={sessionId} isLoading={isLoading} />
+        <SessionShareButton sessionId={sessionId} />
         <CloseConversationButton
           closed={conversationClosed.closed}
           pending={conversationClosed.pending}

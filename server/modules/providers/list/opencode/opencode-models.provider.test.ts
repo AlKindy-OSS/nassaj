@@ -56,7 +56,7 @@ after(async () => {
 
 test('live catalog from a successful models run is NOT flagged degraded', async () => {
   setCli('anthropic/claude-sonnet-4-5\nopenai/gpt-5.1\n', 0);
-  const result = await new OpenCodeProviderModels().getSupportedModels();
+  const result = await new OpenCodeProviderModels().getSupportedModels(null);
 
   assert.deepEqual(result.OPTIONS.map((o) => o.value), ['anthropic/claude-sonnet-4-5', 'openai/gpt-5.1']);
   assert.notEqual(result.degraded, true);
@@ -64,7 +64,7 @@ test('live catalog from a successful models run is NOT flagged degraded', async 
 
 test('no parsed ids falls back to the degraded catalog', async () => {
   setCli('some banner text with no model ids\n', 0);
-  const result = await new OpenCodeProviderModels().getSupportedModels();
+  const result = await new OpenCodeProviderModels().getSupportedModels(null);
 
   assert.equal(result.degraded, true);
   assert.deepEqual(result.OPTIONS, OPENCODE_FALLBACK_MODELS.OPTIONS);
@@ -73,7 +73,7 @@ test('no parsed ids falls back to the degraded catalog', async () => {
 
 test('a non-zero exit falls back to the degraded catalog', async () => {
   setCli('', 2);
-  const result = await new OpenCodeProviderModels().getSupportedModels();
+  const result = await new OpenCodeProviderModels().getSupportedModels(null);
 
   assert.equal(result.degraded, true);
   assert.deepEqual(result.OPTIONS, OPENCODE_FALLBACK_MODELS.OPTIONS);
@@ -82,7 +82,7 @@ test('a non-zero exit falls back to the degraded catalog', async () => {
 test('a missing binary (spawn error) falls back to the degraded catalog', async () => {
   process.env.FAKE_OPENCODE_USE_MISSING = '1';
   try {
-    const result = await new OpenCodeProviderModels().getSupportedModels();
+    const result = await new OpenCodeProviderModels().getSupportedModels(null);
     assert.equal(result.degraded, true);
     assert.deepEqual(result.OPTIONS, OPENCODE_FALLBACK_MODELS.OPTIONS);
   } finally {
@@ -92,7 +92,7 @@ test('a missing binary (spawn error) falls back to the degraded catalog', async 
 
 test('the shared OPENCODE_FALLBACK_MODELS constant is never mutated', async () => {
   setCli('', 0);
-  const result = await new OpenCodeProviderModels().getSupportedModels();
+  const result = await new OpenCodeProviderModels().getSupportedModels(null);
 
   assert.notEqual(result, OPENCODE_FALLBACK_MODELS);
   assert.notEqual(OPENCODE_FALLBACK_MODELS.degraded, true);

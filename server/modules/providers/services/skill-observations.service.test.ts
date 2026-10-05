@@ -5,7 +5,7 @@ import path from 'node:path';
 import test from 'node:test';
 
 test('real session projections: ACL, canonical owner/provider, children, pagination, replay and project cache', async (t) => {
-  const fixture = await fs.mkdtemp(path.join(os.tmpdir(), 'skill-observations-'));
+  const fixture = await fs.mkdtemp('/var/tmp/skill-observations-');
   const originalHome = os.homedir;
   os.homedir = () => fixture;
   const previousDb = process.env.DATABASE_PATH;

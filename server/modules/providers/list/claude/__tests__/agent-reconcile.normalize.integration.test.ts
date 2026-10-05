@@ -26,7 +26,6 @@
 
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
@@ -56,7 +55,7 @@ async function withSessionOnDisk(
 ): Promise<void> {
   const previousDatabasePath = process.env.DATABASE_PATH;
   const previousFlag = process.env.AGENT_RECONCILE;
-  const tempRoot = await mkdtemp(path.join(tmpdir(), 'agent-normalize-'));
+  const tempRoot = await mkdtemp('/var/tmp/agent-normalize-');
   const projectDir = path.join(tempRoot, 'project-encoded');
   await mkdir(projectDir, { recursive: true });
 

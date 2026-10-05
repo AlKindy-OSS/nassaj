@@ -5,7 +5,8 @@
     "permissions": "権限",
     "mcpServers": "MCPサーバー",
     "skills": "スキル",
-    "appearance": "外観"
+    "appearance": "外観",
+    "update": "アップデート"
   },
   "skills": {
     "title": "スキル",
@@ -721,32 +722,6 @@
       "authenticatedUser": "認証済みユーザー",
       "billingPage": "お支払いページ",
       "billingPageNewTab": "新しいタブで開く"
-    },
-    "account": {
-      "claude": {
-        "description": "Anthropic Claude AIアシスタント"
-      },
-      "cursor": {
-        "description": "Cursor AI搭載コードエディタ"
-      },
-      "codex": {
-        "description": "OpenAI Codex AIアシスタント"
-      },
-      "antigravity": {
-        "description": "agy CLI経由のGoogle AI Pro"
-      },
-      "opencode": {
-        "description": "OpenCode CLIアシスタント"
-      },
-      "kimi": {
-        "description": "APIキー経由のMoonshot Kimi"
-      },
-      "deepseek": {
-        "description": "APIキー経由のDeepSeek"
-      },
-      "glm": {
-        "description": "APIキー経由のZhipu / Z.ai GLM"
-      }
     },
     "connectionStatus": "接続状態",
     "login": {

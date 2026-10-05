@@ -5,7 +5,8 @@
     "permissions": "권한",
     "mcpServers": "MCP 서버",
     "skills": "스킬",
-    "appearance": "외관"
+    "appearance": "외관",
+    "update": "업데이트"
   },
   "skills": {
     "title": "스킬",
@@ -721,32 +722,6 @@
       "authenticatedUser": "인증된 사용자",
       "billingPage": "결제 페이지",
       "billingPageNewTab": "새 탭에서 열림"
-    },
-    "account": {
-      "claude": {
-        "description": "Anthropic Claude AI 어시스턴트"
-      },
-      "cursor": {
-        "description": "Cursor AI 기반 코드 에디터"
-      },
-      "codex": {
-        "description": "OpenAI Codex AI 어시스턴트"
-      },
-      "antigravity": {
-        "description": "agy CLI를 통한 Google AI Pro"
-      },
-      "opencode": {
-        "description": "OpenCode CLI 어시스턴트"
-      },
-      "kimi": {
-        "description": "API 키를 통한 Moonshot Kimi"
-      },
-      "deepseek": {
-        "description": "API 키를 통한 DeepSeek"
-      },
-      "glm": {
-        "description": "API 키를 통한 Zhipu / Z.ai GLM"
-      }
     },
     "connectionStatus": "연결 상태",
     "login": {

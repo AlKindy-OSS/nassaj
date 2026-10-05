@@ -12,6 +12,7 @@ import {
   resolveOutboxFenceReasonKey,
 } from '../../utils/serverErrorMessage';
 import { outboxRetryMode, readOutboxImages, type OutboxEntry } from '../../utils/messageOutbox';
+import ContinueHerePanel from './ContinueHerePanel';
 import CoordinationLevelBadge from './CoordinationLevelBadge';
 
 interface OutboxCardProps {
@@ -183,6 +184,11 @@ export default function OutboxCard({ entry, onRetry, onEdit, onDelete, onVerify 
               </span>
             ))}
         </div>
+      )}
+
+      {/* T-1910 S4: «أكمل من هنا» لحجبٍ بنطاق الجلسة؛ onEdit يعيد النصّ للمُؤلِّف ويزيل البطاقة. */}
+      {!isDelivered && hasNewConversationAction && entry.sessionId && (
+        <ContinueHerePanel sessionId={entry.sessionId} onLifted={() => onEdit(entry.id)} />
       )}
 
       <div className="mt-2 flex flex-wrap items-center gap-2">

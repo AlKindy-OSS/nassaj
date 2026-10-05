@@ -60,7 +60,10 @@ export default function ForceChangePasswordForm() {
       setIsSubmitting(true);
       const result = await changePassword(formState.currentPassword, formState.newPassword);
       if (!result.success) {
-        setErrorMessage(result.error);
+        // B-1533: a wrong temporary password is a form error, not an identity failure.
+        setErrorMessage(result.code === 'current_password_incorrect'
+          ? t('forceChangePassword.errors.incorrectCurrent')
+          : result.error);
       }
       setIsSubmitting(false);
     },

@@ -59,7 +59,7 @@ async function withIsolatedDatabase(run: () => void | Promise<void>): Promise<vo
 }
 
 /** Creates a linked member attested at `attestedAt` (null = never) with one key. */
-function linkedMemberWithKey(name: string, attestedAt: number | null, role: 'user' | 'admin' | 'owner' = 'user') {
+function linkedMemberWithKey(name: string, attestedAt: number | null, role: 'user' | 'admin' | 'owner' = 'admin') {
   const user = userDb.createUser(name, 'hash', role);
   const linkId = userIdentitiesDb.link(user.id, ISSUER, `sub-${name}`);
   if (attestedAt !== null) userIdentitiesDb.markAttested(linkId, user.id, attestedAt);
@@ -121,7 +121,7 @@ test('changing N takes effect on the very next check', async () => {
 
 test('unlinked members and the owner are not governed', async () => {
   await withIsolatedDatabase(() => {
-    const local = userDb.createUser('local-member', 'hash', 'user');
+    const local = userDb.createUser('local-member', 'hash', 'admin');
     const localKey = apiKeysDb.createApiKey(local.id, 'local');
     const owner = linkedMemberWithKey('owner', null, 'owner');
     apiKeySsoWindowDb.setDays(1);
@@ -182,8 +182,8 @@ test('window parsing accepts only whole days 1..365; a corrupt stored value uses
 
 test('suspending a member deletes all their API keys; re-enabling restores none', async () => {
   await withIsolatedDatabase(() => {
-    const member = userDb.createUser('suspended', 'hash', 'user');
-    const other = userDb.createUser('bystander', 'hash', 'user');
+    const member = userDb.createUser('suspended', 'hash', 'admin');
+    const other = userDb.createUser('bystander', 'hash', 'admin');
     const key = apiKeysDb.createApiKey(member.id, 'one');
     const disabled = apiKeysDb.createApiKey(member.id, 'two');
     apiKeysDb.toggleApiKey(member.id, Number(disabled.id), false);
@@ -206,7 +206,7 @@ test('suspending a member deletes all their API keys; re-enabling restores none'
 
 test('deleting a member deletes all their API keys', async () => {
   await withIsolatedDatabase(() => {
-    const member = userDb.createUser('deleted', 'hash', 'user');
+    const member = userDb.createUser('deleted', 'hash', 'admin');
     const key = apiKeysDb.createApiKey(member.id, 'one');
     apiKeysDb.createApiKey(member.id, 'two');
     assert.equal(userDb.deleteUser(member.id), true);
@@ -264,7 +264,7 @@ test('admins are governed and the newest of several links decides', async () => 
 
 test('suspension is atomic: a failed key purge leaves status, keys and audit unchanged', async () => {
   await withIsolatedDatabase(() => {
-    const member = userDb.createUser('atomic', 'hash', 'user');
+    const member = userDb.createUser('atomic', 'hash', 'admin');
     const key = apiKeysDb.createApiKey(member.id, 'kept');
     getConnection().exec(`CREATE TRIGGER t1946_block_purge BEFORE DELETE ON api_keys
       BEGIN SELECT RAISE(ABORT, 'purge blocked'); END`);
@@ -296,7 +296,7 @@ test('parity: authentication, revalidation, launch predicate and review agree (T
   await withIsolatedDatabase(() => {
     getConnection().prepare("INSERT INTO app_config (key, value) VALUES ('external_api.enabled', '1')").run();
     const now = Date.now();
-    const local = userDb.createUser('parity-local', 'hash', 'user');
+    const local = userDb.createUser('parity-local', 'hash', 'admin');
     const cases = {
       owner: linkedMemberWithKey('parity-owner', null, 'owner').key.apiKey,
       local: apiKeysDb.createApiKey(local.id, 'local').apiKey,
@@ -352,7 +352,7 @@ test('a schema without last_attested_at never throws; linked members fail closed
   await withIsolatedDatabase(() => {
     getConnection().prepare("INSERT INTO app_config (key, value) VALUES ('external_api.enabled', '1')").run();
     const owner = linkedMemberWithKey('nocol-owner', null, 'owner');
-    const local = userDb.createUser('nocol-local', 'hash', 'user');
+    const local = userDb.createUser('nocol-local', 'hash', 'admin');
     const localKey = apiKeysDb.createApiKey(local.id, 'local');
     const member = linkedMemberWithKey('nocol-member', NOW - DAY_MS);
     assert.equal(reason(member.key.apiKey), 'ok', 'detected with the column first');
@@ -399,7 +399,7 @@ test('the compatible-forward schema keeps owner and local keys working', () => {
         VALUES (?, ?, 'k', ?, ?)`).run(id, userId, digestApiKey(secret), secret.slice(0, 10));
       return secret;
     };
-    addUser(1, 'owner'); addUser(2, 'user'); addUser(3, 'user');
+    addUser(1, 'owner'); addUser(2, 'admin'); addUser(3, 'admin');
     const keys = { owner: addKey(1, 1), local: addKey(2, 2), linked: addKey(3, 3) };
     db.prepare("INSERT INTO user_identities (user_id, issuer, subject) VALUES (1, 'i', 'o'), (3, 'i', 'm')").run();
 
@@ -424,7 +424,7 @@ test('a schema without user_identities or app_config treats every account as unl
     db.exec(`CREATE TABLE users (id INTEGER PRIMARY KEY, role TEXT, status TEXT, is_active INTEGER,
         authorization_generation INTEGER);
       CREATE TABLE api_keys (id INTEGER PRIMARY KEY, user_id INTEGER, is_active INTEGER);
-      INSERT INTO users VALUES (4, 'user', 'active', 1, 1);
+      INSERT INTO users VALUES (4, 'admin', 'active', 1, 1);
       INSERT INTO api_keys VALUES (9, 4, 1);`);
     assert.equal(apiKeyCredentialState(db, { apiKeyId: 9, userId: 4, authorizationGeneration: 1 }), 'current');
     assert.equal(apiKeyCredentialState(db, { apiKeyId: 9, userId: 4, authorizationGeneration: 2 }), 'invalid');

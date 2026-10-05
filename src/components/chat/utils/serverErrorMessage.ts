@@ -18,6 +18,9 @@ export const SERVER_ERROR_CODE_KEYS: Record<string, string> = {
   // `unknown` («حدث خطأ غير متوقع») فلا يفهم المستخدم أن رسالته لم تُرسل
   // أصلاً ولا ما يفعله، فيعيد الإرسال ويُرفض ثانيةً.
   session_busy: 'serverError.session_busy',
+  // B-1374 / B-1367: قاطعان قبل أي تشغيل، وسببهما في يد المستخدم.
+  attachment_rejected: 'serverError.attachment_rejected',
+  opencode_project_config_refused: 'serverError.opencode_project_config_refused',
   // B-1298: رموز أخطاء المزوّد المحلي — تصل مباشرةً على إطار kind:'error' أو
   // في حقل providerErrorCode على إطار message_dispatch_unconfirmed.
   provider_auth_failed: 'serverError.provider_auth_failed',

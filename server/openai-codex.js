@@ -13,6 +13,7 @@
  * - getActiveCodexSessions() - List all active sessions
  */
 
+import { randomUUID } from 'node:crypto';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -43,6 +44,7 @@ import { resolveProviderEnv } from './services/isolation/resolve-provider-env.js
 import { beginProviderRun } from './services/provider-run-presence.js';
 import { refuseSpawnIfHarnessUpdating } from './modules/providers/harness-update/spawn-admission.js';
 import { PROCESS_TAG_ENV_VAR } from './services/session-process-monitor.js';
+import { permissionProcessTag } from './modules/execution-permissions/process-tag-identity.js';
 import { classifyCodexFailure } from './modules/providers/list/codex/codex-failure.js';
 import {
   accumulateCodexCoordinatorUsage,
@@ -122,11 +124,29 @@ async function prepareCodexInput(command, images) {
 }
 
 /**
+ * Live row id for one SDK item, unique across the whole thread.
+ *
+ * B-1489: SDK ids (`item_0`, `item_1`, ...) are per-turn counters that restart
+ * every turn while the thread id stays constant, so the raw id collided with
+ * the previous turn's card in the client store (appendRealtime dedupes by row
+ * id) and turn N silently replaced turn N-1's cards. Prefixing the per-spawn
+ * `turnNonce` keeps the id stable for started/updated/completed of the same
+ * item inside one turn and distinct across turns.
+ * @param {string} turnNonce - Random id generated once per queryCodex spawn
+ * @param {object} item - SDK thread item
+ * @returns {string|undefined}
+ */
+function liveCodexItemId(turnNonce, item) {
+  return typeof item.id === 'string' && item.id ? `codex-${turnNonce}-${item.id}` : undefined;
+}
+
+/**
  * Transform Codex SDK event to WebSocket message format
  * @param {object} event - SDK event
+ * @param {string} turnNonce - Per-spawn nonce that scopes SDK item ids to this turn
  * @returns {object} - Transformed event for WebSocket
  */
-function transformCodexEvent(event) {
+function transformCodexEvent(event, turnNonce) {
   // Map SDK event types to a consistent format
   switch (event.type) {
     case 'item.started':
@@ -136,6 +156,7 @@ function transformCodexEvent(event) {
       if (!item) {
         return { type: event.type, item: null };
       }
+      const uuid = liveCodexItemId(turnNonce, item);
 
       // Transform based on item type
       switch (item.type) {
@@ -143,11 +164,11 @@ function transformCodexEvent(event) {
           return {
             type: 'item',
             itemType: 'agent_message',
-            // Transport-local id (`item_0`, `item_1`, ...). It is NOT the
-            // durable rollout `payload.id` (`msg_<hex>`) and never appears in
-            // the JSONL, so it can only identify the live row — see
+            // Transport-local id scoped by the turn nonce (B-1489). It is NOT
+            // the durable rollout `payload.id` (`msg_<hex>`) and never appears
+            // in the JSONL, so it can only identify the live row — see
             // codex-turn-metrics.newestCompletedTurnFromJsonl (B-822).
-            uuid: typeof item.id === 'string' ? item.id : undefined,
+            uuid,
             message: {
               role: 'assistant',
               content: item.text
@@ -165,17 +186,16 @@ function transformCodexEvent(event) {
             }
           };
 
-        // B-1482: every tool-shaped item carries a stable SDK `item.id`
+        // B-1482: every tool-shaped item carries an SDK `item.id`
         // (CommandExecutionItem/FileChangeItem/McpToolCallItem/WebSearchItem/
-        // TodoListItem — @openai/codex-sdk). `agent_message` above already
-        // forwards it as `uuid`; these cases used to drop it, so
-        // normalizeMessage() fell back to a FRESH random id
-        // (generateMessageId) on every call instead of the tool's own id.
+        // TodoListItem — @openai/codex-sdk). Without it normalizeMessage()
+        // fell back to a FRESH random id (generateMessageId) on every call.
+        // The id is turn-scoped via liveCodexItemId (B-1489).
         case 'command_execution':
           return {
             type: 'item',
             itemType: 'command_execution',
-            uuid: typeof item.id === 'string' ? item.id : undefined,
+            uuid,
             command: item.command,
             output: item.aggregated_output,
             exitCode: item.exit_code,
@@ -186,7 +206,7 @@ function transformCodexEvent(event) {
           return {
             type: 'item',
             itemType: 'file_change',
-            uuid: typeof item.id === 'string' ? item.id : undefined,
+            uuid,
             changes: item.changes,
             status: item.status
           };
@@ -195,7 +215,7 @@ function transformCodexEvent(event) {
           return {
             type: 'item',
             itemType: 'mcp_tool_call',
-            uuid: typeof item.id === 'string' ? item.id : undefined,
+            uuid,
             server: item.server,
             tool: item.tool,
             arguments: item.arguments,
@@ -208,7 +228,7 @@ function transformCodexEvent(event) {
           return {
             type: 'item',
             itemType: 'web_search',
-            uuid: typeof item.id === 'string' ? item.id : undefined,
+            uuid,
             query: item.query
           };
 
@@ -216,7 +236,7 @@ function transformCodexEvent(event) {
           return {
             type: 'item',
             itemType: 'todo_list',
-            uuid: typeof item.id === 'string' ? item.id : undefined,
+            uuid,
             items: item.items
           };
 
@@ -450,6 +470,7 @@ export {
   resolveCodexNetworkAccess,
   resolveCodexReasoningEffort,
   resolveCodexDocsWritableRoots,
+  transformCodexEvent,
 };
 
 /**
@@ -526,6 +547,8 @@ async function queryCodexOwned(invocation) {
   const clientMsgIdField = typeof options.clientMsgId === 'string' && options.clientMsgId
     ? { clientMsgId: options.clientMsgId }
     : {};
+  // B-1489: one nonce per spawn scopes the per-turn SDK `item_N` counters.
+  const turnNonce = randomUUID();
   const responseToMessageIdField = typeof options.clientMsgId === 'string' && options.clientMsgId
     ? { responseToMessageId: options.clientMsgId }
     : {};
@@ -711,7 +734,12 @@ async function queryCodexOwned(invocation) {
   // child env the way claude-sdk does and let the monitor resolve the pid from
   // /proc. Registration itself waits for a session id (a fresh thread only
   // learns one at `thread.started`), see runPresence.rekey below.
-  const processRunTag = `codex-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+  // T-1910 S2: an admitted run carries the durable tag pe-<decisionId> (inherited by the CLI and
+  // its descendants). No child identity is recorded for Codex in this slice: codex-sdk hides the
+  // pid, the sdk_turn footprint is external (identity would not change fencing), and an attach
+  // failure would block the generation. Without identity the fence stays (fail-safe).
+  const processRunTag = permissionProcessTag(permissionExecution?.decisionId)
+    ?? `codex-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
   const runPresence = beginProviderRun({
     provider: 'codex',
     writer: ws,
@@ -925,6 +953,14 @@ async function queryCodexOwned(invocation) {
         if (discoveredSessionId && !capturedSessionId) {
           // Reserve the SDK-minted ID before any observer can submit a resumed turn.
           if (activeCodexTurnLocks.has(discoveredSessionId)) throw new Error('CODEX_NEW_THREAD_ID_COLLISION');
+          // T-1910 S2 (B-1202): one-shot CAS binding this new-chat decision to its thread, so a
+          // later crash fences session:<id> instead of every Codex chat of this user. Codex exec
+          // exposes no host tool hook, so the short window before this line cannot be gated and
+          // a death inside it keeps the user-wide fence. A refused bind stops the turn.
+          if (permissionExecution && typeof permissionExecution.isSessionBound === 'function'
+            && !permissionExecution.isSessionBound()) {
+            permissionExecution.bindSession(discoveredSessionId);
+          }
           activeCodexTurnLocks.add(discoveredSessionId);
           reservedNewReceiptSession = discoveredSessionId;
           capturedSessionId = discoveredSessionId;
@@ -1057,7 +1093,7 @@ async function queryCodexOwned(invocation) {
         continue;
       }
 
-      const transformed = transformCodexEvent(event);
+      const transformed = transformCodexEvent(event, turnNonce);
 
       // Normalize the transformed event into NormalizedMessage(s) via adapter
       const normalizedMsgs = sessionsService.normalizeMessage('codex', transformed, capturedSessionId || sessionId || null);
@@ -1088,7 +1124,8 @@ async function queryCodexOwned(invocation) {
         ? await resolveCodexUserProof(completedSessionId, receiptWindow,
           reservedNewReceiptSession === completedSessionId, receiptPayloadHash) : null;
       // The durable ids come from the rollout, never from the live stream: the
-      // SDK emits `item_N` while Codex files the answer under `msg_<hex>`, so
+      // live row is `codex-<turnNonce>-item_N` (B-1489) while Codex files the
+      // answer under `msg_<hex>`, so
       // ownership is proven by the inode/offset-bound append window instead.
       if (turnStartedAt && sawFinalAssistant && completedSessionId) {
         const durableTurn = await resolveCompletedCodexTurn(completedSessionId, turnBaseline);
@@ -1101,7 +1138,7 @@ async function queryCodexOwned(invocation) {
             turnId: durableTurn.turnId,
           });
           if (timing.responseTurnMetric) {
-            // يظل رد البث الحيّ تحت `item_N`، لكن الكلفة والتاريخ يستخدمان
+            // يظل رد البث الحيّ تحت `codex-<nonce>-item_N`، لكن الكلفة والتاريخ يستخدمان
             // `msg_<hex>` المتين من rollout. يحمل إطار الإكمال المفتاحين كي
             // تلصق الواجهة المعرف المتين بالرد الحي قبل مطابقة تذييل الكلفة.
             durableTiming = {

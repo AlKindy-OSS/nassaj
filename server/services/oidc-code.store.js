@@ -16,6 +16,10 @@
  * tiny (the SPA redeems within one page load); stale entries are pruned lazily
  * on store().
  *
+ * Wallet mode (ADR-163 amendment 1, A-1): the entry carries no JWT, only
+ * `{ userId, configVersion }`; POST /exchange re-checks the version, the
+ * attestation and the Origin, then issues a device session.
+ *
  * Pattern intentionally identical to services/oidc-pkce.store.js.
  */
 
@@ -51,7 +55,7 @@ export function createOidcCodeStore({ ttlMs, maxEntries } = {}) {
   if (!Number.isInteger(ttl) || ttl <= 0 || !Number.isInteger(maximum) || maximum <= 0) {
     throw new TypeError('OIDC code store options must be positive integers');
   }
-  /** @type {Map<string, { token: string, userId: number, transactionHash: Buffer, expiresAt: number }>} */
+  /** @type {Map<string, { token: string | null, userId: number, configVersion: number | null, transactionHash: Buffer, expiresAt: number }>} */
   const codes = new Map();
 
   function pruneExpired(now) {
@@ -64,18 +68,21 @@ export function createOidcCodeStore({ ttlMs, maxEntries } = {}) {
 
   return {
     /**
-     * Stores a minted token under a one-time code.
+     * Stores a minted token, or a wallet-mode grant, under a one-time code.
+     * Exactly one of `token` (legacy JWT) or `configVersion` (wallet mode) is set.
      * @param {string} code base64url one-time code
-     * @param {{ token: string, userId: number, browserTransaction: string }} payload
+     * @param {{ token?: string, configVersion?: number, userId: number, browserTransaction: string }} payload
      * @returns {boolean} false when the bounded store is full or input is invalid
      */
-    store(code, { token, userId, browserTransaction }) {
+    store(code, { token, configVersion, userId, browserTransaction }) {
       const now = Date.now();
       const transactionHash = hashBrowserTransaction(browserTransaction);
+      const legacy = typeof token === 'string' && configVersion === undefined;
+      const wallet = token === undefined && Number.isInteger(configVersion);
       if (
         typeof code !== 'string'
         || code.length === 0
-        || typeof token !== 'string'
+        || !(legacy || wallet)
         || !Number.isInteger(userId)
         || transactionHash === null
       ) {
@@ -85,17 +92,23 @@ export function createOidcCodeStore({ ttlMs, maxEntries } = {}) {
       if (codes.size >= maximum) {
         return false;
       }
-      codes.set(code, { token, userId, transactionHash, expiresAt: now + ttl });
+      codes.set(code, {
+        token: legacy ? token : null,
+        userId,
+        configVersion: wallet ? configVersion : null,
+        transactionHash,
+        expiresAt: now + ttl,
+      });
       return true;
     },
 
     /**
-     * Consumes a code (single use). Returns `{ token, userId }` when `code`
-     * exists and has not expired; null otherwise. The entry is always removed,
-     * so a second consume of the same code fails.
+     * Consumes a code (single use). Returns `{ token, userId, configVersion }`
+     * when `code` exists and has not expired; null otherwise. The entry is
+     * always removed, so a second consume of the same code fails.
      * @param {string} code
      * @param {string} browserTransaction opaque secure-cookie value for this browser
-     * @returns {{ token: string, userId: number } | null}
+     * @returns {{ token: string | null, userId: number, configVersion: number | null } | null}
      */
     consume(code, browserTransaction) {
       if (typeof code !== 'string' || code.length === 0) {
@@ -109,7 +122,7 @@ export function createOidcCodeStore({ ttlMs, maxEntries } = {}) {
       if (Date.now() >= entry.expiresAt || !matchesTransaction(entry.transactionHash, browserTransaction)) {
         return null;
       }
-      return { token: entry.token, userId: entry.userId };
+      return { token: entry.token, userId: entry.userId, configVersion: entry.configVersion };
     },
 
     /**

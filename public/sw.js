@@ -5,6 +5,8 @@ self.addEventListener('fetch', event => {
   const url = new URL(event.request.url);
   if (url.origin !== self.location.origin || event.request.method !== 'GET') return;
   if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/ws')) return;
+  // Public share viewer: a sandboxed document that must never be proxied by the app worker.
+  if (url.pathname === '/s' || url.pathname.startsWith('/s/')) return;
   if (event.request.mode === 'navigate' || url.pathname === '/version.json') {
     event.respondWith(fetch(event.request, { cache: 'no-store' }).catch(() =>
       event.request.mode === 'navigate'

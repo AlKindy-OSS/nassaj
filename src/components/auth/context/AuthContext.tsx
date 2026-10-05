@@ -34,6 +34,7 @@ import {
   isCurrentIdentityReconciliation,
   lockIdentityBarrier,
   reconcileRevokedIdentity,
+  retryIdentityReconciliation,
   stabilizeIdentityBarrier,
   subscribeIdentityBarrier,
 } from '../accountIdentityBarrier';
@@ -56,6 +57,19 @@ import {
 } from '../accountIdentityReceipt';
 
 const AuthContext = createContext<AuthContextValue | null>(null);
+
+// Reasons whose wallet 401 means "signed out", not a failed reconciliation.
+const SIGNED_OUT_REASONS: ReadonlySet<string> = new Set([
+  'logout', 'logout_all', 'identity_revoked', 'identity_reconciliation_retry', 'signed_out',
+]);
+// Reasons that do not by themselves change the active account (B-1531).
+const SAME_IDENTITY_REASONS: ReadonlySet<string> = new Set([
+  'wallet_generation_changed', 'identity_revoked',
+]);
+const ACCOUNT_NOTICE_MS = 8_000;
+
+/** A primary sign-in answer: a bearer `token`, or none when it carried a wallet. */
+type PrimarySessionGrant = Readonly<{ token?: string }>;
 
 const readStoredToken = (): string | null => localStorage.getItem(AUTH_TOKEN_STORAGE_KEY);
 
@@ -156,6 +170,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
   // than appearing with a lone avatar on every row.
   const [isMultiUser, setIsMultiUser] = useState(false);
   const [deviceAccountSessionsEnabled, setDeviceAccountSessionsEnabled] = useState(false);
+  const [accountNotice, setAccountNotice] = useState<string | null>(null);
   const mustChangePassword = Boolean(user?.mustChangePassword);
   // Prevent checkAuthStatus from re-running immediately after a successful login/register/invite.
   // Without this flag, changing `token` state causes checkAuthStatus to be rebuilt
@@ -379,6 +394,16 @@ export function AuthProvider({ children }: AuthProviderProps) {
         return;
       }
 
+      if (userPayload.passwordChangeSession === true && !token) {
+        // B-1533: a reload during a forced rotation keeps the purpose-limited
+        // session instead of falling back to the login screen.
+        clearIdentityCompletionReceipt();
+        setDeviceSession({ ...userPayload.user, mustChangePassword: true }, true);
+        authCheckController.current = null;
+        setIsLoading(false);
+        enterPasswordChangeOnlyMode();
+        return;
+      }
       setUser(userPayload.user);
       setCookieSessionKind(token ? 'none' : 'device');
       setPreferenceIdentityAuthenticated(true);
@@ -409,7 +434,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       }
     }
   }, [beginAuthCheck, checkOnboardingStatus, clearSession, evictIfTokenStale,
-    hydratePreferences, isCurrentAuthCheck, token]);
+    hydratePreferences, isCurrentAuthCheck, setDeviceSession, token]);
 
   // Listen for 401 responses dispatched by authenticatedFetch (api.js). When
   // any endpoint rejects the token we clear the local session and redirect to
@@ -579,46 +604,75 @@ export function AuthProvider({ children }: AuthProviderProps) {
         || reconcilingIdentityVersion.current === identityBarrier.version) return;
     reconcilingIdentityVersion.current = identityBarrier.version;
     const reconciliationVersion = identityBarrier.version;
+    const reason = identityBarrier.reason;
+    const isCurrent = () => isCurrentIdentityReconciliation(reconciliationVersion);
+    const paintedUser = user;
     const reconcile = async () => {
       try {
         // A persisted revocation resumes on reload without emitting a fresh
         // identity-changing event. Neutralize old account preferences before
         // any identity can become visible.
         setPreferenceIdentityAuthenticated(false);
+        // Reconciliation reads its own 401s; none may re-enter the fail-closed
+        // cookie path and lock the tab it is about to restore (B-1531).
+        setCookieSessionKind('none');
         let wallet: AccountWallet;
         try {
           wallet = await readAccountWallet(undefined, true);
         } catch (caughtError) {
           const status = caughtError && typeof caughtError === 'object'
             && 'status' in caughtError ? caughtError.status : null;
-          const expectedWalletAbsence = status === 401
-            && ['logout', 'logout_all', 'identity_revoked'].includes(identityBarrier.reason);
-          if (!expectedWalletAbsence) throw caughtError;
+          if (status !== 401 || !SIGNED_OUT_REASONS.has(reason)) throw caughtError;
 
           // Removing the final slot makes /accounts itself unauthorized. In an
           // explicit logout transition that absence is the authoritative end
           // state, but local cleanup must still succeed before login is shown.
           clearIdentityCompletionReceipt();
           await purgeAccountIdentityState();
-          if (!isCurrentIdentityReconciliation(reconciliationVersion)) return;
+          if (!isCurrent()) return;
           clearSession(); setIsMultiUser(false);
           setNeedsSetup(false); setError(null); setIsLoading(false);
           stabilizeIdentityBarrier(reconciliationVersion);
           return;
         }
-        if (!isCurrentIdentityReconciliation(reconciliationVersion)) return;
+        if (!isCurrent()) return;
+        // A wallet answered, so this deployment runs device sessions. A
+        // reload that resumes a fence never ran the status check (B-1532).
+        setDeviceAccountSessionsEnabled(true);
+        setNeedsSetup(false);
         const receipt = readIdentityCompletionReceipt();
-        if (identityBarrier.reason === 'wallet_generation_changed'
-            && receiptMatchesIdentity(receipt, wallet, user)) {
+        if (reason === 'wallet_generation_changed'
+            && receiptMatchesIdentity(receipt, wallet, paintedUser)) {
           setCookieSessionKind('device');
           setPreferenceIdentityAuthenticated(true);
           await hydratePreferences();
-          if (!isCurrentIdentityReconciliation(reconciliationVersion)) return;
-          writeIdentityCompletionReceipt(reconciliationVersion, wallet, user!);
+          if (!isCurrent()) return;
+          writeIdentityCompletionReceipt(reconciliationVersion, wallet, paintedUser!);
           setError(null);
           setIsLoading(false);
           stabilizeIdentityBarrier(reconciliationVersion);
           return;
+        }
+        if (SAME_IDENTITY_REASONS.has(reason) && paintedUser && wallet.activeSlotId !== null) {
+          // The active account may be unchanged (a wallet edit, an expected
+          // generation revocation). Prove it against the server before keeping
+          // this account's drafts and caches; any mismatch takes the full path.
+          const response = await api.auth.userForIdentityReconciliation();
+          if (!isCurrent()) return;
+          const payload = response.ok ? await parseJsonSafely<AuthUserPayload>(response) : null;
+          if (!isCurrent()) return;
+          if (payload?.user && authUserKey(payload.user) === authUserKey(paintedUser)) {
+            setCookieSessionKind('device');
+            setPreferenceIdentityAuthenticated(true);
+            setUser(payload.user); setToken(null); clearStoredToken();
+            setIsMultiUser(Boolean(payload.isMultiUser));
+            writeIdentityCompletionReceipt(reconciliationVersion, wallet, payload.user);
+            await hydratePreferences();
+            if (!isCurrent()) return;
+            setError(null); setIsLoading(false);
+            stabilizeIdentityBarrier(reconciliationVersion);
+            return;
+          }
         }
 
         const mayReuseCompletedCleanup = receipt?.version === reconciliationVersion
@@ -628,12 +682,12 @@ export function AuthProvider({ children }: AuthProviderProps) {
           clearIdentityCompletionReceipt();
           await purgeAccountIdentityState();
         }
-        if (!isCurrentIdentityReconciliation(reconciliationVersion)) return;
+        if (!isCurrent()) return;
         const response = await api.auth.userForIdentityReconciliation();
-        if (!isCurrentIdentityReconciliation(reconciliationVersion)) return;
+        if (!isCurrent()) return;
         if (response.status === 401) {
           if (mayReuseCompletedCleanup) await purgeAccountIdentityState();
-          if (!isCurrentIdentityReconciliation(reconciliationVersion)) return;
+          if (!isCurrent()) return;
           clearIdentityCompletionReceipt();
           clearSession(); setIsMultiUser(false);
           setError(null); setIsLoading(false);
@@ -641,12 +695,12 @@ export function AuthProvider({ children }: AuthProviderProps) {
           return;
         }
         const payload = await parseJsonSafely<AuthUserPayload>(response);
-        if (!isCurrentIdentityReconciliation(reconciliationVersion)) return;
+        if (!isCurrent()) return;
         if (!response.ok || !payload?.user) throw new Error('identity_hydration_failed');
         if (mayReuseCompletedCleanup && receipt.userKey !== authUserKey(payload.user)) {
           clearIdentityCompletionReceipt();
           await purgeAccountIdentityState();
-          if (!isCurrentIdentityReconciliation(reconciliationVersion)) return;
+          if (!isCurrent()) return;
         }
         setCookieSessionKind('device');
         setPreferenceIdentityAuthenticated(true);
@@ -655,18 +709,55 @@ export function AuthProvider({ children }: AuthProviderProps) {
         setError(null); setIsLoading(false);
         writeIdentityCompletionReceipt(reconciliationVersion, wallet, payload.user);
         await hydratePreferences();
-        if (!isCurrentIdentityReconciliation(reconciliationVersion)) return;
+        if (!isCurrent()) return;
         await checkOnboardingStatus();
-        if (!isCurrentIdentityReconciliation(reconciliationVersion)) return;
+        if (!isCurrent()) return;
         stabilizeIdentityBarrier(reconciliationVersion);
+        if (reason === 'logout') {
+          // B-1534: signing out of the active account lands in another one;
+          // never let that happen silently.
+          const active = wallet.accounts.find((account) => account.slotId === wallet.activeSlotId);
+          setAccountNotice(active?.displayName ?? payload.user.username ?? null);
+        }
       } catch {
-        if (isCurrentIdentityReconciliation(reconciliationVersion)) {
+        if (isCurrent()) {
           lockIdentityBarrier(reconciliationVersion, 'identity_cleanup_or_hydration_failed');
         }
       }
     };
     void reconcile();
   }, [checkOnboardingStatus, clearSession, hydratePreferences, identityBarrier, user]);
+
+  // Locked-screen recovery: revoke this device's sessions when the server can
+  // still be reached, then let a fresh reconciliation clean up and show login.
+  const signOutLockedIdentity = useCallback(async () => {
+    try {
+      const wallet = await readAccountWallet(undefined, true);
+      await mutateAccountWallet('/api/auth/logout-all', 'POST', 'logout_all',
+        { expectedGeneration: wallet.generation }, { identityBypass: true });
+    } catch {
+      // An already-absent session, or a 204 without a body, both end here; the
+      // reconciliation below reads the authoritative outcome either way.
+    }
+    clearStoredToken();
+    retryIdentityReconciliation('signed_out');
+  }, []);
+
+  // One adoption step for every primary sign-in answer (password, passkey,
+  // SSO): a legacy JWT becomes a bearer session; a wallet answer
+  // (MULTI_ACCOUNT_SWITCHING, ADR-163 amendment 1) means the server already set
+  // the HttpOnly device cookie, so any stored bearer is dropped and the cookie
+  // session takes over. The skip flag keeps the token-change-driven auth check
+  // from racing a half-settled session.
+  const adoptPrimarySession = useCallback((nextUser: AuthUser, grant: PrimarySessionGrant) => {
+    skipNextAuthCheck.current = true;
+    if (grant.token) setSession(nextUser, grant.token);
+    else {
+      setDeviceAccountSessionsEnabled(true);
+      setDeviceSession(nextUser);
+    }
+    setNeedsSetup(false);
+  }, [setDeviceSession, setSession]);
 
   const login = useCallback<AuthContextValue['login']>(
     async (username, password) => {
@@ -693,15 +784,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
           return { success: false, error: message, code: payload?.code };
         }
 
-        // Prevent the token-change-driven useEffect from re-running checkAuthStatus
-        // (which would call clearSession if any intermediate state is stale).
-        skipNextAuthCheck.current = true;
-        if (payload.token) setSession(payload.user, payload.token);
-        else {
-          setDeviceAccountSessionsEnabled(Boolean(payload.wallet));
-          setDeviceSession(payload.user);
-        }
-        setNeedsSetup(false);
+        adoptPrimarySession(payload.user, payload);
         await hydrateUserIdentity();
         await checkOnboardingStatus();
         hydratePreferences();
@@ -712,7 +795,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
         return { success: false, error: AUTH_ERROR_MESSAGES.networkError };
       }
     },
-    [checkOnboardingStatus, hydratePreferences, hydrateUserIdentity, setDeviceSession, setSession],
+    [adoptPrimarySession, checkOnboardingStatus, hydratePreferences, hydrateUserIdentity, setDeviceSession],
   );
 
   // Passkey sign-in (C-PK-1). The WebAuthn ceremony itself (options +
@@ -726,17 +809,15 @@ export function AuthProvider({ children }: AuthProviderProps) {
         const response = await api.auth.webauthn.loginVerify(assertionResponse);
         const payload = await parseJsonSafely<AuthSessionPayload>(response);
 
-        if (!response.ok || !payload?.token || !payload.user) {
+        // Wallet mode refuses with a machine code (403 password_change_required,
+        // origin_rejected); the code travels to the view, which owns the wording.
+        if (!response.ok || !payload?.user || (!payload.token && !payload.wallet)) {
           const message = resolveApiErrorMessage(payload, AUTH_ERROR_MESSAGES.loginFailed);
           setError(message);
-          return { success: false, error: message };
+          return { success: false, error: message, code: payload?.code };
         }
 
-        // Same guard as `login`: prevent the token-change-driven useEffect from
-        // re-running checkAuthStatus against a half-settled session.
-        skipNextAuthCheck.current = true;
-        setSession(payload.user, payload.token);
-        setNeedsSetup(false);
+        adoptPrimarySession(payload.user, payload);
         await hydrateUserIdentity();
         await checkOnboardingStatus();
         hydratePreferences();
@@ -747,13 +828,14 @@ export function AuthProvider({ children }: AuthProviderProps) {
         return { success: false, error: AUTH_ERROR_MESSAGES.networkError };
       }
     },
-    [checkOnboardingStatus, hydratePreferences, hydrateUserIdentity, setSession],
+    [adoptPrimarySession, checkOnboardingStatus, hydratePreferences, hydrateUserIdentity],
   );
 
   // SSO sign-in (B-728). The exchange answers only `{ token, userId }`, so the
-  // identity is loaded with that token BEFORE anything is persisted; then the
-  // same session steps as `login` run so the mustChangePassword and onboarding
-  // gates engage identically.
+  // identity is loaded with that token BEFORE anything is persisted; in wallet
+  // mode it answers `{ wallet }` and the identity is read through the new
+  // device cookie. Then the same adoption step as `login` runs so the
+  // mustChangePassword and onboarding gates engage identically.
   const loginWithOidcCode = useCallback<AuthContextValue['loginWithOidcCode']>(
     async (code) => {
       setError(null);
@@ -766,17 +848,15 @@ export function AuthProvider({ children }: AuthProviderProps) {
         return { success: false, reason: identity.reason };
       }
 
-      skipNextAuthCheck.current = true;
-      setSession(identity.user, exchange.token);
+      adoptPrimarySession(identity.user, exchange);
       // A completed SSO sign-in answers any pending re-attestation notice.
       consumeSsoReauthNotice();
       setIsMultiUser(identity.isMultiUser);
-      setNeedsSetup(false);
       await checkOnboardingStatus();
       hydratePreferences();
       return { success: true };
     },
-    [checkOnboardingStatus, hydratePreferences, setSession],
+    [adoptPrimarySession, checkOnboardingStatus, hydratePreferences],
   );
 
   const register = useCallback<AuthContextValue['register']>(
@@ -814,15 +894,16 @@ export function AuthProvider({ children }: AuthProviderProps) {
         const response = await api.auth.acceptInvite(inviteToken, username, password);
         const payload = await parseJsonSafely<AuthSessionPayload>(response);
 
-        if (!response.ok || !payload?.token || !payload.user) {
+        if (!response.ok || !payload?.user || (!payload.token && !payload.wallet)) {
           const message = resolveApiErrorMessage(payload, AUTH_ERROR_MESSAGES.inviteFailed);
           setError(message);
           return { success: false, error: message, code: payload?.code };
         }
 
-        skipNextAuthCheck.current = true;
-        setSession(payload.user, payload.token);
-        setNeedsSetup(false);
+        // B-1534: in wallet mode the join answer carries a device session, not
+        // a JWT; adopt it exactly like a password sign-in.
+        adoptPrimarySession(payload.user, payload);
+        await hydrateUserIdentity();
         await checkOnboardingStatus();
         hydratePreferences();
         return { success: true };
@@ -832,7 +913,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
         return { success: false, error: AUTH_ERROR_MESSAGES.networkError };
       }
     },
-    [checkOnboardingStatus, hydratePreferences, setSession],
+    [adoptPrimarySession, checkOnboardingStatus, hydratePreferences, hydrateUserIdentity],
   );
 
   const changePassword = useCallback<AuthContextValue['changePassword']>(
@@ -865,7 +946,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
         if (!response.ok || (!payload?.token && !payload?.wallet)) {
           const message = resolveApiErrorMessage(payload, AUTH_ERROR_MESSAGES.passwordChangeFailed);
-          return { success: false, error: message };
+          return { success: false, error: message, code: payload?.code };
         }
 
         if (payload.wallet) {
@@ -1038,19 +1119,36 @@ export function AuthProvider({ children }: AuthProviderProps) {
     ],
   );
 
+  useEffect(() => {
+    if (!accountNotice) return;
+    const timer = window.setTimeout(() => setAccountNotice(null), ACCOUNT_NOTICE_MS);
+    return () => window.clearTimeout(timer);
+  }, [accountNotice]);
+
   const arabic = document.documentElement.lang.startsWith('ar');
+  const locked = identityBarrier.phase === 'locked';
   const barrierScreen = (
-    <div className="fixed inset-0 z-[1000] flex min-h-dvh items-center justify-center bg-background p-6 text-foreground" role={identityBarrier.phase === 'locked' ? 'alert' : 'status'} aria-live="assertive">
+    <div className="fixed inset-0 z-[1000] flex min-h-dvh items-center justify-center bg-background p-6 text-foreground" role={locked ? 'alert' : 'status'} aria-live="assertive">
       <div className="w-full max-w-md rounded-xl border border-border bg-card p-6 text-center shadow-xl">
-        <h1 className="text-lg font-semibold">{identityBarrier.phase === 'locked' ? (arabic ? 'تعذر تأمين تبديل الحساب' : 'Account switch could not be secured') : (arabic ? 'جارٍ تأمين الحساب…' : 'Securing account…')}</h1>
-        <p className="mt-2 text-sm text-muted-foreground">{identityBarrier.phase === 'locked' ? (arabic ? 'أُوقفت الطلبات والاتصالات لحماية بيانات الحساب. أعد تحميل الصفحة للمحاولة بأمان.' : 'Requests and realtime connections are stopped to protect account data. Reload to retry safely.') : (arabic ? 'لن تُعرض بيانات الحساب حتى يكتمل التنظيف والتحقق من الهوية.' : 'Account data stays hidden until cleanup and identity verification finish.')}</p>
+        <h1 className="text-lg font-semibold">{locked ? (arabic ? 'تعذر تأمين تبديل الحساب' : 'Account switch could not be secured') : (arabic ? 'جارٍ تأمين الحساب…' : 'Securing account…')}</h1>
+        <p className="mt-2 text-sm text-muted-foreground">{locked ? (arabic ? 'أُوقفت الطلبات والاتصالات لحماية بيانات الحساب. أعد المحاولة، أو سجّل الخروج من هذا الجهاز.' : 'Requests and realtime connections are stopped to protect account data. Try again, or sign out of this device.') : (arabic ? 'لن تُعرض بيانات الحساب حتى يكتمل التنظيف والتحقق من الهوية.' : 'Account data stays hidden until cleanup and identity verification finish.')}</p>
+        {locked && <div className="mt-5 flex flex-wrap justify-center gap-2">
+          <button type="button" onClick={() => retryIdentityReconciliation()} className="min-h-[var(--control-height-touch)] rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2">{arabic ? 'إعادة المحاولة' : 'Try again'}</button>
+          <button type="button" onClick={() => void signOutLockedIdentity()} className="min-h-[var(--control-height-touch)] rounded-md border border-border px-4 text-sm font-medium hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2">{arabic ? 'تسجيل الخروج' : 'Sign out'}</button>
+        </div>}
       </div>
     </div>
   );
+  const noticeToast = accountNotice && identityBarrier.phase === 'stable' ? (
+    <div role="status" aria-live="polite" className="fixed inset-x-4 bottom-4 z-[900] mx-auto flex max-w-sm items-start gap-3 rounded-xl border border-border bg-card p-4 text-sm text-foreground shadow-xl">
+      <p className="min-w-0 flex-1">{arabic ? 'تم تسجيل الخروج. الحساب النشط الآن: ' : 'Signed out. The active account is now '}<bdi className="font-semibold">{accountNotice}</bdi></p>
+      <button type="button" onClick={() => setAccountNotice(null)} aria-label={arabic ? 'إغلاق التنبيه' : 'Dismiss notice'} className="-m-1 min-h-[var(--control-height-touch)] min-w-[var(--control-height-touch)] rounded-md text-muted-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">×</button>
+    </div>
+  ) : null;
 
   return <AuthContext.Provider value={contextValue}>
-    {identityBarrier.phase === 'committed' || identityBarrier.phase === 'locked'
+    {identityBarrier.phase === 'committed' || locked
       ? barrierScreen
-      : <>{children}{identityBarrier.phase === 'changing' ? barrierScreen : null}</>}
+      : <>{children}{identityBarrier.phase === 'changing' ? barrierScreen : null}{noticeToast}</>}
   </AuthContext.Provider>;
 }

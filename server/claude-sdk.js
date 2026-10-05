@@ -80,6 +80,8 @@ import {
 } from './services/isolation/engine-pin.js';
 import { resolveClaudeRunProfileOrThrow } from './services/isolation/resolve-claude-run-profile.js';
 import { runAuthorizedProviderCatalog } from './modules/execution-permissions/runtime-catalog.js';
+import { readRuntimeProcessIdentity } from './modules/execution-permissions/adapter.js';
+import { findDirectChildByProcessTag, permissionProcessTag } from './modules/execution-permissions/process-tag-identity.js';
 import { buildVendorDelegateMcp } from './modules/providers/shared/vendor/vendor-delegate-mcp.js';
 // T-822 (§ج-4): the per-conversation chat-turn lock. BOTH imports are
 // side-effect-free (pure function/flag modules — no top-level I/O/timers). The
@@ -2095,6 +2097,7 @@ async function spawnClaudeSideQuery(params = {}, callbacks = {}) {
       authoritativeStoredPin: true,
       requireKnownResumePin: true,
       failOnAmbiguous: true,
+      cwd: sdkOptions.cwd ?? projectRoot ?? null,
     });
     sdkOptions.env = sideProfile.env;
     const sideQueryEngine = sideProfile.effectiveEngine;
@@ -2977,6 +2980,20 @@ async function runClaudeSDKQuery(command, options = {}, ws, internalOptions = {}
   )) {
     throw new Error('PERMISSION_EXECUTION_HANDLE_INVALID');
   }
+  // T-1910 S2 (B-1202): a new chat binds its decision to its session before the CLI exists,
+  // so a handle that cannot bind (or report the bind) cannot launch one.
+  if (permissionExecution && !sessionId && (
+    typeof permissionExecution.bindSession !== 'function'
+    || typeof permissionExecution.isSessionBound !== 'function'
+  )) {
+    throw new Error('PERMISSION_EXECUTION_HANDLE_INVALID');
+  }
+  // The session id this run's decision was bound to before spawn (new chats only).
+  let permissionBoundSessionId = null;
+  let permissionSessionMismatch = false;
+  // qa I2: no tool runs while the decision names no session (a resume is admitted bound).
+  const permissionToolsBlocked = () => Boolean(permissionExecution) && !sessionId
+    && !permissionExecution.isSessionBound();
   // Server-generated durable id. It is never sent to the browser and is only
   // committed once a final assistant message gives us a stable history key.
   const responseTurnId = crypto.randomUUID();
@@ -3325,6 +3342,22 @@ async function runClaudeSDKQuery(command, options = {}, ws, internalOptions = {}
     // URL placed there cannot bypass the OS-env guard above.
     assertSettingsEnvAllowed(sdkOptions.env.CLAUDE_CONFIG_DIR, sdkOptions.env);
 
+    // T-1910 S2: the admitted run's child identity is evidence for its decision. Recorded once;
+    // a refused record is only logged (a failed write already blocked the generation inside the
+    // gateway) and never breaks the run: without identity a dead run still fences its scope.
+    let permissionChildRecorded = false;
+    const recordPermissionChild = (identity) => {
+      if (!permissionExecution || permissionChildRecorded || !identity
+        || typeof permissionExecution.attachChildIdentity !== 'function') return;
+      permissionChildRecorded = true;
+      try {
+        permissionExecution.attachChildIdentity(identity);
+      } catch (error) {
+        console.error('[Claude] permission child identity not recorded', {
+          code: error?.code || error?.message || 'CHILD_IDENTITY_NOT_RECORDABLE',
+        });
+      }
+    };
     // T-897: unified provider cage (behind NASSAJ_PROVIDER_CAGE, default OFF).
     // When on, route the SDK's Claude Code spawn through bwrap so it cannot read
     // other users' ~/.nassaj-users trees or reach host runtime sockets. Returns
@@ -3334,6 +3367,11 @@ async function runClaudeSDKQuery(command, options = {}, ws, internalOptions = {}
       userId: ws?.userId ?? null,
       authenticatedPrincipal: options.authenticatedPrincipal,
       cwd: sdkOptions.cwd ?? null,
+      // Own process group, identity recorded at the spawn seam itself.
+      processGroup: Boolean(permissionExecution),
+      onSpawn: permissionExecution
+        ? (child) => recordPermissionChild(readRuntimeProcessIdentity(child.pid))
+        : undefined,
     });
     if (cagedClaudeSpawn) {
       sdkOptions.spawnClaudeCodeProcess = cagedClaudeSpawn;
@@ -3350,8 +3388,19 @@ async function runClaudeSDKQuery(command, options = {}, ws, internalOptions = {}
     // Frozen-session indicator: the SDK never exposes the spawned CLI's pid,
     // so tag the child env with a unique value the process monitor can match
     // against /proc/<pid>/environ to find the pid and watch for kill -STOP.
-    const processRunTag = crypto.randomUUID();
+    // T-1910 S2: an admitted run carries the durable tag pe-<decisionId>, inherited by every
+    // descendant, so the decision's processes stay identifiable across a server restart.
+    const permissionRunTag = permissionProcessTag(permissionExecution?.decisionId);
+    const processRunTag = permissionRunTag ?? crypto.randomUUID();
     sdkOptions.env[PROCESS_TAG_ENV_VAR] = processRunTag;
+    // Stock (uncaged) spawn: the SDK hides the pid, so find the one direct child carrying the
+    // exact tag once the CLI has spoken. Uncertain reads record nothing (the fence stays).
+    let permissionChildScanned = false;
+    const scanPermissionChildOnce = () => {
+      if (permissionChildScanned || cagedClaudeSpawn || !permissionRunTag) return;
+      permissionChildScanned = true;
+      recordPermissionChild(findDirectChildByProcessTag(permissionRunTag));
+    };
 
     // B-1136: this run's hard-stop handle. interrupt() is a control request and
     // never settles once the control stream is closed, so STOP needs a path that
@@ -3453,6 +3502,7 @@ async function runClaudeSDKQuery(command, options = {}, ws, internalOptions = {}
       envAlreadyIsolated: true,
       requireKnownResumePin: Boolean(sessionId),
       failOnAmbiguous: Boolean(sessionId),
+      cwd: sdkOptions.cwd ?? null,
     });
     sdkOptions.env = runProfile.env;
     effectiveEngineProvider = runProfile.effectiveEngine ?? null;
@@ -3757,6 +3807,11 @@ async function runClaudeSDKQuery(command, options = {}, ws, internalOptions = {}
     // tools to a PreToolUse hook (runs before the mode check) if we need them
     // to work in those modes.
     sdkOptions.canUseTool = async (toolName, input, context) => {
+      // T-1910 S2 (qa I2), defence in depth: the bind commits before the CLI is spawned, so
+      // this never fires on the production path; it refuses if that ordering ever regresses.
+      if (permissionToolsBlocked()) {
+        return { behavior: 'deny', message: 'Tools are unavailable until this turn is bound to its session.' };
+      }
       const requiresInteraction = TOOLS_REQUIRING_INTERACTION.has(toolName);
 
       // [B117-DENY] Monitoring only — zero behaviour change (T-250,
@@ -4024,6 +4079,16 @@ async function runClaudeSDKQuery(command, options = {}, ws, internalOptions = {}
     // the process's life — inherited by every later spawn (every provider CLI,
     // every child), silently changing their stream-close behaviour.
     if (permissionExecution) {
+      if (!sessionId) {
+        // T-1910 S2 (B-1202, qa I2): bind the decision to the session id this CLI will use,
+        // BEFORE the CLI exists. The CAS commits before any process could run a tool, so a
+        // decision that names no session provably ran none, and a crash after this point
+        // fences session:<id> instead of every new chat and resume of this user.
+        const boundSessionId = crypto.randomUUID();
+        permissionExecution.bindSession(boundSessionId);
+        permissionBoundSessionId = boundSessionId;
+        sdkOptions.sessionId = boundSessionId;
+      }
       permissionExecution.consume();
       permissionConsumed = true;
       // markStarted rechecks the exact admitted actor and persists the effect
@@ -4174,8 +4239,19 @@ async function runClaudeSDKQuery(command, options = {}, ws, internalOptions = {}
         );
       }
 
+      scanPermissionChildOnce();
       // Capture session ID from first message
       if (message.session_id && !capturedSessionId) {
+        // T-1910 S2: the CLI must speak for the session its decision was bound to; any other id
+        // would run tools outside the fenced scope, so the run stops at its first message.
+        if (permissionBoundSessionId && message.session_id !== permissionBoundSessionId) {
+          // Leaving the loop closes the CLI; it already holds the prompt, so the outcome is unknown.
+          // (Not runAbortController: that is the user's STOP and would hide the error frame.)
+          permissionSessionMismatch = true;
+          throw Object.assign(new Error('Claude started a session other than the one it was admitted for.'), {
+            code: 'PERMISSION_SESSION_MISMATCH',
+          });
+        }
 
         capturedSessionId = message.session_id;
         // ADR-041 / B-N-RESUME clean buffer (mirrors agy-cli.js): the SDK reports
@@ -4565,6 +4641,9 @@ async function runClaudeSDKQuery(command, options = {}, ws, internalOptions = {}
       permissionOutcome = permissionStarted ? 'failed' : 'spawn_failed';
       console.error('SDK query error:', error);
     }
+    // T-1910 S2: a CLI that ignored its bound session id may have acted on the prompt
+    // before it closed; its outcome is unknown, never a plain failure or a stop.
+    if (permissionSessionMismatch) permissionOutcome = 'reconciled_unknown';
 
     // B-40a: cancel dangling tool approvals so approval promises resolve
     // immediately rather than leaking until TOOL_APPROVAL_TIMEOUT_MS.

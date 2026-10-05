@@ -53,11 +53,11 @@ before(async () => {
   // D1 matrices (sso-config.service and sso-credential-matrix tests).
   writeDisabledRecordOn(getConnection(), 'owner', Date.now());
   setExternalApiEnabled(true);
-  const stale = userDb.createUser('agent-window-stale', 'hash', 'user');
+  const stale = userDb.createUser('agent-window-stale', 'hash', 'admin');
   const staleLink = userIdentitiesDb.link(stale.id, 'https://idp.example', 'sub-agent-stale');
   userIdentitiesDb.markAttested(staleLink, stale.id, Date.now() - 8 * DAY_MS);
   staleKey = apiKeysDb.createApiKey(stale.id, 'stale').apiKey;
-  const fresh = userDb.createUser('agent-window-fresh', 'hash', 'user');
+  const fresh = userDb.createUser('agent-window-fresh', 'hash', 'admin');
   const freshLink = userIdentitiesDb.link(fresh.id, 'https://idp.example', 'sub-agent-fresh');
   userIdentitiesDb.markAttested(freshLink, fresh.id, Date.now() - DAY_MS);
   freshKey = apiKeysDb.createApiKey(fresh.id, 'fresh').apiKey;

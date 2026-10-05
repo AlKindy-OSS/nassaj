@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict';
 import { appendFile, mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
@@ -21,7 +20,7 @@ import {
 
 async function withDatabase(run: (directory: string) => void | Promise<void>): Promise<void> {
   const previous = process.env.DATABASE_PATH;
-  const directory = await mkdtemp(path.join(tmpdir(), 'usage-ingestion-'));
+  const directory = await mkdtemp('/var/tmp/usage-ingestion-');
   closeConnection();
   process.env.DATABASE_PATH = path.join(directory, 'db.sqlite');
   await initializeDatabase();

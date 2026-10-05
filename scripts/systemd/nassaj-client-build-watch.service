@@ -50,6 +50,7 @@ ReadOnlyPaths=-%h/Project/nassaj-dev/server
 ReadOnlyPaths=-%h/Project/nassaj-dev/scripts
 ReadOnlyPaths=-%h/Project/nassaj-dev/node_modules
 ReadOnlyPaths=-%h/Project/nassaj-dev/index.html
+ReadOnlyPaths=-%h/Project/nassaj-dev/share.html
 ReadOnlyPaths=-%h/Project/nassaj-dev/package.json
 ReadOnlyPaths=-%h/Project/nassaj-dev/package-lock.json
 ReadOnlyPaths=-%h/Project/nassaj-dev/vite.config.js

@@ -7,6 +7,7 @@ import crossSpawn from 'cross-spawn';
 import { beginHarnessLaunch } from '@/modules/providers/harness-update/spawn-admission.js';
 import { GLM_CARRIER_MODELS } from '@/modules/providers/shared/vendor/vendor-config.js';
 import { hasRunnableLocalServers } from '@/services/isolation/local-model-config.js';
+import { resolveCatalogEnv } from '@/services/isolation/resolve-provider-env.js';
 import {
   QWEN_PLAN_MODELS,
   QWEN_PLAN_MODEL_PREFIX,
@@ -464,13 +465,19 @@ export const parseOpenCodeSessionModelValue = (rawModel: unknown): string | null
   return providerId ? `${providerId}/${modelId}` : modelId;
 };
 
-const runOpenCodeModelsCommand = (): Promise<string> => new Promise((resolve, reject) => {
+/**
+ * Spawns `opencode models` under `env` — the caller's resolved catalog env
+ * (B-1284/B-1375), never the raw server env: opencode's list depends on the
+ * auth.json under XDG_DATA_HOME (measured: an empty tree lists only `-free`
+ * models), and the raw env carried host secrets such as JWT_SECRET.
+ */
+const runOpenCodeModelsCommand = (env: NodeJS.ProcessEnv): Promise<string> => new Promise((resolve, reject) => {
   const releaseLaunch = beginHarnessLaunch('opencode');
   // OC-06: OPENCODE_PATH knob → ~/.opencode/bin/opencode → PATH fallback.
   let openCodeProcess;
   try {
     openCodeProcess = spawnFunction(resolveOpenCodeBinaryPath(), ['models'], {
-      cwd: process.cwd(), env: { ...process.env },
+      cwd: process.cwd(), env,
     });
   } catch (error) {
     releaseLaunch();
@@ -531,13 +538,25 @@ const runOpenCodeModelsCommand = (): Promise<string> => new Promise((resolve, re
 });
 
 export class OpenCodeProviderModels implements IProviderModels {
-  async getSupportedModels(): Promise<ProviderModelsDefinition> {
+  /**
+   * `userId` is positionally REQUIRED (B-1284, the agy lesson): an optional id
+   * that silently means "operator" is how every member ended up on the
+   * operator's catalog. `null` still means the operator, but it must be said.
+   */
+  async getSupportedModels(userId: string | number | null): Promise<ProviderModelsDefinition> {
     // GL-9: the GLM carrier catalog is merged in (flag-gated, default OFF) so a GLM
     // carrier model is selectable even before opencode's live catalog lists it. With
     // the carrier flag off, withGlmCarrierModels is an identity — the returned catalog
     // is byte-for-byte the pre-GL-9 behavior on every branch.
     try {
-      const stdout = await runOpenCodeModelsCommand();
+      // B-1284: chat mode (not the GLM carrier's agent mode) — the catalog reads
+      // the member's auth.json; it needs no carrier sanitizer. Isolation
+      // unavailable → degraded fallback with NO spawn, never the operator env.
+      const env = resolveCatalogEnv(userId, 'opencode', process.env);
+      if (!env) {
+        return { ...withGlmCarrierModels(OPENCODE_FALLBACK_MODELS), degraded: true };
+      }
+      const stdout = await runOpenCodeModelsCommand(env);
       const ids = parseOpenCodeModelsStdout(stdout);
       if (ids.length === 0) {
         // B-1283: no ids parsed → degraded fallback. The degraded flag is added
@@ -555,7 +574,7 @@ export class OpenCodeProviderModels implements IProviderModels {
 
   async getCurrentActiveModel(sessionId?: string, userId?: string | number | null): Promise<ProviderCurrentActiveModel> {
     if (!sessionId?.trim()) {
-      return buildDefaultProviderCurrentActiveModel(await this.getSupportedModels());
+      return buildDefaultProviderCurrentActiveModel(await this.getSupportedModels(userId ?? null));
     }
 
     try {
@@ -602,7 +621,7 @@ export class OpenCodeProviderModels implements IProviderModels {
       // Fall through to the provider default when OpenCode session lookup fails.
     }
 
-    return buildDefaultProviderCurrentActiveModel(await this.getSupportedModels());
+    return buildDefaultProviderCurrentActiveModel(await this.getSupportedModels(userId ?? null));
   }
 
   async changeActiveModel(

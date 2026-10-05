@@ -14,7 +14,6 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { copyFile, mkdir, mkdtemp, readFile, rm, stat, utimes, writeFile } from 'node:fs/promises';
-import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
@@ -65,7 +64,7 @@ type Environment = {
 
 async function withEnvironment(run: (environment: Environment) => Promise<void>): Promise<void> {
   const previousDatabasePath = process.env.DATABASE_PATH;
-  const root = await mkdtemp(path.join(os.tmpdir(), 'session-cost-'));
+  const root = await mkdtemp('/var/tmp/session-cost-');
 
   closeConnection();
   process.env.DATABASE_PATH = path.join(root, 'auth.db');

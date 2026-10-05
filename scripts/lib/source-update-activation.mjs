@@ -258,7 +258,10 @@ function recoveryValidation({ projectRoot, controlRoot, job }) {
         || digest(JSON.stringify(action)) !== job.activation_identity_sha256
         || action.transactionId !== job.transaction_id || action.targetCommit !== job.release_commit
         || action.version !== job.expected_version || action.expectedServerBuildId !== job.expected_server_build_id
-        || !SHA40.test(action.originalHead || '')) throw new Error('recovery_action_mismatch');
+        || !SHA40.test(action.originalHead || '')
+        || (action.previousRuntimeOid !== undefined && !SHA40.test(action.previousRuntimeOid || ''))) {
+        throw new Error('recovery_action_mismatch');
+    }
     const validation = validateCandidate({ projectRoot, candidateRoot, transactionId: action.transactionId,
         releaseCommit: action.targetCommit, version: action.version,
         manifestPath: action.manifestPath, manifestSha256: action.manifestSha256 });
@@ -303,19 +306,28 @@ export function inspectGitRuntimeRecovery({ projectRoot, controlRoot, job, journ
     } catch { return unresolved; }
 }
 
-/** A rollback is final only when its receipt, source, loaded process and all previous trees agree. */
+/**
+ * A rollback is final only when its receipt, source, loaded process and all previous
+ * trees agree. The source must be back at originalHead, the restored trees must be
+ * exactly the receipt's previous ones, and the loaded process must run the restored
+ * server tree (runtime.commit === its provenance commit). That commit may be the
+ * runtime loaded before the update (`previousRuntimeOid`, B-1264, possibly older than
+ * originalHead) or originalHead itself (dist-server rebuilt from the source before
+ * the update without a restart, then loaded by the restart that recovered).
+ */
 function inspectGitRollbackRecovery({ journal, runtime, action, validation }) {
     if (journal.databaseState !== 'PRE_CANDIDATE'
         || (journal.recovery && journal.recovery !== 'ROLLED_BACK')) return null;
+    const acceptedRuntimeCommits = new Set([action.originalHead, action.previousRuntimeOid].filter(Boolean));
     const receipt = readReceipt(validation);
-    if (receipt?.state !== 'rolled_back' || runtime?.commit !== action.originalHead
+    if (receipt?.state !== 'rolled_back' || !acceptedRuntimeCommits.has(runtime?.commit)
         || git(validation.projectRoot, ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim() !== action.originalHead) return null;
     const identities = Object.fromEntries(Object.entries(validation.live).map(([name, directory]) => [name, hashTree(directory)]));
     const previous = Object.fromEntries(['client', 'server', 'nodeModules'].map((name) => [name, receipt.steps?.[name]?.previous]));
     if (!sameRuntimeTrees(previous, identities)) return null;
     const server = provenance(validation.live.server);
     const client = provenance(validation.live.client);
-    if (server.commit !== action.originalHead || runtime.serverBuildId !== server.buildId
+    if (server.commit !== runtime.commit || runtime.serverBuildId !== server.buildId
         || runtime.clientBuildId !== client.buildId || !SHA256.test(server.buildId || '')
         || !SHA256.test(client.buildId || '')) return null;
     return { next: 'rolled_back', code: 'source_update_rollback_recovered', runtimeIdentities: identities };

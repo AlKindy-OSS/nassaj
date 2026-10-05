@@ -26,7 +26,7 @@ const patchHomeDir = (nextHomeDir: string) => {
 
 async function withIsolatedDatabase(runTest: () => void | Promise<void>): Promise<void> {
   const previousDatabasePath = process.env.DATABASE_PATH;
-  const tempDirectory = await mkdtemp(path.join(os.tmpdir(), 'opencode-provider-db-'));
+  const tempDirectory = await mkdtemp('/var/tmp/opencode-provider-db-');
   const databasePath = path.join(tempDirectory, 'auth.db');
 
   closeConnection();
@@ -252,7 +252,7 @@ const createOpenCodeDatabase = async (homeDir: string, workspacePath: string): P
 };
 
 test('OpenCode session synchronizer indexes sqlite sessions without deletable transcript paths', { concurrency: false }, async () => {
-  const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'opencode-session-sync-'));
+  const tempRoot = await mkdtemp('/var/tmp/opencode-session-sync-');
   const workspacePath = path.join(tempRoot, 'workspace');
   await mkdir(workspacePath, { recursive: true });
   const restoreHomeDir = patchHomeDir(tempRoot);
@@ -279,7 +279,7 @@ test('OpenCode session synchronizer indexes sqlite sessions without deletable tr
 });
 
 test('OpenCode synchronizer backfills an external session to the platform owner and stays native (T-857 part ب)', { concurrency: false }, async () => {
-  const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'opencode-attrib-'));
+  const tempRoot = await mkdtemp('/var/tmp/opencode-attrib-');
   const workspacePath = path.join(tempRoot, 'workspace');
   await mkdir(workspacePath, { recursive: true });
   const restoreHomeDir = patchHomeDir(tempRoot);
@@ -315,7 +315,7 @@ test('OpenCode synchronizer backfills an external session to the platform owner 
 });
 
 test('OpenCode synchronizer never re-attributes a session that already has an owner (T-857 part د)', { concurrency: false }, async () => {
-  const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'opencode-noreattrib-'));
+  const tempRoot = await mkdtemp('/var/tmp/opencode-noreattrib-');
   const workspacePath = path.join(tempRoot, 'workspace');
   await mkdir(workspacePath, { recursive: true });
   const restoreHomeDir = patchHomeDir(tempRoot);
@@ -368,7 +368,7 @@ test('OpenCode sessions provider normalizes quoted live text and skips user echo
 });
 
 test('OpenCode sessions provider reads sqlite history and token usage', { concurrency: false }, async () => {
-  const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'opencode-session-history-'));
+  const tempRoot = await mkdtemp('/var/tmp/opencode-session-history-');
   const workspacePath = path.join(tempRoot, 'workspace');
   await mkdir(workspacePath, { recursive: true });
   const restoreHomeDir = patchHomeDir(tempRoot);

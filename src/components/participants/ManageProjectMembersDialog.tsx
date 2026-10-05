@@ -341,7 +341,7 @@ type TriggerVariant = 'default' | 'circle';
 // `bg-muted`/`rounded-full` styling this deliberately mirrors.
 const TRIGGER_VARIANT_CLASS: Record<TriggerVariant, string> = {
   default: 'h-11 w-11 rounded-md text-muted-foreground hover:bg-accent hover:text-foreground',
-  circle: 'aspect-square h-5 w-5 rounded-full bg-muted text-muted-foreground hover:bg-accent hover:text-foreground align-middle',
+  circle: 'aspect-square h-5 w-5 rounded-full bg-transparent text-muted-foreground/70 hover:bg-accent hover:text-foreground align-middle',
 };
 
 export type ManageProjectMembersButtonProps = {

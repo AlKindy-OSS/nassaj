@@ -102,8 +102,13 @@ function restrictDatabasePermissions(dbPath: string): void {
  * If the database was moved to an external location (e.g. ~/.cloudcli/)
  * but the user still has a legacy auth.db inside the install directory,
  * copy it to the new location as a one-time migration.
+ *
+ * Never in a test run or for a target under a temporary directory (B-973):
+ * the isolation guard admits exactly those targets, and copying the real
+ * in-repo legacy database into a synthetic fixture path put real rows in it.
  */
 function migrateLegacyDatabase(targetPath: string): void {
+  if (isTestRuntime() || isUnderTemporaryDirectory(targetPath)) return;
   const legacyPath = resolveLegacyDatabasePath();
 
   if (targetPath === legacyPath) return;

@@ -21,6 +21,11 @@ import { authorizeRuntimeUserProviderEffect } from '@/modules/execution-permissi
 import { assertHarnessNotUpdating, beginHarnessLaunch } from '@/modules/providers/harness-update/spawn-admission.js';
 import { assertSessionAccessible } from '@/modules/providers/index.js';
 
+import {
+  assertNoAnthropicCredentialForEngine,
+  assertNoSettingsOverrideArgv,
+  isEngineRoutedEnv,
+} from './engine-anthropic-credential-guard.js';
 import { requestManagedClaudeBroker } from './managed-claude-launch-broker.js';
 import { resolveClaudeRunProfileOrThrow } from './resolve-claude-run-profile.js';
 import {
@@ -71,6 +76,23 @@ export function parseClaudeResumeArgv(argv: readonly string[]): ParsedResume {
     sessionId = candidate;
   }
   return { ok: true, sessionId };
+}
+
+/**
+ * B-1541: an engine-pinned child must not see an Anthropic credential. Checks
+ * the argv (`--settings` / `--setting-sources` would inject settings no file
+ * shows) and every settings source at THIS process's cwd, which the child
+ * inherits because it is spawned without `cwd`.
+ */
+function assertEngineLaunchSafe(
+  env: NodeJS.ProcessEnv,
+  childArgv: readonly string[],
+  engineHosts?: Set<string> | null,
+): void {
+  const pinned = (engineHosts instanceof Set && engineHosts.size > 0) || isEngineRoutedEnv(env);
+  if (!pinned) return;
+  assertNoSettingsOverrideArgv(childArgv);
+  assertNoAnthropicCredentialForEngine(env, { cwd: process.cwd() });
 }
 
 type LauncherDeps = {
@@ -140,6 +162,9 @@ export async function runManagedClaudeLauncher(
     if (typeof launch !== 'string' || !profileEnv || typeof profileEnv !== 'object') {
       throw new Error('BROKER_RESPONSE_INVALID');
     }
+    // B-1541: the broker checked the terminal's registered cwd; the child runs in
+    // THIS process's cwd (the shell may have moved), so re-check here before start.
+    assertEngineLaunchSafe(profileEnv as NodeJS.ProcessEnv, childArgv);
     await requestManagedClaudeBroker(sourceEnv, 'start', { launch });
     const spawnImpl = deps.spawnImpl ?? spawn;
     return new Promise<number>((resolve, reject) => {
@@ -175,7 +200,10 @@ export async function runManagedClaudeLauncher(
     authoritativeStoredPin: targetSessionId !== null,
     requireKnownResumePin: targetSessionId !== null,
     failOnAmbiguous: true,
+    // The child below is spawned without `cwd`, so it inherits this one.
+    cwd: process.cwd(),
   });
+  assertEngineLaunchSafe(profile.env, childArgv, profile.engineHosts);
 
   const spawnImpl = deps.spawnImpl ?? spawn;
   const permissionExecution = deps.permissionExecution !== undefined

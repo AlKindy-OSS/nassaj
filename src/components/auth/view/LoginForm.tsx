@@ -8,6 +8,7 @@ import { useBranding } from '../../../contexts/BrandingContext';
 import { useAuth } from '../context/AuthContext';
 import { useSsoStatus } from '../hooks/useOidcAvailability';
 import { useWebAuthn } from '../hooks/useWebAuthn';
+import type { WebAuthnLoginResult } from '../hooks/useWebAuthn';
 import { startOidcLogin } from '../oidc';
 import { consumeSsoReauthNotice, hasSsoReauthNotice } from '../ssoReauth';
 
@@ -24,6 +25,18 @@ const initialState: LoginFormState = {
   username: '',
   password: '',
 };
+
+/**
+ * i18n key for a failed passkey sign-in. Wallet mode (ADR-163 amendment 1)
+ * refuses an account under forced rotation with `password_change_required`:
+ * only the password sign-in can rotate it. Every other refusal, including a
+ * rejected origin, stays generic.
+ */
+function passkeyFailureKey(result: Extract<WebAuthnLoginResult, { success: false }>): string {
+  if (result.kind === 'network') return 'login.errors.networkError';
+  if (result.code === 'password_change_required') return 'passkey.errors.passwordChangeRequired';
+  return 'passkey.errors.failed';
+}
 
 /**
  * Login form component.
@@ -121,9 +134,7 @@ export default function LoginForm() {
 
     // A dismissed passkey prompt is not an error — stay silent.
     if (!result.success && result.kind !== 'cancelled') {
-      setErrorMessage(
-        result.kind === 'network' ? t('login.errors.networkError') : t('passkey.errors.failed'),
-      );
+      setErrorMessage(t(passkeyFailureKey(result)));
     }
   }, [loginWithPasskey, t]);
 

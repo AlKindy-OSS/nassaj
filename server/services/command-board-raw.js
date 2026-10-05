@@ -73,8 +73,9 @@ import crypto from 'crypto';
 import { appConfigDb } from '../modules/database/index.js';
 
 import { APP_ROOT } from './server-actions.js';
-import { cleanSpawnEnv } from './command-board-custom.js';
+import { cleanSpawnEnv, userManagerSpawnEnv } from './command-board-custom.js';
 import { canRoleRunRawExec } from './command-board-config.js';
+import { AUDIT_REDACTED, LEGACY_AUDIT_REDACTION_RULES } from './secret-patterns.js';
 
 /** app_config key holding the JSON array of pending raw commands (the queue). */
 export const RAW_QUEUE_CONFIG_KEY = 'command_board_raw_queue';
@@ -438,8 +439,11 @@ function optionSepValue(tool) {
  * normalised (`-H` arrives as `-h`, `-P` as `-p`). A value flag may also read as
  * a plain flag, so a verb right after it (`-h restart x`) is still seen.
  */
-function systemdToolFlags(tool, valueFlags) {
-  return `(?:\\s+(?:--|(?:${valueFlags})${optionSepValue(tool)}|-{1,2}[a-z0-9][\\w-]*${OPTION_EQ_VALUE}))*`;
+function systemdToolFlags(tool, valueFlags, shortValueLetters) {
+  // B-1325: a combined short-flag cluster ending in a value-taking letter
+  // (`-lH host`, `-qM box`) takes the next token as its value, as getopt does.
+  const cluster = `-[a-z0-9]+[${shortValueLetters}]${optionSepValue(tool)}`;
+  return `(?:\\s+(?:--|(?:${valueFlags})${optionSepValue(tool)}|${cluster}|-{1,2}[a-z0-9][\\w-]*${OPTION_EQ_VALUE}))*`;
 }
 /**
  * systemctl's own option grammar (B-1278), kept SEPARATE from FLAGS (shared with
@@ -459,6 +463,7 @@ const SYSTEMCTL_FLAGS = systemdToolFlags(
     + '--check-inhibitors|--kill-whom|--kill-value|-s|--signal|--what|--message|--legend|'
     + '--root|--image-policy|--image|--preset-mode|-n|--lines|-o|--output|--boot-loader-menu|'
     + '--boot-loader-entry|--reboot-argument|--timestamp|--drop-in|--when',
+  'chmtpsno',
 );
 /**
  * loginctl's value-taking options, from `loginctl --help` (systemd 257):
@@ -468,6 +473,7 @@ const SYSTEMCTL_FLAGS = systemdToolFlags(
 const LOGINCTL_FLAGS = systemdToolFlags(
   'loginctl',
   '-h|--host|-m|--machine|-p|--property|-s|--signal|--kill-whom|-n|--lines|-o|--output|--json',
+  'hmpsno',
 );
 
 // ── host_power (B-1277): command-position grammar, on commandPositionNormalize ──
@@ -532,6 +538,24 @@ const SYSTEMD_SPECIAL_TARGETS =
   '(?:reboot|poweroff|halt|kexec|soft-reboot|rescue|emergency|exit|shutdown|suspend|hibernate|hybrid-sleep|suspend-then-hibernate|sleep)';
 /** How far past `start|restart` a special target is looked for (a bound keeps it linear). */
 const SYSTEMD_TARGET_REACH = 256;
+
+/**
+ * B-1325: the D-Bus spelling of systemctl. `busctl call … systemd1 … StopUnit`
+ * (or `set-property`, `gdbus call`, `dbus-send`) reaches the same manager the
+ * systemctl rules guard. Bounded reach keeps each match linear (see ReDoS).
+ */
+const DBUS_REACH = 256;
+/** busctl's option grammar (`busctl --help`, systemd 257): -H/--host, -M/--machine, -C/--capsule. */
+const BUSCTL_FLAGS = systemdToolFlags('busctl', '-h|--host|-m|--machine|-c|--capsule', 'hmc');
+/**
+ * Where a manager call starts: the busctl verb right after its options, `gdbus
+ * call`, or any dbus-send. One reading per token keeps each match linear.
+ */
+const DBUS_SYSTEMD_CALL =
+  `(?:busctl${BUSCTL_FLAGS}\\s+(?:call|set-property|emit)|gdbus\\s+call|dbus-send|qdbus(?:6|-qt[56])?)\\b`;
+/** Manager/logind methods that stop or replace the manager or the host (lower-cased). */
+const DBUS_MANAGER_METHODS =
+  '(?:poweroff|reboot|halt|kexec|exit|softreboot|switchroot|reexecute|suspend|hibernate|hybridsleep|suspendthenhibernate)';
 
 /**
  * pm2 app names that ARE this server. A lifecycle verb aimed at one of these is
@@ -689,6 +713,15 @@ export const RAW_DENY_RULES = Object.freeze([
       `${PREFIX}systemctl${SYSTEMCTL_FLAGS}\\s+(?:${SYSTEMD_MANAGER_VERBS}\\b|(?:start|restart)[^;&|]{0,${SYSTEMD_TARGET_REACH}}?\\b${SYSTEMD_SPECIAL_TARGETS}\\.target\\b)`,
     ),
   }),
+  // B-1325: the same manager/host outcome over D-Bus (`busctl call
+  // org.freedesktop.systemd1 … PowerOff`, logind's PowerOff/Reboot, or
+  // StartUnit of a special target). Fatal, so it precedes the discretionary block.
+  Object.freeze({
+    code: 'systemd_manager',
+    re: new RegExp(
+      `${PREFIX}${DBUS_SYSTEMD_CALL}(?=[^;&|]{0,${DBUS_REACH}}?\\b(?:systemd1|login1)\\b)[^;&|]{0,${DBUS_REACH}}?\\b${DBUS_MANAGER_METHODS}\\b`,
+    ),
+  }),
   // ── DISCRETIONARY ── Load-bearing ORDER (see FATAL above): these deny a
   // command that is disruptive but aimed at a named target; they must all come
   // after the fatal block. Same single-quoted `code: '<name>'` convention.
@@ -698,7 +731,28 @@ export const RAW_DENY_RULES = Object.freeze([
   Object.freeze({
     code: 'systemctl_lifecycle',
     norm: 'either',
-    re: new RegExp(`${PREFIX}systemctl${SYSTEMCTL_FLAGS}\\s+(?:restart|stop|disable|kill|mask|try-restart|reload-or-restart|try-reload-or-restart|reload-or-try-restart|condrestart|condstop|force-reload|freeze)\\b`),
+    // B-1325: `set-property` (MemoryMax=1 OOM-kills the unit, CPUQuota=1% starves it).
+    re: new RegExp(`${PREFIX}systemctl${SYSTEMCTL_FLAGS}\\s+(?:restart|stop|disable|kill|mask|try-restart|reload-or-restart|try-reload-or-restart|reload-or-try-restart|condrestart|condstop|force-reload|freeze|set-property)\\b`),
+  }),
+  // B-1325: a verb the human cannot read (`systemctl --user $V cloudflared`,
+  // `"$(echo stop)"`) is refused — the review pane cannot show what will run.
+  Object.freeze({
+    code: 'systemctl_lifecycle',
+    norm: 'either',
+    re: new RegExp(`${PREFIX}systemctl${SYSTEMCTL_FLAGS}\\s+[^\\s;&|()<>]*\\$`),
+  }),
+  // B-1325: the backtick form of the same, judged on the lower-cased raw text
+  // because both normalisers drop or split at the backtick.
+  Object.freeze({
+    code: 'systemctl_lifecycle',
+    raw: true,
+    re: new RegExp(`(?:^|[;&|(]\\s*|\\$\\(\\s*|\\s)(?:[\\w.~-]*/)*systemctl${SYSTEMCTL_FLAGS}\\s+[^\\s;&|()<>]*\x60`),
+  }),
+  // B-1325: any other D-Bus call into the systemd manager (StopUnit,
+  // KillUnit, SetUnitProperties …) is the systemctl lifecycle by another name.
+  Object.freeze({
+    code: 'systemctl_lifecycle',
+    re: new RegExp(`${PREFIX}${DBUS_SYSTEMD_CALL}[^;&|]{0,${DBUS_REACH}}?\\bsystemd1\\b`),
   }),
   // SysV-style equivalent: `service <unit> restart|stop`.
   Object.freeze({
@@ -747,6 +801,15 @@ export const RAW_DENY_RULES = Object.freeze([
   Object.freeze({
     code: 'session_kill',
     re: new RegExp(`${PREFIX}loginctl${LOGINCTL_FLAGS}\\s+(?:terminate-user|kill-user|terminate-session|kill-session)\\b`),
+  }),
+  // B-1325: the same four logind verbs over D-Bus (busctl/gdbus/dbus-send/qdbus
+  // into login1). The login1 lookahead and the method scan are separate bounded
+  // reads, so each match stays linear.
+  Object.freeze({
+    code: 'session_kill',
+    re: new RegExp(
+      `${PREFIX}${DBUS_SYSTEMD_CALL}(?=[^;&|]{0,${DBUS_REACH}}?\\blogin1\\b)[^;&|]{0,${DBUS_REACH}}?\\b(?:terminateuser|killuser|terminatesession|killsession)\\b`,
+    ),
   }),
 ]);
 
@@ -810,33 +873,8 @@ function ruleHaystacks(rule, command, views) {
 // positives. The load-bearing controls remain (a) the sink is owner-only and (b)
 // the owner should not paste secrets inline. This only shrinks the blast radius.
 
-/** Replacement written in place of a matched secret value. */
-const REDACTED = '«redacted»';
-
-/**
- * Frozen list of redaction rules. Each is a regex whose LAST capture group is
- * the secret value; everything before it (the label/flag) is preserved so the
- * audit entry still shows WHAT kind of credential was passed.
- */
-const REDACTION_RULES = Object.freeze([
-  // NAME=value assignments and --flag=value / --flag value forms whose name
-  // looks like a credential. Value = up to the next space or shell separator.
-  Object.freeze({
-    re: /((?:^|[\s;&|(])(?:-{0,2})[\w.-]*(?:passwo?rd|passwd|pwd|secret|token|api[_-]?key|apikey|access[_-]?key|auth[_-]?key|credential|private[_-]?key|passphrase)[\w.-]*\s*[=:]\s*)("[^"]*"|'[^']*'|[^\s;&|)]+)/gi,
-  }),
-  // `--token VALUE` (space-separated flag form).
-  Object.freeze({
-    re: /((?:^|[\s;&|(])-{1,2}[\w.-]*(?:passwo?rd|passwd|secret|token|api[_-]?key|apikey|credential|passphrase)[\w.-]*\s+)("[^"]*"|'[^']*'|[^\s;&|)-][^\s;&|)]*)/gi,
-  }),
-  // HTTP bearer / basic credentials, with or without a surrounding quote.
-  Object.freeze({
-    re: /((?:bearer|basic)\s+)([\w./+=-]{8,})/gi,
-  }),
-  // PEM private key material pasted inline (here-doc / echo).
-  Object.freeze({
-    re: /(-----BEGIN [A-Z ]*PRIVATE KEY-----)([\s\S]*?)(?=-----END|$)/g,
-  }),
-]);
+// The rule set itself lives in secret-patterns.js (LEGACY_AUDIT_REDACTION_RULES),
+// shared with the session-share redactor; its behaviour here is unchanged.
 
 /**
  * Returns `command` with labelled credential VALUES masked, for the audit sink
@@ -850,8 +888,8 @@ const REDACTION_RULES = Object.freeze([
 export function redactSecretsForAudit(command) {
   if (typeof command !== 'string') return null;
   let out = command;
-  for (const rule of REDACTION_RULES) {
-    out = out.replace(rule.re, (_m, prefix) => `${prefix}${REDACTED}`);
+  for (const rule of LEGACY_AUDIT_REDACTION_RULES) {
+    out = out.replace(rule.re, (_m, prefix) => `${prefix}${AUDIT_REDACTED}`);
   }
   return out;
 }
@@ -946,6 +984,15 @@ function writeQueue(list) {
 }
 
 /**
+ * Identity of a command for de-duplication and the ledger: surrounding whitespace
+ * is ignored (an agent's row often ends in a newline the chat fence does not
+ * carry). The stored/executed bytes and the review digest are NOT affected.
+ */
+function sameCommand(a, b) {
+  return typeof a === 'string' && typeof b === 'string' && a.trim() === b.trim();
+}
+
+/**
  * Inserts a validated raw command as a pending row. fail-closed on cap /
  * validation. Stores ONLY the verbatim command + metadata (never a digest field
  * that could drift from the text — the digest is always recomputed from the
@@ -957,6 +1004,24 @@ export function insertRawCommand({ command, requestedBy } = {}) {
   const v = validateRawCommand(command);
   if (!v.ok) return v;
   const list = readQueue();
+  // One board entry per command text. The chat «Execute» button inserts before it
+  // opens the review dialog, so without this a command an agent already placed on
+  // the board got a SECOND row: the click executed (and consumed) the twin while
+  // the original stayed on the board forever. Byte-identical text → same row.
+  const twin = list.find((e) => sameCommand(e.command, v.value.command));
+  if (twin) {
+    return {
+      ok: true,
+      reused: true,
+      value: {
+        id: twin.id,
+        command: twin.command,
+        digest: v.value.digest,
+        requestedBy: typeof twin.requestedBy === 'string' ? twin.requestedBy : null,
+        requestedAt: typeof twin.requestedAt === 'string' ? twin.requestedAt : null,
+      },
+    };
+  }
   if (list.length >= MAX_RAW_QUEUE) {
     return { ok: false, error: 'too_many_commands' };
   }
@@ -1004,6 +1069,26 @@ export function deleteRawCommand(id) {
   const removed = next.length !== list.length;
   if (removed) writeQueue(next);
   return { removed };
+}
+
+/**
+ * Removes every queued row whose text equals `command` (legacy duplicates created
+ * before insert de-duplicated). Called once a command ran so the board stops
+ * offering what already executed. Returns who it removed so the caller can audit.
+ * @returns {{removed:number, rows:Array<{id:string, requestedBy:string|null}>}}
+ */
+export function deleteRawCommandsByText(command) {
+  if (typeof command !== 'string') return { removed: 0, rows: [] };
+  const list = readQueue();
+  const gone = list.filter((e) => sameCommand(e.command, command));
+  if (gone.length > 0) writeQueue(list.filter((e) => !gone.includes(e)));
+  return {
+    removed: gone.length,
+    rows: gone.map((e) => ({
+      id: e.id,
+      requestedBy: typeof e.requestedBy === 'string' ? e.requestedBy : null,
+    })),
+  };
 }
 
 /** Number of pending raw rows (for the cap / diagnostics). */
@@ -1114,6 +1199,12 @@ export function recordRawExecution(execution = {}) {
     stderrTail: outputTail(execution.stderr),
   };
   appConfigDb.set(RAW_HISTORY_CONFIG_KEY, JSON.stringify(pruneHistory([entry, ...readHistory()])));
+  writeLedger(command, {
+    executedAt: entry.executedAt,
+    outcome,
+    exitCode: entry.exitCode,
+    executedBy: entry.executedBy,
+  });
   return { id: entry.id, executedAt: entry.executedAt };
 }
 
@@ -1128,6 +1219,72 @@ export function listRawHistory() {
     appConfigDb.set(RAW_HISTORY_CONFIG_KEY, JSON.stringify(kept));
   }
   return kept;
+}
+
+// ── Durable execution ledger ────────────────────────────────────────────────
+//
+// History above expires after an hour and is keyed by the (already consumed) row
+// id, so neither the chat block nor the board could tell later that a command
+// had run. The ledger is keyed by a server-keyed HMAC of the command text — the one identity the board
+// row and the chat fence share — keeps only the LATEST outcome per digest, and
+// stores no command text, output or secret: just when, by whom, and the exit.
+
+/** app_config key holding `{ [digest]: LedgerEntry }`. */
+export const RAW_LEDGER_CONFIG_KEY = 'command_board_raw_executions';
+/** Hard cap on retained digests (newest kept) — bounds the app_config row. */
+export const MAX_RAW_LEDGER = 500;
+
+/**
+ * Ledger key: HMAC-SHA256 under a key derived from the server's own secret (the
+ * same JWT secret source auth uses: env, else the per-install one in app_config),
+ * over the whitespace-trimmed command. An unkeyed hash of a raw command that may
+ * carry an inline credential would let anyone holding a DB copy brute-force weak
+ * secrets offline; with the key they would need the server secret too. (When the
+ * secret rotates, the ledger simply stops matching — it is bookkeeping, not truth.)
+ * The review-dialog digest (computeDigest) is a different, unchanged mechanism.
+ */
+function ledgerKey(command) {
+  const secret = process.env.JWT_SECRET || appConfigDb.getOrCreateJwtSecret();
+  const key = crypto.createHmac('sha256', secret).update('nassaj:raw-exec-ledger:v1').digest();
+  return crypto.createHmac('sha256', key).update(command.trim()).digest('hex');
+}
+
+function readLedger() {
+  try {
+    const raw = appConfigDb.get(RAW_LEDGER_CONFIG_KEY);
+    const parsed = raw ? JSON.parse(raw) : null;
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+/** Notes the latest execution of `command` (verbatim bytes → digest). */
+function writeLedger(command, entry) {
+  const ledger = readLedger();
+  ledger[ledgerKey(command)] = entry;
+  const kept = Object.entries(ledger)
+    .filter(([, e]) => Number.isFinite(Date.parse(e?.executedAt)))
+    .sort(([, a], [, b]) => Date.parse(b?.executedAt) - Date.parse(a?.executedAt))
+    .slice(0, MAX_RAW_LEDGER);
+  appConfigDb.set(RAW_LEDGER_CONFIG_KEY, JSON.stringify(Object.fromEntries(kept)));
+}
+
+/**
+ * Latest recorded execution of this exact command text, or null.
+ * @returns {{executedAt:string, outcome:string, exitCode:number|null,
+ *            executedBy:string|null}|null}
+ */
+export function lookupRawExecution(command) {
+  if (typeof command !== 'string' || command === '') return null;
+  const e = readLedger()[ledgerKey(command)];
+  if (!e || typeof e.executedAt !== 'string' || !RAW_OUTCOMES.includes(e.outcome)) return null;
+  return {
+    executedAt: e.executedAt,
+    outcome: e.outcome,
+    exitCode: Number.isSafeInteger(e.exitCode) ? e.exitCode : null,
+    executedBy: typeof e.executedBy === 'string' ? e.executedBy : null,
+  };
 }
 
 /** Deletes one history record by id (manual removal before the hour). Idempotent. */
@@ -1151,7 +1308,8 @@ export function buildRawSpawn(command) {
     // no SECOND shell tokenizes anything. `command` is argv[2] verbatim.
     args: ['-c', command],
     cwd: APP_ROOT,
-    env: cleanSpawnEnv(),
+    // B-678: + the user-manager keys so `systemd-run --user` reaches the bus.
+    env: { ...cleanSpawnEnv(), ...userManagerSpawnEnv() },
     // detached:true puts bash in its OWN process group, whose id equals the
     // child's pid. That is what makes the timeout able to kill the whole tree
     // (`process.kill(-pid)`); without it a `sleep 999 &` / `nohup x &` inside the

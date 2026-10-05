@@ -91,4 +91,27 @@ describe('مُنتقي الوكلاء', () => {
     const codexButton = screen.getByRole('button', { name: 'Codex' });
     expect(codexButton.getAttribute('aria-pressed')).toBe('false');
   });
+
+  it('selected tile carries the same highlight classes for every agent and the local-models card', () => {
+    const selectedClasses = (selected: (typeof agents)[number] | null) => {
+      cleanup();
+      render(
+        <AgentSelectorSection
+          agents={agents}
+          selectedAgent={selected ?? agents[0]}
+          onSelectAgent={() => {}}
+          agentContextById={agentContextById}
+          localModelsLabel={LOCAL_MODELS_LABEL}
+          localModelsSelected={selected === null}
+          onSelectLocalModels={() => {}}
+        />,
+      );
+      const pressed = screen.getAllByRole('button').filter((b) => b.getAttribute('aria-pressed') === 'true');
+      expect(pressed).toHaveLength(1);
+      return pressed[0].className.split(/\s+/).filter((c) => c.startsWith('bg-') || c.startsWith('ring-'));
+    };
+    const reference = selectedClasses(null);
+    expect(reference).toContain('bg-muted');
+    for (const agent of agents) expect(selectedClasses(agent)).toEqual(reference);
+  });
 });

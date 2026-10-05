@@ -51,6 +51,7 @@ import {
   closedSessionsDb,
   isProjectMembershipEnforced,
   isWorkspaceTopologyFenceCurrent,
+  PermissionStateConflictError,
   projectsDb,
   sessionAgentsDb,
   sessionsDb,
@@ -67,6 +68,7 @@ import type {
   LLMProvider,
   McpScope,
   McpTransport,
+  ProviderAuthStatus,
   ProviderChangeActiveModelInput,
   ProviderQuotaWindows,
   ProviderSkillCreateFile,
@@ -80,6 +82,8 @@ import { AppError, asyncHandler, createApiSuccessResponse } from '@/shared/utils
 import { runPermissionExecutionAdapter } from '@/modules/execution-permissions/adapter.js';
 // eslint-disable-next-line boundaries/dependencies
 import { authorizeRuntimeUserProviderEffect } from '@/modules/execution-permissions/runtime-user-effect.js';
+// eslint-disable-next-line boundaries/dependencies
+import { runAuthorizedInProcessRead } from '@/modules/execution-permissions/in-process-read.js';
 
 import {
   ELIGIBLE_ENGINE_PROVIDERS,
@@ -1011,6 +1015,28 @@ router.get(
   }),
 );
 
+/**
+ * B-1289 / ADR-198: a refused or unsettled quota read is a server-side failure with an
+ * explicit code, never the 404 "no quota source". A fenced scope (ADR-143, no auto-lift)
+ * is its own retriable 503; every other refusal or settlement failure answers 500.
+ * User-facing messages stay generic; only the refusal code is logged.
+ */
+const sendProviderQuotaError = (res: Response, provider: string, error: unknown): void => {
+  if (error instanceof AppError) {
+    res.status(error.statusCode).json({ error: error.message, code: error.code });
+    return;
+  }
+  const refusal = (error as { code?: unknown } | null)?.code;
+  console.warn('[provider-quota] read refused', {
+    provider, code: typeof refusal === 'string' ? refusal : 'unknown',
+  });
+  if (error instanceof PermissionStateConflictError && error.code === 'EFFECT_SCOPE_FENCED') {
+    res.status(503).json({ error: 'Provider quota is temporarily unavailable.', code: 'PROVIDER_QUOTA_FENCED' });
+    return;
+  }
+  res.status(500).json({ error: 'Provider quota is currently unavailable.', code: 'PROVIDER_QUOTA_ERROR' });
+};
+
 // ----------------- Per-provider quota windows route -----------------
 // Specific path declared before the generic `/:provider/*` routes so it is not
 // shadowed. Quota as the PROVIDER itself reports it, read backend-side only —
@@ -1043,12 +1069,26 @@ router.get(
       return;
     }
 
-    const windows: ProviderQuotaWindows | null = await providerQuotaService.getWindows(
-      provider,
-      userId,
-      { runEffect: effect => runAuthorizedProviderSideQuery(req, 'quota', provider, effect) },
-      model,
-    );
+    let windows: ProviderQuotaWindows | null;
+    try {
+      windows = await providerQuotaService.getWindows(
+        provider,
+        userId,
+        {
+          // T-1910: codex/glm/kimi quota reads are idempotent GETs carried by this process;
+          // an interrupted read reconciles without fencing the user's quota scope.
+          read: descriptor => runAuthorizedInProcessRead({
+            authenticatedPrincipal: (req as Request & { user?: unknown }).user,
+            provider,
+            purpose: 'quota',
+          }, descriptor),
+        },
+        model,
+      );
+    } catch (error) {
+      sendProviderQuotaError(res, provider, error);
+      return;
+    }
 
     if (!windows) {
       res.status(404).json({
@@ -1165,6 +1205,30 @@ const parseChangeActiveModelPayload = (payload: unknown): ProviderChangeActiveMo
 // remains a union-only placeholder with no provider folder/registry entry.
 const STUB_API_PROVIDERS = new Set<string>(['sakana']);
 
+/**
+ * A subscription login read from `.credentials.json` is only "connected" if
+ * Anthropic still accepts it: a well-formed but refused file otherwise shows
+ * "connected" while every turn fails with "Not logged in". Transient probe
+ * failures keep the on-disk verdict.
+ */
+async function withLiveClaudeLink(
+  provider: string,
+  status: ProviderAuthStatus,
+  userId: string | number | null,
+): Promise<ProviderAuthStatus> {
+  if (provider !== 'claude' || !status.authenticated || status.method !== 'credentials_file') {
+    return status;
+  }
+  if (await claudeUsageService.verifyLink(userId) !== 'rejected') return status;
+  return {
+    ...status,
+    authenticated: false,
+    email: null,
+    linkExpiry: null,
+    error: 'Claude rejected the stored login. Sign in again.',
+  };
+}
+
 router.get(
   '/:provider/auth/status',
   asyncHandler(async (req: Request, res: Response) => {
@@ -1189,7 +1253,7 @@ router.get(
     // operator's fixed home. `req.user` is set by authenticateToken middleware.
     // `userId` is already resolved at the top of this handler.
     const status = await providerAuthService.getProviderAuthStatus(provider, userId);
-    res.json(createApiSuccessResponse(status));
+    res.json(createApiSuccessResponse(await withLiveClaudeLink(provider, status, userId)));
   }),
 );
 

@@ -351,7 +351,53 @@ const resolveRuntimeEntries = () => {
 const LOCAL_FOOTPRINT_SITES = [
   { file: 'server/services/isolation/managed-claude-launcher.ts', start: 'authorizeRuntimeUserProviderEffect({', end: 'return runPermissionExecutionAdapter(' },
   { file: 'server/services/isolation/managed-claude-launch-broker.ts', start: 'authorizeRuntimeUserProviderEffect({', end: 'const launch = crypto.randomUUID();' },
+  // T-1910: in-process provider reads; the lease's child is the server itself.
+  { file: 'server/modules/execution-permissions/in-process-read.ts', start: 'authorizeRuntimeUserProviderEffect({', end: 'export type InProcessReadDependencies' },
 ];
+
+// T-1910: the in-process read capability and helper are pinned to their reviewed files by
+// name AND by module. Any identifier, property name or string literal carrying one of these
+// names (aliases, destructuring, element access, re-exports) and any import/export/require/
+// dynamic import of the two modules outside the listed files fails --check. Tests excluded.
+const EP = 'server/modules/execution-permissions';
+const IN_PROCESS_READ_NAMES = new Map([
+  ['issueInProcessReadCapability', [`${EP}/in-process-read-capability.ts`, `${EP}/in-process-read.ts`]],
+  ['isInProcessReadCapability', [`${EP}/in-process-read-capability.ts`, `${EP}/execution-gateway.service.ts`]],
+  ['markStartedInProcessRead', [`${EP}/execution-gateway.service.ts`, `${EP}/in-process-read.ts`]],
+  ['runAuthorizedInProcessRead', [`${EP}/in-process-read.ts`, 'server/modules/providers/provider.routes.ts']],
+]);
+const IN_PROCESS_READ_MODULES = [
+  [/(?:^|\/)in-process-read-capability(?:\.[cm]?[jt]s)?$/u, [`${EP}/in-process-read.ts`, `${EP}/execution-gateway.service.ts`]],
+  [/(?:^|\/)in-process-read(?:\.[cm]?[jt]s)?$/u, ['server/modules/providers/provider.routes.ts']],
+];
+
+function inProcessReadOffenders(relative, source) {
+  const parsed = ts.createSourceFile(relative, source, ts.ScriptTarget.Latest, true);
+  const offenders = [];
+  let helperCalls = 0;
+  const visit = node => {
+    const text = ts.isIdentifier(node) || ts.isPrivateIdentifier(node) ? node.text
+      : ts.isStringLiteralLike(node) ? node.text : undefined;
+    if (text !== undefined) {
+      const allowed = IN_PROCESS_READ_NAMES.get(text);
+      if (allowed && !allowed.includes(relative)) offenders.push(`${relative}:${text}`);
+      if (ts.isStringLiteralLike(node)) {
+        for (const [pattern, files] of IN_PROCESS_READ_MODULES) {
+          if (pattern.test(text) && !files.includes(relative)) offenders.push(`${relative}:${text}`);
+        }
+      }
+    }
+    if (ts.isCallExpression(node) && ts.isIdentifier(node.expression)
+      && node.expression.text === 'runAuthorizedInProcessRead'
+      && relative === 'server/modules/providers/provider.routes.ts') {
+      helperCalls += 1;
+      if (helperCalls > 1) offenders.push(`${relative}:runAuthorizedInProcessRead#${helperCalls}`);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(parsed);
+  return offenders;
+}
 
 function collectEffectScopes(source, file, scopes) {
   const parsed = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true);
@@ -407,6 +453,7 @@ function assertLocalFootprintReviewed() {
     const source = fs.readFileSync(file, 'utf8');
     collectEffectScopes(source, file, scopes);
     const relative = path.relative(ROOT, file).split(path.sep).join('/');
+    offenders.push(...inProcessReadOffenders(relative, source));
     const site = LOCAL_FOOTPRINT_SITES.find(entry => entry.file === relative);
     const sourceFile = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true);
     const visit = node => {
@@ -746,6 +793,27 @@ if (process.argv.includes('--mutation-test')) {
   try { collectEffectScopes("import { authorizeRuntimeUserProviderEffect as authorize } from './runtime-user-effect'; authorize({provider:'claude',purpose:'spawn',effectFootprint: ('lo'+'cal')})", 'alias.ts', new Map()); }
   catch (error) { aliasRejected = error.message.includes('PERMISSION_EFFECT_FOOTPRINT_NONLITERAL'); }
   if (!aliasRejected) throw new Error('PERMISSION_EFFECT_FOOTPRINT_ALIAS_MUTATION_BYPASSED');
+  const pinMutations = [
+    'runAuthorizedInProcessRead(scope, descriptor);',
+    'execution.markStartedInProcessRead(token);',
+    "import { runAuthorizedInProcessRead as read } from '@/modules/execution-permissions/in-process-read.js';",
+    "import * as helper from '../execution-permissions/in-process-read.js'; void helper;",
+    "export { issueInProcessReadCapability as issue } from './in-process-read-capability.js';",
+    'const { markStartedInProcessRead: start } = execution; void start;',
+    "execution['markStartedInProcessRead'](token);",
+    "const helper = await import('./in-process-read.js');",
+    "const capability = require('./in-process-read-capability');",
+    'register(runAuthorizedInProcessRead);',
+  ];
+  for (const [index, mutation] of pinMutations.entries()) {
+    if (inProcessReadOffenders(`server/__permission_inventory_in_process_read_mutation_${index}__.ts`, mutation).length === 0) {
+      throw new Error(`PERMISSION_IN_PROCESS_READ_PIN_MUTATION_BYPASSED:${index}`);
+    }
+  }
+  const routeSource = 'runAuthorizedInProcessRead(a, b);\nrunAuthorizedInProcessRead(a, b);\n';
+  if (inProcessReadOffenders('server/modules/providers/provider.routes.ts', routeSource).length !== 1) {
+    throw new Error('PERMISSION_IN_PROCESS_READ_PIN_MUTATION_BYPASSED:second-route-call');
+  }
   process.stdout.write(`mutation-rejected:${mutatedIds.join(',')}\n`);
 } else if (process.argv.includes('--write')) {
   fs.writeFileSync(INVENTORY, serialized, 'utf8');

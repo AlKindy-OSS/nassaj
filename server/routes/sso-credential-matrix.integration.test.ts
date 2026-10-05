@@ -27,6 +27,8 @@ import type { Server } from 'node:http';
 
 import express from 'express';
 
+import { useWalletOriginEnv } from '../utils/__tests__/wallet-origin-env.js';
+
 const url = (spec: string) => pathToFileURL(path.resolve(import.meta.dirname, spec)).href;
 const passThrough = (_req: unknown, _res: unknown, next: () => void) => next();
 
@@ -76,10 +78,10 @@ app.use('/api/webauthn', webauthnRouter);
 app.get('/probe', authenticateToken, (req, res) => res.json({ id: (req as { user: { id: number } }).user.id }));
 const server: Server = app.listen(0, '127.0.0.1');
 await new Promise<void>((resolve) => server.once('listening', resolve));
-const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-process.env.APP_ORIGIN = origin;
+const { origin, restore: restoreOriginEnv } = useWalletOriginEnv((server.address() as AddressInfo).port);
 after(async () => {
   await new Promise<void>((resolve) => server.close(() => resolve()));
+  restoreOriginEnv();
 });
 
 const db = getConnection();
@@ -103,7 +105,7 @@ async function enroll(user: User) {
 before(async () => {
   const hash = await hashPassword(PASSWORD);
   owner = userDb.createUser('matrix_owner', hash, 'owner') as User;
-  member = userDb.createUser('matrix_member@example.test', hash, 'user') as User;
+  member = userDb.createUser('matrix_member@example.test', hash, 'admin') as User;
   ownerPasskey = await enroll(owner);
   memberPasskey = await enroll(member);
   memberApiKey = String(apiKeysDb.createApiKey(member.id, 'matrix-key').apiKey);

@@ -5,12 +5,14 @@ import {
   hashMessageAuthorContent,
   canAccessProject,
   findOwningProject,
+  getConnection,
   isProjectMembershipEnforced,
   messageAuthorsDb,
   messageCoordinationDb,
   participantsDb,
   projectsDb,
   responseTurnMetricsDb,
+  revokeSharesBySession,
   sessionsDb,
   type MessageAuthorRow,
   type MessageCoordinationRow,
@@ -324,6 +326,27 @@ function stampMessageAuthors(sessionId: string, messages: NormalizedMessage[], l
     return;
   }
   applyMessageAuthorAttribution(messages, authorRows);
+}
+
+/**
+ * Fail-closed variant of stampMessageAuthors for public share snapshots
+ * (ADR-196). The best-effort stamper swallows an author-table failure, which
+ * would make every human row look unattributed; a share must instead refuse.
+ * Mutates `messages` in place, so pass detached copies.
+ *
+ * @throws AppError 409 AUTHOR_UNVERIFIABLE when the author rows cannot be read.
+ */
+export function stampMessageAuthorsStrict(sessionId: string, messages: NormalizedMessage[]): void {
+  let authorRows: MessageAuthorRow[];
+  try {
+    authorRows = messageAuthorsDb.listBySession(sessionId);
+  } catch {
+    throw new AppError('Message authorship could not be verified.', {
+      code: 'AUTHOR_UNVERIFIABLE',
+      statusCode: 409,
+    });
+  }
+  if (authorRows.length > 0) applyMessageAuthorAttribution(messages, authorRows);
 }
 
 /** Re-attaches immutable turn policy without modifying provider transcripts. */
@@ -884,6 +907,8 @@ export const sessionsService = {
     if (!options.force) {
       options.assertCurrent?.(true);
       sessionsDb.updateSessionIsArchived(sessionId, true);
+      // ADR-196: an archived session keeps no public share alive.
+      revokeSharesBySession(getConnection(), sessionId, 'session_archived');
       return {
         sessionId,
         action: 'archived',
@@ -908,6 +933,7 @@ export const sessionsService = {
     // settlement of that same operation. A revocation here suppresses the HTTP
     // result at the route boundary; it must not leave a dangling DB row.
     if (!removedFromDisk) options.assertCurrent?.(true);
+    revokeSharesBySession(getConnection(), sessionId, 'session_deleted');
     const deleted = sessionsDb.deleteSessionById(sessionId);
     if (!deleted) {
       throw new AppError(`Session "${sessionId}" was not found.`, {

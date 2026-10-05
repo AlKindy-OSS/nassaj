@@ -13,7 +13,11 @@ type AuthRequest = Request & { user: ReviewAuthUser & { authenticationKind: stri
   deviceSessionId?: string; slotId?: string; deviceGeneration?: number };
   authenticatedPrincipal: Readonly<{ userId: number }>; assertCurrentIdentity: () => boolean;
   devicePrincipal?: NonNullable<ReturnType<typeof deviceAccountSessionsDb.resolve>>['principal'] };
-type Options = { db: Database; jwtSecret: string; deviceEnabled: boolean; accessSeams?: ReviewAccessSeams; userRateLimit: RequestHandler };
+/**
+ * `deviceEnabled` is read per request: the composition root passes
+ * multiAccountSwitchingEnabled, the single flag predicate (ADR-163 amendment 1, D1/M4).
+ */
+type Options = { db: Database; jwtSecret: string; deviceEnabled: () => boolean; accessSeams?: ReviewAccessSeams; userRateLimit: RequestHandler };
 
 function reject(res: Response, status = 401, code = 'authentication_required'): void {
   res.status(status).set('Cache-Control', 'no-store').json({ error: { code } });
@@ -86,7 +90,7 @@ export function createAgentReviewAuthComposition(options: Options): express.Rout
       if (getConnection() !== db) { reject(res, 503, 'review_unavailable'); return; }
       const credential = carriers(req); if (!credential) { reject(res, 400, 'ambiguous_authentication'); return; }
       const valid = credential.bearer ? authenticateBearer(req, credential.bearer, repository, jwtSecret)
-        : !!(credential.device && deviceEnabled && authenticateDevice(req, credential.device, repository));
+        : !!(credential.device && deviceEnabled() === true && authenticateDevice(req, credential.device, repository));
       if (!valid) { reject(res); return; }
       if (req.devicePrincipal && !enforceCookieMutationGuard(req, res, jwtSecret)) return;
       const captured = authority.capture(req, match.sessionId, req.method === 'GET' ? 'read' : 'write');

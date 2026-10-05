@@ -157,45 +157,26 @@ export class AccountWalletService {
     }
   }
 
-  /** Rotates a forced credential and establishes a normal safe wallet identity. */
+  /**
+   * Rotates a forced credential, then issues a NEW device session (ADR-163
+   * amendment 1, C1 / B-1529): the device the browser presented is revoked with
+   * all of its slots and its live connections are closed. Nothing merges.
+   */
   completeForcedPasswordRotation(
     userId: number,
     passwordHash: string,
     changedAt: number,
     existingDeviceSecret: string | null,
     ttlMs: number,
-  ): { secret: string; wallet: AccountWalletSnapshot } {
+  ): { secret: string; expiresAt: number; wallet: AccountWalletSnapshot } {
     this.rotatePassword(userId, passwordHash, changedAt, null, false);
-    if (existingDeviceSecret) {
-      const existing = databaseModule.deviceAccountSessionsDb.resolve(existingDeviceSecret);
-      if (existing) {
-        try {
-          const added = databaseModule.deviceAccountSessionsDb.add(
-            existing.principal, userId, changedAt, existing.wallet.generation,
-          );
-          connectionRevocationRegistry.revokeOlderGenerations(
-            existing.principal.deviceSessionId, added.generation,
-          );
-          const slotId = databaseModule.deviceAccountSessionsDb.slotIdForUser(
-            existing.principal.deviceSessionId, userId,
-          );
-          if (slotId) {
-            const principal = { ...existing.principal, generation: added.generation };
-            const wallet = databaseModule.deviceAccountSessionsDb.switch(
-              principal, slotId, added.generation,
-            );
-            connectionRevocationRegistry.revokeOlderGenerations(
-              principal.deviceSessionId, wallet.generation,
-            );
-            return { secret: existingDeviceSecret, wallet };
-          }
-        } catch (error) {
-          if (!(error instanceof databaseModule.WalletConflictError)) throw error;
-        }
-      }
+    const issued = databaseModule.deviceAccountSessionsDb.rotateDevice(
+      existingDeviceSecret, userId, ttlMs,
+    );
+    if (issued.revokedDeviceSessionId) {
+      connectionRevocationRegistry.revokeDevice(issued.revokedDeviceSessionId);
     }
-    const created = databaseModule.deviceAccountSessionsDb.create(userId, ttlMs);
-    return { secret: created.secret, wallet: created.wallet };
+    return { secret: issued.secret, expiresAt: issued.expiresAt, wallet: issued.wallet };
   }
 
   /** Closes every transport on devices changed by permanent user deletion. */

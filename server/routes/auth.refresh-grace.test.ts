@@ -89,7 +89,7 @@ mock.module(url('../modules/database/index.js'), {
     userDb: {
       getUserById: () => (userResolvable ? row : undefined),
       getRawById: () => row,
-      getUserByUsername: () => undefined,
+      getUserByLoginIdentifier: () => undefined,
       isAuthorizationPrincipalCurrent: (userId: number, generation: number) =>
         userResolvable && row.id === userId && row.authorization_generation === generation,
       updateLastLogin: () => {},

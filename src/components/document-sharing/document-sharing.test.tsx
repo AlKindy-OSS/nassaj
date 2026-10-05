@@ -96,6 +96,12 @@ describe('member login and return', () => {
     expect(screen.getByTestId('location').textContent).toBe(`/share/members/${id}`);
     expect(fetchMock.mock.calls[0][1].headers).toEqual({ Authorization: 'Bearer jwt' });
   });
+  it('leaves the login page after a device-cookie sign-in that carries no bearer token', async () => {
+    auth.user = { id: 2, role: 'user' }; auth.token = null;
+    openPage('/login');
+    expect(await screen.findByText('HOME')).toBeTruthy();
+    expect(screen.queryByText('EXISTING_LOGIN_FORM')).toBeNull();
+  });
   it('allows changing an unauthorized account without an automatic login loop', async () => {
     auth.user = { id: 3, role: 'user' }; auth.token = 'jwt';
     auth.logout.mockImplementation(() => { auth.user = null; auth.token = null; });

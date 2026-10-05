@@ -13,6 +13,7 @@ import {
 import { applyOutcomeDelta, type OutcomeState } from '../stores/sessionCompletionStore';
 import { consumeOutboxIngressVerdict } from '../components/chat/utils/messageOutbox';
 import {
+  consumeExpectedWalletRevocation,
   getIdentityBarrierSnapshot,
   isIdentityRevocationClose,
   reconcileRevokedIdentity,
@@ -604,6 +605,17 @@ const useWebSocketProviderState = (): WebSocketContextType => {
         setIsConnected(false);
         wsRef.current = null;
         if (isIdentityRevocationClose(event.code)) {
+          if (consumeExpectedWalletRevocation()) {
+            // B-1531: this device's own same-identity wallet edit bumped the
+            // generation. Redial with the new cookie; a second 4401 is not
+            // expected and takes the identity path below.
+            setWsStatus('reconnecting');
+            reconnectTimeoutRef.current = setTimeout(() => {
+              if (unmountedRef.current) return;
+              connect();
+            }, calcReconnectDelay(0));
+            return;
+          }
           unmountedRef.current = true;
           setWsStatus('disconnected');
           reconcileRevokedIdentity();

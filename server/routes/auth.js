@@ -21,12 +21,20 @@ import {
   mintMutationCsrfToken,
   mutationIdentityBinding,
 } from '../modules/account-wallet/request-csrf.js';
+import {
+  clearPasswordChangeCookie,
+  csrfFor as signWalletCsrf,
+  deviceCookieOptions,
+  issueDeviceSession,
+  renewDeviceCookie,
+} from '../modules/account-wallet/issue-device-session.js';
 import * as databaseModule from '../modules/database/index.js';
 import * as authMiddleware from '../middleware/auth.js';
 import { createRateLimiter } from '../middleware/rate-limit.js';
 import { verifyPassword, needsRehash, hashPassword } from '../services/password.service.js';
 import { createInvite, acceptInvite, InviteError } from '../services/invite.service.js';
 import { clientIp } from '../utils/client-ip.js';
+import { isTrustedOrigin, multiAccountSwitchingEnabled } from '../utils/trusted-origin.js';
 import { userConfigDir } from '../services/isolation/provision-user-dirs.js';
 import {
   clearConnectorOwnerAuthentication,
@@ -55,6 +63,7 @@ const USERNAME_PATTERN = /^[a-zA-Z0-9_]{3,32}$/;
 const { userDb, auditLogDb, invitesDb } = databaseModule;
 const deviceAccountSessionsDb = databaseModule.deviceAccountSessionsDb;
 const DEVICE_COOKIE = databaseModule.DEVICE_COOKIE ?? '__Host-nassaj_device';
+const DEVICE_IDLE_TTL_MS = databaseModule.DEVICE_IDLE_TTL_MS ?? 7 * 24 * 60 * 60 * 1000;
 const WalletConflictError = databaseModule.WalletConflictError;
 const {
   generateToken,
@@ -165,11 +174,11 @@ const avatarUpload = multer({
 }).single('avatar');
 
 const router = express.Router();
-const multiAccountEnabled = () => process.env.MULTI_ACCOUNT_SWITCHING === 'true';
 const SLOT_ID_PATTERN = /^slot_[A-Za-z0-9_-]{16,64}$/;
-const LOCAL_EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const LOGIN_IDENTIFIER_MAX_LENGTH = 320;
+const CONTROL_CHARACTER = /\p{Cc}/u;
 const validGeneration = (value) => Number.isSafeInteger(value) && value > 0;
-const csrfFor = (sessionId, generation, action, expiry) => `${expiry}.${crypto.createHmac('sha256', JWT_SECRET).update(`${sessionId}:${generation}:${action}:${expiry}`).digest('base64url')}`;
+const csrfFor = (sessionId, generation, action, expiry) => signWalletCsrf(JWT_SECRET, sessionId, generation, action, expiry);
 const csrfAction = (action, slotId) => {
   if (action === 'remove') {
     return typeof slotId === 'string' && SLOT_ID_PATTERN.test(slotId)
@@ -177,11 +186,6 @@ const csrfAction = (action, slotId) => {
       : null;
   }
   return new Set(['switch', 'add', 'logout', 'logout_all']).has(action) ? action : null;
-};
-const trustedOrigin = (req) => {
-  const origin = req.get('origin');
-  const expected = process.env.APP_ORIGIN || `${req.protocol}://${req.get('host')}`;
-  return Boolean(origin && origin === expected);
 };
 const walletCsrf = (action) => (req, res, next) => {
   const canonicalAction = csrfAction(action, req.params?.slotId);
@@ -193,7 +197,7 @@ const walletCsrf = (action) => (req, res, next) => {
     : '';
   const supplied = Buffer.from(signature || '');
   const wanted = Buffer.from(expected);
-  if (!trustedOrigin(req) || numericExpiry < Date.now() || !signature
+  if (!isTrustedOrigin(req) || numericExpiry < Date.now() || !signature
       || supplied.length !== wanted.length || !crypto.timingSafeEqual(supplied, wanted)) {
     return res.status(403).json({ error: 'Request rejected', code: 'csrf_or_origin_rejected' });
   }
@@ -203,13 +207,14 @@ const walletMutationGuard = (req, res, next) => req.devicePrincipal
   ? walletCsrf('logout')(req, res, next)
   : next();
 const walletAuth = (req, res, next) => {
-  if (!multiAccountEnabled()) return res.status(404).json({ error: 'Not found' });
+  if (!multiAccountSwitchingEnabled()) return res.status(404).json({ error: 'Not found' });
   const secret = readCookie(req, DEVICE_COOKIE);
   if (!secret || req.get('authorization')) return res.status(req.get('authorization') ? 400 : 401).json({ error: 'Authentication rejected', code: req.get('authorization') ? 'ambiguous_authentication' : 'device_session_invalid' });
   const resolved = deviceAccountSessionsDb.resolve(secret);
   if (!resolved) return res.status(401).json({ error: 'Device session invalid', code: 'device_session_invalid' });
   req.wallet = resolved.wallet;
   req.devicePrincipal = resolved.principal;
+  renewDeviceCookie(res, secret, resolved.principal.deviceSessionId);
   next();
 };
 const walletError = (res, error, principal) => {
@@ -244,9 +249,34 @@ const accountWalletService = new AccountWalletService({
   attestationFresh: (userId) => ssoAttestationFresh(userId),
 });
 
+/**
+ * Parses a local login identifier (username or invite email; ADR-163 amendment
+ * 1, D2). `invalid_request` (400) is reserved for a wrong type or size; an
+ * unusable shape is `invalid_shape`, which callers answer with the decoy
+ * verification and the same 401 as an unknown account.
+ * @returns {{ normalized: string } | { error: 'invalid_request' | 'invalid_shape' }}
+ */
+const parseLoginIdentifier = (value) => {
+  if (typeof value !== 'string' || value.length > LOGIN_IDENTIFIER_MAX_LENGTH) {
+    return { error: 'invalid_request' };
+  }
+  const normalized = value.trim().toLowerCase();
+  return !normalized || CONTROL_CHARACTER.test(value) ? { error: 'invalid_shape' } : { normalized };
+};
+/**
+ * The add-account identifier: `identifier`, or the one-release `email` alias.
+ * Both present and different is a conflict (400); identical values are accepted.
+ */
+const addAccountIdentifier = (body) => {
+  const { identifier, email } = body ?? {};
+  const conflict = identifier !== undefined && email !== undefined && identifier !== email;
+  return { conflict, value: identifier ?? email };
+};
+/** Rate-limit bucket for the candidate: the normalized identifier, before shape checks. */
 const addCandidateKey = (req) => {
-  const identifier = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : '';
-  return crypto.createHmac('sha256', JWT_SECRET).update(identifier).digest('hex');
+  const { value } = addAccountIdentifier(req.body);
+  const candidate = typeof value === 'string' ? value.trim().toLowerCase() : '';
+  return crypto.createHmac('sha256', JWT_SECRET).update(candidate).digest('hex');
 };
 const addLimit = (max, key) => createRateLimiter({
   windowMs: 15 * 60_000,
@@ -301,18 +331,28 @@ router.post('/accounts/switch', walletAuth, walletCsrf('switch'), (req, res) => 
     return walletError(res, error, req.devicePrincipal);
   }
 });
+const addAccountFailed = (res) => res.status(401).json({
+  error: 'Account could not be added', code: 'add_account_failed',
+});
 router.post('/accounts/add', walletAuth, ...addAccountLimiters, walletCsrf('add'), async (req, res) => {
-  const { email, password, expectedGeneration } = req.body ?? {};
-  if (typeof email !== 'string' || email.length > 320 || !LOCAL_EMAIL_PATTERN.test(email.trim())
+  const { password, expectedGeneration } = req.body ?? {};
+  const field = addAccountIdentifier(req.body);
+  const identifier = field.conflict ? { error: 'invalid_request' } : parseLoginIdentifier(field.value);
+  if (identifier.error === 'invalid_request'
       || typeof password !== 'string' || password.length < 1 || password.length > 1024
       || !validGeneration(expectedGeneration)) {
-    return res.status(400).json({ error: 'Invalid request' });
+    return res.status(400).json({ error: 'Invalid request', code: 'invalid_request' });
+  }
+  if (identifier.error) {
+    // Same verification cost and answer as an unknown account (I-ENUM).
+    await verifyPassword(DECOY_PASSWORD_HASH, password);
+    return addAccountFailed(res);
   }
   try {
     const wallet = await accountWalletService.addLocal(
-      req.devicePrincipal, email, password, expectedGeneration,
+      req.devicePrincipal, identifier.normalized, password, expectedGeneration,
     );
-    if (!wallet) return res.status(401).json({ error: 'Account could not be added', code: 'add_account_failed' });
+    if (!wallet) return addAccountFailed(res);
     return res.status(201).set('Cache-Control', 'no-store').json(wallet);
   } catch (error) {
     if (error instanceof SsoRequiredError) {
@@ -368,7 +408,7 @@ router.get('/status', async (req, res) => {
       isAuthenticated: false,
       ssoState: state,
       ssoLoginAvailable: state === 'active',
-      deviceAccountSessionsEnabled: multiAccountEnabled(),
+      deviceAccountSessionsEnabled: multiAccountSwitchingEnabled(),
     });
   } catch (error) {
     console.error('Auth status error:', error);
@@ -380,9 +420,35 @@ router.get('/status', async (req, res) => {
 // Login (public, rate-limited)
 // ---------------------------------------------------------------------------
 
+/**
+ * Wallet-mode password login (ADR-163 amendment 1, D3/C1): the device session
+ * is issued FIRST; only a successful issuance records the connector owner
+ * session (B-1407), the last login and the login_success audit.
+ */
+function finishWalletPasswordLogin(req, res, user) {
+  const ipAddress = clientIp(req);
+  const userAgent = req.headers['user-agent'] ?? null;
+  const issued = issueDeviceSession(req, res, user, JWT_SECRET);
+  if (!issued.ok) {
+    auditLogDb.record('login_failure', {
+      userId: user.id, metadata: { reason: issued.code }, ipAddress, userAgent,
+    });
+    return res.status(401).json({ error: 'Invalid username or password' });
+  }
+  recordConnectorOwnerAuthentication(res, user.id, 'password');
+  userDb.updateLastLogin(user.id);
+  auditLogDb.record('login_success', { userId: user.id, ipAddress, userAgent });
+  return res.set('Cache-Control', 'no-store').json({
+    success: true,
+    user: { id: user.id, username: user.username, role: user.role },
+    wallet: issued.wallet,
+    csrfToken: issued.csrfToken,
+  });
+}
+
 router.post('/login', authLimiter, async (req, res) => {
   try {
-    if (multiAccountEnabled() && !trustedOrigin(req)) {
+    if (multiAccountSwitchingEnabled() && !isTrustedOrigin(req)) {
       return res.status(403).set('Cache-Control', 'no-store').json({
         error: 'Request rejected', code: 'origin_rejected',
       });
@@ -396,7 +462,13 @@ router.post('/login', authLimiter, async (req, res) => {
     const ip = clientIp(req);
     const userAgent = req.headers['user-agent'] ?? null;
 
-    const user = userDb.getUserByUsername(username);
+    // Username or invite email, case-insensitive (ADR-163 amendment 1, D2). An
+    // unusable shape takes the unknown-account decoy path below.
+    const identifier = parseLoginIdentifier(username);
+    if (identifier.error === 'invalid_request') {
+      return res.status(400).json({ error: 'Username and password are required' });
+    }
+    const user = identifier.normalized ? userDb.getUserByLoginIdentifier(identifier.normalized) : undefined;
     // Always run a verification path; generic error to avoid user enumeration.
     if (!user) {
       // Constant-time defence (B-142): perform a real argon2id verification
@@ -455,23 +527,14 @@ router.post('/login', authLimiter, async (req, res) => {
       }
     }
 
+    if (multiAccountSwitchingEnabled()) return finishWalletPasswordLogin(req, res, user);
+
     const token = generateToken(user);
     res.clearCookie(PASSWORD_CHANGE_COOKIE, SESSION_COOKIE_OPTIONS);
     recordConnectorOwnerAuthentication(res, user.id, 'password');
     userDb.updateLastLogin(user.id);
     auditLogDb.record('login_success', { userId: user.id, ipAddress: ip, userAgent });
 
-    if (multiAccountEnabled()) {
-      const device = deviceAccountSessionsDb.create(user.id, 7 * 24 * 60 * 60 * 1000);
-      const expiry = Date.now() + 900000;
-      res.cookie(DEVICE_COOKIE, device.secret, SESSION_COOKIE_OPTIONS);
-      return res.set('Cache-Control', 'no-store').json({
-        success: true,
-        user: { id: user.id, username: user.username, role: user.role },
-        wallet: device.wallet,
-        csrfToken: csrfFor(device.principal.deviceSessionId, device.principal.generation, 'switch', expiry),
-      });
-    }
     res.json({
       success: true,
       user: { id: user.id, username: user.username, role: user.role },
@@ -588,7 +651,10 @@ router.post('/refresh', graceRefresh, authenticateToken, (req, res) => {
 // Current user / logout
 // ---------------------------------------------------------------------------
 
-router.get('/user', authenticateToken, (req, res) => {
+// B-1533: also answers the single-purpose forced-rotation cookie, so a reload
+// mid-change restores the change screen instead of the login screen. That
+// identity is flagged; every other route still refuses the cookie.
+router.get('/user', authenticatePasswordChange, (req, res) => {
   // Map the DB row to the client contract: the row stores snake_case
   // (avatar_url, must_change_password) but the frontend AuthUser type expects
   // camelCase. Returning the raw row left user.avatarUrl undefined, so the
@@ -610,6 +676,7 @@ router.get('/user', authenticateToken, (req, res) => {
     // the sidebar draws no participant avatars. Counted per request — accounts
     // are added rarely and this is one indexed COUNT.
     isMultiUser: userDb.getActiveUserCount() > 1,
+    ...(req.passwordChangeSession ? { passwordChangeSession: true } : {}),
   });
 });
 
@@ -670,10 +737,34 @@ router.post('/invite/accept', authLimiter, async (req, res) => {
       userAgent: req.headers['user-agent'] ?? null,
     });
   }
+  // B-1534: with switching on, the join answer is a device session like a
+  // password sign-in; refuse an untrusted origin before the invite is consumed.
+  const walletMode = multiAccountSwitchingEnabled();
+  if (walletMode && !isTrustedOrigin(req)) {
+    return res.status(403).set('Cache-Control', 'no-store').json({
+      error: 'Request rejected', code: 'origin_rejected',
+    });
+  }
   try {
     const { token, username, password } = req.body ?? {};
     const user = await acceptInvite({ token, username, password }, clientIp(req));
+    if (walletMode) {
+      const issued = issueDeviceSession(req, res, user, JWT_SECRET);
+      if (!issued.ok) {
+        return res.status(403).set('Cache-Control', 'no-store').json({
+          error: 'Request rejected', code: issued.code,
+        });
+      }
+      return res.set('Cache-Control', 'no-store').json({
+        success: true,
+        user: { id: user.id, username: user.username, role: user.role },
+        wallet: issued.wallet,
+        csrfToken: issued.csrfToken,
+      });
+    }
     const jwtToken = generateToken(user);
+    // W1: a leftover forced-change cookie must not outrank the new Bearer.
+    clearPasswordChangeCookie(res);
     res.json({
       success: true,
       user: { id: user.id, username: user.username, role: user.role },
@@ -985,7 +1076,10 @@ router.patch('/me/password', authenticatePasswordChange, authLimiter, async (req
         ipAddress: clientIp(req),
         userAgent: req.headers['user-agent'] ?? null,
       });
-      return res.status(401).json({ error: 'Current password is incorrect' });
+      // A coded 401: a wrong current password is not a session rejection (B-1533).
+      return res.status(401).json({
+        error: 'Current password is incorrect', code: 'current_password_incorrect',
+      });
     }
 
     const changedAt = Date.now();
@@ -993,19 +1087,17 @@ router.patch('/me/password', authenticatePasswordChange, authLimiter, async (req
     if (req.assertCurrentIdentity?.() === false) {
       return res.status(409).json({ error: 'Identity changed during request', code: 'identity_changed' });
     }
-    let establishedWallet = null;
-    let establishedSecret = null;
-    if (multiAccountEnabled() && req.passwordChangeSession) {
-      const established = accountWalletService.completeForcedPasswordRotation(
+    let established = null;
+    if (multiAccountSwitchingEnabled() && req.passwordChangeSession) {
+      // B-1529: always a new device; the presented one is revoked, never merged into.
+      established = accountWalletService.completeForcedPasswordRotation(
         req.user.id,
         newHash,
         changedAt,
         readCookie(req, DEVICE_COOKIE),
-        7 * 24 * 60 * 60 * 1000,
+        DEVICE_IDLE_TTL_MS,
       );
-      establishedWallet = established.wallet;
-      establishedSecret = established.secret;
-    } else if (multiAccountEnabled()) {
+    } else if (multiAccountSwitchingEnabled()) {
       accountWalletService.rotatePassword(
         req.user.id,
         newHash,
@@ -1030,13 +1122,13 @@ router.patch('/me/password', authenticatePasswordChange, authLimiter, async (req
 
     // Issue a fresh token carrying the new pwd_iat so this device stays signed in.
     const refreshedUser = userDb.getUserById(req.user.id);
-    const token = req.devicePrincipal || establishedWallet ? null : generateToken(refreshedUser);
+    const token = req.devicePrincipal || established ? null : generateToken(refreshedUser);
 
     if (req.passwordChangeSession) {
       res.clearCookie(PASSWORD_CHANGE_COOKIE, SESSION_COOKIE_OPTIONS);
     }
-    if (establishedSecret) {
-      res.cookie(DEVICE_COOKIE, establishedSecret, SESSION_COOKIE_OPTIONS);
+    if (established) {
+      res.cookie(DEVICE_COOKIE, established.secret, deviceCookieOptions(established.expiresAt));
     }
     req.allowIdentityTransitionResponse?.();
 
@@ -1048,7 +1140,7 @@ router.patch('/me/password', authenticatePasswordChange, authLimiter, async (req
     res.set('Cache-Control', 'no-store').json({
       success: true,
       ...(token ? { token } : {}),
-      ...(establishedWallet ? { wallet: establishedWallet } : {}),
+      ...(established ? { wallet: established.wallet } : {}),
     });
   } catch (error) {
     console.error('Password change error:', error?.message);
@@ -1299,7 +1391,7 @@ router.post(
         return res.status(409).json({ error: 'Identity changed during request', code: 'identity_changed' });
       }
       const changedAt = Date.now();
-      if (multiAccountEnabled()) {
+      if (multiAccountSwitchingEnabled()) {
         accountWalletService.rotatePassword(id, tempHash, changedAt, null, true);
       } else {
         userDb.resetPassword(id, tempHash, changedAt);

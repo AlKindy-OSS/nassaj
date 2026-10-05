@@ -19,8 +19,15 @@
  */
 
 import assert from 'node:assert/strict';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import path from 'node:path';
 import test from 'node:test';
 
+import {
+  validateInProcessReadDescriptor,
+  type InProcessReadDescriptor,
+  type InProcessReadResult,
+} from '@/modules/execution-permissions/index.js';
 import { providerQuotaService } from '@/modules/providers/services/usage/provider-quota.service.js';
 
 // ردّ كودكس الحيّ (مقتطعٌ بأمانة: الحقول كلها كما وصلت، والقيم كما هي).
@@ -477,21 +484,82 @@ test('single-flight: أربعة متزامنة ⇒ جلبٌ واحد', async () 
   );
 });
 
-test('permission effect encloses only the live refresh, not cache hits', async () => {
+test('T-1910: each live read is one admitted GET descriptor; cache hits need no lease', async () => {
   providerQuotaService.__resetCache();
-  const { impl } = countingFetch(GLM_LIVE_BODY);
-  let effects = 0;
+  const descriptors: InProcessReadDescriptor[] = [];
   const deps = {
-    fetchImpl: impl,
     credential: 'k',
-    runEffect: async <T>(effect: () => Promise<T>): Promise<T> => {
-      effects += 1;
-      return effect();
+    read: async (descriptor: InProcessReadDescriptor): Promise<InProcessReadResult> => {
+      descriptors.push(descriptor);
+      return { kind: 'response', status: 200, body: JSON.stringify(GLM_LIVE_BODY) };
     },
   };
+  assert.equal((await providerQuotaService.getWindows('glm', 'u1', deps))?.provider, 'glm');
   await providerQuotaService.getWindows('glm', 'u1', deps);
-  await providerQuotaService.getWindows('glm', 'u1', deps);
-  assert.equal(effects, 1);
+  assert.equal(descriptors.length, 1);
+});
+
+test('T-1910: codex, glm and kimi readers send only valid GET descriptors to allowlisted origins', async () => {
+  const home = mkdtempSync(path.join('/var/tmp', 'quota-kimi-home-'));
+  const previousHome = process.env.HOME;
+  try {
+    process.env.HOME = home;
+    const credentials = path.join(home, '.kimi-code', 'credentials');
+    mkdirSync(credentials, { recursive: true });
+    const writeKimi = (secondsLeft: number) => writeFileSync(path.join(credentials, 'kimi-code.json'),
+      JSON.stringify({ access_token: 'kimi-token', expires_at: Math.floor(Date.now() / 1000) + secondsLeft }));
+    const descriptors: InProcessReadDescriptor[] = [];
+    const read = async (descriptor: InProcessReadDescriptor): Promise<InProcessReadResult> => {
+      descriptors.push(validateInProcessReadDescriptor(descriptor));
+      return { kind: 'response', status: 200, body: '{}' };
+    };
+    for (const provider of ['codex', 'glm']) {
+      providerQuotaService.__resetCache();
+      await providerQuotaService.getWindows(provider, 'u1', { credential: 'k', read });
+    }
+    // Kimi refuses a near-expiry token instead of refreshing it: nothing is sent.
+    writeKimi(30);
+    providerQuotaService.__resetCache();
+    await providerQuotaService.getWindows('kimi', null, { read });
+    assert.equal(descriptors.length, 2);
+    writeKimi(3_600);
+    providerQuotaService.__resetCache();
+    await providerQuotaService.getWindows('kimi', null, { read });
+    assert.deepEqual(descriptors.map(descriptor => [descriptor.method, new URL(descriptor.url).origin]), [
+      ['GET', 'https://chatgpt.com'], ['GET', 'https://api.z.ai'], ['GET', 'https://api.kimi.com'],
+    ]);
+  } finally {
+    if (previousHome === undefined) delete process.env.HOME; else process.env.HOME = previousHome;
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('T-1910: a failed or non-2xx in-process read is "unknown", never a number', async () => {
+  for (const result of [
+    { kind: 'failed', reason: 'timeout' }, { kind: 'failed', reason: 'redirect' },
+    { kind: 'response', status: 401, body: '{}' }, { kind: 'response', status: 200, body: '' },
+    { kind: 'response', status: 200, body: 'not json' },
+  ] as InProcessReadResult[]) {
+    providerQuotaService.__resetCache();
+    assert.equal(await providerQuotaService.getWindows('glm', 'u1', { credential: 'k', read: async () => result }), null);
+  }
+  providerQuotaService.__resetCache();
+  await assert.rejects(providerQuotaService.getWindows('glm', 'u1', { credential: 'k' }),
+    /QUOTA_AUTHENTICATED_EFFECT_RUNNER_REQUIRED/);
+});
+
+test('B-1289: a refusal thrown by the admitted read propagates, is not cached, and is not "no source"', async () => {
+  for (const provider of ['codex', 'glm']) {
+    providerQuotaService.__resetCache();
+    const refusal = Object.assign(new Error('EFFECT_SCOPE_FENCED'), { code: 'EFFECT_SCOPE_FENCED' });
+    let calls = 0;
+    const read = async (): Promise<InProcessReadResult> => { calls += 1; throw refusal; };
+    await assert.rejects(providerQuotaService.getWindows(provider, 'u1', { credential: 'k', read }),
+      (error: unknown) => error === refusal, provider);
+    // Not cached: the next request asks the gate again instead of serving a stale null.
+    await assert.rejects(providerQuotaService.getWindows(provider, 'u1', { credential: 'k', read }));
+    assert.equal(calls, 2, provider);
+  }
 });
 
 test('الفشل يُكاش أيضاً: سطحٌ يُركَّب كثيراً لا يُعيد المحاولة كل مرّة', async () => {

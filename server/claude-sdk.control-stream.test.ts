@@ -340,11 +340,17 @@ test('an ordinary turn closes input the moment the result lands (no added latenc
 });
 
 test('ADR-134 handle brackets the Claude SDK effect exactly once', async () => {
-  scriptedMessages = [resultMsg];
+  // The CLI must speak for the session its decision was bound to (T-1910 S2).
+  const boundResult: SdkMessage = { ...resultMsg };
+  scriptedMessages = [boundResult];
   const trace: string[] = [];
+  let bound = false;
   const run = sdk.queryClaudeSDK(PROMPT, {
     cwd: process.cwd(),
     permissionExecution: {
+      // T-1910 S2: a new chat binds its decision to the session before the CLI exists.
+      bindSession: (sid: string) => { trace.push('bind'); bound = true; boundResult.session_id = sid; },
+      isSessionBound: () => bound,
       consume: () => { trace.push('consume'); },
       markStarted: () => { trace.push('started'); },
       settle: (outcome: string) => { trace.push(`settle:${outcome}`); },
@@ -355,7 +361,7 @@ test('ADR-134 handle brackets the Claude SDK effect exactly once', async () => {
   releaseScriptedMessages();
   releaseMessageStream();
   await run;
-  assert.deepEqual(trace, ['consume', 'started', 'settle:succeeded']);
+  assert.deepEqual(trace, ['bind', 'consume', 'started', 'settle:succeeded']);
 });
 
 test('a background agent keeps the channel open past the result, then closes on the grace', async () => {

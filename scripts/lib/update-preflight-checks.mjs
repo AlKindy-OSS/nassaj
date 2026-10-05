@@ -23,6 +23,7 @@ import { compareNassajReleaseVersions, isNassajReleaseVersion } from '../../shar
 import { selectLatestAnnotatedReleaseTag } from '../../server/services/git-tag-release-discovery.js';
 import { normalizeGitHubRepositoryIdentity, resolveReleaseSource } from '../../server/services/release-source-config.js';
 import { releaseGitEnvironment, resolveGovernedSshCommand } from '../../server/services/source-updater.js';
+import { resolveDatabaseFilePath } from '../../server/modules/database/database-path.js';
 
 import { supportsAtomicExchange } from './atomic-exchange-capability.mjs';
 import { classifyDivergence, diffDependencyVersions } from './local-divergence.mjs';
@@ -77,6 +78,7 @@ export const PREFLIGHT_CODES = Object.freeze([
     'pm2_entry',
     'node_env_not_loaded',
     'node_overlay_invalid',
+    'migration_backup_directory_insecure',
     'stale_restart_row',
     'client_generation_archive',
 ]);
@@ -755,6 +757,42 @@ function checkClientGenerationArchive({ readFile, exists, appRoot }) {
         { ar: 'هيّئ الأرشيف المخدوم بإعادة تشغيل المثبّت أو بزرّ التحديث؛ كلاهما يبنيه من dist.', en: 'Prepare the served archive by re-running the installer or the update button; both build it from dist.', command: 'node scripts/install-node.mjs --node <name> --yes' });
 }
 
+function defaultLstatPath(target) {
+    try { return fs.lstatSync(target); } catch { return null; }
+}
+
+/**
+ * `migration_backup_directory_insecure` (B-1146): the next server boot refuses to
+ * run a rebuild migration when `migration-backups` beside the database is not a
+ * real directory owned by the service user with mode 0700, and an update that
+ * activated first then crashed and rolled back. Checked here, read-only, so the
+ * update refuses BEFORE activation. An absent directory is fine: the migration
+ * creates it 0700. Never auto-fixed: the mode is the owner's to change.
+ */
+function checkMigrationBackupDirectory({ env, lstatPath = defaultLstatPath, realpath = fs.realpathSync, euid }) {
+    const code = 'migration_backup_directory_insecure';
+    let directory;
+    try {
+        directory = path.join(realpath(path.dirname(path.resolve(resolveDatabaseFilePath(env)))), 'migration-backups');
+    } catch {
+        return clear(code, { ar: 'مجلد قاعدة البيانات غير موجود بعد، فلا نسخ ترحيل سابقة.', en: 'The database directory does not exist yet, so there are no migration backups.' });
+    }
+    const stat = lstatPath(directory);
+    if (!stat) {
+        return clear(code, { ar: 'لا مجلد migration-backups بعد؛ يُنشأ بصلاحية 0700 عند أول نسخة.', en: 'No migration-backups directory yet; it is created 0700 on first use.' });
+    }
+    const mode = stat.mode & 0o777;
+    const ownerOk = euid < 0 || stat.uid === euid;
+    if (!stat.isSymbolicLink() && stat.isDirectory() && ownerOk && mode === 0o700) {
+        return clear(code, { ar: 'مجلد migration-backups بصلاحية 0700 ومالك الخدمة.', en: 'migration-backups is mode 0700 and owned by the service user.' });
+    }
+    const shape = stat.isSymbolicLink() ? 'symlink' : !stat.isDirectory() ? 'not a directory'
+        : !ownerOk ? `owner uid ${stat.uid}` : `mode ${mode.toString(8).padStart(4, '0')}`;
+    return blocker(code,
+        { ar: `مجلد ${directory} غير آمن (${shape})، فيرفض الإقلاع الجديد ترحيل إعادة البناء ويتراجع التحديث.`, en: `${directory} is not secure (${shape}), so the new boot would refuse the rebuild migration and the update would roll back.` },
+        { ar: 'اجعله مجلداً حقيقياً يملكه مستخدم الخدمة بصلاحية 0700، ثم أعد الفحص.', en: 'Make it a real directory owned by the service user with mode 0700, then re-run the check.', command: `chmod 700 ${directory}` });
+}
+
 /** Parse a `KEY=value` env file's text into a plain object (no process.env mutation). */
 export function parseEnvText(text) {
     const out = {};
@@ -1011,6 +1049,7 @@ export async function runUpdatePreflightChecks({
     installedVersion = null,
     readFile = defaultReadFile,
     statPath = defaultStatPath,
+    lstatPath = defaultLstatPath,
     euid = (typeof process.geteuid === 'function' ? process.geteuid() : -1),
     exists = isPresent,
 } = {}) {
@@ -1088,6 +1127,7 @@ export async function runUpdatePreflightChecks({
     checks.set('node_env_not_loaded', checkNodeEnvLoaded({ configEnv, liveEnv }));
 
     checks.set('node_overlay_invalid', checkNodeOverlayConfig({ readFile, appRoot, statPath, euid }));
+    checks.set('migration_backup_directory_insecure', checkMigrationBackupDirectory({ env, lstatPath, euid }));
 
     checks.set('stale_restart_row', checkStaleRestartRow({
         rows: listQueuedSafeRestarts(), isJobLive: isSourceUpdateJobLive,

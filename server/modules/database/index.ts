@@ -49,6 +49,13 @@ export {
 } from '@/modules/database/repositories/engine-restamp-intent.db.js';
 export type { EngineRestampIntent } from '@/modules/database/repositories/engine-restamp-intent.db.js';
 export { auditLogDb } from '@/modules/database/repositories/audit-log.js';
+export {
+    createSessionSharesStore,
+    migrateSessionShares,
+    revokeSharesByProject,
+    revokeSharesBySession,
+    revokeSharesByUser,
+} from '@/modules/database/session-shares.js';
 export { invitesDb } from '@/modules/database/repositories/invites.js';
 export { credentialsDb } from '@/modules/database/repositories/credentials.js';
 export { connectorsDb } from '@/modules/database/repositories/connectors.db.js';
@@ -231,7 +238,10 @@ export type { ClosedSessionRow } from '@/modules/database/repositories/closed-se
 export { uiPreferencesDb } from '@/modules/database/repositories/ui-preferences.js';
 export type { UiPreferences } from '@/modules/database/repositories/ui-preferences.js';
 export { userDb } from '@/modules/database/repositories/users.js';
-export { deviceAccountSessionsDb, DEVICE_COOKIE, MAX_ACCOUNT_SLOTS, WalletConflictError } from '@/modules/database/repositories/device-account-sessions.js';
+export {
+  deviceAccountSessionsDb, DEVICE_ABSOLUTE_TTL_MS, DEVICE_COOKIE, DEVICE_IDLE_TTL_MS, MAX_ACCOUNT_SLOTS,
+  WalletConflictError,
+} from '@/modules/database/repositories/device-account-sessions.js';
 export type { AccountWalletSnapshot, DevicePrincipal } from '@/modules/database/repositories/device-account-sessions.js';
 export type { UserRole } from '@/modules/database/repositories/users.js';
 export {
@@ -246,6 +256,7 @@ export {
   listPermissionEffectFences,
   markPermissionEffectStarted,
   attachPermissionEffectChild,
+  bindPermissionDecisionSession,
   permissionUserProviderPurposeKey,
   resolvePermissionEffectScope,
   PermissionStateConflictError,

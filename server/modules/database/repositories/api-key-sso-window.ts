@@ -140,12 +140,21 @@ export function apiKeySsoAttestationClause(db: Database, nowMs: number = Date.no
   };
 }
 
+/**
+ * B-464: only these roles may hold a usable API key. The owner's CURRENT role is
+ * checked on every use, so keys minted by a member before the creation gate, or
+ * held by a since-demoted admin, stop authenticating. SQL literal on purpose
+ * (constant, no user input) so every key query shares one clause.
+ */
+export const API_KEY_ALLOWED_ROLES = Object.freeze(['owner', 'admin'] as const);
+export const API_KEY_ROLE_SQL = `u.role IN (${API_KEY_ALLOWED_ROLES.map((role) => `'${role}'`).join(', ')})`;
+
 /** Why an exact API key credential is or is not usable right now. */
 export type ApiKeyCredentialState = 'current' | 'invalid' | 'sso_attestation_expired';
 
 /**
  * Revalidates one exact key row (`api-key:<id>`) and its owning account:
- * key active, account active, and the SSO window. `authorizationGeneration`,
+ * key active, account active, owner/admin role (B-464), and the SSO window. `authorizationGeneration`,
  * when given, must also match. Shared by every launch-time and in-flight check
  * so they cannot drift (T-1946 review M3).
  */
@@ -166,7 +175,7 @@ export function apiKeyCredentialState(db: Database, input: Readonly<{
   const row = db.prepare(`SELECT CASE WHEN ${clause.sql} THEN 1 ELSE 0 END AS attested
     FROM api_keys ak JOIN users u ON u.id = ak.user_id
     WHERE ak.id = ? AND ak.user_id = ? AND ak.is_active = 1
-      AND u.is_active = 1 AND u.status = 'active' ${generationSql}`)
+      AND u.is_active = 1 AND u.status = 'active' AND ${API_KEY_ROLE_SQL} ${generationSql}`)
     .get(...clause.params, apiKeyId, userId,
       ...(authorizationGeneration === undefined ? [] : [authorizationGeneration])) as
     { attested: number } | undefined;

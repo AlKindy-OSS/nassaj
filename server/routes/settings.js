@@ -515,8 +515,12 @@ router.get('/api-keys', async (req, res) => {
   }
 });
 
-// Create a new API key
-router.post('/api-keys', async (req, res) => {
+// Create a new API key.
+// B-464: an API key is a durable credential that authenticates agent/external
+// API calls (which may run with bypassPermissions), so minting one is limited to
+// owner/admin. Members keep list/revoke/toggle over their own keys only (every
+// handler below is scoped by req.user.id).
+router.post('/api-keys', requireRole('owner', 'admin'), async (req, res) => {
   try {
     const { keyName } = req.body;
 
@@ -564,6 +568,19 @@ router.patch('/api-keys/:keyId/toggle', async (req, res) => {
 
     if (typeof isActive !== 'boolean') {
       return res.status(400).json({ error: 'isActive must be a boolean' });
+    }
+
+    // B-464: disabling stays open to every key holder; re-enabling a key grants
+    // a durable credential again, so it is owner/admin only (same rule as
+    // creation). A member's legacy key can be switched off but never back on.
+    if (isActive && !['owner', 'admin'].includes(req.user?.role)) {
+      auditLogDb.record('insufficient_role', {
+        userId: req.user?.id ?? null,
+        metadata: { required: ['owner', 'admin'], actual: req.user?.role ?? null, action: 'api_key_enable' },
+        ipAddress: req.ip ?? null,
+        userAgent: req.headers['user-agent'] ?? null,
+      });
+      return res.status(403).json({ error: 'Insufficient permissions' });
     }
 
     const success = apiKeysDb.toggleApiKey(req.user.id, parseInt(keyId), isActive);

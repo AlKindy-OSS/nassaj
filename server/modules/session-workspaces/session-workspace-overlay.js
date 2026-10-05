@@ -6,6 +6,7 @@ import { spawnSync } from 'node:child_process';
 const OVERLAY_SCHEMA = 1;
 const sleepBuffer = new Int32Array(new SharedArrayBuffer(4));
 const DEFAULT_REAP_AGE_MS = 24 * 60 * 60_000;
+const DEFAULT_REAP_BATCH = 20;
 const CANONICAL_OVERLAY_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
 function runGit(cwd, args, { allowFailure = false, encoding = 'utf8' } = {}) {
@@ -102,16 +103,15 @@ function withStateLock(root, operation, timeoutMs = 15_000) {
   while (true) {
     try {
       fs.mkdirSync(lock);
-      fs.writeFileSync(path.join(lock, 'owner.json'), JSON.stringify({ pid: process.pid, at: Date.now() }));
+      fs.writeFileSync(path.join(lock, 'owner.json'), JSON.stringify({
+        pid: process.pid, at: Date.now(), startTicks: processStartTicks(process.pid), bootId: currentBootId(),
+      }));
       break;
     } catch (error) {
       if (error.code !== 'EEXIST' || Date.now() >= deadline) {
         throw new Error('session overlay lock timeout');
       }
-      try {
-        const owner = JSON.parse(fs.readFileSync(path.join(lock, 'owner.json'), 'utf8'));
-        if (Date.now() - owner.at > timeoutMs * 2) fs.rmSync(lock, { recursive: true, force: true });
-      } catch {}
+      if (staleLockIsAbandoned(lock, timeoutMs * 2)) fs.rmSync(lock, { recursive: true, force: true });
       Atomics.wait(sleepBuffer, 0, 0, 20);
     }
   }
@@ -119,6 +119,71 @@ function withStateLock(root, operation, timeoutMs = 15_000) {
     return operation();
   } finally {
     fs.rmSync(lock, { recursive: true, force: true });
+  }
+}
+
+/** Field 22 of /proc/<pid>/stat (start time in clock ticks), or null when unreadable. */
+function processStartTicks(pid, procRoot = '/proc') {
+  try {
+    const stat = fs.readFileSync(path.join(procRoot, String(pid), 'stat'), 'utf8');
+    const fields = stat.slice(stat.lastIndexOf(')') + 2).split(' ');
+    return /^\d+$/.test(fields[19] ?? '') ? fields[19] : null;
+  } catch {
+    return null;
+  }
+}
+
+/** This boot's id, or null when unreadable. */
+function currentBootId(procRoot = '/proc') {
+  try {
+    return fs.readFileSync(path.join(procRoot, 'sys', 'kernel', 'random', 'boot_id'), 'utf8').trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+/** Last resort: no overlay state operation legitimately holds the lock this long. */
+const STATE_LOCK_MAX_AGE_MS = 10 * 60_000;
+
+/**
+ * True only when the recorded owner provably no longer holds the lock: the pid is
+ * gone, it is this very process (the lock is synchronous and not re-entrant, so
+ * finding our own pid means we leaked it), the machine rebooted (boot_id differs),
+ * or the pid was reused (its start time differs). A live, matching or unprobeable
+ * owner is alive.
+ */
+function lockOwnerIsGone(owner, { procRoot } = {}) {
+  if (!Number.isSafeInteger(owner.pid) || owner.pid <= 0) return true;
+  if (owner.pid === process.pid) return true;
+  const bootId = currentBootId(procRoot);
+  if (owner.bootId && bootId && owner.bootId !== bootId) return true;
+  try {
+    process.kill(owner.pid, 0);
+  } catch (error) {
+    if (error?.code === 'ESRCH') return true;
+  }
+  const startTicks = processStartTicks(owner.pid, procRoot);
+  return Boolean(owner.startTicks && startTicks && owner.startTicks !== startTicks);
+}
+
+/**
+ * B-914: an old lock may be taken over only when its owner is gone (see
+ * lockOwnerIsGone); age alone used to be enough, so a slow but live owner could
+ * lose its lock mid-operation. A lock with no readable owner file (a crash between
+ * mkdir and the owner write) is abandoned once the dir is old, and any lock older
+ * than STATE_LOCK_MAX_AGE_MS is abandoned as a last resort.
+ */
+function staleLockIsAbandoned(lock, maxAgeMs, options = {}) {
+  let owner = null;
+  try { owner = JSON.parse(fs.readFileSync(path.join(lock, 'owner.json'), 'utf8')); } catch { owner = null; }
+  if (owner && Number.isFinite(owner.at)) {
+    const age = Date.now() - owner.at;
+    return age > STATE_LOCK_MAX_AGE_MS || (age > maxAgeMs && lockOwnerIsGone(owner, options));
+  }
+  try {
+    return Date.now() - fs.lstatSync(lock).mtimeMs > maxAgeMs;
+  } catch {
+    return false;
   }
 }
 
@@ -680,15 +745,69 @@ function removeOverlayRefs(repositoryRoot, overlayId) {
   }
 }
 
-/** Reap stale overlay worktrees, aliases, durable request refs, and manifests. */
-export function reapSessionWorkspaces({ projectPath, maxAgeMs = DEFAULT_REAP_AGE_MS, now = Date.now() }) {
+/** True when any readable process has its working directory inside `directory`. */
+function directoryHasLiveProcess(directory, procRoot = '/proc') {
+  let real;
+  try { real = fs.realpathSync(directory); } catch { return false; }
+  let entries = [];
+  try { entries = fs.readdirSync(procRoot); } catch { return true; }
+  for (const entry of entries) {
+    if (!/^\d+$/.test(entry)) continue;
+    let cwd;
+    try { cwd = fs.readlinkSync(path.join(procRoot, entry, 'cwd')); } catch { continue; }
+    if (cwd === real || cwd.startsWith(`${real}${path.sep}`)) return true;
+  }
+  return false;
+}
+
+/**
+ * Why an unbound overlay must NOT be removed, or null when it is safe (B-914):
+ * the workspace must be the manifest's own worktree, still at its base commit,
+ * with no tracked or untracked change (a `node_modules` symlink is the only
+ * tolerated entry), and no live process working inside it.
+ */
+function overlayRemovalBlocker(instanceRoot, manifest, { procRoot } = {}) {
+  const expected = path.join(instanceRoot, 'workspace');
+  if (manifest.cwd !== expected) return 'cwd_mismatch';
+  if (!fs.existsSync(expected)) return null;
+  const head = runGit(expected, ['rev-parse', '--verify', 'HEAD^{commit}'], { allowFailure: true });
+  if (head.status !== 0) return 'head_unreadable';
+  if (head.stdout.trim() !== manifest.baseOid) return 'head_moved';
+  const status = runGit(expected, ['status', '--porcelain=v1', '-z', '--untracked-files=all'], {
+    allowFailure: true,
+  });
+  if (status.status !== 0) return 'status_unreadable';
+  const changes = status.stdout.split('\0').filter(Boolean).filter((record) => {
+    if (record !== '?? node_modules') return true;
+    try { return !fs.lstatSync(path.join(expected, 'node_modules')).isSymbolicLink(); } catch { return true; }
+  });
+  if (changes.length) return 'dirty_tree';
+  if (directoryHasLiveProcess(expected, procRoot)) return 'in_use';
+  return null;
+}
+
+/**
+ * Reap stale unbound overlay worktrees, aliases, request refs and manifests, and
+ * report what was kept and why. Bounded and fail-closed (B-914): at most
+ * `maxBatch` removals per run, each only after overlayRemovalBlocker passes, and
+ * the run stops at the first removal git refuses, leaving that instance intact.
+ * @returns {{reaped: string[], skipped: Array<{overlayId: string, reason: string}>,
+ *   stopped: null | {overlayId: string, reason: string}}}
+ */
+export function reapSessionWorkspacesReport({
+  projectPath, maxAgeMs = DEFAULT_REAP_AGE_MS, now = Date.now(), maxBatch = DEFAULT_REAP_BATCH, procRoot,
+  lockTimeoutMs = 15_000,
+}) {
   if (!Number.isFinite(maxAgeMs) || maxAgeMs < 0) throw new Error('invalid overlay reap age');
+  if (!Number.isSafeInteger(maxBatch) || maxBatch < 1) throw new Error('invalid overlay reap batch');
   const repository = resolveRepository(projectPath);
   const root = stateRoot(repository);
   return withStateLock(root, () => {
     const instancesRoot = path.join(root, 'instances');
     const reaped = [];
-    for (const entry of fs.existsSync(instancesRoot) ? fs.readdirSync(instancesRoot) : []) {
+    const skipped = [];
+    let stopped = null;
+    for (const entry of fs.existsSync(instancesRoot) ? fs.readdirSync(instancesRoot).sort() : []) {
       const manifest = readJson(manifestFile(root, entry));
       const lastUsed = Date.parse(manifest?.lastUsedAt ?? manifest?.createdAt ?? '');
       // A durable provider session owns its worktree until an explicit session
@@ -696,9 +815,16 @@ export function reapSessionWorkspaces({ projectPath, maxAgeMs = DEFAULT_REAP_AGE
       // that never reached a provider session id.
       if (!manifest || manifest.sessionId || !Number.isFinite(lastUsed)
           || now - lastUsed < maxAgeMs) continue;
-      runGit(repository.repositoryRoot, ['worktree', 'remove', '--force', manifest.cwd], {
-        allowFailure: true,
-      });
+      if (manifest.overlayId !== entry) { skipped.push({ overlayId: entry, reason: 'manifest_mismatch' }); continue; }
+      if (reaped.length >= maxBatch) { skipped.push({ overlayId: entry, reason: 'batch_cap' }); continue; }
+      const blocker = overlayRemovalBlocker(path.join(instancesRoot, entry), manifest, { procRoot });
+      if (blocker) { skipped.push({ overlayId: entry, reason: blocker }); continue; }
+      if (fs.existsSync(manifest.cwd)) {
+        const removed = runGit(repository.repositoryRoot, ['worktree', 'remove', '--force', manifest.cwd], {
+          allowFailure: true,
+        });
+        if (removed.status !== 0) { stopped = { overlayId: entry, reason: 'worktree_remove_failed' }; break; }
+      }
       removeOverlayRefs(repository.repositoryRoot, manifest.overlayId);
       if (manifest.sessionId) {
         fs.rmSync(aliasFile(root, 'session', manifest.sessionId), { force: true });
@@ -712,8 +838,13 @@ export function reapSessionWorkspaces({ projectPath, maxAgeMs = DEFAULT_REAP_AGE
       reaped.push(manifest.overlayId);
     }
     runGit(repository.repositoryRoot, ['worktree', 'prune'], { allowFailure: true });
-    return reaped;
-  });
+    return { reaped, skipped, stopped };
+  }, lockTimeoutMs);
+}
+
+/** Reap stale overlays (see reapSessionWorkspacesReport); returns the reaped ids. */
+export function reapSessionWorkspaces(options) {
+  return reapSessionWorkspacesReport(options).reaped;
 }
 
 /** Map a physical overlay cwd back to the project identity used by auth/history. */

@@ -25,7 +25,7 @@ function isAgentDeepLinkable(agent: string): agent is AgentProvider {
 }
 
 const CATEGORIES = new Set<AgentCategory>([
-  'account', 'permissions', 'engines', 'instructions', 'mcp', 'skills',
+  'account', 'permissions', 'engines', 'instructions', 'mcp', 'skills', 'update',
 ]);
 
 const writeSearch = (url: URL, replace: boolean) => {

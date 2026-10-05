@@ -1,0 +1,150 @@
+/* Public share viewer styles. Same token names/values as src/index.css so the page
+   matches the app, but standalone: the app stylesheet (Tailwind, app chrome) is not
+   loaded here. The viewer follows the visitor's system colour scheme. */
+:root {
+  /* Same family as the app default (ui-font.ts): native Arabic with Latin coverage. */
+  --font-ui: "IBM Plex Sans Arabic", "IBM Plex Sans", "Segoe UI", Tahoma, sans-serif;
+  --background: 0 0% 100%;
+  --foreground: 222.2 84% 4.9%;
+  --card: 0 0% 100%;
+  --primary: 221.2 83.2% 53.3%;
+  --muted: 210 40% 96.1%;
+  --muted-foreground: 215.4 16.3% 46.9%;
+  --border: 214.3 31.8% 91.4%;
+  --warning: 23 83% 31%;
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-6: 1.5rem;
+  --radius: 0.5rem;
+  --measure: 46rem;
+  color-scheme: light dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: 222.2 84% 4.9%;
+    --foreground: 210 40% 98%;
+    --card: 217.2 91.2% 8%;
+    --primary: 217.2 91.2% 59.8%;
+    --muted: 217.2 32.6% 17.5%;
+    --muted-foreground: 215 20.2% 65.1%;
+    --border: 217.2 32.6% 17.5%;
+    --warning: 46 96% 65%;
+  }
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: hsl(var(--background));
+  color: hsl(var(--foreground));
+  font-family: var(--font-ui);
+  font-size: 1rem;
+  line-height: 1.75;
+  overflow-wrap: anywhere;
+}
+
+.share-page {
+  max-inline-size: var(--measure);
+  margin-inline: auto;
+  padding: var(--space-6) var(--space-4);
+}
+
+.share-status { text-align: center; padding-block: var(--space-6); color: hsl(var(--muted-foreground)); }
+
+.share-header { border-block-end: 1px solid hsl(var(--border)); padding-block-end: var(--space-4); }
+.share-header h1 { margin: 0 0 var(--space-2); font-size: 1.5rem; font-weight: 600; line-height: 1.4; }
+.share-meta, .share-note { margin: 0; color: hsl(var(--muted-foreground)); font-size: 0.875rem; }
+
+.share-messages { display: flex; flex-direction: column; gap: var(--space-4); margin-block-start: var(--space-4); }
+
+.share-message {
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius);
+  background: hsl(var(--card));
+}
+.share-message[data-role="user"] { background: hsl(var(--muted)); }
+
+.share-message-head {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-3);
+  color: hsl(var(--muted-foreground));
+  font-size: 0.8125rem;
+}
+.share-author { margin: 0; font-size: inherit; font-weight: 600; color: hsl(var(--foreground)); }
+
+.share-body { margin-block-start: var(--space-2); }
+.share-block > :first-child { margin-block-start: 0; }
+.share-block > :last-child { margin-block-end: 0; }
+.share-block + .share-block { margin-block-start: var(--space-2); }
+.share-body p { margin-block: var(--space-2); }
+.share-body a { color: hsl(var(--primary)); text-decoration: underline; text-underline-offset: 0.2em; }
+.share-body a:focus-visible { outline: 2px solid hsl(var(--primary)); outline-offset: 2px; }
+.share-body pre {
+  overflow-x: auto;
+  padding: var(--space-3);
+  border-radius: var(--radius);
+  background: hsl(var(--muted));
+  direction: ltr;
+  text-align: start;
+  line-height: 1.5;
+}
+.share-body code { font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace; font-size: 0.875em; }
+.share-body table { border-collapse: collapse; display: block; overflow-x: auto; }
+.share-body th, .share-body td { border: 1px solid hsl(var(--border)); padding: var(--space-1) var(--space-3); }
+.share-body blockquote {
+  margin-inline: 0;
+  padding-inline-start: var(--space-3);
+  border-inline-start: 3px solid hsl(var(--border));
+  color: hsl(var(--muted-foreground));
+}
+.share-image-text::before { content: "["; }
+.share-image-text::after { content: "]"; }
+
+.share-chips { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-block: var(--space-2); }
+.share-redacted {
+  display: inline-block;
+  max-inline-size: 100%;
+  padding: var(--space-1) var(--space-3);
+  border: 1px dashed hsl(var(--warning));
+  border-radius: var(--radius);
+  color: hsl(var(--warning));
+  font-size: 0.875rem;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.share-redacted bdi { font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace; font-size: 0.8125rem; }
+
+.share-sr-only {
+  position: absolute;
+  inline-size: 1px;
+  block-size: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.share-status h1 { margin: 0 0 var(--space-2); font-size: 1.25rem; color: hsl(var(--foreground)); }
+.share-retry {
+  margin-block-start: var(--space-3);
+  padding: var(--space-2) var(--space-4);
+  border: 1px solid hsl(var(--primary));
+  border-radius: var(--radius);
+  background: transparent;
+  color: hsl(var(--primary));
+  font: inherit;
+  cursor: pointer;
+}
+.share-retry:focus-visible { outline: 2px solid hsl(var(--primary)); outline-offset: 2px; }
+
+@media (max-width: 480px) {
+  .share-page { padding-inline: var(--space-3); }
+  .share-message { padding-inline: var(--space-3); }
+}

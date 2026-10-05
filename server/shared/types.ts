@@ -377,6 +377,17 @@ export type NormalizedMessage = {
   isLocalCommand?: boolean;
   isLocalCommandStdout?: boolean;
   isCompactSummary?: boolean;
+  /** A skill body Claude injected after a Skill tool call; rendered as a compact expandable line. */
+  isSkillLoad?: boolean;
+  skillName?: string;
+  /**
+   * T-1970 D1: provider-neutral provenance. `isSidechain` marks a row from a
+   * subagent thread (not the main conversation); `isSynthetic` marks a row the
+   * provider generated itself. Informational for the chat UI; consumers that
+   * publish the conversation (share snapshots) must exclude both.
+   */
+  isSidechain?: boolean;
+  isSynthetic?: boolean;
   /**
    * Background-task notification fields (ADR-048, C5). Present on the derived
    * kind:'task_reconcile' correction row (and any kind:'workflow_reconciled'

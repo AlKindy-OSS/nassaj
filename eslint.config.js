@@ -63,6 +63,30 @@ export default tseslint.config(
       "no-useless-escape": "off",
     },
   },
+  // The public share viewer is a sandboxed page isolated from the app (auth token in
+  // localStorage on the same origin). It may import only its own files and packages:
+  // nothing from src/components, contexts, hooks or any other app module.
+  {
+    files: ["src/share/**/*.{ts,tsx}"],
+    rules: {
+      "no-restricted-imports": ["error", {
+        patterns: [
+          { group: ["@/*", "../*", "**/components/**", "**/contexts/**"], message: "src/share must not import app code (isolation boundary)." },
+          { group: ["react-router", "react-router-dom"], message: "src/share must not use the app router." },
+        ],
+      }],
+      "no-restricted-globals": ["error",
+        { name: "localStorage", message: "src/share must not touch storage." },
+        { name: "sessionStorage", message: "src/share must not touch storage." },
+        { name: "WebSocket", message: "src/share must not open sockets." },
+      ],
+      "no-restricted-properties": ["error",
+        { object: "navigator", property: "serviceWorker", message: "src/share must not use service workers." },
+        { object: "window", property: "localStorage", message: "src/share must not touch storage." },
+        { object: "document", property: "cookie", message: "src/share must not touch cookies." },
+      ],
+    },
+  },
   // The application entry must resolve every runtime identifier before packaging.
   {
     files: ["server/index.js"],

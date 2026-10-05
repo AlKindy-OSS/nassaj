@@ -288,6 +288,32 @@ function rpcError(message) {
   return new Error(String(detail));
 }
 
+const PAGINATED_FORK_REQUIRES_EXCLUDE_TURNS = /paginated thread\/fork requires `excludeTurns: true`/;
+
+/**
+ * Forks the source thread ephemerally for a /btw side query.
+ * The first attempt omits excludeTurns: on legacy threads it selects App Server's
+ * paginated fork path, whose history projection fails on inconsistent ordinals.
+ * Threads already promoted to paginated storage (Codex CLI >= 0.160) reject that
+ * request and require excludeTurns, so retry exactly once in that case (B-1553).
+ */
+async function forkForSideQuery(call, sessionId) {
+  const forkParams = {
+    threadId: sessionId,
+    // Nassaj's visible message ids are transcript-row ids, not Codex turn ids.
+    // Fork the latest persisted source state; passing a row id as lastTurnId
+    // would make App Server reject an otherwise valid side query.
+    ephemeral: true,
+  };
+  try {
+    return await call('thread/fork', forkParams);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (!PAGINATED_FORK_REQUIRES_EXCLUDE_TURNS.test(message)) throw error;
+    return call('thread/fork', { ...forkParams, excludeTurns: true });
+  }
+}
+
 function stopChild(child) {
   if (!child || child.exitCode !== null || child.killed) return;
   child.kill('SIGTERM');
@@ -465,15 +491,7 @@ export async function spawnCodexSideQuery(params = {}, callbacks = {}, options =
   try {
     await call('initialize', { clientInfo: { name: 'nassaj', title: 'Nassaj', version: '1' } });
     child.stdin.write(`${JSON.stringify({ method: 'initialized', params: {} })}\n`);
-    const forkResult = await call('thread/fork', {
-      threadId: sessionId,
-      // Nassaj's visible message ids are transcript-row ids, not Codex turn ids.
-      // Fork the latest persisted source state; passing a row id as lastTurnId
-      // would make App Server reject an otherwise valid side query.
-      ephemeral: true,
-      // Do not set excludeTurns: it selects App Server's paginated fork path,
-      // whose history projection can fail when source ordinals are inconsistent.
-    });
+    const forkResult = await forkForSideQuery(call, sessionId);
     forkThreadId = forkResult?.thread?.id;
     if (!forkThreadId) throw new Error('Codex did not return a forked thread id.');
     const question = typeof params.question === 'string' ? params.question.trim() : '';

@@ -84,6 +84,39 @@ describe('getClaudeConnectionStatus', () => {
     assert.equal(JSON.stringify(status).includes('sk-secret-xyz'), false);
   });
 
+  it('reports not connected when Anthropic refuses a well-formed OAuth link', async () => {
+    const dir = makeClaudeDir(1011);
+    fs.writeFileSync(
+      path.join(dir, '.credentials.json'),
+      JSON.stringify({
+        claudeAiOauth: {
+          accessToken: 'sk-refused',
+          refreshToken: 'rt-refused',
+          expiresAt: Date.now() + 3_600_000,
+        },
+      })
+    );
+    const refused = await getClaudeConnectionStatus(1011, { verifyOauthLink: async () => false });
+    assert.equal(refused.connected, false);
+    assert.equal(refused.incompleteLink, false);
+    const accepted = await getClaudeConnectionStatus(1011, { verifyOauthLink: async () => true });
+    assert.equal(accepted.connected, true);
+  });
+
+  it('never consults the live check for an API-key connection', async () => {
+    const dir = makeClaudeDir(1012);
+    fs.writeFileSync(
+      path.join(dir, 'settings.json'),
+      JSON.stringify({ env: { ANTHROPIC_API_KEY: 'sk-ant-456' } })
+    );
+    let asked = false;
+    const status = await getClaudeConnectionStatus(1012, {
+      verifyOauthLink: async () => { asked = true; return false; },
+    });
+    assert.equal(status.connected, true);
+    assert.equal(asked, false);
+  });
+
   it('reports not connected for an expired OAuth token', async () => {
     const dir = makeClaudeDir(1004);
     fs.writeFileSync(

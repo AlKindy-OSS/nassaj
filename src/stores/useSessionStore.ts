@@ -100,6 +100,9 @@ export interface NormalizedMessage {
   isLocalCommand?: boolean;
   isLocalCommandStdout?: boolean;
   isCompactSummary?: boolean;
+  /** A skill body Claude injected after a Skill tool call; rendered as a compact expandable line. */
+  isSkillLoad?: boolean;
+  skillName?: string;
   /** T-1862: locally-added "Context compaction started." row — see ChatMessage doc. */
   isCompactionBoundary?: boolean;
   images?: string[];
@@ -438,6 +441,101 @@ function persistedReplyCovers(row: NormalizedMessage, server: NormalizedMessage[
     && message.content?.startsWith(content));
 }
 
+/**
+ * Live Codex SDK reply (`codex-<turnNonce>-<item>`, B-1489). Its history copy
+ * carries the durable rollout id (`msg_<hex>`), so id equality never retires it.
+ */
+function isLiveCodexReply(row: NormalizedMessage): boolean {
+  return row.provider === 'codex' && row.kind === 'text' && row.role === 'assistant'
+    && row.id.startsWith('codex-') && !row.id.startsWith('codex-history-');
+}
+
+/**
+ * Index of the server user row opening the live row's turn: the row that
+ * acknowledges its send (`responseToMessageId`), else the newest user row not
+ * later than it. -1 when the turn precedes every user row.
+ */
+function codexTurnStart(
+  row: NormalizedMessage,
+  server: NormalizedMessage[],
+  users: number[],
+): number {
+  const sent = row.responseToMessageId;
+  const proven = sent ? users.find(i => server[i].id === sent || server[i].clientMsgId === sent
+    || server[i].displayClientMsgId === sent) : undefined;
+  if (proven !== undefined) return proven;
+  const at = Date.parse(row.timestamp);
+  let start = -1;
+  for (const i of users) if (Date.parse(server[i].timestamp) <= at) start = i;
+  return start;
+}
+
+/** Unconsumed server row carrying the live row's attested durable transcript id, or -1. */
+function findByTranscriptId(
+  row: NormalizedMessage,
+  server: NormalizedMessage[],
+  consumed: ReadonlySet<number>,
+): number {
+  const durable = row.transcriptMessageId;
+  return durable ? server.findIndex((m, i) => !consumed.has(i) && m.id === durable) : -1;
+}
+
+/**
+ * Unconsumed history assistant row in the live row's turn whose text covers
+ * it, or -1. Exact (trimmed) equality wins over a prefix match so "OK" never
+ * claims the "OK, done" that belongs to a later live row.
+ */
+function findCodexHistoryTwin(
+  row: NormalizedMessage,
+  server: NormalizedMessage[],
+  users: number[],
+  consumed: ReadonlySet<number>,
+): number {
+  const byId = findByTranscriptId(row, server, consumed);
+  if (byId >= 0) return byId;
+  const text = (row.content || '').trim();
+  if (!text) return -1;
+  const start = codexTurnStart(row, server, users);
+  const end = users.find(i => i > start) ?? server.length;
+  const candidates: Array<{ index: number; saved: string }> = [];
+  for (let i = start + 1; i < end; i += 1) {
+    const message = server[i];
+    if (consumed.has(i) || message.kind !== 'text' || message.role !== 'assistant') continue;
+    candidates.push({ index: i, saved: (message.content || '').trim() });
+  }
+  const exact = candidates.find(candidate => candidate.saved === text);
+  return (exact ?? candidates.find(candidate => candidate.saved.startsWith(text)))?.index ?? -1;
+}
+
+/**
+ * Live Codex replies whose history copy is proven, matched one-to-one within
+ * their turn. A reply to a send the snapshot has not acknowledged yet
+ * (`pendingSends`) belongs to a turn the snapshot predates: only its attested
+ * transcript id may retire it, never text or timestamps.
+ */
+function coveredLiveCodexReplies(
+  realtime: NormalizedMessage[],
+  server: NormalizedMessage[],
+  capturedRows: ReadonlySet<NormalizedMessage>,
+  pendingSends: ReadonlySet<string>,
+): Set<NormalizedMessage> {
+  const users = server.flatMap((m, i) => (m.kind === 'text' && m.role === 'user' ? [i] : []));
+  const consumed = new Set<number>();
+  const covered = new Set<NormalizedMessage>();
+  for (const row of realtime) {
+    if (!capturedRows.has(row) || !isLiveCodexReply(row)) continue;
+    const sent = row.responseToMessageId;
+    const pending = sent !== undefined && pendingSends.has(sent);
+    const index = pending
+      ? findByTranscriptId(row, server, consumed)
+      : findCodexHistoryTwin(row, server, users, consumed);
+    if (index < 0) continue;
+    consumed.add(index);
+    covered.add(row);
+  }
+  return covered;
+}
+
 /** Shared history reconciliation: retain assistant content until its identity is covered. */
 function retainUnconfirmedRealtime(
   realtime: NormalizedMessage[],
@@ -445,8 +543,11 @@ function retainUnconfirmedRealtime(
   capturedRows: ReadonlySet<NormalizedMessage> = new Set(realtime),
 ): NormalizedMessage[] {
   const unsyncedUsers = new Set(retainUnsyncedOptimisticRows(realtime, server));
+  const pendingSends = new Set([...unsyncedUsers].map(row => row.id));
+  const coveredCodex = coveredLiveCodexReplies(realtime, server, capturedRows, pendingSends);
   return realtime.filter(row => {
     if (!capturedRows.has(row) || row.id.startsWith('stream_gap_')) return true;
+    if (isLiveCodexReply(row)) return !coveredCodex.has(row);
     if (row.kind === 'stream_delta' || (row.kind === 'text' && row.role === 'assistant')) {
       return !persistedReplyCovers(row, server);
     }
@@ -624,6 +725,8 @@ const STALE_THRESHOLD_MS = 30_000;
 
 const MAX_REALTIME_MESSAGES = 500;
 
+const MAX_SEQ_RUNS = 16;
+
 // ─── Hook ────────────────────────────────────────────────────────────────────
 
 export function useSessionStore() {
@@ -636,6 +739,8 @@ export function useSessionStore() {
   // message arrays and is read synchronously; it monotonically increases and is
   // never reset for the life of a session id.
   const lastSeqRef = useRef(new Map<string, number>());
+  // Recently seen run ids per session (bounded): tells a restarted sequence line from a late frame.
+  const seqRunsRef = useRef(new Map<string, string[]>());
   // Bump to force re-render — only when the active session's data changes
   const [, setTick] = useState(0);
   const notify = useCallback((sessionId: string) => {
@@ -679,11 +784,21 @@ export function useSessionStore() {
   // a non-finite/absent sequence (legacy payloads, or the registry flag off
   // server-side so no `sequence` is ever stamped). Keyed by the resolved session
   // id so an alias (post session_created rename) shares one counter.
-  const recordSeq = useCallback((sessionId: string, sequence: unknown) => {
+  // A frame of a run not seen before whose sequence is not above the stored
+  // floor means the server's sequence line restarted (registry entry dropped
+  // after the previous run, or a server restart): the floor is lowered to it,
+  // otherwise reconnect would ask for `seq > staleHigh` and replay nothing.
+  const recordSeq = useCallback((sessionId: string, sequence: unknown, runId?: unknown) => {
     if (typeof sequence !== 'number' || !Number.isFinite(sequence)) return;
     const resolvedSessionId = resolveSessionId(sessionId) ?? sessionId;
     const prev = lastSeqRef.current.get(resolvedSessionId) ?? 0;
-    if (sequence > prev) {
+    const run = typeof runId === 'string' && runId.trim() ? runId : null;
+    const seen = seqRunsRef.current.get(resolvedSessionId) ?? [];
+    const newRun = run !== null && seen.length > 0 && !seen.includes(run);
+    if (run !== null && !seen.includes(run)) {
+      seqRunsRef.current.set(resolvedSessionId, [...seen, run].slice(-MAX_SEQ_RUNS));
+    }
+    if (sequence > prev || (newRun && sequence < prev)) {
       lastSeqRef.current.set(resolvedSessionId, sequence);
     }
   }, [resolveSessionId]);
@@ -1068,7 +1183,7 @@ export function useSessionStore() {
     const slot = getSlot(resolvedSessionId);
     // ADR-041 (B-80): track the highest server-stamped stream sequence so reconnect
     // requests only the delta. No-op when `sequence` is absent (flag off / legacy).
-    recordSeq(resolvedSessionId, (msg as NormalizedMessage).sequence);
+    recordSeq(resolvedSessionId, (msg as NormalizedMessage).sequence, msg.responseToMessageId ?? msg.clientMsgId);
     const normalizedMessage =
       msg.sessionId === resolvedSessionId
         ? msg
@@ -1130,7 +1245,7 @@ export function useSessionStore() {
     const slot = getSlot(resolvedSessionId);
     // ADR-041 (B-80): track the highest server-stamped stream sequence in the batch.
     for (const msg of msgs) {
-      recordSeq(resolvedSessionId, (msg as NormalizedMessage).sequence);
+      recordSeq(resolvedSessionId, (msg as NormalizedMessage).sequence, msg.responseToMessageId ?? msg.clientMsgId);
     }
     const normalizedMessages = msgs.map((msg) =>
       msg.sessionId === resolvedSessionId

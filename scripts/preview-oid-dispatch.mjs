@@ -8,7 +8,7 @@ import { materializePreviewSnapshot, readPreviewState } from './preview-oid-pipe
 import { enqueuePreviewEvent } from './local-preview-ledger.mjs';
 
 const CLIENT_PREFIXES = [
-    'src/', 'public/', 'docs/team-wiki/', 'index.html', 'vite.config.js',
+    'src/', 'public/', 'docs/team-wiki/', 'index.html', 'share.html', 'vite.config.js',
     'postcss.config.js', 'tailwind.config.js', 'tsconfig.json', 'tsconfig.preview.json',
 ];
 const SERVER_PREFIXES = ['server/', 'scripts/', 'server.js'];

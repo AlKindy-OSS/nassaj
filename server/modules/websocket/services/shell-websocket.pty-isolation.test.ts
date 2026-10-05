@@ -32,7 +32,7 @@ import test, { mock } from 'node:test';
 // barrel, per the `boundaries/dependencies` rule in eslint.config.js. Deep
 // imports of connection.js / init-db.js are only legal for tests that live
 // inside server/modules/database/ itself.
-import { closeConnection, initializeDatabase } from '@/modules/database/index.js';
+import { closeConnection, getConnection, initializeDatabase, projectsDb, userDb } from '@/modules/database/index.js';
 import { installFakeHarnessOverrides } from '@/shared/__tests__/harness-binary-fixtures.js';
 import { acceptFixtureRuntimeCompat, createCodexMachineFixture } from '@/shared/tests/codex-release-fixture.js';
 
@@ -138,6 +138,10 @@ mock.module('@/services/isolation/resolve-provider-env.js', {
 });
 
 const { handleShellConnection } = await import('./shell-websocket.service.js');
+const { isProjectPathWritableByUser } = await import('./chat-websocket.service.js');
+const { createStandaloneTerminal, resetStandaloneTerminalsForTest } = await import(
+  '@/services/standalone-terminals/standalone-terminal-registry.js'
+);
 
 // --- Database isolation ------------------------------------------------------
 
@@ -497,6 +501,84 @@ test('B-MU-PTY-KEY: same projectPath+sessionId across two users spawns separate 
       assert.equal(reconnected, false, 'user B was not reconnected into another session');
     } finally {
       fs.rmdirSync(tempDir);
+    }
+  });
+});
+
+/** Opens one project PTY for `userId` at `cwd`; returns the close code (undefined = opened). */
+function openPty(userId: number, cwd: string): number | undefined {
+  const ws = makeFakeWs();
+  handleShellConnection(ws as never, asRequest(userId), deps);
+  ws.emit('message', initMessage(cwd));
+  return ws.closes[0]?.code;
+}
+
+/** Runs `body` with PROJECT_MEMBERSHIP_ENFORCE and WORKSPACES_ROOT set, then restores both. */
+async function withEnforcement(root: string, body: () => void | Promise<void>): Promise<void> {
+  const saved = { enforce: process.env.PROJECT_MEMBERSHIP_ENFORCE, root: process.env.WORKSPACES_ROOT };
+  process.env.PROJECT_MEMBERSHIP_ENFORCE = '1';
+  process.env.WORKSPACES_ROOT = root;
+  try {
+    await body();
+  } finally {
+    for (const [key, value] of [['PROJECT_MEMBERSHIP_ENFORCE', saved.enforce], ['WORKSPACES_ROOT', saved.root]] as const) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+}
+
+test('B-1411 (flag off): a non-member owner and a team member may start in a public project (ADR-089)', async () => {
+  await withIsolatedDatabase(() => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pty-b1411-off-'));
+    try {
+      const creator = userDb.createUser('b1411-creator', 'hash', 'user');
+      const owner = userDb.createUser('b1411-owner', 'hash', 'owner');
+      const teammate = userDb.createUser('b1411-teammate', 'hash', 'user');
+      projectsDb.createProjectPath(tempDir, 'B1411', creator.id);
+      for (const user of [owner, teammate]) {
+        spawnCalls.length = 0;
+        assert.equal(isProjectPathWritableByUser(tempDir, user.id), true, `chat gate: ${user.username}`);
+        assert.equal(openPty(user.id, tempDir), undefined, `PTY not refused: ${user.username}`);
+        assert.equal(spawnCalls.length, 1, `PTY spawned: ${user.username}`);
+      }
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+});
+
+test('B-1411 (flag on): a non-member is refused at the root, a sub-folder, a symlink and a standalone terminal', async () => {
+  await withIsolatedDatabase(async () => {
+    const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'pty-b1411-on-')));
+    const projectDir = path.join(root, 'proj');
+    const subDir = path.join(projectDir, 'src');
+    const linkDir = path.join(root, 'link-to-proj');
+    fs.mkdirSync(subDir, { recursive: true });
+    fs.symlinkSync(projectDir, linkDir);
+    try {
+      const creator = userDb.createUser('b1411-on-creator', 'hash', 'user');
+      const reader = userDb.createUser('b1411-on-reader', 'hash', 'user');
+      const created = projectsDb.createProjectPath(projectDir, 'B1411on', creator.id);
+      const projectId = created.project?.project_id as string;
+      await withEnforcement(root, () => {
+        for (const cwd of [projectDir, subDir, linkDir]) {
+          spawnCalls.length = 0;
+          assert.equal(isProjectPathWritableByUser(cwd, reader.id), false, `chat gate refuses ${cwd}`);
+          assert.equal(openPty(reader.id, cwd), 4404, `PTY refused at ${cwd}`);
+          const standalone = createStandaloneTerminal({ userId: reader.id, cwd, writerLease: { release() {} } });
+          assert.equal(standalone.ok, false, `standalone refused at ${cwd}`);
+          assert.equal(spawnCalls.length, 0, `nothing spawned at ${cwd}`);
+        }
+        getConnection().prepare('INSERT INTO project_members (project_id, user_id, role, added_by) VALUES (?, ?, ?, ?)')
+          .run(projectId, reader.id, 'member', creator.id);
+        assert.equal(isProjectPathWritableByUser(subDir, reader.id), true, 'a member passes via sub-folder');
+        assert.equal(createStandaloneTerminal({ userId: reader.id, cwd: linkDir, writerLease: { release() {} } }).ok, true,
+          'a member passes via symlink');
+      });
+    } finally {
+      resetStandaloneTerminalsForTest();
+      fs.rmSync(root, { recursive: true, force: true });
     }
   });
 });

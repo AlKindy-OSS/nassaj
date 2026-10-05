@@ -2,6 +2,8 @@ import { spawn } from 'node:child_process';
 
 import { resolveHarnessBinary } from '@/shared/harness-binaries.js';
 import { beginHarnessLaunch } from '@/modules/providers/harness-update/spawn-admission.js';
+import { createIdentityCircuit } from '@/modules/providers/list/antigravity/antigravity-identity-circuit.js';
+import { resolveCatalogEnv } from '@/services/isolation/resolve-provider-env.js';
 import type { ProviderModelOption, ProviderModelsDefinition } from '@/shared/types.js';
 import { ANTIGRAVITY_FALLBACK_MODELS } from '@/modules/providers/list/antigravity/antigravity-models.provider.js';
 
@@ -43,14 +45,28 @@ const AGY_MODELS_TIMEOUT_MS = 6_000;
 /** Bounded stdout buffer; the model list is a handful of short lines. */
 const AGY_MODELS_MAX_BUFFER = 256 * 1024;
 
-/**
- * Runner seam. Defaults to spawning `agy models`; overridable in tests so the
- * parser and the getSupportedModels CLI-first wiring stay hermetic (no real
- * subprocess). Returns the raw stdout, or `null` on any failure.
- */
-type AgyModelsRunner = () => Promise<string | null>;
+/** Consecutive CLI failures for one caller before their breaker opens. */
+const AGY_MODELS_FAILURE_THRESHOLD = 3;
 
-const defaultRunner: AgyModelsRunner = () =>
+/** How long one caller's open CLI breaker suppresses the spawn. */
+const AGY_MODELS_COOLDOWN_MS = 5 * 60 * 1000;
+
+/**
+ * B-1284: per-identity CLI breaker. A member who never signed in to agy makes
+ * `agy models` exit 1 ("Please sign in") every time; without this, each of their
+ * degraded-TTL retries spawned a live `agy` child that safe-restart counts as a
+ * session. After three failures their spawn stops for the cooldown — theirs only.
+ */
+const cliCircuit = createIdentityCircuit(AGY_MODELS_FAILURE_THRESHOLD, AGY_MODELS_COOLDOWN_MS);
+
+/**
+ * Runner seam. Defaults to spawning `agy models` under the env it is handed;
+ * overridable in tests so the parser and the getSupportedModels CLI-first wiring
+ * stay hermetic. Returns the raw stdout, or `null` on any failure.
+ */
+type AgyModelsRunner = (env: NodeJS.ProcessEnv) => Promise<string | null>;
+
+const defaultRunner: AgyModelsRunner = (env) =>
   new Promise((resolve) => {
     let releaseLaunch: (() => void) | undefined;
     let child;
@@ -70,9 +86,11 @@ const defaultRunner: AgyModelsRunner = () =>
         // of succeeding. Raising the timeout does NOT help: the read never
         // returns, so a longer cap only widens the collision window.
         stdio: ['ignore', 'pipe', 'ignore'],
-        // The catalog is operator-global (agy prints the models the installed
-        // binary/account can drive); the base env is enough to run the subcommand.
-        env: process.env,
+        // B-1284/B-1375: the catalog is NOT operator-global — measured: under an
+        // empty HOME `agy models` exits 1 "Please sign in". So it runs under the
+        // caller's resolved, host-secret-stripped env (resolveCatalogEnv), never
+        // the raw server env (which carried JWT_SECRET into the child).
+        env,
       });
     } catch {
       releaseLaunch?.();
@@ -183,16 +201,46 @@ export function parseAgyModelsOutput(stdout: unknown): ProviderModelsDefinition 
 }
 
 /**
- * Runs `agy models` and returns the parsed catalog, or `null` on any failure
- * (binary missing, timeout, empty/garbled output). Never throws — the CLI
- * catalog is an enhancement, not a dependency.
+ * Runs `agy models` for `userId` and returns the parsed catalog, or `null` on
+ * any failure (isolation unavailable, breaker open, binary missing, timeout,
+ * empty/garbled output). Never throws — the CLI catalog is an enhancement.
+ *
+ * `userId` is positionally required (B-1284): the command runs under that
+ * caller's own agy tree. When isolation is unavailable for them the answer is
+ * `null` with NO spawn — never the operator's environment.
  */
-export async function readAntigravityModelsFromCli(): Promise<ProviderModelsDefinition | null> {
-  try {
-    const stdout = await runner();
-    return parseAgyModelsOutput(stdout);
-  } catch {
-    // Even a misbehaving (rejecting) runner degrades to "no CLI catalog".
+export async function readAntigravityModelsFromCli(
+  userId: string | number | null,
+): Promise<ProviderModelsDefinition | null> {
+  if (cliCircuit.isOpen(userId, Date.now())) {
     return null;
   }
+  let catalog: ProviderModelsDefinition | null = null;
+  try {
+    const env = resolveCatalogEnv(userId, 'agy', process.env);
+    if (!env) {
+      return null;
+    }
+    catalog = parseAgyModelsOutput(await runner(env));
+  } catch {
+    // A provisioning error or a misbehaving (rejecting) runner degrades to
+    // "no CLI catalog", like any other failure.
+    catalog = null;
+  }
+  if (catalog) {
+    cliCircuit.recordSuccess(userId);
+  } else {
+    cliCircuit.recordFailure(userId, Date.now());
+  }
+  return catalog;
+}
+
+/** Resets the CLI breaker. Exported for unit tests only. */
+export function __resetAgyModelsCliCircuit(): void {
+  cliCircuit.reset();
+}
+
+/** Number of callers with a failing CLI breaker. Exported for unit tests only. */
+export function __agyModelsCliCircuitSize(): number {
+  return cliCircuit.size();
 }

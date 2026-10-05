@@ -46,7 +46,6 @@ import type { WebSocket } from 'ws';
 // member a mock omits (same rationale as chat-websocket.service.ts).
 import * as databaseModule from '@/modules/database/index.js';
 import {
-  canAccessProjectPath,
   isProjectMembershipEnforced,
   resolveWorkspaceProjectAdmission,
 } from '@/modules/database/repositories/project-access.js';
@@ -322,14 +321,16 @@ function trimExitedForUser(userId: number): void {
 }
 
 /**
- * cwd visibility gate — same semantics as isProjectPathVisibleToUser in
+ * B-1411 cwd launch gate — same rule as isProjectPathWritableByUser in
  * chat-websocket.service.ts (re-implemented on the database barrel to keep this
- * service outside the websocket module graph): an UNREGISTERED directory is
- * allowed (matches the project shell's creation/first-run rule); a REGISTERED
- * project must be visible to the caller. The caller maps a refusal onto the
- * same INVALID_CWD failure as a nonexistent path (indistinguishable).
+ * service outside the websocket module graph). Enforce off: the previous
+ * visibility rule exactly (unregistered directory allowed, registered project
+ * must be visible). Enforce on: the cwd resolves (realpath, sub-directory,
+ * symlink) to the nearest registered containing project, whose WRITE predicate
+ * decides. A UI/API gate, not an OS boundary (one uid). The caller maps a
+ * refusal onto the same INVALID_CWD failure as a nonexistent path.
  */
-function isCwdVisibleToUser(cwd: string, userId: string | number): boolean {
+function isCwdWritableByUser(cwd: string, userId: string | number): boolean {
   const numericUserId =
     typeof userId === 'number'
       ? userId
@@ -338,9 +339,11 @@ function isCwdVisibleToUser(cwd: string, userId: string | number): boolean {
         : null;
 
   const resolvedUserId = Number.isInteger(numericUserId) ? (numericUserId as number) : null;
-  // ADR-172 (qa #4): sub-directories/symlinks of a project are gated by it.
   if (isProjectMembershipEnforced()) {
-    return canAccessProjectPath(cwd, resolvedUserId);
+    const admission = resolveWorkspaceProjectAdmission(cwd, resolvedUserId);
+    if (!admission.allowed) return false;
+    if (!admission.projectId) return true;
+    return databaseModule.projectsDb.isProjectWritableByUser(admission.projectId, resolvedUserId) === true;
   }
   const projectRow = databaseModule.projectsDb.getProjectPath(cwd);
   if (!projectRow) {
@@ -406,7 +409,7 @@ export function createStandaloneTerminal(
   } catch {
     return INVALID_CWD;
   }
-  if (!isCwdVisibleToUser(cwd, userId)) {
+  if (!isCwdWritableByUser(cwd, userId)) {
     return INVALID_CWD;
   }
   if (isProjectMembershipEnforced()) {

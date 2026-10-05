@@ -13,8 +13,7 @@ import { auditLogDb, sessionAgentsDb, sessionsDb } from '../../modules/database/
 import { providerModelsService } from '../../modules/providers/index.js';
 
 import { applyClaudeEngineProviderEnvOrThrow } from './apply-claude-engine-provider-env.js';
-import { assertAnthropicBaseUrlAllowed, assertSettingsEnvAllowed } from './anthropic-base-url-guard.js';
-import { collectSettingsBaseUrls } from './collect-settings-base-urls.js';
+import { assertClaudeSpawnEnvAllowed } from './claude-spawn-env-guard.js';
 import {
   OFFICIAL_ENGINE,
   PIN_SOURCE,
@@ -160,7 +159,10 @@ export async function resolveClaudeSessionEngineForSpawn({
  *   sessionId?:string|null,clientEngine?:string|null,
  *   baseEnv?:NodeJS.ProcessEnv,strictUser?:boolean,envAlreadyIsolated?:boolean,
  *   authoritativeStoredPin?:boolean,skipInferenceWhenUnknown?:boolean,
- *   requireKnownResumePin?:boolean,failOnAmbiguous?:boolean}} input
+ *   requireKnownResumePin?:boolean,failOnAmbiguous?:boolean,
+ *   cwd?:string|null}} input `cwd` is the child's working directory; the
+ *   engine credential check (B-1541) reads project/local settings there and
+ *   falls back to this process's cwd, which a spawn without `cwd` inherits.
  */
 export async function resolveClaudeRunProfileOrThrow({
   userId,
@@ -174,6 +176,7 @@ export async function resolveClaudeRunProfileOrThrow({
   skipInferenceWhenUnknown = false,
   requireKnownResumePin = false,
   failOnAmbiguous = false,
+  cwd = null,
 }) {
   const env = envAlreadyIsolated
     ? { ...baseEnv }
@@ -202,12 +205,7 @@ export async function resolveClaudeRunProfileOrThrow({
     : pin.effectiveEngine;
 
   const engineHosts = applyClaudeEngineProviderEnvOrThrow(env, userId, effectiveEngine);
-  assertSettingsEnvAllowed(env.CLAUDE_CONFIG_DIR, env);
-  const settingsBaseUrls = await collectSettingsBaseUrls(env);
-  assertAnthropicBaseUrlAllowed(env, {
-    engineProviderHosts: engineHosts ?? undefined,
-    extraValues: settingsBaseUrls,
-  });
+  await assertClaudeSpawnEnvAllowed(env, { engineHosts, cwd });
 
   return { env, effectiveEngine, engineHosts, pin };
 }

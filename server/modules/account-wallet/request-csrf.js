@@ -1,5 +1,8 @@
 import crypto from 'node:crypto';
 
+// eslint-disable-next-line boundaries/no-unknown -- ADR-163 amendment 1: the single trusted-origin source.
+import { isTrustedOrigin } from '../../utils/trusted-origin.js';
+
 const TOKEN_TTL_MS = 15 * 60_000;
 const MUTATION_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 
@@ -40,14 +43,6 @@ export function mintMutationCsrfToken(secret, binding, method, path, nowMs = Dat
   return { csrfToken: `${expiresAt}.${signature}`, expiresAt };
 }
 
-/** Checks an Origin header against the configured or request-derived application origin. */
-export function isTrustedMutationOrigin(req) {
-  const origin = req.get('origin');
-  const expected = String(process.env.APP_ORIGIN || `${req.protocol}://${req.get('host')}`)
-    .replace(/\/$/u, '');
-  return typeof origin === 'string' && origin.replace(/\/$/u, '') === expected;
-}
-
 /** Verifies the mutation token in constant time. */
 export function verifyMutationCsrfToken(secret, req, binding, nowMs = Date.now()) {
   const method = String(req.method || '').toUpperCase();
@@ -65,7 +60,12 @@ export function verifyMutationCsrfToken(secret, req, binding, nowMs = Date.now()
   return supplied.length === expected.length && crypto.timingSafeEqual(supplied, expected);
 }
 
-/** Enforces Origin and generation-bound CSRF only for ambient cookie identities. */
+/**
+ * Enforces Origin and generation-bound CSRF only for ambient cookie identities.
+ * The Origin check is the shared trusted-origin policy and does not depend on
+ * MULTI_ACCOUNT_SWITCHING, so the forced password-change cookie is guarded
+ * (and works behind the tunnel) with the flag off (ADR-163 amendment 1, C2).
+ */
 export function enforceCookieMutationGuard(req, res, secret) {
   const method = String(req.method || '').toUpperCase();
   if (!MUTATION_METHODS.has(method)) return true;
@@ -78,7 +78,7 @@ export function enforceCookieMutationGuard(req, res, secret) {
   }
   const binding = mutationIdentityBinding(req);
   if (!binding) return true;
-  if (!isTrustedMutationOrigin(req) || !verifyMutationCsrfToken(secret, req, binding)) {
+  if (!isTrustedOrigin(req) || !verifyMutationCsrfToken(secret, req, binding)) {
     res.status(403).json({ error: 'Request rejected', code: 'csrf_or_origin_rejected' });
     return false;
   }

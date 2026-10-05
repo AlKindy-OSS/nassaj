@@ -94,3 +94,7 @@ export { readProjectSkills } from './services/skill-observations.service.js';
 
 // B-894: authenticated complete-payload receipt capability, never raw provider metadata.
 export { createVendorReceiptInvocation, readVendorReceiptInvocation } from './shared/vendor/vendor-receipt-identity.js';
+
+// Live check that Anthropic still accepts a member's stored Claude login (the
+// onboarding route must not trust the credentials file's shape alone).
+export { claudeUsageService } from './services/claude-usage.service.js';

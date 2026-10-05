@@ -83,7 +83,12 @@ const secrets = (await import('./services/isolation/provider-secrets-store.js'))
 
 const LIVE_SID = 'live-session-uuid-2222';
 const USER_ID = '42';
-database.sessionsDb.createSession(LIVE_SID, 'claude', process.cwd());
+// B-1373 (55e7c933f) refuses protected roots as project roots and the release
+// preflight checks the tree out under ~/.nassaj-release-work, so the checkout cwd
+// would leave no sessions row there. The project lives beside the isolated DB.
+const projectDir = path.join(databaseDir, 'project');
+fs.mkdirSync(projectDir);
+database.sessionsDb.createSession(LIVE_SID, 'claude', projectDir);
 
 after(() => {
   database.closeConnection();

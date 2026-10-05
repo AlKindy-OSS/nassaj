@@ -66,6 +66,7 @@ import {
   parseBtwQuestion,
 } from '../utils/btwCommand';
 import { isArabicCodexSideAlias, normalizeArabicSlashCommand } from '../utils/commandLocalization';
+import { clearPendingCodexPermissionStamp, writePendingCodexPermissionStamp } from '../utils/codexPermissionMode';
 import { isReservedSteerCommand, parseSteerText } from '../utils/steerCommand';
 
 import { resolveStickyEffortMode } from './stickyEffortMode';
@@ -1211,12 +1212,23 @@ export function useChatComposerState({
         if (effortValue) {
           codexOptions.reasoningEffort = effortValue;
         }
+        // B-472: bind the sent mode to THIS send so session_created (matched by
+        // clientMsgId) seeds the minted session with it instead of Settings.
+        if (!resume) {
+          writePendingCodexPermissionStamp(
+            effectivePermissionMode === 'plan' ? 'default' : String(effectivePermissionMode),
+            clientMsgId,
+          );
+        }
         result = dispatch({
           type: 'codex-command',
           command: messageContent,
           sessionId: targetSessionId,
           options: codexOptions,
         });
+        if (result && !result.ok) {
+          clearPendingCodexPermissionStamp();
+        }
       } else if (effectiveProvider === 'antigravity') {
         result = dispatch({
           type: 'antigravity-command',

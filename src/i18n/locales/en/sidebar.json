@@ -54,7 +54,7 @@
     "adding": "Adding account…",
     "added": "Account added.",
     "addDescription": "Enter the local account credentials. The password is not saved and your active account will not change.",
-    "email": "Email",
+    "identifier": "Username or email",
     "password": "Password",
     "manage": "Manage accounts",
     "manageDescription": "Accounts are kept separately on this device.",
@@ -70,7 +70,8 @@
       "wallet_mutation_outcome_unknown": "The operation result could not be confirmed. Identity is being verified safely.",
       "add_account_failed": "The account could not be added. Check the details and try again.",
       "account_limit_reached": "This device has reached the account limit.",
-      "csrf_token_missing": "This account action is not ready yet."
+      "csrf_token_missing": "This account action is not ready yet.",
+      "account_already_added": "This account is already added"
     },
     "roles": {
       "owner": "Owner",

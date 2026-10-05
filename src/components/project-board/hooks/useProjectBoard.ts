@@ -18,6 +18,7 @@ export function useProjectBoard(projectId: string | null | undefined) {
   const [board, setBoard] = useState<ProjectBoardResponse | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
+  const [notFound, setNotFound] = useState(false);
   const { latestMessage } = useWebSocket();
   const projectIdRef = useRef(projectId);
   projectIdRef.current = projectId;
@@ -28,6 +29,13 @@ export function useProjectBoard(projectId: string | null | undefined) {
       if (projectIdRef.current !== targetProjectId) {
         return; // stale response for a previously selected project
       }
+      if (response.status === 404) {
+        // Hidden or unknown project: distinct from a transient failure.
+        setBoard(null);
+        setNotFound(true);
+        setLoadError(false);
+        return;
+      }
       if (!response.ok) {
         setLoadError(true);
         return;
@@ -37,6 +45,7 @@ export function useProjectBoard(projectId: string | null | undefined) {
         return;
       }
       setBoard(data);
+      setNotFound(false);
       setLoadError(false);
     } catch {
       if (projectIdRef.current === targetProjectId) {
@@ -52,6 +61,7 @@ export function useProjectBoard(projectId: string | null | undefined) {
   useEffect(() => {
     setBoard(null);
     setLoadError(false);
+    setNotFound(false);
     if (!projectId) {
       setIsLoading(false);
       return;
@@ -71,5 +81,5 @@ export function useProjectBoard(projectId: string | null | undefined) {
     }
   }, [latestMessage, projectId, refresh]);
 
-  return { board, isLoading, loadError };
+  return { board, isLoading, loadError, notFound };
 }

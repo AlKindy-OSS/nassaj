@@ -4,8 +4,14 @@ import os from 'node:os';
 import path from 'node:path';
 import { after, it, mock } from 'node:test';
 
-const scratch = fs.mkdtempSync(path.join(process.env.TMPDIR || path.join(process.cwd(), '.artifacts'), 'vendor-response-identity-'));
+// B-1373 (55e7c933f) refuses the service home (the mocked one and the passwd
+// home) and its hidden entries as project roots. TMPDIR may point inside the real
+// home (~/.cache/tmp, ~/.nassaj-release-gate/...), so the scratch home lives on a
+// fixed non-hidden on-disk root, and the project is a plain subdirectory of it.
+const scratch = fs.mkdtempSync('/var/tmp/vendor-response-identity-');
 mock.method(os, 'homedir', () => scratch);
+const project = path.join(scratch, 'project');
+fs.mkdirSync(project);
 process.env.DATABASE_PATH = path.join(scratch, 'empty-test.sqlite');
 fs.writeFileSync(process.env.DATABASE_PATH, '');
 const { initializeDatabase, closeConnection, sessionsDb, responseTurnMetricsDb } =
@@ -25,16 +31,16 @@ after(() => {
 for (const providerName of ['qwen', 'hermes'] as const) {
   it(`${providerName}: saved assistant ID survives reload and joins only its completed response metric`, async () => {
     const sessionId = `${providerName}-identity`;
-    const file = vendorTranscriptPath(providerName, sessionId, scratch);
-    sessionsDb.createSession(sessionId, providerName, scratch, undefined, undefined, undefined, file);
-    await appendVendorTranscriptTurn(providerName, sessionId, scratch, 'user', 'prompt');
-    const partial = await appendVendorTranscriptTurn(providerName, sessionId, scratch, 'assistant', 'progress', {
+    const file = vendorTranscriptPath(providerName, sessionId, project);
+    sessionsDb.createSession(sessionId, providerName, project, undefined, undefined, undefined, file);
+    await appendVendorTranscriptTurn(providerName, sessionId, project, 'user', 'prompt');
+    const partial = await appendVendorTranscriptTurn(providerName, sessionId, project, 'assistant', 'progress', {
       model: 'model-a',
     });
-    const first = await appendVendorTranscriptTurn(providerName, sessionId, scratch, 'assistant', 'same answer', {
+    const first = await appendVendorTranscriptTurn(providerName, sessionId, project, 'assistant', 'same answer', {
       model: 'model-a', finalAnswer: true,
     });
-    const second = await appendVendorTranscriptTurn(providerName, sessionId, scratch, 'assistant', 'same answer', {
+    const second = await appendVendorTranscriptTurn(providerName, sessionId, project, 'assistant', 'same answer', {
       model: 'model-b', finalAnswer: true,
     });
     assert.ok(first && second && partial);
@@ -44,8 +50,8 @@ for (const providerName of ['qwen', 'hermes'] as const) {
       startedAt: '2026-09-05T12:00:00Z', completedAt: '2026-09-05T12:00:02Z',
     }).responseTurnMetric?.durationMs, 2000);
     const provider = new VendorSessionsProvider({ provider: providerName });
-    const firstRead = await provider.fetchHistory(sessionId, { projectPath: scratch });
-    const secondRead = await provider.fetchHistory(sessionId, { projectPath: scratch });
+    const firstRead = await provider.fetchHistory(sessionId, { projectPath: project });
+    const secondRead = await provider.fetchHistory(sessionId, { projectPath: project });
     assert.deepEqual(firstRead.messages.map((row) => row.id), secondRead.messages.map((row) => row.id));
     assert.deepEqual(firstRead.messages.map((row) => row.timestamp), secondRead.messages.map((row) => row.timestamp));
     applyResponseTurnMetrics(secondRead.messages, responseTurnMetricsDb.listForMessages(
@@ -64,8 +70,8 @@ it('a failed transcript append returns no identity and cannot create a response 
   fs.mkdirSync(path.dirname(root), { recursive: true });
   fs.writeFileSync(root, 'synthetic blocked directory');
   const sessionId = 'failed-append';
-  sessionsDb.createSession(sessionId, 'deepseek', scratch);
-  const id = await appendVendorTranscriptTurn('deepseek', sessionId, scratch, 'assistant', 'visible reply', {
+  sessionsDb.createSession(sessionId, 'deepseek', project);
+  const id = await appendVendorTranscriptTurn('deepseek', sessionId, project, 'assistant', 'visible reply', {
     finalAnswer: true,
   });
   assert.equal(id, null);
@@ -77,10 +83,10 @@ it('a failed transcript append returns no identity and cannot create a response 
 });
 
 it('legacy text-only history remains visible without inventing model or timing', async () => {
-  const file = vendorTranscriptPath('glm', 'legacy', scratch);
+  const file = vendorTranscriptPath('glm', 'legacy', project);
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, `${JSON.stringify({ type: 'message', message: { role: 'assistant', content: 'legacy' } })}\n`);
-  const history = await new VendorSessionsProvider({ provider: 'glm' }).fetchHistory('legacy', { projectPath: scratch });
+  const history = await new VendorSessionsProvider({ provider: 'glm' }).fetchHistory('legacy', { projectPath: project });
   assert.equal(history.messages[0]?.content, 'legacy');
   assert.equal(history.messages[0]?.model, undefined);
   assert.equal(history.messages[0]?.responseTurnMetric, undefined);

@@ -25,7 +25,6 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { mkdtemp, mkdir, rm, utimes, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { promisify } from 'node:util';
@@ -121,7 +120,7 @@ async function withScopeHarness(
   const prevDb = process.env.DATABASE_PATH;
   const prevFlag = process.env.WORKFLOW_SUPERVISOR;
   const prevStateDir = process.env.WORKFLOW_SUPERVISOR_STATE_DIR;
-  const tempRoot = await mkdtemp(path.join(tmpdir(), 'wf-scope-'));
+  const tempRoot = await mkdtemp('/var/tmp/wf-scope-');
   const databasePath = path.join(tempRoot, 'db.sqlite');
   const projectDir = path.join(tempRoot, 'project-encoded');
   const stateDir = path.join(tempRoot, 'supervisor-state');

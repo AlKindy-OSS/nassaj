@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { readFile, rename, stat, unlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -61,6 +62,27 @@ const CLAUDE_USAGE_UNAVAILABLE = 'CLAUDE_USAGE_UNAVAILABLE';
 // its "link Claude" state from the `code` field.
 const PROVIDER_CREDENTIAL_STATUS = 424;
 
+/**
+ * How long a live link verdict is trusted. Keyed by a fingerprint of the access
+ * token, so a re-login (new token) is re-checked at once, never served stale.
+ */
+const LINK_VERDICT_TTL_MS = 60_000;
+
+/**
+ * Whether Anthropic still accepts the stored subscription login:
+ *   - 'valid'    the usage call succeeded (after at most one refresh);
+ *   - 'rejected' the token was refused and the refresh token was refused too;
+ *   - 'unknown'  no credential to test, or a transient failure (rate limit,
+ *                network) — callers keep their on-disk verdict.
+ */
+export type ClaudeLinkVerdict = 'valid' | 'rejected' | 'unknown';
+
+type LinkVerdictEntry = {
+  fingerprint: string;
+  verdict: ClaudeLinkVerdict;
+  expiresAt: number;
+};
+
 type CacheEntry = {
   summary: ClaudeUsageSummary;
   expiresAt: number;
@@ -92,6 +114,54 @@ class ClaudeUsageService {
 
   /** In-flight fetch dedupe (per credentials path) so concurrent requests share one upstream call. */
   private inFlight = new Map<string, Promise<ClaudeUsageSummary>>();
+
+  private linkVerdicts = new Map<string, LinkVerdictEntry>();
+
+  /**
+   * Asks Anthropic whether the user's stored subscription login still works.
+   *
+   * The credentials file can look like a full link — access + refresh token,
+   * future timestamps, profile scope — while Anthropic refuses it (revoked,
+   * rotated by another client, or overwritten by a fixture). The file-shape
+   * check alone then reports "connected" while every turn fails with
+   * "Not logged in". This probe settles it on the wire, reusing the usage
+   * call (and its single refresh on 401) so it adds no new upstream contract.
+   */
+  async verifyLink(userId: string | number | null = null): Promise<ClaudeLinkVerdict> {
+    const credPath = this.resolveCredentialsPath(userId);
+    let credential: OAuthCredential;
+    try {
+      credential = await this.readCredential(credPath);
+    } catch {
+      return 'unknown';
+    }
+
+    const fingerprint = createHash('sha256').update(credential.accessToken).digest('hex');
+    const known = this.linkVerdicts.get(credPath);
+    if (known && known.fingerprint === fingerprint && known.expiresAt > Date.now()) {
+      return known.verdict;
+    }
+
+    const verdict = await this.probeLink(credPath, credential);
+    if (verdict !== 'unknown') {
+      this.linkVerdicts.set(credPath, { fingerprint, verdict, expiresAt: Date.now() + LINK_VERDICT_TTL_MS });
+    }
+    return verdict;
+  }
+
+  /** One live usage call; a success also refreshes the usage cache. */
+  private async probeLink(credPath: string, credential: OAuthCredential): Promise<ClaudeLinkVerdict> {
+    try {
+      const raw = await this.fetchUsage(credPath, credential);
+      const summary = this.normalize(raw, credential, false);
+      this.cache.set(credPath, { summary, expiresAt: Date.now() + CACHE_TTL_MS });
+      return 'valid';
+    } catch (error) {
+      return error instanceof AppError && error.statusCode === PROVIDER_CREDENTIAL_STATUS
+        ? 'rejected'
+        : 'unknown';
+    }
+  }
 
   /**
    * Returns the Claude usage summary for the given user, serving a fresh cache
@@ -293,9 +363,10 @@ class ClaudeUsageService {
         signal: controller.signal,
       });
     } catch {
+      // Unreachable is transient, not a refused credential: 502, never 424.
       throw new AppError('Claude OAuth refresh request failed.', {
         code: CLAUDE_USAGE_UNAVAILABLE,
-        statusCode: PROVIDER_CREDENTIAL_STATUS,
+        statusCode: 502,
       });
     } finally {
       clearTimeout(timer);

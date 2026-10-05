@@ -20,6 +20,7 @@ import { notifyRunFailed, notifyRunStopped } from './services/notification-orche
 import { createNormalizedMessage, resolveOpenCodeBinaryPath, stampCoordinatorId } from './shared/utils.js';
 import { checkCwdExists, buildCwdMissingPayload } from './shared/cwd-check.js';
 import { mapSpawnError } from './shared/spawn-error.js';
+import { resolveInboxAttachment } from './utils/attachment-inbox.js';
 import { provisionUserDirs, userConfigDir } from './services/isolation/provision-user-dirs.js';
 import { resolveProviderEnv } from './services/isolation/resolve-provider-env.js';
 import { beginProviderRun } from './services/provider-run-presence.js';
@@ -27,8 +28,12 @@ import { refuseSpawnIfHarnessUpdating } from './modules/providers/harness-update
 import { resolveCagedLaunch } from './services/isolation/provider-cage-wiring.js';
 import { sanitizeVendorAgentEnv } from './services/isolation/sanitize-vendor-agent-env.js';
 import {
+  OPENCODE_CONFIG_SOURCE_ENV,
+  OPENCODE_DISABLE_PROJECT_CONFIG_ENV,
+  OPENCODE_PROJECT_CONFIG_SCOPE,
   assertOpenCodeBaseUrlAllowed,
   assertOpenCodeCarrierServerLocal,
+  assertOpenCodeProjectConfigAllowed,
   resolveOpenCodeConfigPath,
 } from './services/isolation/opencode-baseurl-guard.js';
 import { resolveOpenCodeDatabasePathForUser } from './modules/providers/list/opencode/opencode-home.js';
@@ -69,6 +74,39 @@ function auditQwenPlanTurn(action, userId, metadata) {
     userId: Number.isInteger(id) && id > 0 ? id : undefined,
     metadata: { engine: 'opencode', provider: 'qwen-plan', source: 'ws-interactive', ...metadata },
   });
+}
+
+/**
+ * The user-facing error frame for a blocked carrier launch. A project-level opencode
+ * config refusal (B-1367) gets its own code so the client can say exactly what to
+ * fix; the offending file is named relative to the project, never as a host path.
+ *
+ * @param {any} guardError the thrown guard error
+ * @param {boolean} qwenPlanRun whether the turn was a qwen-plan run
+ * @param {string} workingDir the project root
+ * @returns {{ kind: 'error', code: string, content: string }}
+ */
+function carrierRefusalPayload(guardError, qwenPlanRun, workingDir) {
+  if (guardError?.scope === OPENCODE_PROJECT_CONFIG_SCOPE) {
+    const file = typeof guardError.file === 'string' ? guardError.file : '';
+    const relative = file ? path.relative(workingDir, file) : '';
+    const shown = relative && !relative.startsWith('..') && !path.isAbsolute(relative)
+      ? relative
+      : path.basename(file || 'opencode.json');
+    return {
+      kind: 'error',
+      code: 'opencode_project_config_refused',
+      content: `تعذّر التشغيل: ملف إعداد OpenCode «${shown}» يحدّد عناوين مزوّدين أو MCP، وهذا ممنوع في هذا الوضع. أزِل أقسام provider وmcp منه أو احذفه ثم أعد الإرسال.`,
+    };
+  }
+  return {
+    kind: 'error',
+    code: guardError?.code || 'opencode_carrier_blocked',
+    content: guardError?.code === 'ENGINE_PROVIDER_UNAVAILABLE'
+      ? 'خادم النموذج المحلي غير متاح. راجع إعدادات الخادم وصلاحية الوصول.'
+      : (qwenPlanRun && QWEN_PLAN_REFUSAL_TEXT[guardError?.code])
+        || 'تعذّر تشغيل النموذج بسبب إعدادات الحوكمة أو الاتصال.',
+  };
 }
 
 /** Fleet flag gating the GLM OpenCode carrier (GL-8 / OCC-15). Default OFF. */
@@ -220,16 +258,18 @@ function readOpenCodeTokenUsage(sessionId, userId = null) {
  *
  * opencode's `-f/--file` flag takes on-disk file PATHS (an array). Images arrive
  * as base64 data URLs, so they are written to per-run temp files; uploaded files
- * already live under the project's .nassaj-uploads/inbox as cwd-relative paths,
- * so they are resolved against the working dir. Returns the absolute paths to
- * attach plus the temp dir to clean up after the run (null when no images were
- * materialized). Fully defensive: a malformed entry is skipped, never thrown, so
- * a bad attachment can never abort the run.
+ * already live under the project's .nassaj-uploads/inbox as cwd-relative paths.
+ * B-1374: a file ref is attached ONLY when it really (realpath) resolves to a
+ * regular file inside that inbox — an absolute path, a `..` climb or a symlink
+ * leading out is dropped and counted in `rejectedFiles`. Returns the absolute
+ * paths to attach plus the temp dir to clean up after the run (null when no
+ * images were materialized). Fully defensive: a malformed entry is skipped,
+ * never thrown, so a bad attachment can never abort the run.
  *
  * @param {Array<{data?: string}>} images base64 data-URL image objects
  * @param {Array<{path?: string, name?: string}>} files cwd-relative file refs
- * @param {string} cwd working directory the file paths resolve against
- * @returns {Promise<{ filePaths: string[], tempDir: string|null }>}
+ * @param {string} cwd working directory (project root) holding the inbox
+ * @returns {Promise<{ filePaths: string[], tempDir: string|null, rejectedFiles: number }>}
  */
 async function prepareOpenCodeAttachments(images, files, cwd) {
   const filePaths = [];
@@ -259,15 +299,17 @@ async function prepareOpenCodeAttachments(images, files, cwd) {
   }
 
   const fileList = Array.isArray(files) ? files : [];
+  let rejectedFiles = 0;
   for (const file of fileList) {
-    const relOrAbs = typeof file?.path === 'string' ? file.path : null;
-    if (!relOrAbs) {
-      continue;
+    const safePath = resolveInboxAttachment(cwd, file?.path);
+    if (safePath) {
+      filePaths.push(safePath);
+    } else {
+      rejectedFiles += 1;
     }
-    filePaths.push(path.isAbsolute(relOrAbs) ? relOrAbs : path.resolve(cwd, relOrAbs));
   }
 
-  return { filePaths, tempDir };
+  return { filePaths, tempDir, rejectedFiles };
 }
 
 /** Best-effort removal of the per-run temp image dir (OC-22). Never throws. */
@@ -490,6 +532,25 @@ async function spawnOpenCode(command, options = {}, ws) {
       prepareOpenCodeAttachments(images, files, workingDir),
     ]).then(([resolvedModel, attachments]) => {
       attachmentsTempDir = attachments.tempDir;
+      // B-1374: a rejected attachment refuses the WHOLE send before anything runs.
+      // The client treats kind:'error' as the end of the turn, so the error is only
+      // truthful when no process is started after it.
+      if (attachments.rejectedFiles > 0) {
+        console.warn('[OpenCode] send refused: attachment(s) outside the upload inbox', {
+          count: attachments.rejectedFiles,
+        });
+        ws.send(createNormalizedMessage({
+          kind: 'error',
+          code: 'attachment_rejected',
+          content: 'لم تُرسل رسالتك: أحد المرفقات ليس ملفاً مرفوعاً إلى هذا المشروع.',
+          sessionId: capturedSessionId || sessionId || null,
+          provider: 'opencode',
+        }));
+        runPresence.end();
+        void cleanupOpenCodeTempDir(attachmentsTempDir);
+        resolve();
+        return;
+      }
       // T-1854 (qa H1b): last await is the Promise.all; spawn follows synchronously.
       if (ws?.runFenceRevoked) {
         runPresence.end();
@@ -593,7 +654,19 @@ async function spawnOpenCode(command, options = {}, ws) {
           // SL-3: sanitize env as the LAST step before spawn — strip
           // CLAUDE_CODE_OAUTH_TOKEN / ANTHROPIC_*/CLAUDE_* / inherited *_BASE_URL so the
           // carrier child can never inherit the owner's Claude subscription/routing.
-          childEnv = sanitizeVendorAgentEnv(childEnv);
+          // B-1367: also strip OPENCODE_CONFIG / _DIR / _CONTENT — extra config
+          // sources the GL-3 file check never sees (qwen-plan re-adds its own below).
+          childEnv = sanitizeVendorAgentEnv(childEnv, { extraDeny: OPENCODE_CONFIG_SOURCE_ENV });
+          // B-1367: opencode would merge the working tree's opencode.json(c), its
+          // .opencode/ dirs (config, plugins) and project AGENTS.md over the per-user
+          // file — a provider `api`, a `{file:…}` header or a plugin there could
+          // reroute the carrier key. The switch makes opencode skip ALL of it at read
+          // time (no check-then-read race); governance still comes from the per-user
+          // $XDG_CONFIG_HOME/opencode/AGENTS.md, which it does not touch.
+          childEnv[OPENCODE_DISABLE_PROJECT_CONFIG_ENV] = '1';
+          // Defense in depth: still refuse a project file that declares endpoints,
+          // in case a future opencode stops honoring the switch.
+          assertOpenCodeProjectConfigAllowed(workingDir, childEnv, localServerOrigins(callerId));
           if (qwenPlanRun) {
             // Set AFTER sanitizing: the key and the inline provider block reach
             // this child only. Everything else strips NASSAJ_QWEN_PLAN_API_KEY.
@@ -615,12 +688,7 @@ async function spawnOpenCode(command, options = {}, ws) {
             error: guardError instanceof Error ? guardError.message : String(guardError),
           });
           ws.send(createNormalizedMessage({
-            kind: 'error',
-            code: guardError?.code || 'opencode_carrier_blocked',
-            content: guardError?.code === 'ENGINE_PROVIDER_UNAVAILABLE'
-              ? 'خادم النموذج المحلي غير متاح. راجع إعدادات الخادم وصلاحية الوصول.'
-              : (qwenPlanRun && QWEN_PLAN_REFUSAL_TEXT[guardError?.code])
-                || 'تعذّر تشغيل النموذج بسبب إعدادات الحوكمة أو الاتصال.',
+            ...carrierRefusalPayload(guardError, qwenPlanRun, workingDir),
             sessionId: finalSessionId,
             provider: 'opencode',
           }));
@@ -827,4 +895,6 @@ export {
   getActiveOpenCodeSessions,
   // Exported for behavioral tests of the carrier-detection seam (no source grep).
   isOpenCodeCarrierRun,
+  // Exported for the B-1374 attachment-confinement test.
+  prepareOpenCodeAttachments,
 };

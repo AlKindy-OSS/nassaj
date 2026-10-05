@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import test from 'node:test';
 
 import { acquireLease, captureRequest, commitRequest } from '../../../scripts/session-commit-arbiter.mjs';
@@ -13,6 +13,7 @@ import {
   logicalProjectPathForWorkspace,
   probeSessionWorkspaceAlias,
   reapSessionWorkspaces,
+  reapSessionWorkspacesReport,
   readSessionFileBlob,
   resolveSessionWorkspace,
   resolveSessionWorkspaceForLaunch,
@@ -435,6 +436,103 @@ test('reaper preserves bound sessions regardless of age', () => {
       bound.cwd,
     );
   } finally {
+    cleanup(repo);
+  }
+});
+
+// ── B-914: the reaper removes only clean, unmoved, unused unbound overlays ──
+
+/** An empty fake /proc, or one whose single process works inside `cwd`. */
+function fakeProc(repo, cwd = null) {
+  const root = fs.mkdtempSync(path.join(repo, '.proc-'));
+  if (cwd) {
+    fs.mkdirSync(path.join(root, '4242'));
+    fs.symlinkSync(fs.realpathSync(cwd), path.join(root, '4242', 'cwd'));
+  }
+  return root;
+}
+
+test('reaper removes a clean stale overlay and keeps dirty, moved and in-use ones with reasons', () => {
+  const repo = fixture();
+  try {
+    const clean = createSessionWorkspace({ projectPath: repo, launchKey: 'clean' });
+    fs.symlinkSync('/var/tmp', path.join(clean.cwd, 'node_modules'));
+    const dirty = createSessionWorkspace({ projectPath: repo, launchKey: 'dirty' });
+    fs.writeFileSync(path.join(dirty.cwd, 'agent-work.txt'), 'unsaved\n');
+    const moved = createSessionWorkspace({ projectPath: repo, launchKey: 'moved' });
+    git(moved.cwd, 'commit', '--allow-empty', '-m', 'work in the overlay');
+    const busy = createSessionWorkspace({ projectPath: repo, launchKey: 'busy' });
+    const report = reapSessionWorkspacesReport({
+      projectPath: repo, maxAgeMs: 0, now: Date.now() + 1_000, procRoot: fakeProc(repo, busy.cwd),
+    });
+    assert.deepEqual(report.reaped, [clean.overlayId]);
+    assert.equal(report.stopped, null);
+    const reasons = Object.fromEntries(report.skipped.map(({ overlayId, reason }) => [overlayId, reason]));
+    assert.deepEqual(reasons, { [dirty.overlayId]: 'dirty_tree', [moved.overlayId]: 'head_moved', [busy.overlayId]: 'in_use' });
+    assert.equal(fs.existsSync(clean.cwd), false);
+    for (const kept of [dirty, moved, busy]) assert.equal(fs.existsSync(kept.cwd), true);
+    assert.equal(fs.readFileSync(path.join(dirty.cwd, 'agent-work.txt'), 'utf8'), 'unsaved\n');
+  } finally {
+    cleanup(repo);
+  }
+});
+
+test('reaper caps the batch and stops at the first removal git refuses', () => {
+  const repo = fixture();
+  try {
+    const made = ['a', 'b', 'c'].map((key) => createSessionWorkspace({ projectPath: repo, launchKey: key }));
+    const procRoot = fakeProc(repo);
+    const first = reapSessionWorkspacesReport({ projectPath: repo, maxAgeMs: 0, now: Date.now() + 1_000, maxBatch: 2, procRoot });
+    assert.equal(first.reaped.length, 2);
+    assert.deepEqual(first.skipped.map(({ reason }) => reason), ['batch_cap']);
+    const [left] = made.filter((binding) => !first.reaped.includes(binding.overlayId));
+    git(repo, 'worktree', 'lock', '--reason', 'held', left.cwd);
+    const second = reapSessionWorkspacesReport({ projectPath: repo, maxAgeMs: 0, now: Date.now() + 1_000, procRoot });
+    assert.deepEqual(second.reaped, []);
+    assert.deepEqual(second.stopped, { overlayId: left.overlayId, reason: 'worktree_remove_failed' });
+    assert.equal(fs.existsSync(path.join(path.dirname(left.cwd), 'manifest.json')), true, 'a refused removal keeps its instance');
+  } finally {
+    cleanup(repo);
+  }
+});
+
+test('the state lock is taken over only from a gone owner: dead, rebooted, reused pid, self, or far too old', async () => {
+  const repo = fixture();
+  const sleeper = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60_000)'], { stdio: 'ignore' });
+  try {
+    await new Promise((resolve) => sleeper.once('spawn', resolve));
+    const stat = fs.readFileSync(`/proc/${sleeper.pid}/stat`, 'utf8');
+    const startTicks = stat.slice(stat.lastIndexOf(')') + 2).split(' ')[19];
+    const bootId = fs.readFileSync('/proc/sys/kernel/random/boot_id', 'utf8').trim();
+    const lock = path.join(repo, '.git', 'nassaj-session-overlays', '.lock');
+    const holdWith = (owner) => {
+      fs.mkdirSync(lock, { recursive: true });
+      fs.writeFileSync(path.join(lock, 'owner.json'), JSON.stringify(owner));
+    };
+    const reap = () => reapSessionWorkspacesReport({ projectPath: repo, lockTimeoutMs: 200 });
+    const live = { pid: sleeper.pid, at: Date.now() - 60_000, startTicks, bootId };
+
+    holdWith(live);
+    assert.throws(reap, /lock timeout/);
+    assert.equal(fs.existsSync(lock), true, 'a live owner keeps its lock however old');
+
+    const exited = spawnSync(process.execPath, ['-e', 'process.stdout.write(String(process.pid))'], { encoding: 'utf8' });
+    for (const [label, owner] of [
+      ['dead pid', { ...live, pid: Number(exited.stdout) }],
+      ['reused pid', { ...live, startTicks: String(Number(startTicks) + 1) }],
+      ['previous boot', { ...live, bootId: '00000000-0000-4000-8000-000000000000' }],
+      ['own leaked lock', { ...live, pid: process.pid }],
+      ['past the last-resort age', { ...live, at: Date.now() - 11 * 60_000 }],
+    ]) {
+      holdWith(owner);
+      assert.deepEqual(reap().reaped, [], label);
+      assert.equal(fs.existsSync(lock), false, `${label}: the lock is taken over and released`);
+    }
+
+    const fresh = reapSessionWorkspacesReport({ projectPath: repo });
+    assert.deepEqual(fresh.reaped, []);
+  } finally {
+    sleeper.kill('SIGKILL');
     cleanup(repo);
   }
 });

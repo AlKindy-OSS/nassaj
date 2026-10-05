@@ -14,6 +14,8 @@
  *                               (login refusals: ?error=<oidc_* code>; an unknown or
  *                               expired state: ?error=invalid_state / transaction_expired)
  *   POST   /exchange          → { token, userId }  (SPA trades code for JWT)
+ *                               MULTI_ACCOUNT_SWITCHING: { wallet, csrfToken } and a
+ *                               new device cookie instead (ADR-163 amendment 1, A-1)
  *
  * IdP-facing (back channel):
  *   POST   /backchannel-logout   { logout_token } → 200  (revokes the user's tokens)
@@ -95,6 +97,7 @@ import crypto from 'crypto';
 
 import express from 'express';
 
+import * as authMiddleware from '../middleware/auth.js';
 import {
   authenticateToken,
   generateToken,
@@ -117,6 +120,9 @@ import {
   userIdentitiesDb,
 } from '../modules/database/index.js';
 import { clientIp } from '../utils/client-ip.js';
+import { isTrustedOrigin, multiAccountSwitchingEnabled } from '../utils/trusted-origin.js';
+import { clearPasswordChangeCookie, issueDeviceSession } from '../modules/account-wallet/issue-device-session.js';
+import { userSsoAttestationFresh } from '../services/sso-attestation.js';
 import { oidcPkceStore } from '../services/oidc-pkce.store.js';
 import { oidcCodeStore } from '../services/oidc-code.store.js';
 import { reconcileLocalRole, syncExternalRole } from '../services/external-role-mapper.js';
@@ -359,12 +365,31 @@ export async function beginTestAuthorization(res, ownerUserId) {
   return authorizationUrl ? { authorizationUrl } : { refusal: 'temporarily_unavailable' };
 }
 
+const SAME_SITE_FETCH = new Set(['same-origin', 'none']);
+
+/**
+ * Wallet mode (ADR-163 amendment 1, B-1529 gate L2): a primary SSO login may
+ * replace this browser's device session, so it must start from the app itself
+ * or a typed URL. A navigation the browser marks cross-site or same-site
+ * (Sec-Fetch-Site) is refused before any transaction cookie or state exists.
+ * A browser that sends no Sec-Fetch-Site is not refused here.
+ */
+function crossSiteLoginStart(req) {
+  if (!multiAccountSwitchingEnabled()) return false;
+  const site = req.get('sec-fetch-site');
+  return typeof site === 'string' && !SAME_SITE_FETCH.has(site);
+}
+
 // Kicks off the authorization-code + PKCE flow and redirects the browser to
 // the IdP. Always a 'login' transaction: it can never link an identity.
 router.get('/login', oidcLoginLimiter, async (req, res) => {
   const client = ssoLoginAvailable() ? activeSsoClient() : null;
   if (!client) {
     return res.status(501).json({ error: 'OIDC is not enabled' });
+  }
+  if (crossSiteLoginStart(req)) {
+    logOidcFailure('login_not_initiated');
+    return redirectLoginRefusal(res, 'oidc_login_not_initiated');
   }
   try {
     const authorizationUrl = await beginAuthorization(res, client, { purpose: 'login' });
@@ -381,13 +406,16 @@ router.get('/login', oidcLoginLimiter, async (req, res) => {
 /**
  * Mints the JWT, parks it behind a one-minute one-time code bound to this
  * browser transaction, and redirects to the SPA return page (never the JWT).
+ * In wallet mode no JWT is minted: the code carries `{ userId, configVersion }`
+ * and /exchange issues the device session (ADR-163 amendment 1, A-1).
  * ADR-194 D9: after the code is stored the active version is read again; if
  * an apply landed meanwhile the code is dropped and the login refused.
  */
 function handOffSession(req, res, user, transaction, configVersion) {
-  const token = generateToken(user);
+  const walletMode = multiAccountSwitchingEnabled();
+  const grant = walletMode ? { configVersion } : { token: generateToken(user) };
   const oneTimeCode = randomToken();
-  if (!oidcCodeStore.store(oneTimeCode, { token, userId: user.id, browserTransaction: transaction })) {
+  if (!oidcCodeStore.store(oneTimeCode, { ...grant, userId: user.id, browserTransaction: transaction })) {
     logOidcFailure('code_store_full');
     return res.status(503).json({ error: 'Identity provider temporarily unavailable' });
   }
@@ -396,16 +424,21 @@ function handOffSession(req, res, user, transaction, configVersion) {
     return redirectLoginRefusal(res, 'oidc_config_changed');
   }
 
-  userDb.updateLastLogin(user.id);
+  // Wallet mode records the login at /exchange, after the device is issued.
+  if (!walletMode) recordOidcLogin(req, user.id);
+  setNoStore(res);
+  return res.redirect(`${RETURN_PATH}?oidc_code=${encodeURIComponent(oneTimeCode)}`);
+}
+
+/** Last-login and the oidc_login audit for a session that was actually handed out. */
+function recordOidcLogin(req, userId) {
+  userDb.updateLastLogin(userId);
   auditLogDb.record('oidc_login', {
-    userId: user.id,
+    userId,
     metadata: { provider: 'oidc' },
     ipAddress: clientIp(req),
     userAgent: req.headers['user-agent'] ?? null,
   });
-
-  setNoStore(res);
-  return res.redirect(`${RETURN_PATH}?oidc_code=${encodeURIComponent(oneTimeCode)}`);
 }
 
 /**
@@ -759,7 +792,8 @@ router.get('/callback', oidcLoginLimiter, async (req, res) => {
   setCallbackHeaders(res);
   const { code, state } = req.query;
   if (typeof state !== 'string' || state.length === 0 || state.length > 256) {
-    return res.status(400).json({ error: 'Missing state parameter' });
+    // B-1066: a browser lands here from the IdP, so answer on the return page.
+    return redirectLoginRefusal(res, 'invalid_state');
   }
   const transaction = readBrowserTransaction(req);
   const { entry, stalePurpose } = oidcPkceStore.consumeWithOutcome(state, transaction);
@@ -783,17 +817,50 @@ router.get('/callback', oidcLoginLimiter, async (req, res) => {
     logOidcFailure('callback_rejected');
     if (res.headersSent) return undefined;
     if (entry.purpose === 'step_up') return redirectStepUpRefusal(res, 'temporarily_unavailable');
-    return res.status(500).json({ error: 'Sign-in could not be completed' });
+    return redirectLoginRefusal(res, 'server_error');
   }
 });
 
-// SPA trades the one-time code for the actual JWT. It must prove it is the
-// browser that started the authorization transaction by presenting the secure
-// transaction cookie. The one-time code remains single-use.
+const INVALID_CODE = Object.freeze({ error: 'Invalid or expired code' });
+
+/**
+ * Wallet-mode redemption (ADR-163 amendment 1, A-1): the version, the member's
+ * SSO attestation and the account are re-checked at redemption, then a NEW
+ * device session replaces whatever device the browser presented (D3/C1).
+ */
+function redeemIntoDeviceSession(req, res, redeemed) {
+  if (!redeemed || redeemed.token !== null) return res.status(401).json(INVALID_CODE);
+  if (!activeVersionStillIs(redeemed.configVersion)) {
+    return res.status(409).json({ error: 'SSO configuration changed', code: 'oidc_config_changed' });
+  }
+  const user = userDb.getUserById(redeemed.userId);
+  if (!user || !userSsoAttestationFresh(user)) return res.status(401).json(INVALID_CODE);
+  const issued = issueDeviceSession(req, res, user, authMiddleware.JWT_SECRET);
+  if (!issued.ok) {
+    auditLogDb.record('login_failure', {
+      userId: user.id,
+      metadata: { method: 'oidc', reason: issued.code },
+      ipAddress: clientIp(req),
+      userAgent: req.headers['user-agent'] ?? null,
+    });
+    return res.status(401).json(INVALID_CODE);
+  }
+  recordOidcLogin(req, user.id);
+  return res.json({ wallet: issued.wallet, csrfToken: issued.csrfToken });
+}
+
+// SPA trades the one-time code for the actual JWT (or, in wallet mode, a device
+// session). It must prove it is the browser that started the authorization
+// transaction by presenting the secure transaction cookie. The one-time code
+// remains single-use.
 router.post('/exchange', oidcExchangeLimiter, (req, res) => {
   setNoStore(res);
   if (!ssoLoginAvailable()) {
     return res.status(501).json({ error: 'OIDC is not enabled' });
+  }
+  const walletMode = multiAccountSwitchingEnabled();
+  if (walletMode && !isTrustedOrigin(req)) {
+    return res.status(403).json({ error: 'Request rejected', code: 'origin_rejected' });
   }
   const { code } = req.body ?? {};
   if (typeof code !== 'string' || code.length === 0 || code.length > 256) {
@@ -802,9 +869,12 @@ router.post('/exchange', oidcExchangeLimiter, (req, res) => {
   const transaction = readBrowserTransaction(req);
   const redeemed = oidcCodeStore.consume(code, transaction);
   res.clearCookie(BROWSER_TRANSACTION_COOKIE, BROWSER_TRANSACTION_COOKIE_OPTIONS);
-  if (!redeemed) {
-    return res.status(401).json({ error: 'Invalid or expired code' });
+  if (walletMode) return redeemIntoDeviceSession(req, res, redeemed);
+  if (!redeemed?.token) {
+    return res.status(401).json(INVALID_CODE);
   }
+  // W1: a leftover forced-change cookie must not outrank the new Bearer.
+  clearPasswordChangeCookie(res);
   return res.json({ token: redeemed.token, userId: redeemed.userId });
 });
 

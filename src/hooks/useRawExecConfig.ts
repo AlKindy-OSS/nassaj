@@ -85,6 +85,20 @@ function notifySubscribers(p: BoardPermission) {
   subscribers.forEach((fn) => fn(p));
 }
 
+/**
+ * Subscribe to every refresh of the shared raw snapshot (WS-driven, see
+ * useServerActions). For consumers that derive their own state from the same
+ * live signal, e.g. the chat fence's durable «executed at» record.
+ * Returns the unsubscribe function.
+ */
+export function subscribeRawExecConfig(listener: () => void): () => void {
+  const fn = () => listener();
+  subscribers.add(fn);
+  return () => {
+    subscribers.delete(fn);
+  };
+}
+
 function publish(canUseRaw: boolean, commands: readonly RawCommand[] = NO_COMMANDS) {
   cachedPerm = { canUseRaw, commands };
   cacheTimestamp = Date.now();

@@ -110,7 +110,11 @@ mock.module(url('./services/isolation/vendor-binary-integrity.js'), {
 });
 mock.module(url('./services/isolation/opencode-baseurl-guard.js'), {
   namedExports: {
+    OPENCODE_CONFIG_SOURCE_ENV: ['OPENCODE_CONFIG', 'OPENCODE_CONFIG_DIR', 'OPENCODE_CONFIG_CONTENT'],
+    OPENCODE_DISABLE_PROJECT_CONFIG_ENV: 'OPENCODE_DISABLE_PROJECT_CONFIG',
+    OPENCODE_PROJECT_CONFIG_SCOPE: 'project',
     assertOpenCodeBaseUrlAllowed: () => undefined,
+    assertOpenCodeProjectConfigAllowed: () => undefined,
     assertOpenCodeCarrierServerLocal: () => { loopbackChecks += 1; },
     resolveOpenCodeConfigPath: () => '/fake/opencode.json',
   },

@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
+import { EventEmitter } from 'node:events';
 import fs from 'node:fs';
 import net from 'node:net';
+import os from 'node:os';
 import path from 'node:path';
 import test, { mock } from 'node:test';
 
@@ -10,11 +12,14 @@ const authorizations: Array<Record<string, unknown>> = [];
 mock.module('@/modules/providers/index.js', {
   namedExports: { assertSessionAccessible: () => undefined },
 });
+type ProfileInput = { cwd?: string | null };
+const officialProfile = async (_input: ProfileInput): Promise<Record<string, unknown>> => ({
+  env: { ANTHROPIC_API_KEY: 'broker-test-key', PATH: '/usr/bin' }, effectiveEngine: 'anthropic',
+});
+let profileImpl = officialProfile;
 mock.module('./resolve-claude-run-profile.js', {
   namedExports: {
-    resolveClaudeRunProfileOrThrow: async () => ({
-      env: { ANTHROPIC_API_KEY: 'broker-test-key', PATH: '/usr/bin' }, effectiveEngine: 'anthropic',
-    }),
+    resolveClaudeRunProfileOrThrow: async (input: ProfileInput) => profileImpl(input),
   },
 });
 mock.module('@/modules/execution-permissions/runtime-user-effect.js', {
@@ -43,6 +48,8 @@ mock.module('@/modules/execution-permissions/index.js', {
 });
 
 const broker = await import('./managed-claude-launch-broker.js');
+const launcher = await import('./managed-claude-launcher.js');
+const { assertClaudeSpawnEnvAllowed } = await import('./claude-spawn-env-guard.js');
 
 const actor = Object.freeze({
   id: 7, role: 'admin', status: 'active', authenticationKind: 'session', authorizationGeneration: 4,
@@ -281,4 +288,140 @@ test('revoke settles reconciled_unknown when the wrapper cannot be signalled (ki
   restore();
   assert.deepEqual(settlements, ['reconciled_unknown']);
   assert.deepEqual(signals, ['SIGTERM', 'SIGKILL']); // Both attempts threw EPERM and changed nothing.
+});
+
+// ---------------------------------------------------------------------------
+// B-1541: brokered engine-pinned launches. The mocked profile resolver runs the
+// REAL spawn guard at the cwd it is handed, as resolveClaudeRunProfileOrThrow
+// does, so these prove the broker hands it the terminal's registered cwd.
+// ---------------------------------------------------------------------------
+
+const KIMI_ENV = { ANTHROPIC_BASE_URL: 'https://api.moonshot.ai/anthropic', ANTHROPIC_AUTH_TOKEN: 'vendor-fixture' };
+
+function b1541Dirs(): { root: string; registered: string; shell: string; configDir: string } {
+  const root = fs.mkdtempSync(path.join(process.env.TMPDIR || os.tmpdir(), 'b1541-broker-'));
+  const dirs = {
+    root,
+    registered: path.join(root, 'registered'),
+    shell: path.join(root, 'shell'),
+    configDir: path.join(root, 'config'),
+  };
+  for (const dir of [dirs.registered, dirs.shell, dirs.configDir]) fs.mkdirSync(dir, { recursive: true });
+  return dirs;
+}
+
+function writeLocalKey(project: string): void {
+  fs.mkdirSync(path.join(project, '.claude'), { recursive: true });
+  fs.writeFileSync(path.join(project, '.claude', 'settings.local.json'),
+    JSON.stringify({ env: { ANTHROPIC_API_KEY: 'sk-ant-api03-FIXTURE' } }));
+}
+
+function pinnedProfile(configDir: string, seen: ProfileInput[]) {
+  return async (input: ProfileInput): Promise<Record<string, unknown>> => {
+    seen.push(input);
+    const env = { PATH: '/usr/bin', HOME: configDir, CLAUDE_CONFIG_DIR: configDir, ...KIMI_ENV };
+    const engineHosts = new Set(['api.moonshot.ai']);
+    await assertClaudeSpawnEnvAllowed(env, { engineHosts, cwd: input.cwd ?? null });
+    return { env, effectiveEngine: 'kimi', engineHosts };
+  };
+}
+
+function registerAt(cwd: string) {
+  return broker.registerManagedClaudeTerminal({
+    authenticatedPrincipal: actor, userId: 7, mode: 'general', sessionId: null,
+    cwd, realBinary: '/bin/true', baseEnv: { PATH: '/usr/bin' },
+  });
+}
+
+function wrapperEnv(registration: { selector: string; socketPath: string }): NodeJS.ProcessEnv {
+  return {
+    PATH: '/usr/bin',
+    NASSAJ_MANAGED_CLAUDE_MODE: 'general',
+    NASSAJ_MANAGED_CLAUDE_USER_ID: '7',
+    NASSAJ_MANAGED_CLAUDE_REAL_BIN: '/bin/true',
+    ...envFor(registration),
+  };
+}
+
+function exitingSpawn(calls: string[][]) {
+  return ((_bin: string, argv: string[]) => {
+    calls.push(argv);
+    const child = new EventEmitter() as EventEmitter & { kill: () => boolean };
+    child.kill = () => true;
+    queueMicrotask(() => child.emit('exit', 0, null));
+    return child;
+  }) as never;
+}
+
+const isExposed = (error: Error & { code?: string }) => error.code === 'ENGINE_ANTHROPIC_CREDENTIAL_EXPOSED';
+
+test('B-1541 broker: a key at the registered cwd refuses authorization', async () => {
+  const dirs = b1541Dirs();
+  const seen: ProfileInput[] = [];
+  profileImpl = pinnedProfile(dirs.configDir, seen);
+  const registration = registerAt(dirs.registered);
+  try {
+    broker.bindManagedClaudeTerminal(registration.selector, process.pid);
+    writeLocalKey(dirs.registered);
+    await assert.rejects(
+      broker.requestManagedClaudeBroker(envFor(registration), 'authorize', { argv: ['-r', 'sess-1'] }),
+      isExposed,
+    );
+    assert.equal(seen.at(-1)?.cwd, dirs.registered);
+  } finally {
+    profileImpl = officialProfile;
+    broker.revokeManagedClaudeTerminal(registration.selector);
+    fs.rmSync(dirs.root, { recursive: true, force: true });
+  }
+});
+
+test('B-1541 broker: --settings / --setting-sources refuse an engine-pinned authorization', async () => {
+  const dirs = b1541Dirs();
+  profileImpl = pinnedProfile(dirs.configDir, []);
+  const registration = registerAt(dirs.registered);
+  try {
+    broker.bindManagedClaudeTerminal(registration.selector, process.pid);
+    for (const argv of [['--settings', '{}'], ['--setting-sources=user']]) {
+      await assert.rejects(broker.requestManagedClaudeBroker(envFor(registration), 'authorize', { argv }), isExposed);
+    }
+  } finally {
+    profileImpl = officialProfile;
+    broker.revokeManagedClaudeTerminal(registration.selector);
+    fs.rmSync(dirs.root, { recursive: true, force: true });
+  }
+});
+
+test('B-1541 brokered launcher: re-checks at the shell cwd and refuses --settings', async () => {
+  const dirs = b1541Dirs();
+  profileImpl = pinnedProfile(dirs.configDir, []);
+  const registration = registerAt(dirs.registered);
+  const previous = process.cwd();
+  const calls: string[][] = [];
+  try {
+    broker.bindManagedClaudeTerminal(registration.selector, process.pid);
+    process.chdir(dirs.shell);
+    // Clean registered cwd and clean shell cwd: the launch goes through.
+    assert.equal(await launcher.runManagedClaudeLauncher(['-r', 'sess-1'], wrapperEnv(registration),
+      { spawnImpl: exitingSpawn(calls) }), 0);
+    assert.equal(calls.length, 1);
+    // The shell moved to a dir whose local settings hold a key: the broker
+    // (registered cwd) approves, the wrapper's own re-check refuses.
+    writeLocalKey(dirs.shell);
+    await assert.rejects(
+      launcher.runManagedClaudeLauncher(['-r', 'sess-1'], wrapperEnv(registration), { spawnImpl: exitingSpawn(calls) }),
+      isExposed,
+    );
+    fs.rmSync(path.join(dirs.shell, '.claude'), { recursive: true, force: true });
+    await assert.rejects(
+      launcher.runManagedClaudeLauncher(['-r', 'sess-1', '--settings', '{"apiKeyHelper":"/bin/echo"}'],
+        wrapperEnv(registration), { spawnImpl: exitingSpawn(calls) }),
+      isExposed,
+    );
+    assert.equal(calls.length, 1, 'no refused launch spawned a child');
+  } finally {
+    process.chdir(previous);
+    profileImpl = officialProfile;
+    broker.revokeManagedClaudeTerminal(registration.selector);
+    fs.rmSync(dirs.root, { recursive: true, force: true });
+  }
 });

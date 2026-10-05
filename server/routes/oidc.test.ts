@@ -50,6 +50,7 @@ const apiKeyRevocations: number[] = [];
 let apiKeyCount = 2;
 let apiKeyFailure: Error | null = null;
 let identityUserId = 12;
+let identityLookupFailure: Error | null = null;
 // T-1939 slice 5: legacy duplicate (user, issuer) links.
 let userIssuerLinkCount = 1;
 let duplicateUsersCount = 0;
@@ -161,7 +162,10 @@ mock.module(url('../modules/database/index.js'), {
       updateLastLogin: () => {},
     },
     userIdentitiesDb: {
-      findByIssuerAndSubject: () => ({ id: 40, user_id: identityUserId }),
+      findByIssuerAndSubject: () => {
+        if (identityLookupFailure) throw identityLookupFailure;
+        return { id: 40, user_id: identityUserId };
+      },
       markAttested: (identityId: number, userId: number, at: number) => {
         if (attestationFailure === 'throw') throw new Error('database is locked');
         if (attestationFailure === 'no_row') return false;
@@ -263,6 +267,8 @@ test('OIDC browser transaction cookie binds callback and POST exchange, with no-
   assert.equal(exchange.status, 200);
   assert.equal(exchange.headers.get('cache-control'), 'no-store');
   assert.match(exchange.headers.get('set-cookie') ?? '', /__Host-oidc-txn=;/);
+  // W1: a leftover forced-change cookie must not outrank the JWT this exchange answers.
+  assert.match(exchange.headers.get('set-cookie') ?? '', /__Host-nassaj_password_change=;/);
   assert.deepEqual(await exchange.json(), { token: 'jwt-synthetic', userId: 12 });
   assert.equal(storedCode?.browserTransaction, currentTransaction);
   assert.ok(audits.every((record) => !JSON.stringify(record).includes('subject-synthetic')));
@@ -930,4 +936,25 @@ test('T-1939 slice 5: the boot check audits and warns the duplicate-link count o
   assert.deepEqual(audits, [
     { event: 'oidc_duplicate_links_detected', userId: null, metadata: { duplicateUsers: 3 } },
   ]);
+});
+
+// B-1066: the browser arrives from the IdP, so even these failures answer on the return page.
+test('B-1066: a callback without state redirects to the return page with invalid_state', async () => {
+  const res = await fetch(`${baseUrl}/api/auth/oidc/callback?code=provider-code`, { redirect: 'manual' });
+  assert.equal(res.status, 302);
+  assert.equal(res.headers.get('location'), '/auth/oidc/return?error=invalid_state');
+});
+
+test('B-1066: an unexpected failure after verification redirects with server_error, not JSON', async (t) => {
+  t.mock.method(process.stderr, 'write', () => true);
+  resetLoginState('user', { [ROLES_CLAIM]: ['member'] });
+  identityLookupFailure = new Error('database unavailable');
+  try {
+    const res = await runCallback();
+    assert.equal(res.status, 302);
+    assert.equal(res.headers.get('location'), '/auth/oidc/return?error=server_error');
+    assert.equal(storedCode, null, 'no one-time code is issued');
+  } finally {
+    identityLookupFailure = null;
+  }
 });

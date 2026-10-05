@@ -670,7 +670,7 @@
     "cropHint": "Ok tuşlarını kullanarak kırpma alanını taşıyın veya yeniden boyutlandırın"
   },
   "inlineCode": {
-    "openLink": "Bağlantıyı aç — kopyalamak için sağ tıklayın",
+    "copyLink": "Bağlantıyı kopyala",
     "copyHint": "Kopyala"
   }
 }

@@ -56,8 +56,8 @@ export default function AgentCategoryContentSection({
         **تبويب الحساب: ثلاثة أقسام في تسلسلٍ واحد وفاصلٍ واحد** (‏T-1700، شكوى
         المالك 2026-09-10: «فيها نوع من الفوضى»).
 
-        الترتيب يتبع سؤال القارئ: **أموصولٌ أنا؟** (الاتصال والربط) ← **مع من
-        أشارك اعتمادي؟** ← **كم بقي لي؟** (حدود الاستخدام). وكان القسم الأول
+        الترتيب (2026-10-04): الحالة وإعادة المصادقة ← حدود الاستخدام ← مشاركة
+        الاعتماد، لكل وكيل بلا استثناء. وكان القسم الأول
         يُصيَّر خارج أي غلافٍ مشترك ثم يُفتَح للقسمين الباقيين غلافٌ ثانٍ
         بـ`mt-8 space-y-8` — أي فاصلان مصدرُهما اثنان لثلاثة أقسام. الآن غلافٌ
         واحد يملك الفاصل كلَّه، فلا يمكن لفجوةٍ أن تختلف عن أختها.
@@ -94,12 +94,16 @@ export default function AgentCategoryContentSection({
             />
           )}
 
-          <CredentialGrantsSection agent={selectedAgent} />
-
           <AgentUsageSection agent={selectedAgent} />
 
-          <HarnessVersionSection agent={selectedAgent} onOpenSystemTab={onOpenSystemTab} />
+          <CredentialGrantsSection agent={selectedAgent} />
         </div>
+      )}
+
+      {/* تحديث أداة الوكيل: تبويبٌ قائم بذاته لكل وكيل، في موضعٍ ثابت آخر الشريط
+          (كان قسماً رابعاً مكدَّساً أسفل تبويب الحساب). */}
+      {selectedCategory === 'update' && (
+        <HarnessVersionSection agent={selectedAgent} onOpenSystemTab={onOpenSystemTab} />
       )}
 
       {/*

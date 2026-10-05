@@ -51,7 +51,7 @@ mock.module(url('../modules/database/index.js'), {
     userDb: {
       getUserById: () => ({ ...row }),
       getRawById: () => ({ ...row }),
-      getUserByUsername: () => undefined,
+      getUserByLoginIdentifier: () => undefined,
       isAuthorizationPrincipalCurrent: () => true,
       updateLastLogin: () => {},
     },
@@ -116,8 +116,11 @@ await new Promise<void>((resolve) => server.once('listening', resolve));
 const { port } = server.address() as AddressInfo;
 after(() => new Promise<void>((resolve) => server.close(() => resolve())));
 
-const OIDC_KEYS = ['MULTI_ACCOUNT_SWITCHING'] as const;
+const OIDC_KEYS = ['MULTI_ACCOUNT_SWITCHING', 'NASSAJ_PUBLIC_ORIGIN', 'ALLOWED_ORIGINS'] as const;
 const savedEnv = Object.fromEntries(OIDC_KEYS.map((key) => [key, process.env[key]]));
+// Device sessions need an explicit https origin that CORS serves (ADR-163 amendment 1).
+process.env.NASSAJ_PUBLIC_ORIGIN = 'https://nassaj.test';
+process.env.ALLOWED_ORIGINS = 'https://nassaj.test';
 after(() => {
   for (const key of OIDC_KEYS) {
     if (savedEnv[key] === undefined) delete process.env[key];

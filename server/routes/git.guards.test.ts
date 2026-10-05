@@ -154,6 +154,8 @@ function accessFor(projectId: string, userId: number | null) {
 }
 
 let storedGithubToken: string | null = null;
+/** B-1373: per-test override of the project root the DB returns. */
+let projectDirOverride: string | null = null;
 
 mock.module('@/modules/database/index.js', {
   namedExports: {
@@ -163,7 +165,7 @@ mock.module('@/modules/database/index.js', {
       isProjectWritableByUser: (projectId: string, userId: number | null) =>
         accessFor(projectId, userId).writable,
       getProjectPathById: (projectId: string) =>
-        projectId === PUBLIC_PROJECT || projectId === PRIVATE_PROJECT ? PROJECT_DIR : null,
+        projectId === PUBLIC_PROJECT || projectId === PRIVATE_PROJECT ? (projectDirOverride ?? PROJECT_DIR) : null,
       getProjectPath: (candidate: string) =>
         candidate === PROJECT_DIR ? { project_id: PUBLIC_PROJECT } : null,
     },
@@ -224,6 +226,7 @@ beforeEach(() => {
   toplevel = PROJECT_DIR;
   currentUserId = 7;
   storedGithubToken = null;
+  projectDirOverride = null;
   askpassCleanupCalls = 0;
   identityCurrent = true;
 });
@@ -573,3 +576,24 @@ test('B-1076: a blocked generation is 409 and an arbitrary storage code stays a 
     warn.mock.restore();
   }
 });
+
+// ── B-1373: no git reads over the service home or a hidden home entry ─────────
+
+for (const label of ['the home directory', 'a hidden home entry'] as const) {
+  test(`B-1373: GET /diff refuses a project rooted at ${label} before spawning git`, async () => {
+    currentUserId = 9; // a member: the visibility gate passes
+    const home = os.homedir();
+    const root = label === 'the home directory' ? home : path.join(home, '.cloudflared');
+    fs.mkdirSync(root, { recursive: true });
+    projectDirOverride = root;
+    gitScript = (args) => (args[0] === 'diff' ? { stdout: 'LEAK' } : undefined);
+
+    const res = await request('GET', `/api/git/diff?project=${PRIVATE_PROJECT}&file=a.txt`);
+
+    // The /diff error branch answers { error } (historically with 200), so the
+    // proof is the refusal reason plus zero git processes, not the status code.
+    assert.match(String(res.json.error), /protected location/);
+    assert.equal(res.text.includes('LEAK'), false);
+    assert.equal(spawnCalls.length, 0, 'validateProjectPath must refuse before any git process');
+  });
+}

@@ -35,7 +35,57 @@ export type PermissionFence = {
   decision: FenceDecision | null;
 };
 
-type FencesResponse = { fences: PermissionFence[]; scopedFences: PermissionFence[] };
+export type RecentAcknowledgement = {
+  operationId: string;
+  sessionId: string;
+  actorUserId: number | null;
+  actorDeviceSessionId: string | null;
+  decisionOwnerUserId: number | null;
+  decisionId: string | number | null;
+  atMs: number;
+  committed: boolean;
+};
+
+type FencesResponse = {
+  fences: PermissionFence[];
+  scopedFences: PermissionFence[];
+  recentAcknowledgements?: RecentAcknowledgement[];
+  recentAcknowledgementsAvailable?: boolean;
+};
+
+/** إقرارات «أكمل من هنا» الأخيرة: سجلّ تدقيق للمالك؛ غير متاح = لا يُعرض بيانٌ مختلق. */
+function RecentAcknowledgements({ data }: { data: FencesResponse }) {
+  const { t, i18n } = useTranslation('settings');
+  const rows = data.recentAcknowledgements ?? [];
+  const unknownId = '—';
+  return (
+    <SettingsCard>
+      <div className="space-y-2 text-[13px] leading-relaxed text-foreground" data-testid="recent-acknowledgements">
+        <p className="font-medium">{t('permissionFences.recentTitle')}</p>
+        {data.recentAcknowledgementsAvailable === false ? (
+          <p className="text-danger" role="alert">{t('permissionFences.recentUnavailable')}</p>
+        ) : rows.length === 0 ? (
+          <p className="text-muted-foreground">{t('permissionFences.recentEmpty')}</p>
+        ) : (
+          <ul className="space-y-1 ps-4 text-muted-foreground">
+            {rows.map((row) => (
+              <li key={row.operationId} className="list-disc break-words">
+                {t('permissionFences.recentRow', {
+                  when: new Date(row.atMs).toLocaleString(i18n.language),
+                  session: row.sessionId,
+                  actor: row.actorUserId ?? unknownId,
+                  owner: row.decisionOwnerUserId ?? unknownId,
+                })}
+                {' · '}
+                {row.committed ? t('permissionFences.committed') : t('permissionFences.notCommitted')}
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </SettingsCard>
+  );
+}
 
 const REASON_MAX = 512;
 
@@ -279,6 +329,7 @@ export default function PermissionFencesSection({ fenceFilter }: PermissionFence
               <FenceCard key={fenceKey(fence)} fence={fence} busy={busyKey === fenceKey(fence)} onLift={lift} />
             ))
           )}
+          {data && <RecentAcknowledgements data={data} />}
         </div>
       )}
     </SettingsSection>

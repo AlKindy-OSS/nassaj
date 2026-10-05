@@ -57,7 +57,8 @@ function createFixture(kind: ActorKind = 'jwt', actorOwnsProject = false) {
   const suffix = String(sequence);
   const creator = database.userDb.createUser(`creator_${suffix}`, 'hash', 'user').id;
   const controller = database.userDb.createUser(`controller_${suffix}`, 'hash', 'user').id;
-  const actorUser = database.userDb.createUser(`actor_${suffix}`, 'hash', 'user').id;
+  // B-464: only owner/admin API keys authenticate, so a CK actor is an admin.
+  const actorUser = database.userDb.createUser(`actor_${suffix}`, 'hash', kind === 'ck' ? 'admin' : 'user').id;
   const projectPath = fs.mkdtempSync(path.join(root, `project-${suffix}-`));
   const project = database.projectsDb.createProjectPath(projectPath, null, creator).project!;
   database.projectMembersDb.addAndRotateProjectAccess(project.project_id, actorUser, 'member', creator);

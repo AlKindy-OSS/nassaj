@@ -38,8 +38,9 @@ import { createSourceVersionHealthMiddleware } from '@/services/source-version.s
 import { runConnectorCredentialRetentionAtStartup } from '@/modules/connectors/connector-user-grant.production.js';
 import {
     authorizeRuntimeProviderExecution,
-    isPermissionReconciliationFatal, reconcileRuntimePermissionExecutions,
+    isPermissionReconciliationFatal, processAlive, reconcileRuntimePermissionExecutions,
 } from '@/modules/execution-permissions/runtime-gateway.js';
+import { createHostContainment } from '@/modules/execution-permissions/index.js';
 
 import { getConnectableHost } from '../shared/networkHosts.js';
 import { exchangeGenerations, validateCandidate, verifyRuntimeIdentities } from '../scripts/lib/source-update-activation.mjs';
@@ -62,14 +63,21 @@ import { acquireCodexLaunchIdentity, prewarmCodexLaunchIdentity } from './shared
 import { prewarmCodexRuntimeCompat } from './shared/codex-runtime-compat.js';
 import { checkBundledCageBwrap } from './services/isolation/provider-cage.js';
 import { clientIp } from './utils/client-ip.js';
+import { isTrustedOrigin, multiAccountSwitchingEnabled, trustedOriginPolicy } from './utils/trusted-origin.js';
+import { corsAllowedOrigins } from './config/cors-origins.js';
+import { serverPort } from './config/server-port.js';
 import { sanitizeAttachmentName, resolveCollisionFreeDest } from './utils/attachment-helpers.js';
 import { resolveReadPathInProject, isResolvedPathInsideRootReal } from './utils/path-guard.js';
+import { isForbiddenProjectRoot, isSecretPath } from '@/shared/secret-path-guard.js';
 import { sanitizeSvg } from './services/svg-sanitizer.js';
 import { createChatImagesRouter } from './routes/chat-images.js';
-import { createDocumentSharesRouter } from './routes/document-shares.js';
+import { createDocumentSharesMount, createDocumentSharesRouter } from './routes/document-shares.js';
+import { applyRawFileResponseHeaders } from './utils/raw-file-response-headers.js';
+import { createSessionShareManagementMount } from './routes/session-shares.js';
 import { configureInternalChatSessionAccess, createInternalSessionChatRouter, isInternalChatReady } from './modules/internal-session-chat/index.js';
 import { createDocumentSharesStore } from './modules/database/document-shares.js';
 import { createDocumentShareVerifier } from './services/document-share-auth.js';
+import { createSessionShareRuntime } from './services/session-share-runtime.js';
 import { isShareableDocument, saveSharedDocumentAtomically } from './services/document-share-files.js';
 import { createAssistantImagesRouter, deriveAllowedRoots, defaultScratchpadBases, defaultTmpBases, deriveOverlayWorkspace } from './routes/assistant-images.js';
 import {
@@ -205,6 +213,7 @@ import { reconcileHarnessSnapshots } from './modules/providers/harness-update/bo
 import { logUnresolvedHarnessBinaries } from './shared/harness-binaries.js';
 import governancePreferencesRoutes from './modules/providers/governance-preferences.routes.js';
 import participantsRoutes from './modules/providers/participants.routes.js';
+import { createSessionPermissionFenceRouter } from './modules/providers/session-permission-fence.routes.js';
 import {
     latestClaudeCacheTtlMinutes,
     latestClaudeTokenUsage,
@@ -221,14 +230,14 @@ import {
     cliTurnSupervisor, CLI_TURN_SUPERVISOR_OWNER_ID,
 } from './modules/turn-supervisor/cli-turn-supervisor.service.js';
 import { createTurnSupervisorLifecycle } from './modules/turn-supervisor/lifecycle.js';
-import { initializeDatabase, closeConnection, getConnection, projectsDb, sessionsDb, participantsDb, appConfigDb, pendingServerActionsDb, sessionOutcomesDb, sourceUpdateJobsDb, hashSourceUpdateIdempotencyKey, sourceUpdateRequestFingerprint, scheduledMessagesDb, userDb, auditLogDb, canAccessProject, canAccessRegisteredProjectPath, captureWorkspaceTopologyFence, isWorkspaceTopologyFenceCurrent, describePlatformModeVisibilityRisk, isProjectMembershipEnforced } from './modules/database/index.js';
+import { initializeDatabase, closeConnection, getConnection, projectsDb, sessionsDb, participantsDb, appConfigDb, pendingServerActionsDb, sessionOutcomesDb, sourceUpdateJobsDb, hashSourceUpdateIdempotencyKey, sourceUpdateRequestFingerprint, scheduledMessagesDb, userDb, auditLogDb, canAccessProject, canAccessRegisteredProjectPath, captureWorkspaceTopologyFence, isWorkspaceTopologyFenceCurrent, describePlatformModeVisibilityRisk, isProjectMembershipEnforced, DEVICE_COOKIE } from './modules/database/index.js';
 import { onSessionOutcomeChange } from './modules/websocket/services/session-outcome.service.js';
 import { broadcastSessionOutcome } from './modules/websocket/services/presence.service.js';
 import { revokeProjectLiveAccess } from './modules/websocket/services/project-membership-revocation.service.js';
 import { onMemberRemoved } from './modules/projects/services/project-visibility-management.service.js';
 import { isProjectVisible, coerceUserId } from './modules/projects/index.js';
 import { configureWebPush } from './services/vapid-keys.js';
-import { createSourceUpdater, evaluateUpdateStorage, publicStorageFigures, resolveUpdateHostCapability, sourceUpdateErrorPayload } from './services/source-updater.js';
+import { createSourceUpdater, defaultSourceUpdateControlRoot, evaluateUpdateStorage, publicStorageFigures, resolveUpdateHostCapability, sourceUpdateErrorPayload } from './services/source-updater.js';
 import { createSourceUpdateWorker, durableReceiptFile } from './services/source-update-worker.js';
 import { createUpdateDeferralScheduler } from './services/update-deferral-scheduler.js';
 import {
@@ -250,6 +259,7 @@ import { assertLegacyTransitionAllowed, requireStartupAdmission, confirmStartupS
 import { createUpdateMaintenanceGate } from './services/update-maintenance-gate.js';
 import { acquireApplicationWriterLease, applicationWriterLeaseMiddleware, installLocalUpdateRouteLeases, summarizeOpenTerminals, withLocalUpdateWriterLease } from './services/update-writer-lease.js';
 import { createClientPublicationStaticMiddleware, createClientManifestHandler } from './services/client-publication-static.js';
+import { createSharePageRouter, publicAssetCors } from './services/share-page.js';
 import { resolveHostUpdateMode, setLocalUpdateRuntimeIdentity, localUpdateActivationJobs, ensureLocalUpdateAction,
     getLocalUpdatePolicyCapability } from './services/local-preview-server-control.js';
 import { getBrandingTitle } from './services/branding-config.js';
@@ -264,7 +274,7 @@ import { resolveSecurityPosture } from './services/isolation/security-posture.js
 import { credentialPrincipalId } from './services/isolation/credential-principal.js';
 import { userConfigDir } from './services/isolation/provision-user-dirs.js';
 import { isProviderIsolated } from './services/provider-sharing.js';
-import { validateApiKey, authenticateToken, authenticateWebSocket, authenticateDeviceWebSocket, requireRole, JWT_SECRET } from './middleware/auth.js';
+import { validateApiKey, authenticateToken, authenticateDeviceCookieIfPresent, authenticateWebSocket, authenticateDeviceWebSocket, requireRole, JWT_SECRET } from './middleware/auth.js';
 import { recordAuthRejection } from './middleware/auth-rejection-audit.js';
 import { IS_PLATFORM } from './constants/config.js';
 import { c } from './utils/colors.js';
@@ -463,6 +473,8 @@ const updateNassajSource = releaseSourceInvalid ? null : createSourceUpdater({
         if (queued) pendingServerActionsDb.markSuperseded(queued.id, 'source_changed_after_staging');
         return true;
     },
+    // B-1264: read at job time; SERVER_RUNTIME_IDENTITY is set later during startup.
+    loadedRuntimeCommit: () => SERVER_RUNTIME_IDENTITY.runtimeCommit,
 });
 // git-checkout-v2 discovers a release from git tags via the node's own git
 // credentials (so a private source works), not the credential-free GitHub API
@@ -474,7 +486,7 @@ const updateReleaseDiscovery = releaseSourceInvalid ? null
     ? createGitTagReleaseDiscovery({ appRoot: APP_ROOT })
     : createReleaseDiscovery();
 const UPDATE_JOB_RECEIPT_ROOT = path.join(
-    UPDATE_CONTROL_ROOT || path.join(APP_ROOT, '.git', 'nassaj-source-update'),
+    UPDATE_CONTROL_ROOT || defaultSourceUpdateControlRoot(APP_ROOT),
     'job-receipts',
 );
 // T-1768: the live terminal log of each job, beside its receipts, so it
@@ -764,20 +776,6 @@ const MAX_FILE_UPLOAD_COUNT = 20;
 const MAX_ATTACHMENT_SIZE_BYTES = 50 * 1024 * 1024;
 const MAX_ATTACHMENT_COUNT = 20;
 
-// Content types a browser renders as an ACTIVE document (can execute embedded
-// script/markup) when navigated to directly. When the raw-bytes endpoint serves
-// one of these, it forces a download disposition so a direct navigation can
-// never execute stored script — the SVG/HTML stored-XSS vector (B-158 / T-844).
-// Raster images/video/audio/pdf are intentionally absent: they render inline and
-// carry no script, and the media preview fetches them via XHR+blob regardless.
-const RENDERABLE_XSS_TYPES = new Set([
-    'image/svg+xml',
-    'text/html',
-    'application/xhtml+xml',
-    'application/xml',
-    'text/xml',
-]);
-
 console.log('SERVER_PORT from env:', process.env.SERVER_PORT);
 
 // ---------------------------------------------------------------------------
@@ -916,7 +914,7 @@ const wss = createWebSocketServer(server, {
         canAcceptApplications: () => normalAdmissionReady && !requestMaintenanceGate.readPublicStatus().gateClosed,
         authenticateWebSocket,
         authenticateDeviceWebSocket,
-        deviceSessionsEnabled: () => process.env.MULTI_ACCOUNT_SWITCHING === 'true',
+        deviceSessionsEnabled: multiAccountSwitchingEnabled,
         // Cross-boundary collaborators injected from the composition root so the
         // websocket module never imports middleware/utils across the boundary
         // (eslint-plugin-boundaries). T-182 auth_rejected auditing on the WS path.
@@ -924,14 +922,9 @@ const wss = createWebSocketServer(server, {
         recordRejection: recordAuthRejection,
         clientIp,
         ssoAttestationFresh,
-        isTrustedOrigin: (request) => {
-            const origin = request.headers.origin;
-            const forwardedProto = String(request.headers['x-forwarded-proto'] || '').split(',')[0].trim();
-            const protocol = forwardedProto === 'https' ? 'https' : 'http';
-            const expected = String(process.env.APP_ORIGIN || `${protocol}://${request.headers.host || ''}`)
-                .replace(/\/$/u, '');
-            return typeof origin === 'string' && origin.replace(/\/$/u, '') === expected;
-        },
+        // ADR-163 amendment 1 (D1): the shared env-derived allowlist; never
+        // Host or X-Forwarded-Proto, which any peer can set.
+        isTrustedOrigin,
     },
     chat: (chatDependencies = {
         acquireWriterLease: (kind) => acquireApplicationWriterLease(kind, { waitMs: 100 }),
@@ -1094,11 +1087,14 @@ try {
 // while risking the live tunnels (which have already caused multi-hour outages
 // when the request path changed):
 //
-//  1. Authentication is Bearer-token only. There is no cookie anywhere in
-//     server/ and `credentials: true` is NOT set on this middleware, so a
-//     browser never attaches ambient credentials to a cross-origin request.
-//     CORS is therefore not what stands between an attacker page and this API;
-//     the Authorization header is, and a foreign origin cannot forge it.
+//  1. `credentials: true` is NOT set on this middleware, so a browser never
+//     attaches ambient credentials to a cross-origin CORS request. Bearer JWT is
+//     the default credential; the cookie identities that do exist (the
+//     `__Host-` device session under MULTI_ACCOUNT_SWITCHING and the forced
+//     password-change cookie) are `SameSite=Lax`, used same-origin only, and
+//     every cookie mutation is gated by the trusted-origin allowlist plus a
+//     CSRF token (server/utils/trusted-origin.ts, ADR-163 amendment 1). Device
+//     sessions stay off unless every explicit trusted origin is listed here.
 //  2. `!origin` covers every non-browser caller: curl, the /health probe that
 //     scripts/safe-restart.sh polls, and server-to-server calls. Rejecting them
 //     would break the restart gate, and it protects nothing: an attacker who
@@ -1109,17 +1105,31 @@ try {
 //
 // If this is ever revisited, the safe order is: drop the localhost entries
 // behind NODE_ENV first, verify both tunnels, and only then reconsider (1).
-const _corsDefaultOrigins = [
-  'http://localhost:3004',
-  'http://localhost:3001',
-  'http://localhost:5173',
-];
-const _corsAllowedOrigins = process.env.ALLOWED_ORIGINS
-  ? [...new Set([
-      ..._corsDefaultOrigins,
-      ...process.env.ALLOWED_ORIGINS.split(',').map((o) => o.trim()).filter(Boolean),
-    ])]
-  : _corsDefaultOrigins;
+// Defaults and ALLOWED_ORIGINS parsing live in server/config/cors-origins.ts,
+// shared with the trusted-origin policy's CORS alignment check.
+const _corsAllowedOrigins = corsAllowedOrigins();
+// Evaluate the trusted-origin policy at boot so its warnings (invalid origin,
+// unconfigured allowlist, CORS mismatch, flag disabled) are logged once now.
+trustedOriginPolicy();
+
+// ADR-196 (T-1970): read-only session share links. The public read is mounted
+// BEFORE the global cors(): the sandboxed viewer has an opaque origin
+// (`Origin: null`) and needs an explicit wildcard preflight answer, which the
+// allow-list cors() would otherwise swallow. Management routes authenticate
+// themselves (Bearer JWT, or the device cookie through the bridge), outside authenticateToken.
+const sessionShareRuntime = createSessionShareRuntime({
+    verifyUser: createDocumentShareVerifier(userDb, JWT_SECRET),
+    audit: (action, userId, metadata) => auditLogDb.record(action, { userId, metadata }),
+    writer: applicationWriterLeaseMiddleware('session-share-write'),
+    withWriter: async (operation) => {
+        const lease = await acquireApplicationWriterLease('session-share-background', { waitMs: 100 });
+        try { return operation(); } finally { lease.release(); }
+    },
+    publicOrigin: process.env.NASSAJ_PUBLIC_ORIGIN,
+    deviceCookieName: DEVICE_COOKIE,
+    deviceCookiesEnabled: multiAccountSwitchingEnabled,
+});
+app.use(sessionShareRuntime.publicHandler);
 
 app.use(cors({
   origin: (origin, callback) => {
@@ -1460,15 +1470,15 @@ const documentSharesRouter = createDocumentSharesRouter({
     writer: applicationWriterLeaseMiddleware('document-share-write'),
     audit: (action, userId, shareId) => auditLogDb.record(action, { userId, metadata: { shareId } }),
 });
-app.use('/api', (req, res, next) => {
-    if (/^\/projects\/[^/]+\/document-shares(?:\/|$)/.test(req.path)) {
-        return authenticateToken(req, res, () => documentSharesRouter(req, res, next));
-    }
-    if (/^\/document-shares(?:\/|$)/.test(req.path)) {
-        return documentSharesRouter(req, res, next);
-    }
-    next();
-});
+// ADR-163 amendment 1 (M4): share routes that verify Bearer themselves accept
+// the wallet device cookie only through authenticateDeviceCookieIfPresent,
+// which delegates to the single authenticateToken.
+app.use('/api', createDocumentSharesMount(documentSharesRouter, {
+    authenticateToken, deviceIdentity: authenticateDeviceCookieIfPresent,
+}));
+app.use('/api', createSessionShareManagementMount(
+    (req, res, next) => sessionShareRuntime.managementRouter(req, res, next),
+    authenticateDeviceCookieIfPresent));
 app.use('/share', (_req, res, next) => {
     res.set({ 'Referrer-Policy': 'no-referrer', 'Cache-Control': 'no-store',
         'X-Robots-Tag': 'noindex, nofollow, noarchive' });
@@ -1524,6 +1534,26 @@ app.use('/api/voice', authenticateToken, voiceRoutes);
 
 // Session participant/agent tracking (protected)
 app.use('/api/sessions', authenticateToken, participantsRoutes);
+// T-1910 S4: "continue here" on a SESSION-scoped permission fence. Any session writer may
+// acknowledge; containment is proven and the lift is journaled by the audited fence core.
+app.use('/api/sessions', authenticateToken, createSessionPermissionFenceRouter({
+    containment: createHostContainment(processAlive),
+    // The push util has no per-user locale: Arabic first, English fallback in the same body.
+    notifyDecisionOwner: ({ ownerUserId, sessionId, operationId }) => notifyUserIfEnabled({
+        userId: ownerUserId,
+        event: createNotificationEvent({
+            provider: 'system',
+            sessionId,
+            kind: 'info',
+            code: 'agent.notification',
+            meta: {
+                message: 'تابع عضو في الجلسة تشغيلك الموقوف بعد إقراره بأن أثره غير معروف. '
+                    + '/ A session member acknowledged your paused run and continued it.',
+            },
+            dedupeKey: `system:permission-fence:acknowledged:${sessionId}:${operationId}`,
+        }),
+    }),
+}));
 // Internal team chat (ADR-187): room membership narrows, never widens, the
 // platform session gate. The same predicate as every session route is injected
 // here so the chat module never imports the provider layer.
@@ -1838,6 +1868,12 @@ app.get('/manifest.json', createClientManifestHandler(APP_ROOT, getBrandingTitle
 // search retained generations on a miss; this bounds disk growth without
 // breaking those already-open tabs.
 const immutableAssetHeaders = (res) => res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+// The public share viewer is a sandboxed (opaque-origin) document: its module
+// scripts, styles and fonts are CORS fetches, so every asset route is readable
+// cross-origin. Must precede all /assets mounts, including retained generations.
+app.use('/assets', publicAssetCors);
+// Public session-share viewer (GET /s/:id). Before static mounts and the SPA fallback.
+app.use(createSharePageRouter({ appRoot: APP_ROOT, publicOrigin: process.env.NASSAJ_PUBLIC_ORIGIN }));
 app.use('/assets/generations', createClientPublicationStaticMiddleware(APP_ROOT));
 app.use('/assets', express.static(path.join(APP_ROOT, 'dist', 'assets'), { setHeaders: immutableAssetHeaders }));
 app.use('/assets', (req, res, next) => {
@@ -2253,6 +2289,10 @@ app.get('/api/browse-filesystem', authenticateToken, async (req, res) => {
             return res.status(403).json({ error: validation.error });
         }
         const resolvedPath = validation.resolvedPath || targetPath;
+        // B-1373: do not browse into credential locations (~/.ssh, ~/.nassaj-users …).
+        if (isSecretPath(resolvedPath)) {
+            return res.status(403).json({ error: 'Path is not allowed' });
+        }
 
         // Security check - ensure path is accessible
         try {
@@ -2328,6 +2368,10 @@ app.post('/api/create-folder', authenticateToken,
             return res.status(403).json({ error: validation.error });
         }
         const targetPath = validation.resolvedPath || resolvedInput;
+        // B-1373: never create folders inside credential locations.
+        if (isSecretPath(targetPath)) {
+            return res.status(403).json({ error: 'Path is not allowed' });
+        }
         const parentDir = path.dirname(targetPath);
         try {
             await fs.promises.access(parentDir);
@@ -2445,22 +2489,10 @@ app.get('/api/projects/:projectId/files/content', authenticateToken, async (req,
             return res.status(403).json({ error: 'Path must be under project root' });
         }
 
-        // Content type from the requested name's extension.
-        const mimeType = mime.lookup(guard.resolved) || 'application/octet-stream';
-        res.setHeader('Content-Type', mimeType);
-
-        // B-158 hardening for direct navigation to the raw bytes:
-        //  - nosniff on every response so a stored file can never be re-sniffed
-        //    into an active type regardless of its bytes.
-        //  - For types a browser renders as an active document (SVG/HTML/XML),
-        //    force a download disposition so an embedded <script> cannot execute
-        //    on direct navigation (stored XSS). Inline media preview is unaffected:
-        //    ImageViewer / CodeEditorMediaPreview fetch via XHR and build a blob
-        //    URL, and Content-Disposition never influences an <img>/fetch load.
-        res.setHeader('X-Content-Type-Options', 'nosniff');
-        if (RENDERABLE_XSS_TYPES.has(String(mimeType).toLowerCase())) {
-            res.setHeader('Content-Disposition', 'attachment');
-        }
+        // Content type from the requested name's extension; nosniff, a
+        // sandboxing CSP and a download disposition for active document types
+        // keep a direct (cookie-authenticated) navigation inert (B-158, M9).
+        applyRawFileResponseHeaders(res, mime.lookup(guard.resolved) || 'application/octet-stream');
 
         // Stream the verified real path (not the lexical one) to avoid a
         // symlink swap between the check and the open.
@@ -2565,6 +2597,11 @@ app.get('/api/projects/:projectId/files', authenticateToken, async (req, res) =>
         const actualPath = await projectsDb.getProjectPathById(req.params.projectId);
         if (!actualPath) {
             return res.status(404).json({ error: 'Project not found' });
+        }
+        // B-1373: never list a root that is (or contains) the service user's home
+        // or a secret location, even when such a project row already exists.
+        if (isForbiddenProjectRoot(actualPath)) {
+            return res.status(403).json({ error: 'Project root is not allowed' });
         }
 
         // Check if path exists
@@ -3932,7 +3969,7 @@ function resolveDrainExitCode(deps) {
     return DRAIN_ORPHAN_EXIT_CODE;
 }
 
-const SERVER_PORT = process.env.SERVER_PORT || 3001;
+const SERVER_PORT = serverPort();
 const HOST = process.env.HOST || '0.0.0.0';
 const DISPLAY_HOST = getConnectableHost(HOST);
 const VITE_PORT = process.env.VITE_PORT || 5173;
@@ -4331,6 +4368,10 @@ async function startServer() {
         if (OID_PAIR_BOOTSTRAP) runConnectorCredentialRetentionAtStartup();
         await backgroundLifecycle.start();
         normalAdmissionReady = true;
+        // ADR-196 / B-1535: revoke dead session shares once serving, then every ten
+        // minutes. The first sweep writes (UPDATE session_shares), so it must not run
+        // in the security_startup_authorized phase; readers enforce expiry themselves.
+        sessionShareRuntime.startSweeper();
         if (localActivationMode && !OID_PAIR_BOOTSTRAP) updateAutoActivator?.start();
         if (OID_PAIR_BOOTSTRAP) {
             if (!OID_PAIR_BOOTSTRAP.rollback) await recordOidPairApplicationServing(APP_ROOT, OID_PAIR_BOOTSTRAP, {
