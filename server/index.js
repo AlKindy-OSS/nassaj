@@ -186,7 +186,9 @@ import { connectorsOAuthCallbackRoutes, connectorsRoutes } from './modules/conne
 import { voiceRoutes } from './modules/voice/index.js';
 import userRoutes from './routes/user.js';
 import githubRoutes from './routes/github.js';
-import systemRoutes, { executeActionRowAs, findSourceUpdateActivation, reconcileStrandedActivationJobs } from './routes/system.js';
+import systemRoutes, {
+    executeActionRowAs, findSourceUpdateActivation, reconcileStrandedActivationJobs, reconcileSupersededQueuedSourceUpdates,
+} from './routes/system.js';
 import { createUpdateAutoActivator, resolveScheduledUpdateWindowMs } from './services/update-auto-activator.js';
 import { createUpdateJobLog } from './services/update-job-log.js';
 import terminalsRoutes from './routes/terminals.js';
@@ -4332,6 +4334,18 @@ async function startServer() {
         // aborts startup through the outer catch; no listener or background
         // writer is admitted on an unverified generation.
         if (!OID_PAIR_BOOTSTRAP) await completeBootstrappedSourceUpdate();
+        // B-1583: after the bootstrapped activation is settled and before the
+        // auto-activator runs, settle queued jobs an out-of-band install made
+        // moot. Database only: nothing is restarted; a failure never aborts boot.
+        if (!forwardStartup && !OID_PAIR_BOOTSTRAP && !globalThis[SOURCE_UPDATE_OWNERSHIP]) {
+            try {
+                const superseded = reconcileSupersededQueuedSourceUpdates({ runtimeCommit: SERVER_RUNTIME_IDENTITY.runtimeCommit })
+                    .filter((entry) => entry.settled || entry.error);
+                if (superseded.length) console.warn('[source-update] queued jobs superseded at boot', superseded);
+            } catch (error) {
+                console.error('[source-update] queued job reconciliation failed:', error?.message || 'unknown error');
+            }
+        }
         if (!forwardStartup && !OID_PAIR_BOOTSTRAP) sourceUpdateWorker?.start();
         if (!forwardStartup && !OID_PAIR_BOOTSTRAP && !localActivationMode) updateAutoActivator?.start();
         // ADR-156 §3.3: reconcile parked deferrals (expire those that timed out

@@ -17,6 +17,7 @@ import { gitlinkChangePaths, parseRawDiffEntries } from '../../scripts/lib/sourc
 import { classifyDivergence, diffDependencyVersions } from '../../scripts/lib/local-divergence.mjs';
 import { parseNodeOverlay } from '../../scripts/lib/node-overlay.mjs';
 import { planSourceManifest } from '../../scripts/lib/source-update-activation.mjs';
+import { buildSourceUpdateAction } from '../../scripts/lib/source-update-action-schema.mjs';
 import { supportsAtomicExchange } from '../../scripts/lib/atomic-exchange-capability.mjs';
 import { prepareClientPublicationAssets } from '../../scripts/lib/client-publication-archive.mjs';
 import { verifyAssetClosure } from '../../scripts/lib/client-publication-artifacts.mjs';
@@ -841,13 +842,12 @@ export function createSourceUpdater({
                 // was advanced without a rebuild), so recovery settles by it.
                 let previousRuntimeOid = null;
                 try { previousRuntimeOid = loadedRuntimeCommit(); } catch { previousRuntimeOid = null; }
-                const action = {
-                    schema: 'nassaj-source-update-activation/v1', transactionId,
-                    originalHead, targetCommit: releaseCommit, version: expectedVersion,
+                // B-1583: built by the same module the strict readers validate with.
+                const action = buildSourceUpdateAction({
+                    transactionId, originalHead, targetCommit: releaseCommit, version: expectedVersion,
                     manifestPath: plan.outputs.manifest, manifestSha256,
-                    expectedServerBuildId: manifest.serverBuildId,
-                    ...(/^[0-9a-f]{40}$/.test(previousRuntimeOid || '') ? { previousRuntimeOid } : {}),
-                };
+                    expectedServerBuildId: manifest.serverBuildId, previousRuntimeOid,
+                });
                 assertFence();
                 const actionFd = fs.openSync(actionFile, 'wx', 0o600);
                 try { fs.writeFileSync(actionFd, `${JSON.stringify(action)}\n`); fs.fsyncSync(actionFd); } finally { fs.closeSync(actionFd); }

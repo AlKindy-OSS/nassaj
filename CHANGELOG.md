@@ -1,3 +1,16 @@
+## 2.3.1.2 — 2026-10-11
+
+إصلاح مسار التحديث (B-1583): منذ 2.3.1.0 كان كل تحديث بالزرّ يفشل عند إعادة التشغيل الآمنة بالرمز
+source_update_action_invalid؛ صار للإجراء مخطط واحد مشترك بين الكاتب والقارئَين، ويُسوّى الصفّ الفاشل برمز
+محدد بلا إعادة تشغيل، وتُسوّى التفعيلات العالقة عند الإقلاع. العُقد على 2.3.1.0 أو 2.3.1.1 تحتاج تثبيتاً
+يدوياً لمرة واحدة لهذا الإصدار، ثم يعود زرّ التحديث للعمل.
+
+Update path fix (B-1583): since 2.3.1.0 every update-button update failed at the safe restart with
+source_update_action_invalid; the activation action now has one schema shared by the writer and both
+readers, an unresolvable row is settled with a bounded code without restarting, and stranded activations
+are settled at boot. Nodes on 2.3.1.0 or 2.3.1.1 need a one-time manual install of this release; the
+update button works again afterwards.
+
 ## 2.3.1.1 — 2026-10-10
 
 عرض تقدّم التشغيل محايداً للمزوّد (ADR-199): نسبة إنجاز حيّة في شريط الحالة وبطاقة الوكيل الفرعي لـClaude

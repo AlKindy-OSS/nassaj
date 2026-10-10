@@ -472,6 +472,12 @@ export const sourceUpdateJobsDb = {
       WHERE state IN ('activating', 'runtime_verifying', 'rollback_pending') ORDER BY created_at, rowid`).all() as JobRow[];
   },
 
+  /** B-1583: git-checkout jobs sealed and waiting on their governed safe restart. */
+  listRestartQueuedGitCheckout() {
+    return getConnection().prepare(`SELECT * FROM source_update_jobs
+      WHERE state = 'restart_queued' AND strategy = 'git-checkout-v2' ORDER BY created_at, rowid`).all() as JobRow[];
+  },
+
   listRuntimeReferences() {
     return getConnection().prepare(`SELECT id AS jobId, state, transaction_id AS transactionId,
       activation_identity_sha256 AS activationIdentitySha256,

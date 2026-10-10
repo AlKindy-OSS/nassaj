@@ -8,6 +8,7 @@ import {
 } from 'node:fs';
 import path from 'node:path';
 
+import { isSourceUpdateActionShape } from './source-update-action-schema.mjs';
 import { gitlinkPaths, parseTreeEntries, sameEntry } from './source-update-gitlinks.mjs';
 import { hashTree } from './source-update-tree-identity.mjs';
 import { classifyGenerationExchange } from './update-generation-reconciliation.mjs';
@@ -254,12 +255,11 @@ function recoveryValidation({ projectRoot, controlRoot, job }) {
     if (!TX.test(job.transaction_id || '')) throw new Error('recovery_transaction_invalid');
     const candidateRoot = path.join(controlRoot, 'candidates', job.transaction_id);
     const action = readJsonFile(path.join(candidateRoot, 'activation-action.json'), 0o600);
-    if (action.schema !== 'nassaj-source-update-activation/v1'
+    // B-1583: the same shape rule as the command-board reader (shared schema).
+    if (!isSourceUpdateActionShape(action)
         || digest(JSON.stringify(action)) !== job.activation_identity_sha256
         || action.transactionId !== job.transaction_id || action.targetCommit !== job.release_commit
-        || action.version !== job.expected_version || action.expectedServerBuildId !== job.expected_server_build_id
-        || !SHA40.test(action.originalHead || '')
-        || (action.previousRuntimeOid !== undefined && !SHA40.test(action.previousRuntimeOid || ''))) {
+        || action.version !== job.expected_version || action.expectedServerBuildId !== job.expected_server_build_id) {
         throw new Error('recovery_action_mismatch');
     }
     const validation = validateCandidate({ projectRoot, candidateRoot, transactionId: action.transactionId,

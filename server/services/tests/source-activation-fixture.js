@@ -15,6 +15,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync, spawn } from 'node:child_process';
 
+import { buildSourceUpdateAction } from '../../../scripts/lib/source-update-action-schema.mjs';
 import { hashTree } from '../../../scripts/lib/source-update-tree-identity.mjs';
 import { createUpdateMaintenanceGate } from '../update-maintenance-gate.js';
 
@@ -68,9 +69,13 @@ const sha256 = (value) => crypto.createHash('sha256').update(value).digest('hex'
 
 /**
  * Build one fixture. `original`/`target` map a path to its content, `null`
- * meaning absent; the defaults modify, delete and add one file each.
+ * meaning absent; the defaults modify, delete and add one file each. Passing
+ * `previousRuntimeOid` (B-1583) writes the action exactly as the updater does:
+ * its own builder, compact JSON plus a newline, with the optional ninth key.
  */
-export function createActivationFixture({ original = DEFAULT_ORIGINAL, target = DEFAULT_TARGET } = {}) {
+export function createActivationFixture({
+    original = DEFAULT_ORIGINAL, target = DEFAULT_TARGET, previousRuntimeOid = undefined,
+} = {}) {
     const base = fs.mkdtempSync(path.join(diskTempRoot(), 'nassaj-activation-inject-'));
     const root = path.join(base, 'repo');
     fs.mkdirSync(root);
@@ -120,11 +125,22 @@ export function createActivationFixture({ original = DEFAULT_ORIGINAL, target = 
         },
     });
     const manifestSha256 = sha256(manifestBytes);
-    const action = {
-        schema: 'nassaj-source-update-activation/v1', transactionId, originalHead, targetCommit,
-        version: VERSION, manifestPath, manifestSha256, expectedServerBuildId: serverBuildId,
-    };
-    writePrivateJson(path.join(candidateRoot, 'activation-action.json'), action);
+    const actionFile = path.join(candidateRoot, 'activation-action.json');
+    let action;
+    let actionBytes;
+    if (previousRuntimeOid === undefined) {
+        action = {
+            schema: 'nassaj-source-update-activation/v1', transactionId, originalHead, targetCommit,
+            version: VERSION, manifestPath, manifestSha256, expectedServerBuildId: serverBuildId,
+        };
+        actionBytes = writePrivateJson(actionFile, action);
+    } else {
+        action = buildSourceUpdateAction({ transactionId, originalHead, targetCommit, version: VERSION,
+            manifestPath, manifestSha256, expectedServerBuildId: serverBuildId, previousRuntimeOid });
+        actionBytes = `${JSON.stringify(action)}\n`;
+        fs.writeFileSync(actionFile, actionBytes, { mode: 0o600 });
+        fs.chmodSync(actionFile, 0o600);
+    }
 
     const databaseDirectory = path.join(base, 'data');
     fs.mkdirSync(databaseDirectory, { mode: 0o700 });
@@ -134,7 +150,7 @@ export function createActivationFixture({ original = DEFAULT_ORIGINAL, target = 
 
     return {
         base, root, gate, transactionId, originalHead, targetCommit, candidateRoot, manifestPath,
-        manifestSha256, serverBuildId, databasePath, action,
+        manifestSha256, serverBuildId, clientBuildId, databasePath, action, actionBytes,
         identity: { transactionId, originalHead, targetCommit, expectedVersion: VERSION, manifestSha256 },
         cleanup() {
             // A test may leave a read-only directory behind; restore write access first.

@@ -118,7 +118,7 @@ mock.module('../../services/update-maintenance-gate.js', { namedExports: { ...ac
 const {
   default: systemRouter, executeActionRowAs, runQueueMaintenance, setQueueMaintenanceClockForTests,
   setServerCandidateInspectorForTests, setOidReceiptReaderForTests, readOidTransactionReceipts,
-  setSourceUpdateActivationResolverForTests, setSourcePlannerForTests,
+  setSourceUpdateActivationResolverForTests, setSourcePlannerForTests, findSourceUpdateActivation,
 } = await import('../system.js');
 
 closeConnection();
@@ -1310,5 +1310,98 @@ test('B-1448: free text never rides along as the failure reason', async () => {
   } finally {
     gateExitCode = 3;
     fixture.cleanup();
+  }
+});
+
+/* ---- B-1583: a rejected activation action settles the claimed row with its real code ---- */
+
+test('B-1583: an invalid activation action fails the row with its code, restarts nothing, keeps the job', async () => {
+  const fixture = consentedSourceActivation(async () => { throw new Error('unreachable'); });
+  setSourceUpdateActivationResolverForTests(() => { throw new Error('source_update_action_invalid'); });
+  spawnCalls = [];
+  try {
+    const reply = await executeActionRowAs({ id: fixture.rowId, user: OWNER, trigger: 'update-auto-activate' });
+    assert.equal(reply.status, 422, JSON.stringify(reply.body));
+    assert.equal(reply.body.code, 'source_update_action_invalid');
+    const row = pendingServerActionsDb.getById(fixture.rowId)!;
+    assert.deepEqual([row.status, row.error], ['failed', 'source_update_action_invalid']);
+    assert.equal(spawnCalls.length, 0, 'no safe-restart gate or restart was spawned');
+    assert.equal(sourceUpdateJobsDb.getById(fixture.jobId)?.state, 'restart_queued');
+    assert.deepEqual([lastRestartAudit().result, lastRestartAudit().reason], ['gate_failed', 'source_update_action_invalid']);
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test('B-1583: an unbounded resolver error is reported by a fixed code, never its text', async () => {
+  const fixture = consentedSourceActivation(async () => { throw new Error('unreachable'); });
+  setSourceUpdateActivationResolverForTests(() => { throw new SyntaxError('Unexpected token } in JSON at /var/x'); });
+  try {
+    const reply = await executeActionRowAs({ id: fixture.rowId, user: OWNER, trigger: 'update-auto-activate' });
+    assert.equal(reply.status, 422);
+    assert.equal(reply.body.code, 'source_update_action_unreadable');
+    assert.equal(pendingServerActionsDb.getById(fixture.rowId)?.status, 'failed');
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test('B-1583: a nine-key updater action resolves through the real lookup and reaches the safe-restart gate', async () => {
+  const { createActivationFixture } = await import('../../services/tests/source-activation-fixture.js');
+  const fx = createActivationFixture({ previousRuntimeOid: 'e'.repeat(40) });
+  const jobId = crypto.randomUUID();
+  const strategy = 'git-checkout-v2' as const;
+  const identity = createHash('sha256').update(fx.actionBytes.trim()).digest('hex');
+  const rowId = crypto.randomUUID();
+  try {
+    assert.equal(Object.keys(JSON.parse(fx.actionBytes)).length, 9);
+    sourceUpdateJobsDb.createOrReuse({
+      id: jobId, ownerId: OWNER.id, expectedVersion: '1.47.0.11', strategy, autoActivate: true,
+      idempotencyKeyHash: hashSourceUpdateIdempotencyKey(jobId),
+      requestFingerprint: sourceUpdateRequestFingerprint(OWNER.id, '1.47.0.11', strategy, true),
+    });
+    getConnection().prepare(`UPDATE source_update_jobs SET state = 'restart_queued', transaction_id = ?,
+      activation_identity_sha256 = ?, release_commit = ?, expected_server_build_id = ? WHERE id = ?`)
+      .run(fx.transactionId, identity, fx.targetCommit, fx.serverBuildId, jobId);
+    sourceUpdateJobsDb.appendActivationReceipt({ jobId, transactionId: fx.transactionId, activationIdentitySha256: identity },
+      'restart_queued', 'done', {});
+    pendingServerActionsDb.insert({ id: rowId, actionType: 'safe-restart', expectedServerBuildId: fx.serverBuildId,
+      sourceUpdateJobId: jobId, sourceUpdateTransactionId: fx.transactionId, activationIdentitySha256: identity,
+      releaseCommit: fx.targetCommit });
+    const resolved = findSourceUpdateActivation(pendingServerActionsDb.getById(rowId), fx.root);
+    assert.equal(resolved?.action.previousRuntimeOid, 'e'.repeat(40));
+    setSourceUpdateActivationResolverForTests((row: any) => findSourceUpdateActivation(row, fx.root));
+    spawnCalls = [];
+    const reply = await executeActionRowAs({ id: rowId, user: OWNER, trigger: 'update-auto-activate' });
+    // The faked gate exits 3 (live work): the action was accepted and the gate decided, not the reader.
+    assert.equal(reply.body?.status, 'deferred', JSON.stringify(reply.body));
+    assert.ok(spawnCalls.length > 0, 'the safe-restart gate ran');
+    assert.equal(pendingServerActionsDb.getById(rowId)?.status, 'pending');
+  } finally {
+    setSourceUpdateActivationResolverForTests(null);
+    pendingServerActionsDb.deleteById(rowId);
+    getConnection().prepare("UPDATE source_update_jobs SET state = 'failed' WHERE id = ?").run(jobId);
+    fx.cleanup();
+  }
+});
+
+test('B-1583: an unexpected throw after the claim fails exactly that attempt instead of stranding it', async () => {
+  const buildId = '9'.repeat(64);
+  const id = crypto.randomUUID();
+  pendingServerActionsDb.insert({ id, actionType: 'safe-restart', expectedServerBuildId: buildId });
+  setSourceUpdateActivationResolverForTests(() => null);
+  setServerCandidateInspectorForTests(() => { throw new Error('candidate inspection exploded'); });
+  spawnCalls = [];
+  try {
+    const response = await call('POST', `/api/system/pending/${id}/execute`, { user: OWNER, body: {} });
+    assert.equal(response.status, 500);
+    assert.equal((await response.json()).code, 'internal');
+    const row = pendingServerActionsDb.getById(id)!;
+    assert.deepEqual([row.status, row.error], ['failed', 'internal']);
+    assert.equal(spawnCalls.length, 0, 'nothing was launched');
+  } finally {
+    setServerCandidateInspectorForTests(null);
+    setSourceUpdateActivationResolverForTests(null);
+    pendingServerActionsDb.deleteById(id);
   }
 });

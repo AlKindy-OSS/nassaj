@@ -215,6 +215,29 @@ test('a refusal while the row is still an unresolved executing claim is not term
     assert.equal(activator.statusFor('job-1').terminal, undefined);
 });
 
+test('B-1583: an unresolved claim is not promised a retry in the job log', async () => {
+    const rows = [{ id: 7, sourceUpdateJobId: 'job-1', status: 'pending' }];
+    const { activator, calls } = harness({ rows, reply: { status: 500, body: { status: 'error', code: 'internal' } } });
+    const originalPush = calls.executed.push.bind(calls.executed);
+    calls.executed.push = (input) => { rows.length = 0; return originalPush(input); };
+    await activator.tick();
+    assert.doesNotMatch(calls.lines.at(-1).message, /retrying/);
+    assert.match(calls.lines.at(-1).message, /still claimed/);
+});
+
+test('B-1583: an invalid activation action that settles the row is terminal with its real code', async () => {
+    const rows = [{ id: 7, sourceUpdateJobId: 'job-1', status: 'pending' }];
+    const { activator, calls } = harness({ rows,
+        reply: { status: 422, body: { status: 'error', code: 'source_update_action_invalid' } } });
+    const originalPush = calls.executed.push.bind(calls.executed);
+    calls.executed.push = (input) => { rows[0].status = 'failed'; return originalPush(input); };
+    await activator.tick();
+    const status = activator.statusFor('job-1');
+    assert.deepEqual([status.state, status.code, status.terminal], ['refused', 'source_update_action_invalid', true]);
+    assert.match(calls.lines.at(-1).message, /activation action is invalid \(source_update_action_invalid\)/);
+    assert.doesNotMatch(calls.lines.at(-1).message, /retrying|safety check/);
+});
+
 const TERMINALS = { count: 2, attached: 1, detached: 1, usernames: ['owner', 'sara'], detachedClosesAt: QUEUED_AT + 1_800_000 };
 
 test('B-1448: open terminals are waited on without an attempt, named, and logged once per change', async () => {
