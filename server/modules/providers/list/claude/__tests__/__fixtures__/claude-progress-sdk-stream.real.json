@@ -1,0 +1,227 @@
+{
+ "_provenance": "Real Claude Agent SDK stream-json events (Claude Code 2.1.289, haiku), captured 2026-10-09 in a /var/tmp cwd that was removed. Trimmed to the progress-relevant events; session id, paths, usage and thinking signatures scrubbed.",
+ "events": [
+  {
+   "type": "assistant",
+   "parent_tool_use_id": null,
+   "session_id": "00000000-0000-4000-8000-000000000001",
+   "uuid": "e57771ee-a04b-4ea6-8655-08a3a010efb0",
+   "timestamp": "2026-10-09T06:26:29.044Z",
+   "message": {
+    "role": "assistant",
+    "content": [
+     {
+      "type": "tool_use",
+      "id": "toolu_01NQReCbsFjRsqPEtViRc7uM",
+      "name": "TodoWrite",
+      "input": {
+       "todos": [
+        {
+         "content": "Say hello",
+         "status": "in_progress",
+         "activeForm": "Saying hello"
+        },
+        {
+         "content": "Say bye",
+         "status": "pending",
+         "activeForm": "Saying bye"
+        }
+       ]
+      },
+      "caller": {
+       "type": "direct"
+      }
+     }
+    ],
+    "model": "claude-haiku-4-5-20251001"
+   }
+  },
+  {
+   "type": "user",
+   "parent_tool_use_id": null,
+   "session_id": "00000000-0000-4000-8000-000000000001",
+   "uuid": "21b0aff7-dc14-4ee7-b3dc-794a23f06f48",
+   "timestamp": "2026-10-09T06:26:29.049Z",
+   "message": {
+    "role": "user",
+    "content": [
+     {
+      "tool_use_id": "toolu_01NQReCbsFjRsqPEtViRc7uM",
+      "type": "tool_result",
+      "content": "Todos have been modified successfully. Ensure that you continue to use the todo list to track your progress. Please proceed with the current tasks if applicable"
+     }
+    ]
+   },
+   "tool_use_result": {
+    "oldTodos": [],
+    "newTodos": [
+     {
+      "content": "Say hello",
+      "status": "in_progress",
+      "activeForm": "Saying hello"
+     },
+     {
+      "content": "Say bye",
+      "status": "pending",
+      "activeForm": "Saying bye"
+     }
+    ]
+   }
+  },
+  {
+   "type": "assistant",
+   "parent_tool_use_id": null,
+   "session_id": "00000000-0000-4000-8000-000000000001",
+   "uuid": "fc0711c9-3181-4bab-8a9d-c56fa7add747",
+   "timestamp": "2026-10-09T06:26:29.412Z",
+   "message": {
+    "role": "assistant",
+    "content": [
+     {
+      "type": "tool_use",
+      "id": "toolu_01WcE3ua1KLZd5XE3Etd6sPo",
+      "name": "Agent",
+      "input": {
+       "description": "Reply OK",
+       "subagent_type": "general-purpose",
+       "prompt": "Reply with the single word OK and do nothing else."
+      },
+      "caller": {
+       "type": "direct"
+      }
+     }
+    ],
+    "model": "claude-haiku-4-5-20251001"
+   }
+  },
+  {
+   "type": "user",
+   "parent_tool_use_id": null,
+   "session_id": "00000000-0000-4000-8000-000000000001",
+   "uuid": "791cd189-50a5-4548-a522-1a12f84d9c37",
+   "timestamp": "2026-10-09T06:26:29.474Z",
+   "message": {
+    "role": "user",
+    "content": [
+     {
+      "tool_use_id": "toolu_01WcE3ua1KLZd5XE3Etd6sPo",
+      "type": "tool_result",
+      "content": [
+       {
+        "type": "text",
+        "text": "Async agent launched successfully. (This tool result is internal metadata — never quote or paste any part of it, including the agentId below, into a user-facing reply.)\nagentId: a9254f52736edb186 (internal ID - do not mention to user. Use SendMessage with to: 'a9254f52736edb186', summary: '<5-10 word recap>' to continue this agent.)\nThe agent is working in the background. You will be notified automatically when it completes. You know nothing about its results until that notification arrives — do not report, assume, or predict them; continue other work or respond to the user in the meantime.\nDo not duplicate this agent's work — avoid working with the same files or topics it is using.\noutput_file: /var/tmp/redacted"
+       }
+      ]
+     }
+    ]
+   },
+   "tool_use_result": {
+    "isAsync": true,
+    "status": "async_launched",
+    "agentId": "a9254f52736edb186",
+    "description": "Reply OK",
+    "resolvedModel": "claude-haiku-4-5-20251001",
+    "prompt": "Reply with the single word OK and do nothing else.",
+    "outputFile": "/var/tmp/redacted/tasks/a9254f52736edb186.output",
+    "canReadOutputFile": true
+   }
+  },
+  {
+   "type": "assistant",
+   "parent_tool_use_id": "toolu_01WcE3ua1KLZd5XE3Etd6sPo",
+   "session_id": "00000000-0000-4000-8000-000000000001",
+   "uuid": "72a9a2ef-2b3a-44cd-bd77-7e4fef138b06",
+   "timestamp": "2026-10-09T06:26:32.311Z",
+   "message": {
+    "role": "assistant",
+    "content": [
+     {
+      "type": "text",
+      "text": "OK"
+     }
+    ],
+    "model": "claude-haiku-4-5-20251001"
+   },
+   "subagent_type": "general-purpose",
+   "task_description": "Reply OK"
+  },
+  {
+   "type": "assistant",
+   "parent_tool_use_id": null,
+   "session_id": "00000000-0000-4000-8000-000000000001",
+   "uuid": "85c1280e-1c9d-4d9e-a08a-3a9d775bc816",
+   "timestamp": "2026-10-09T06:26:35.009Z",
+   "message": {
+    "role": "assistant",
+    "content": [
+     {
+      "type": "tool_use",
+      "id": "toolu_01VcqgxoL13SpjaZLK2GM8cZ",
+      "name": "TodoWrite",
+      "input": {
+       "todos": [
+        {
+         "content": "Say hello",
+         "status": "completed",
+         "activeForm": "Saying hello"
+        },
+        {
+         "content": "Say bye",
+         "status": "completed",
+         "activeForm": "Saying bye"
+        }
+       ]
+      },
+      "caller": {
+       "type": "direct"
+      }
+     }
+    ],
+    "model": "claude-haiku-4-5-20251001"
+   }
+  },
+  {
+   "type": "user",
+   "parent_tool_use_id": null,
+   "session_id": "00000000-0000-4000-8000-000000000001",
+   "uuid": "f417ccd1-c0ce-4015-bc73-e322f2b60162",
+   "timestamp": "2026-10-09T06:26:35.014Z",
+   "message": {
+    "role": "user",
+    "content": [
+     {
+      "tool_use_id": "toolu_01VcqgxoL13SpjaZLK2GM8cZ",
+      "type": "tool_result",
+      "content": "Todos have been modified successfully. Ensure that you continue to use the todo list to track your progress. Please proceed with the current tasks if applicable"
+     }
+    ]
+   },
+   "tool_use_result": {
+    "oldTodos": [
+     {
+      "content": "Say hello",
+      "status": "in_progress",
+      "activeForm": "Saying hello"
+     },
+     {
+      "content": "Say bye",
+      "status": "pending",
+      "activeForm": "Saying bye"
+     }
+    ],
+    "newTodos": [
+     {
+      "content": "Say hello",
+      "status": "completed",
+      "activeForm": "Saying hello"
+     },
+     {
+      "content": "Say bye",
+      "status": "completed",
+      "activeForm": "Saying bye"
+     }
+    ]
+   }
+  }
+ ]
+}

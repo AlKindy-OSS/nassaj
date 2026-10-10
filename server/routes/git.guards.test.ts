@@ -486,7 +486,18 @@ test('B-GIT-SEC-4: dash-prefixed refs are rejected, and user values are fenced',
   await request('GET', `/api/git/commit-diff?project=${PUBLIC_PROJECT}&commit=HEAD`);
   const showCall = spawnCalls.find((call) => call.args[0] === 'show');
   assert.ok(showCall, 'commit-diff ran');
-  assert.deepEqual(showCall.args, ['show', '--end-of-options', 'HEAD']);
+  assert.deepEqual(showCall.args, ['show', '--end-of-options', 'HEAD^{commit}']);
+});
+
+test('every git spawn runs with literal pathspecs (no glob magic on user paths)', async () => {
+  currentUserId = 9;
+  spawnCalls = [];
+  await request('GET', `/api/git/diff?project=${PUBLIC_PROJECT}&file=${encodeURIComponent('.en?')}`);
+  const gitCalls = spawnCalls.filter((call) => call.cmd === 'git');
+  assert.ok(gitCalls.length > 0, 'the diff route spawned git');
+  for (const call of gitCalls) {
+    assert.equal(call.options.env?.GIT_LITERAL_PATHSPECS, '1', call.args.join(' '));
+  }
 });
 
 test('a wallet switch during async Git preflight prevents the first write effect', async () => {

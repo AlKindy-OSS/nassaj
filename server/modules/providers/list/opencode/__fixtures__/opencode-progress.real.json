@@ -1,0 +1,1108 @@
+{
+ "_source": "Real capture (ADR-199 Addendum B.1): opencode run --format json, OpenCode 1.18.34, model opencode/big-pickle. Prompts, reasoning and task result replaced with placeholders; cwd replaced with /home/user/project. `stream` is the 12-line stdout; `rows` are the parent session message/part rows (fetchHistory join order).",
+ "sessionId": "ses_aaaaaaaa-0002",
+ "stream": [
+  {
+   "type": "step_start",
+   "timestamp": 1791554319516,
+   "sessionID": "ses_aaaaaaaa-0002",
+   "part": {
+    "id": "prt_120f5749a0011e2qL33fb1fbQ3",
+    "messageID": "msg_aaaaaaaa-0002",
+    "sessionID": "ses_aaaaaaaa-0002",
+    "snapshot": "2e81171448eb9f2ee3821e3d447aa6b2fe3ddba1",
+    "type": "step-start"
+   }
+  },
+  {
+   "type": "tool_use",
+   "timestamp": 1791554320149,
+   "sessionID": "ses_aaaaaaaa-0002",
+   "part": {
+    "type": "tool",
+    "tool": "todowrite",
+    "callID": "call_9762e6a06bb3490b8ef9a5af",
+    "state": {
+     "status": "completed",
+     "input": {
+      "todos": [
+       {
+        "content": "read file",
+        "status": "in_progress",
+        "priority": "medium"
+       },
+       {
+        "content": "report",
+        "status": "pending",
+        "priority": "medium"
+       }
+      ]
+     },
+     "output": "[\n  {\n    \"content\": \"read file\",\n    \"status\": \"in_progress\",\n    \"priority\": \"medium\"\n  },\n  {\n    \"content\": \"report\",\n    \"status\": \"pending\",\n    \"priority\": \"medium\"\n  }\n]",
+     "metadata": {
+      "todos": [
+       {
+        "content": "read file",
+        "status": "in_progress",
+        "priority": "medium"
+       },
+       {
+        "content": "report",
+        "status": "pending",
+        "priority": "medium"
+       }
+      ],
+      "truncated": false
+     },
+     "title": "2 todos",
+     "time": {
+      "start": 1791554320143,
+      "end": 1791554320147
+     }
+    },
+    "id": "prt_120f57648001xM1w3bJKA5BmIA",
+    "sessionID": "ses_aaaaaaaa-0002",
+    "messageID": "msg_aaaaaaaa-0002"
+   }
+  },
+  {
+   "type": "step_finish",
+   "timestamp": 1791554320235,
+   "sessionID": "ses_aaaaaaaa-0002",
+   "part": {
+    "id": "prt_120f57766001jpdsNJI4QYKK3F",
+    "reason": "tool-calls",
+    "snapshot": "2e81171448eb9f2ee3821e3d447aa6b2fe3ddba1",
+    "messageID": "msg_aaaaaaaa-0002",
+    "sessionID": "ses_aaaaaaaa-0002",
+    "type": "step-finish",
+    "tokens": {
+     "total": 21856,
+     "input": 21691,
+     "output": 58,
+     "reasoning": 43,
+     "cache": {
+      "write": 0,
+      "read": 64
+     }
+    },
+    "cost": 0
+   }
+  },
+  {
+   "type": "step_start",
+   "timestamp": 1791554322038,
+   "sessionID": "ses_aaaaaaaa-0002",
+   "part": {
+    "id": "prt_120f57e73001l27noiJQ7wYhZI",
+    "messageID": "msg_aaaaaaaa-0003",
+    "sessionID": "ses_aaaaaaaa-0002",
+    "snapshot": "2e81171448eb9f2ee3821e3d447aa6b2fe3ddba1",
+    "type": "step-start"
+   }
+  },
+  {
+   "type": "tool_use",
+   "timestamp": 1791554333338,
+   "sessionID": "ses_aaaaaaaa-0002",
+   "part": {
+    "type": "tool",
+    "tool": "task",
+    "callID": "call_1eb88656fe0840c4937553d3",
+    "state": {
+     "status": "completed",
+     "input": {
+      "description": "Read a.txt content",
+      "prompt": "<placeholder subagent prompt>",
+      "subagent_type": "general"
+     },
+     "output": "<task id=\"ses_aaaaaaaa-0001\" state=\"completed\">\n<task_result>\n<placeholder result>\n</task_result>\n</task>",
+     "metadata": {
+      "parentSessionId": "ses_aaaaaaaa-0002",
+      "sessionId": "ses_aaaaaaaa-0001",
+      "model": {
+       "modelID": "big-pickle",
+       "providerID": "opencode"
+      },
+      "truncated": false
+     },
+     "title": "Read a.txt content",
+     "time": {
+      "start": 1791554323140,
+      "end": 1791554333332
+     }
+    },
+    "id": "prt_120f57fdc001L7n17DMIQTsQzJ",
+    "sessionID": "ses_aaaaaaaa-0002",
+    "messageID": "msg_aaaaaaaa-0003"
+   }
+  },
+  {
+   "type": "step_finish",
+   "timestamp": 1791554333353,
+   "sessionID": "ses_aaaaaaaa-0002",
+   "part": {
+    "id": "prt_120f5aaa500199BSa7C4QSsnIl",
+    "reason": "tool-calls",
+    "snapshot": "2e81171448eb9f2ee3821e3d447aa6b2fe3ddba1",
+    "messageID": "msg_aaaaaaaa-0003",
+    "sessionID": "ses_aaaaaaaa-0002",
+    "type": "step-finish",
+    "tokens": {
+     "total": 22036,
+     "input": 221,
+     "output": 103,
+     "reasoning": 16,
+     "cache": {
+      "write": 0,
+      "read": 21696
+     }
+    },
+    "cost": 0
+   }
+  },
+  {
+   "type": "step_start",
+   "timestamp": 1791554335018,
+   "sessionID": "ses_aaaaaaaa-0002",
+   "part": {
+    "id": "prt_120f5b129001a2eK093nnoXpJH",
+    "messageID": "msg_aaaaaaaa-0004",
+    "sessionID": "ses_aaaaaaaa-0002",
+    "snapshot": "2e81171448eb9f2ee3821e3d447aa6b2fe3ddba1",
+    "type": "step-start"
+   }
+  },
+  {
+   "type": "tool_use",
+   "timestamp": 1791554335466,
+   "sessionID": "ses_aaaaaaaa-0002",
+   "part": {
+    "type": "tool",
+    "tool": "todowrite",
+    "callID": "call_b53b9a20c20c46a89f2e5fc2",
+    "state": {
+     "status": "completed",
+     "input": {
+      "todos": [
+       {
+        "content": "read file",
+        "priority": "medium",
+        "status": "completed"
+       },
+       {
+        "content": "report",
+        "priority": "medium",
+        "status": "completed"
+       }
+      ]
+     },
+     "output": "[\n  {\n    \"content\": \"read file\",\n    \"status\": \"completed\",\n    \"priority\": \"medium\"\n  },\n  {\n    \"content\": \"report\",\n    \"status\": \"completed\",\n    \"priority\": \"medium\"\n  }\n]",
+     "metadata": {
+      "todos": [
+       {
+        "content": "read file",
+        "status": "completed",
+        "priority": "medium"
+       },
+       {
+        "content": "report",
+        "status": "completed",
+        "priority": "medium"
+       }
+      ],
+      "truncated": false
+     },
+     "title": "0 todos",
+     "time": {
+      "start": 1791554335462,
+      "end": 1791554335464
+     }
+    },
+    "id": "prt_120f5b1c4001EafGt3KhNbKtmI",
+    "sessionID": "ses_aaaaaaaa-0002",
+    "messageID": "msg_aaaaaaaa-0004"
+   }
+  },
+  {
+   "type": "step_finish",
+   "timestamp": 1791554335476,
+   "sessionID": "ses_aaaaaaaa-0002",
+   "part": {
+    "id": "prt_120f5b2f0001N1DmXZLWMVnhug",
+    "reason": "tool-calls",
+    "snapshot": "2e81171448eb9f2ee3821e3d447aa6b2fe3ddba1",
+    "messageID": "msg_aaaaaaaa-0004",
+    "sessionID": "ses_aaaaaaaa-0002",
+    "type": "step-finish",
+    "tokens": {
+     "total": 22166,
+     "input": 214,
+     "output": 57,
+     "reasoning": 7,
+     "cache": {
+      "write": 0,
+      "read": 21888
+     }
+    },
+    "cost": 0
+   }
+  },
+  {
+   "type": "step_start",
+   "timestamp": 1791554337771,
+   "sessionID": "ses_aaaaaaaa-0002",
+   "part": {
+    "id": "prt_120f5bbe9001uQaI5Ws36CeDDb",
+    "messageID": "msg_aaaaaaaa-0005",
+    "sessionID": "ses_aaaaaaaa-0002",
+    "snapshot": "2e81171448eb9f2ee3821e3d447aa6b2fe3ddba1",
+    "type": "step-start"
+   }
+  },
+  {
+   "type": "text",
+   "timestamp": 1791554337897,
+   "sessionID": "ses_aaaaaaaa-0002",
+   "part": {
+    "id": "prt_120f5bc40001bLqWgxNu6xqKCW",
+    "messageID": "msg_aaaaaaaa-0005",
+    "sessionID": "ses_aaaaaaaa-0002",
+    "type": "text",
+    "text": "DONE",
+    "time": {
+     "start": 1791554337856,
+     "end": 1791554337895
+    }
+   }
+  },
+  {
+   "type": "step_finish",
+   "timestamp": 1791554337908,
+   "sessionID": "ses_aaaaaaaa-0002",
+   "part": {
+    "id": "prt_120f5bc720016vzi1mglgkrof7",
+    "reason": "stop",
+    "snapshot": "2e81171448eb9f2ee3821e3d447aa6b2fe3ddba1",
+    "messageID": "msg_aaaaaaaa-0005",
+    "sessionID": "ses_aaaaaaaa-0002",
+    "type": "step-finish",
+    "tokens": {
+     "total": 22233,
+     "input": 146,
+     "output": 3,
+     "reasoning": 4,
+     "cache": {
+      "write": 0,
+      "read": 22080
+     }
+    },
+    "cost": 0
+   }
+  }
+ ],
+ "rows": [
+  {
+   "message_id": "msg_aaaaaaaa-0001",
+   "message_time_created": 1791554314747,
+   "message_data": {
+    "role": "user",
+    "time": {
+     "created": 1791554314747
+    },
+    "agent": "build",
+    "model": {
+     "providerID": "opencode",
+     "modelID": "big-pickle"
+    },
+    "summary": {
+     "diffs": []
+    }
+   },
+   "part_id": "prt_120f56201001i9dsk6uT1EBvrC",
+   "part_time_created": 1791554315086,
+   "part_data": {
+    "type": "text",
+    "text": "<placeholder text>"
+   }
+  },
+  {
+   "message_id": "msg_aaaaaaaa-0002",
+   "message_time_created": 1791554315098,
+   "message_data": {
+    "parentID": "msg_aaaaaaaa-0001",
+    "role": "assistant",
+    "mode": "build",
+    "agent": "build",
+    "path": {
+     "cwd": "/home/user/project",
+     "root": "/home/user/project"
+    },
+    "cost": 0,
+    "tokens": {
+     "total": 21856,
+     "input": 21691,
+     "output": 58,
+     "reasoning": 43,
+     "cache": {
+      "write": 0,
+      "read": 64
+     }
+    },
+    "modelID": "big-pickle",
+    "providerID": "opencode",
+    "time": {
+     "created": 1791554315098,
+     "completed": 1791554320244
+    },
+    "finish": "tool-calls"
+   },
+   "part_id": "prt_120f5749a0011e2qL33fb1fbQ3",
+   "part_time_created": 1791554319514,
+   "part_data": {
+    "snapshot": "2e81171448eb9f2ee3821e3d447aa6b2fe3ddba1",
+    "type": "step-start"
+   }
+  },
+  {
+   "message_id": "msg_aaaaaaaa-0002",
+   "message_time_created": 1791554315098,
+   "message_data": {
+    "parentID": "msg_aaaaaaaa-0001",
+    "role": "assistant",
+    "mode": "build",
+    "agent": "build",
+    "path": {
+     "cwd": "/home/user/project",
+     "root": "/home/user/project"
+    },
+    "cost": 0,
+    "tokens": {
+     "total": 21856,
+     "input": 21691,
+     "output": 58,
+     "reasoning": 43,
+     "cache": {
+      "write": 0,
+      "read": 64
+     }
+    },
+    "modelID": "big-pickle",
+    "providerID": "opencode",
+    "time": {
+     "created": 1791554315098,
+     "completed": 1791554320244
+    },
+    "finish": "tool-calls"
+   },
+   "part_id": "prt_120f574bc001aoXR02iZgZk4sL",
+   "part_time_created": 1791554319548,
+   "part_data": {
+    "type": "reasoning",
+    "text": "<placeholder text>",
+    "time": {
+     "start": 1791554319548,
+     "end": 1791554319942
+    }
+   }
+  },
+  {
+   "message_id": "msg_aaaaaaaa-0002",
+   "message_time_created": 1791554315098,
+   "message_data": {
+    "parentID": "msg_aaaaaaaa-0001",
+    "role": "assistant",
+    "mode": "build",
+    "agent": "build",
+    "path": {
+     "cwd": "/home/user/project",
+     "root": "/home/user/project"
+    },
+    "cost": 0,
+    "tokens": {
+     "total": 21856,
+     "input": 21691,
+     "output": 58,
+     "reasoning": 43,
+     "cache": {
+      "write": 0,
+      "read": 64
+     }
+    },
+    "modelID": "big-pickle",
+    "providerID": "opencode",
+    "time": {
+     "created": 1791554315098,
+     "completed": 1791554320244
+    },
+    "finish": "tool-calls"
+   },
+   "part_id": "prt_120f57648001xM1w3bJKA5BmIA",
+   "part_time_created": 1791554319945,
+   "part_data": {
+    "type": "tool",
+    "tool": "todowrite",
+    "callID": "call_9762e6a06bb3490b8ef9a5af",
+    "state": {
+     "status": "completed",
+     "input": {
+      "todos": [
+       {
+        "content": "read file",
+        "status": "in_progress",
+        "priority": "medium"
+       },
+       {
+        "content": "report",
+        "status": "pending",
+        "priority": "medium"
+       }
+      ]
+     },
+     "output": "[\n  {\n    \"content\": \"read file\",\n    \"status\": \"in_progress\",\n    \"priority\": \"medium\"\n  },\n  {\n    \"content\": \"report\",\n    \"status\": \"pending\",\n    \"priority\": \"medium\"\n  }\n]",
+     "metadata": {
+      "todos": [
+       {
+        "content": "read file",
+        "status": "in_progress",
+        "priority": "medium"
+       },
+       {
+        "content": "report",
+        "status": "pending",
+        "priority": "medium"
+       }
+      ],
+      "truncated": false
+     },
+     "title": "2 todos",
+     "time": {
+      "start": 1791554320143,
+      "end": 1791554320147
+     }
+    }
+   }
+  },
+  {
+   "message_id": "msg_aaaaaaaa-0002",
+   "message_time_created": 1791554315098,
+   "message_data": {
+    "parentID": "msg_aaaaaaaa-0001",
+    "role": "assistant",
+    "mode": "build",
+    "agent": "build",
+    "path": {
+     "cwd": "/home/user/project",
+     "root": "/home/user/project"
+    },
+    "cost": 0,
+    "tokens": {
+     "total": 21856,
+     "input": 21691,
+     "output": 58,
+     "reasoning": 43,
+     "cache": {
+      "write": 0,
+      "read": 64
+     }
+    },
+    "modelID": "big-pickle",
+    "providerID": "opencode",
+    "time": {
+     "created": 1791554315098,
+     "completed": 1791554320244
+    },
+    "finish": "tool-calls"
+   },
+   "part_id": "prt_120f57766001jpdsNJI4QYKK3F",
+   "part_time_created": 1791554320230,
+   "part_data": {
+    "reason": "tool-calls",
+    "snapshot": "2e81171448eb9f2ee3821e3d447aa6b2fe3ddba1",
+    "type": "step-finish",
+    "tokens": {
+     "total": 21856,
+     "input": 21691,
+     "output": 58,
+     "reasoning": 43,
+     "cache": {
+      "write": 0,
+      "read": 64
+     }
+    },
+    "cost": 0
+   }
+  },
+  {
+   "message_id": "msg_aaaaaaaa-0003",
+   "message_time_created": 1791554320247,
+   "message_data": {
+    "parentID": "msg_aaaaaaaa-0001",
+    "role": "assistant",
+    "mode": "build",
+    "agent": "build",
+    "path": {
+     "cwd": "/home/user/project",
+     "root": "/home/user/project"
+    },
+    "cost": 0,
+    "tokens": {
+     "total": 22036,
+     "input": 221,
+     "output": 103,
+     "reasoning": 16,
+     "cache": {
+      "write": 0,
+      "read": 21696
+     }
+    },
+    "modelID": "big-pickle",
+    "providerID": "opencode",
+    "time": {
+     "created": 1791554320247,
+     "completed": 1791554333362
+    },
+    "finish": "tool-calls"
+   },
+   "part_id": "prt_120f57e73001l27noiJQ7wYhZI",
+   "part_time_created": 1791554322036,
+   "part_data": {
+    "snapshot": "2e81171448eb9f2ee3821e3d447aa6b2fe3ddba1",
+    "type": "step-start"
+   }
+  },
+  {
+   "message_id": "msg_aaaaaaaa-0003",
+   "message_time_created": 1791554320247,
+   "message_data": {
+    "parentID": "msg_aaaaaaaa-0001",
+    "role": "assistant",
+    "mode": "build",
+    "agent": "build",
+    "path": {
+     "cwd": "/home/user/project",
+     "root": "/home/user/project"
+    },
+    "cost": 0,
+    "tokens": {
+     "total": 22036,
+     "input": 221,
+     "output": 103,
+     "reasoning": 16,
+     "cache": {
+      "write": 0,
+      "read": 21696
+     }
+    },
+    "modelID": "big-pickle",
+    "providerID": "opencode",
+    "time": {
+     "created": 1791554320247,
+     "completed": 1791554333362
+    },
+    "finish": "tool-calls"
+   },
+   "part_id": "prt_120f57ea6001HfTcgcjVaVOa0Y",
+   "part_time_created": 1791554322086,
+   "part_data": {
+    "type": "reasoning",
+    "text": "<placeholder text>",
+    "time": {
+     "start": 1791554322086,
+     "end": 1791554322394
+    }
+   }
+  },
+  {
+   "message_id": "msg_aaaaaaaa-0003",
+   "message_time_created": 1791554320247,
+   "message_data": {
+    "parentID": "msg_aaaaaaaa-0001",
+    "role": "assistant",
+    "mode": "build",
+    "agent": "build",
+    "path": {
+     "cwd": "/home/user/project",
+     "root": "/home/user/project"
+    },
+    "cost": 0,
+    "tokens": {
+     "total": 22036,
+     "input": 221,
+     "output": 103,
+     "reasoning": 16,
+     "cache": {
+      "write": 0,
+      "read": 21696
+     }
+    },
+    "modelID": "big-pickle",
+    "providerID": "opencode",
+    "time": {
+     "created": 1791554320247,
+     "completed": 1791554333362
+    },
+    "finish": "tool-calls"
+   },
+   "part_id": "prt_120f57fdc001L7n17DMIQTsQzJ",
+   "part_time_created": 1791554322396,
+   "part_data": {
+    "type": "tool",
+    "tool": "task",
+    "callID": "call_1eb88656fe0840c4937553d3",
+    "state": {
+     "status": "completed",
+     "input": {
+      "description": "Read a.txt content",
+      "prompt": "<placeholder subagent prompt>",
+      "subagent_type": "general"
+     },
+     "output": "<task id=\"ses_aaaaaaaa-0001\" state=\"completed\">\n<task_result>\n<placeholder result>\n</task_result>\n</task>",
+     "metadata": {
+      "parentSessionId": "ses_aaaaaaaa-0002",
+      "sessionId": "ses_aaaaaaaa-0001",
+      "model": {
+       "modelID": "big-pickle",
+       "providerID": "opencode"
+      },
+      "truncated": false
+     },
+     "title": "Read a.txt content",
+     "time": {
+      "start": 1791554323140,
+      "end": 1791554333332
+     }
+    }
+   }
+  },
+  {
+   "message_id": "msg_aaaaaaaa-0003",
+   "message_time_created": 1791554320247,
+   "message_data": {
+    "parentID": "msg_aaaaaaaa-0001",
+    "role": "assistant",
+    "mode": "build",
+    "agent": "build",
+    "path": {
+     "cwd": "/home/user/project",
+     "root": "/home/user/project"
+    },
+    "cost": 0,
+    "tokens": {
+     "total": 22036,
+     "input": 221,
+     "output": 103,
+     "reasoning": 16,
+     "cache": {
+      "write": 0,
+      "read": 21696
+     }
+    },
+    "modelID": "big-pickle",
+    "providerID": "opencode",
+    "time": {
+     "created": 1791554320247,
+     "completed": 1791554333362
+    },
+    "finish": "tool-calls"
+   },
+   "part_id": "prt_120f5aaa500199BSa7C4QSsnIl",
+   "part_time_created": 1791554333350,
+   "part_data": {
+    "reason": "tool-calls",
+    "snapshot": "2e81171448eb9f2ee3821e3d447aa6b2fe3ddba1",
+    "type": "step-finish",
+    "tokens": {
+     "total": 22036,
+     "input": 221,
+     "output": 103,
+     "reasoning": 16,
+     "cache": {
+      "write": 0,
+      "read": 21696
+     }
+    },
+    "cost": 0
+   }
+  },
+  {
+   "message_id": "msg_aaaaaaaa-0004",
+   "message_time_created": 1791554333365,
+   "message_data": {
+    "parentID": "msg_aaaaaaaa-0001",
+    "role": "assistant",
+    "mode": "build",
+    "agent": "build",
+    "path": {
+     "cwd": "/home/user/project",
+     "root": "/home/user/project"
+    },
+    "cost": 0,
+    "tokens": {
+     "total": 22166,
+     "input": 214,
+     "output": 57,
+     "reasoning": 7,
+     "cache": {
+      "write": 0,
+      "read": 21888
+     }
+    },
+    "modelID": "big-pickle",
+    "providerID": "opencode",
+    "time": {
+     "created": 1791554333365,
+     "completed": 1791554335480
+    },
+    "finish": "tool-calls"
+   },
+   "part_id": "prt_120f5b129001a2eK093nnoXpJH",
+   "part_time_created": 1791554335017,
+   "part_data": {
+    "snapshot": "2e81171448eb9f2ee3821e3d447aa6b2fe3ddba1",
+    "type": "step-start"
+   }
+  },
+  {
+   "message_id": "msg_aaaaaaaa-0004",
+   "message_time_created": 1791554333365,
+   "message_data": {
+    "parentID": "msg_aaaaaaaa-0001",
+    "role": "assistant",
+    "mode": "build",
+    "agent": "build",
+    "path": {
+     "cwd": "/home/user/project",
+     "root": "/home/user/project"
+    },
+    "cost": 0,
+    "tokens": {
+     "total": 22166,
+     "input": 214,
+     "output": 57,
+     "reasoning": 7,
+     "cache": {
+      "write": 0,
+      "read": 21888
+     }
+    },
+    "modelID": "big-pickle",
+    "providerID": "opencode",
+    "time": {
+     "created": 1791554333365,
+     "completed": 1791554335480
+    },
+    "finish": "tool-calls"
+   },
+   "part_id": "prt_120f5b14e001F06Ax5kaJssTqw",
+   "part_time_created": 1791554335054,
+   "part_data": {
+    "type": "reasoning",
+    "text": "<placeholder text>",
+    "time": {
+     "start": 1791554335054,
+     "end": 1791554335170
+    }
+   }
+  },
+  {
+   "message_id": "msg_aaaaaaaa-0004",
+   "message_time_created": 1791554333365,
+   "message_data": {
+    "parentID": "msg_aaaaaaaa-0001",
+    "role": "assistant",
+    "mode": "build",
+    "agent": "build",
+    "path": {
+     "cwd": "/home/user/project",
+     "root": "/home/user/project"
+    },
+    "cost": 0,
+    "tokens": {
+     "total": 22166,
+     "input": 214,
+     "output": 57,
+     "reasoning": 7,
+     "cache": {
+      "write": 0,
+      "read": 21888
+     }
+    },
+    "modelID": "big-pickle",
+    "providerID": "opencode",
+    "time": {
+     "created": 1791554333365,
+     "completed": 1791554335480
+    },
+    "finish": "tool-calls"
+   },
+   "part_id": "prt_120f5b1c4001EafGt3KhNbKtmI",
+   "part_time_created": 1791554335172,
+   "part_data": {
+    "type": "tool",
+    "tool": "todowrite",
+    "callID": "call_b53b9a20c20c46a89f2e5fc2",
+    "state": {
+     "status": "completed",
+     "input": {
+      "todos": [
+       {
+        "content": "read file",
+        "priority": "medium",
+        "status": "completed"
+       },
+       {
+        "content": "report",
+        "priority": "medium",
+        "status": "completed"
+       }
+      ]
+     },
+     "output": "[\n  {\n    \"content\": \"read file\",\n    \"status\": \"completed\",\n    \"priority\": \"medium\"\n  },\n  {\n    \"content\": \"report\",\n    \"status\": \"completed\",\n    \"priority\": \"medium\"\n  }\n]",
+     "metadata": {
+      "todos": [
+       {
+        "content": "read file",
+        "status": "completed",
+        "priority": "medium"
+       },
+       {
+        "content": "report",
+        "status": "completed",
+        "priority": "medium"
+       }
+      ],
+      "truncated": false
+     },
+     "title": "0 todos",
+     "time": {
+      "start": 1791554335462,
+      "end": 1791554335464
+     }
+    }
+   }
+  },
+  {
+   "message_id": "msg_aaaaaaaa-0004",
+   "message_time_created": 1791554333365,
+   "message_data": {
+    "parentID": "msg_aaaaaaaa-0001",
+    "role": "assistant",
+    "mode": "build",
+    "agent": "build",
+    "path": {
+     "cwd": "/home/user/project",
+     "root": "/home/user/project"
+    },
+    "cost": 0,
+    "tokens": {
+     "total": 22166,
+     "input": 214,
+     "output": 57,
+     "reasoning": 7,
+     "cache": {
+      "write": 0,
+      "read": 21888
+     }
+    },
+    "modelID": "big-pickle",
+    "providerID": "opencode",
+    "time": {
+     "created": 1791554333365,
+     "completed": 1791554335480
+    },
+    "finish": "tool-calls"
+   },
+   "part_id": "prt_120f5b2f0001N1DmXZLWMVnhug",
+   "part_time_created": 1791554335472,
+   "part_data": {
+    "reason": "tool-calls",
+    "snapshot": "2e81171448eb9f2ee3821e3d447aa6b2fe3ddba1",
+    "type": "step-finish",
+    "tokens": {
+     "total": 22166,
+     "input": 214,
+     "output": 57,
+     "reasoning": 7,
+     "cache": {
+      "write": 0,
+      "read": 21888
+     }
+    },
+    "cost": 0
+   }
+  },
+  {
+   "message_id": "msg_aaaaaaaa-0005",
+   "message_time_created": 1791554335482,
+   "message_data": {
+    "parentID": "msg_aaaaaaaa-0001",
+    "role": "assistant",
+    "mode": "build",
+    "agent": "build",
+    "path": {
+     "cwd": "/home/user/project",
+     "root": "/home/user/project"
+    },
+    "cost": 0,
+    "tokens": {
+     "total": 22233,
+     "input": 146,
+     "output": 3,
+     "reasoning": 4,
+     "cache": {
+      "write": 0,
+      "read": 22080
+     }
+    },
+    "modelID": "big-pickle",
+    "providerID": "opencode",
+    "time": {
+     "created": 1791554335482,
+     "completed": 1791554337914
+    },
+    "finish": "stop"
+   },
+   "part_id": "prt_120f5bbe9001uQaI5Ws36CeDDb",
+   "part_time_created": 1791554337769,
+   "part_data": {
+    "snapshot": "2e81171448eb9f2ee3821e3d447aa6b2fe3ddba1",
+    "type": "step-start"
+   }
+  },
+  {
+   "message_id": "msg_aaaaaaaa-0005",
+   "message_time_created": 1791554335482,
+   "message_data": {
+    "parentID": "msg_aaaaaaaa-0001",
+    "role": "assistant",
+    "mode": "build",
+    "agent": "build",
+    "path": {
+     "cwd": "/home/user/project",
+     "root": "/home/user/project"
+    },
+    "cost": 0,
+    "tokens": {
+     "total": 22233,
+     "input": 146,
+     "output": 3,
+     "reasoning": 4,
+     "cache": {
+      "write": 0,
+      "read": 22080
+     }
+    },
+    "modelID": "big-pickle",
+    "providerID": "opencode",
+    "time": {
+     "created": 1791554335482,
+     "completed": 1791554337914
+    },
+    "finish": "stop"
+   },
+   "part_id": "prt_120f5bc18001hb0HmL4cVDM11L",
+   "part_time_created": 1791554337816,
+   "part_data": {
+    "type": "reasoning",
+    "text": "<placeholder text>",
+    "time": {
+     "start": 1791554337816,
+     "end": 1791554337855
+    }
+   }
+  },
+  {
+   "message_id": "msg_aaaaaaaa-0005",
+   "message_time_created": 1791554335482,
+   "message_data": {
+    "parentID": "msg_aaaaaaaa-0001",
+    "role": "assistant",
+    "mode": "build",
+    "agent": "build",
+    "path": {
+     "cwd": "/home/user/project",
+     "root": "/home/user/project"
+    },
+    "cost": 0,
+    "tokens": {
+     "total": 22233,
+     "input": 146,
+     "output": 3,
+     "reasoning": 4,
+     "cache": {
+      "write": 0,
+      "read": 22080
+     }
+    },
+    "modelID": "big-pickle",
+    "providerID": "opencode",
+    "time": {
+     "created": 1791554335482,
+     "completed": 1791554337914
+    },
+    "finish": "stop"
+   },
+   "part_id": "prt_120f5bc40001bLqWgxNu6xqKCW",
+   "part_time_created": 1791554337856,
+   "part_data": {
+    "type": "text",
+    "text": "DONE",
+    "time": {
+     "start": 1791554337856,
+     "end": 1791554337895
+    }
+   }
+  },
+  {
+   "message_id": "msg_aaaaaaaa-0005",
+   "message_time_created": 1791554335482,
+   "message_data": {
+    "parentID": "msg_aaaaaaaa-0001",
+    "role": "assistant",
+    "mode": "build",
+    "agent": "build",
+    "path": {
+     "cwd": "/home/user/project",
+     "root": "/home/user/project"
+    },
+    "cost": 0,
+    "tokens": {
+     "total": 22233,
+     "input": 146,
+     "output": 3,
+     "reasoning": 4,
+     "cache": {
+      "write": 0,
+      "read": 22080
+     }
+    },
+    "modelID": "big-pickle",
+    "providerID": "opencode",
+    "time": {
+     "created": 1791554335482,
+     "completed": 1791554337914
+    },
+    "finish": "stop"
+   },
+   "part_id": "prt_120f5bc720016vzi1mglgkrof7",
+   "part_time_created": 1791554337906,
+   "part_data": {
+    "reason": "stop",
+    "snapshot": "2e81171448eb9f2ee3821e3d447aa6b2fe3ddba1",
+    "type": "step-finish",
+    "tokens": {
+     "total": 22233,
+     "input": 146,
+     "output": 3,
+     "reasoning": 4,
+     "cache": {
+      "write": 0,
+      "read": 22080
+     }
+    },
+    "cost": 0
+   }
+  }
+ ]
+}

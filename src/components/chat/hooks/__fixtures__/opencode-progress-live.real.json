@@ -1,0 +1,157 @@
+{
+ "_provenance": "Output of OpenCodeSessionsProvider.normalizeMessage (commit 42518e3cd) over the `stream` of the scrubbed server/modules/providers/list/opencode/__fixtures__/opencode-progress.real.json (real OpenCode 1.18.34 capture, ADR-199 Addendum B.1). Row ids are the adapter's generated ids; no text was added.",
+ "rows": [
+  {
+   "id": "opencode_c6d7c203-fefc-44dd-b12a-e7cab50aaf53",
+   "sessionId": "ses_aaaaaaaa-0002",
+   "timestamp": "2026-10-09T13:58:40.149Z",
+   "provider": "opencode",
+   "kind": "tool_use",
+   "toolName": "todowrite",
+   "toolInput": {
+    "todos": [
+     {
+      "content": "read file",
+      "status": "in_progress",
+      "priority": "medium"
+     },
+     {
+      "content": "report",
+      "status": "pending",
+      "priority": "medium"
+     }
+    ]
+   },
+   "toolId": "call_9762e6a06bb3490b8ef9a5af",
+   "toolResult": {
+    "content": "[\n  {\n    \"content\": \"read file\",\n    \"status\": \"in_progress\",\n    \"priority\": \"medium\"\n  },\n  {\n    \"content\": \"report\",\n    \"status\": \"pending\",\n    \"priority\": \"medium\"\n  }\n]",
+    "isError": false
+   },
+   "plan": {
+    "source": "tool",
+    "items": [
+     {
+      "id": "0",
+      "label": "read file",
+      "status": "in_progress"
+     },
+     {
+      "id": "1",
+      "label": "report",
+      "status": "pending"
+     }
+    ],
+    "counts": {
+     "done": 0,
+     "total": 2
+    }
+   }
+  },
+  {
+   "id": "opencode_f54c65c5-5077-418d-9d09-318335b44098",
+   "sessionId": "ses_aaaaaaaa-0002",
+   "timestamp": "2026-10-09T13:58:40.235Z",
+   "provider": "opencode",
+   "kind": "stream_end"
+  },
+  {
+   "id": "opencode_b82ebffe-3cc2-44bc-ab6f-4c2395714ca9",
+   "sessionId": "ses_aaaaaaaa-0002",
+   "timestamp": "2026-10-09T13:58:53.338Z",
+   "provider": "opencode",
+   "kind": "tool_use",
+   "toolName": "task",
+   "toolInput": {
+    "description": "Read a.txt content",
+    "prompt": "<placeholder subagent prompt>",
+    "subagent_type": "general"
+   },
+   "toolId": "call_1eb88656fe0840c4937553d3",
+   "toolResult": {
+    "content": "<task id=\"ses_aaaaaaaa-0001\" state=\"completed\">\n<task_result>\n<placeholder result>\n</task_result>\n</task>",
+    "isError": false
+   },
+   "subagent": {
+    "id": "call_1eb88656fe0840c4937553d3",
+    "parentId": null,
+    "label": "Read a.txt content",
+    "state": "completed"
+   }
+  },
+  {
+   "id": "opencode_f3a29c7e-f3ea-419b-b570-b02528251679",
+   "sessionId": "ses_aaaaaaaa-0002",
+   "timestamp": "2026-10-09T13:58:53.353Z",
+   "provider": "opencode",
+   "kind": "stream_end"
+  },
+  {
+   "id": "opencode_a43237a7-9a76-445f-b710-feea13e96b74",
+   "sessionId": "ses_aaaaaaaa-0002",
+   "timestamp": "2026-10-09T13:58:55.466Z",
+   "provider": "opencode",
+   "kind": "tool_use",
+   "toolName": "todowrite",
+   "toolInput": {
+    "todos": [
+     {
+      "content": "read file",
+      "priority": "medium",
+      "status": "completed"
+     },
+     {
+      "content": "report",
+      "priority": "medium",
+      "status": "completed"
+     }
+    ]
+   },
+   "toolId": "call_b53b9a20c20c46a89f2e5fc2",
+   "toolResult": {
+    "content": "[\n  {\n    \"content\": \"read file\",\n    \"status\": \"completed\",\n    \"priority\": \"medium\"\n  },\n  {\n    \"content\": \"report\",\n    \"status\": \"completed\",\n    \"priority\": \"medium\"\n  }\n]",
+    "isError": false
+   },
+   "plan": {
+    "source": "tool",
+    "items": [
+     {
+      "id": "0",
+      "label": "read file",
+      "status": "completed"
+     },
+     {
+      "id": "1",
+      "label": "report",
+      "status": "completed"
+     }
+    ],
+    "counts": {
+     "done": 2,
+     "total": 2
+    }
+   }
+  },
+  {
+   "id": "opencode_5c0425bc-9aa2-48af-a079-561e5c1ae2b4",
+   "sessionId": "ses_aaaaaaaa-0002",
+   "timestamp": "2026-10-09T13:58:55.476Z",
+   "provider": "opencode",
+   "kind": "stream_end"
+  },
+  {
+   "id": "opencode_fd3c6b43-c458-4855-9bfa-62f92f536aa2",
+   "sessionId": "ses_aaaaaaaa-0002",
+   "timestamp": "2026-10-09T13:58:57.897Z",
+   "provider": "opencode",
+   "kind": "stream_delta",
+   "content": "DONE"
+  },
+  {
+   "id": "opencode_3354a424-c408-4861-857e-df0531d42fec",
+   "sessionId": "ses_aaaaaaaa-0002",
+   "timestamp": "2026-10-09T13:58:57.908Z",
+   "provider": "opencode",
+   "kind": "stream_end"
+  }
+ ]
+}

@@ -74,6 +74,7 @@ function liveDelegationStream(): NormalizedMessage[] {
       id: 'm2', kind: 'tool_use', role: 'assistant',
       toolName: 'Agent', toolId: PARENT_ID,
       toolInput: { description: 'multi-step task', subagent_type: 'general' },
+      subagent: { id: PARENT_ID, parentId: null, label: 'multi-step task', state: 'started' },
       timestamp: ts(2),
     },
     // 3) LIVE child tool_use streamed by the sub-agent: a TodoWrite with 4 items,
@@ -90,6 +91,13 @@ function liveDelegationStream(): NormalizedMessage[] {
           { content: 'أبلغ', status: 'pending' },
         ],
       },
+      // ADR-199: the neutral snapshot the adapter stamps on this call.
+      plan: { source: 'tool', items: [
+        { id: '0', label: 'اقرأ الملف', status: 'completed' },
+        { id: '1', label: 'عُدّ الأسطر', status: 'in_progress' },
+        { id: '2', label: 'لخّص', status: 'pending' },
+        { id: '3', label: 'أبلغ', status: 'pending' },
+      ] },
       timestamp: ts(6),
     },
     // 4) Another live child (a Read) — also parent-stamped; must fold, not orphan.
@@ -185,6 +193,7 @@ describe('B-63 live task-progress counter (commit 95574f9)', () => {
         id: 'a1', kind: 'tool_use', role: 'assistant',
         toolName: 'Agent', toolId: prevDone,
         toolInput: { description: 'prior search', subagent_type: 'researcher' },
+        subagent: { id: prevDone, parentId: null, label: 'prior search', state: 'started' },
         timestamp: ts(2),
       },
       // tool_result for the prior agent → normalizer marks it isComplete=true.
@@ -195,6 +204,7 @@ describe('B-63 live task-progress counter (commit 95574f9)', () => {
         id: 'a2', kind: 'tool_use', role: 'assistant',
         toolName: 'Agent', toolId: curRunning,
         toolInput: { description: 'new task', subagent_type: 'general' },
+        subagent: { id: curRunning, parentId: null, label: 'new task', state: 'started' },
         timestamp: ts(12),
       },
     ] as NormalizedMessage[];

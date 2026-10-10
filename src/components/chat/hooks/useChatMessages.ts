@@ -4,7 +4,8 @@
  */
 
 import type { NormalizedMessage } from '../../../stores/useSessionStore';
-import type { ChatMessage, SubagentChildTool } from '../types/types';
+import type { ChatMessage, ProgressPlan, ProgressSubagent, SubagentChildTool } from '../types/types';
+import { parseLatestDeclaredProgress, type DeclaredProgress } from './declaredProgress';
 import { decodeHtmlEntities, unescapeWithMathProtection, formatUsageLimitText } from '../utils/chatFormatting';
 import { stripChatImageNote } from '../utils/chatImageNote';
 import { readServerErrorCode } from '../utils/serverErrorMessage';
@@ -60,7 +61,7 @@ export function attachTurnDurations(messages: ChatMessage[]): ChatMessage[] {
  * immediately after delegation, so useRunProgress's activeSubagent /
  * agentsDone and the per-agent strip row showed it finished for the rest of
  * the run even though it was still working — foreclosing any chance of the
- * live "still working" signal (or a later TodoWrite) ever being attributed to
+ * live "still working" signal (or a later plan snapshot) ever being attributed to
  * a container the UI hadn't already written off as resolved.
  *
  * Foreground (blocking) delegations are unaffected: their tool_result has no
@@ -71,6 +72,119 @@ function isAsyncLaunchAck(toolUseResult: unknown): boolean {
   if (typeof toolUseResult !== 'object' || toolUseResult === null) return false;
   const tur = toolUseResult as Record<string, unknown>;
   return tur.isAsync === true && tur.status === 'async_launched';
+}
+
+/**
+ * Container tool names of adapters that do not yet emit the neutral `subagent`
+ * field (ADR-199 P3-P5: history rows of the codex, agy and opencode adapters
+ * still name their delegation `Task`/`Agent`). DOCUMENTED EXCEPTION to the
+ * ADR-199 no-tool-names rule: used ONLY to RENDER such rows as containers, never
+ * for progress; progress reads `subagent` alone. Delete once those adapters
+ * stamp `subagent` on both paths.
+ */
+const LEGACY_CONTAINER_TOOLS: ReadonlySet<string> = new Set(['Task', 'Agent']);
+
+/**
+ * Latest lifecycle of the subagent a container delegates to (ADR-199). A
+ * settlement `status` row wins, then the result row, then the call's
+ * `started`. When the result row is outside the loaded window (only an inline
+ * result survives), a resolved, non-background result settles a still-open
+ * state, as before the neutral fields existed.
+ */
+function effectiveSubagent(
+  call: ProgressSubagent | undefined,
+  result: ProgressSubagent | undefined,
+  resolved: boolean,
+  isError: boolean,
+  settlement?: ProgressSubagent,
+): ProgressSubagent | undefined {
+  const latest = result ?? call;
+  if (settlement && latest) return { ...latest, state: settlement.state };
+  if (result) return result;
+  if (!call) return undefined;
+  if (resolved && (call.state === 'started' || call.state === 'running')) {
+    return { ...call, state: isError ? 'failed' : 'completed' };
+  }
+  return call;
+}
+
+/**
+ * Latest settlement per subagent id from text-less `status` rows (ADR-199 P1c:
+ * a background agent closes through its notification, never a second result).
+ * The rows themselves are control events and are never rendered.
+ */
+function collectSubagentSettlements(messages: NormalizedMessage[]): Map<string, ProgressSubagent> {
+  const byId = new Map<string, ProgressSubagent>();
+  for (const msg of messages) {
+    if (msg.kind === 'status' && msg.subagent?.id) byId.set(msg.subagent.id, msg.subagent);
+  }
+  return byId;
+}
+
+/** Bounds on subagents carried from status rows (text labels only). */
+const MAX_TURN_SUBAGENTS = 50;
+const MAX_SUBAGENT_LABEL = 120;
+
+/** Progress data of one status row, held until its carrier row is known. */
+interface HeldTurnProgress {
+  /** `converted.length` when the status row was met. */
+  at: number;
+  plan?: ProgressPlan;
+  subagent?: ProgressSubagent;
+}
+
+/**
+ * A status row's progress data: its plan, and its subagent when no delegating
+ * call carries that id (a subagent known only from status rows). A subagent
+ * whose call exists is a settlement, applied to that call instead.
+ */
+function heldTurnProgress(msg: NormalizedMessage, toolUseIds: Set<string>, at: number): HeldTurnProgress | null {
+  const sub = msg.subagent;
+  const orphan = sub && typeof sub.id === 'string' && sub.id && !toolUseIds.has(sub.id)
+    ? { ...sub, label: typeof sub.label === 'string' ? sub.label.slice(0, MAX_SUBAGENT_LABEL) : '' }
+    : undefined;
+  if (!msg.plan && !orphan) return null;
+  return { at, ...(msg.plan ? { plan: msg.plan } : {}), ...(orphan ? { subagent: orphan } : {}) };
+}
+
+/**
+ * Carrier of held data met at `at`: the reply row just before it, else (the
+ * status row sorted ahead of the reply, e.g. a live reply stamped after the
+ * transcript time) the first reply row after it. A genuine human prompt ends
+ * the search, so data never crosses into another turn.
+ */
+function turnCarrierIndex(converted: ChatMessage[], at: number): number {
+  const isPrompt = (m: ChatMessage) => m.type === 'user' && !m.isToolUse && !m.originKind;
+  const before = converted[at - 1];
+  if (before && !isPrompt(before)) return at - 1;
+  for (let j = at; j < converted.length; j++) {
+    if (isPrompt(converted[j])) return -1;
+    if (converted[j].type !== 'user') return j;
+  }
+  return -1;
+}
+
+/**
+ * Hand each held plan / subagent to its carrier row, in transcript order: a
+ * later plan replaces an earlier one, a subagent replaces its own id.
+ */
+function attachTurnProgress(converted: ChatMessage[], held: HeldTurnProgress[]): void {
+  for (const item of held) {
+    const index = turnCarrierIndex(converted, item.at);
+    if (index < 0) continue;
+    const carrier = { ...converted[index] };
+    if (item.plan) carrier.plan = item.plan;
+    if (item.subagent) {
+      const others = (carrier.turnSubagents ?? []).filter((s) => s.id !== item.subagent!.id);
+      if (others.length < MAX_TURN_SUBAGENTS) carrier.turnSubagents = [...others, item.subagent];
+    }
+    converted[index] = carrier;
+  }
+}
+
+/** Plan snapshot of a call: its result row's snapshot wins (ADR-199 Addendum A). */
+function rowPlan(call: NormalizedMessage, result: NormalizedMessage | null | undefined): ProgressPlan | undefined {
+  return result?.plan ?? call.plan;
 }
 
 /**
@@ -90,6 +204,22 @@ function isAsyncLaunchAck(toolUseResult: unknown): boolean {
 function isSubagentProse(msg: NormalizedMessage): boolean {
   if (!msg.parentToolUseId) return false;
   return msg.kind === 'text' || msg.kind === 'thinking' || msg.kind === 'stream_delta';
+}
+
+/**
+ * Latest self-reported progress line per sub-agent container (keyed by the
+ * parent tool id). Only the sub-agent's own ASSISTANT prose counts: the
+ * delegated prompt arrives as a `role:'user'` row and may quote the format as an
+ * example. The prose itself stays folded away — only the parsed values survive.
+ */
+function collectSubagentProgress(messages: NormalizedMessage[]): Map<string, DeclaredProgress> {
+  const byParent = new Map<string, DeclaredProgress>();
+  for (const msg of messages) {
+    if (!isSubagentProse(msg) || msg.role === 'user' || msg.kind === 'thinking') continue;
+    const parsed = parseLatestDeclaredProgress(msg.content || '');
+    if (parsed && msg.parentToolUseId) byParent.set(msg.parentToolUseId, parsed);
+  }
+  return byParent;
 }
 
 /**
@@ -131,7 +261,7 @@ export function normalizedToChatMessages(messages: NormalizedMessage[]): ChatMes
   // descends into `subagentState.childTools`). Here we group those children by
   // their parent id into the same SubagentChildTool shape the history path
   // builds, so the container branch below can merge them and useRunProgress can
-  // count the sub-agent's TodoWrite live. The map is order-independent: a child
+  // count the sub-agent's plan live. The map is order-independent: a child
   // that arrives before its container is still attached when the container is
   // converted, because both passes run over the full `messages` array.
   const liveChildMap = new Map<string, SubagentChildTool[]>();
@@ -151,10 +281,16 @@ export function normalizedToChatMessages(messages: NormalizedMessage[]): ChatMes
         : null,
       timestamp: new Date(msg.timestamp || Date.now()),
     };
+    const childPlan = rowPlan(msg, msg.toolId ? toolResultMap.get(msg.toolId) : null);
+    if (childPlan) child.plan = childPlan;
     const bucket = liveChildMap.get(msg.parentToolUseId);
     if (bucket) bucket.push(child);
     else liveChildMap.set(msg.parentToolUseId, [child]);
   }
+
+  const declaredProgressMap = collectSubagentProgress(messages);
+  const settlements = collectSubagentSettlements(messages);
+  const turnProgress: HeldTurnProgress[] = [];
 
   for (const msg of messages) {
     if (isSubagentProse(msg)) continue;
@@ -300,14 +436,12 @@ export function normalizedToChatMessages(messages: NormalizedMessage[]): ChatMes
         }
 
         const tr = msg.toolResult || (msg.toolId ? toolResultMap.get(msg.toolId) : null);
-        // Sub-agent container: the coordinator delegating a run. Two tool names
-        // delegate in this codebase — Claude's native `Task` and the agy /
-        // Antigravity `Agent` tool (the only one actually used in nassaj runs,
-        // 2114 uses vs 0 for `Task`). Both attach their child tools via
-        // `subagentTools` on the result, so both must be recognised or the live
-        // active-agent chip and the history child-tool descent in useRunProgress
-        // never fire for real nassaj delegation runs (B-63).
-        const isSubagentContainer = msg.toolName === 'Task' || msg.toolName === 'Agent';
+        const resultRow = msg.toolId ? toolResultMap.get(msg.toolId) : undefined;
+        // Sub-agent container: the coordinator delegating a run (ADR-199). The
+        // neutral `subagent` field decides; LEGACY_CONTAINER_TOOLS only keeps
+        // not-yet-migrated adapters rendering as containers (see its comment).
+        const isSubagentContainer = Boolean(msg.subagent)
+          || LEGACY_CONTAINER_TOOLS.has(msg.toolName || '');
 
         // Build child tools from subagentTools (history aggregate) and merge the
         // live children folded in the pre-pass (B-63). Dedup by toolId — the same
@@ -323,6 +457,7 @@ export function normalizedToChatMessages(messages: NormalizedMessage[]): ChatMes
               toolInput: tool.toolInput,
               toolResult: tool.toolResult || null,
               timestamp: new Date(tool.timestamp || Date.now()),
+              ...(tool.plan ? { plan: tool.plan } : {}),
             });
             if (tool.toolId) seenChildIds.add(tool.toolId);
           }
@@ -338,6 +473,7 @@ export function normalizedToChatMessages(messages: NormalizedMessage[]): ChatMes
           }
         }
 
+        const declaredProgress = msg.toolId ? declaredProgressMap.get(msg.toolId) : undefined;
         const toolResult = tr
           ? {
               content: formatToolResultContent(tr.content),
@@ -345,6 +481,16 @@ export function normalizedToChatMessages(messages: NormalizedMessage[]): ChatMes
               toolUseResult: (tr as any).toolUseResult,
             }
           : null;
+
+        const settlement = msg.toolId ? settlements.get(msg.toolId) : undefined;
+        const settled = settlement?.state === 'completed' || settlement?.state === 'failed';
+        // A background launch ack is not completion (B-63/T-143); its later
+        // settlement row is (ADR-199 P1c).
+        const isComplete = (Boolean(toolResult) && !isAsyncLaunchAck(toolResult?.toolUseResult)) || settled;
+        const subagent = effectiveSubagent(
+          msg.subagent, resultRow?.subagent, isComplete, Boolean(toolResult?.isError), settlement,
+        );
+        const plan = rowPlan(msg, resultRow);
 
         converted.push({
           id: msg.id,
@@ -357,6 +503,8 @@ export function normalizedToChatMessages(messages: NormalizedMessage[]): ChatMes
           toolId: msg.toolId,
           toolResult,
           isSubagentContainer,
+          ...(plan ? { plan } : {}),
+          ...(subagent ? { subagent } : {}),
           subagentState: isSubagentContainer
             ? {
                 childTools,
@@ -364,7 +512,8 @@ export function normalizedToChatMessages(messages: NormalizedMessage[]): ChatMes
                 // A background-launch acknowledgment is not real completion
                 // (B-63/T-143) — keep the container "running" so the live
                 // agent-working signal survives for the rest of the turn.
-                isComplete: Boolean(toolResult) && !isAsyncLaunchAck(toolResult?.toolUseResult),
+                isComplete,
+                ...(declaredProgress ? { progress: declaredProgress } : {}),
               }
             : undefined,
           ...sharedMetadata,
@@ -476,11 +625,19 @@ export function normalizedToChatMessages(messages: NormalizedMessage[]): ChatMes
         }
         break;
 
-      // stream_end, complete, status, permission_*, session_created
+      // A text-less `status` row may carry a turn-end plan snapshot or a
+      // subagent with no delegating call in the transcript (ADR-199). It is
+      // never rendered: its data rides a reply row (see attachTurnProgress).
+      case 'status': {
+        const held = heldTurnProgress(msg, toolUseIds, converted.length);
+        if (held) turnProgress.push(held);
+        break;
+      }
+
+      // stream_end, complete, permission_*, session_created
       // are control events — not rendered as messages
       case 'stream_end':
       case 'complete':
-      case 'status':
       case 'permission_request':
       case 'permission_cancelled':
       case 'session_created':
@@ -516,6 +673,8 @@ export function normalizedToChatMessages(messages: NormalizedMessage[]): ChatMes
             isError: Boolean(msg.isError),
             toolUseResult: (msg as any).toolUseResult,
           },
+          ...(msg.plan ? { plan: msg.plan } : {}),
+          ...(msg.subagent ? { subagent: msg.subagent } : {}),
           ...sharedMetadata,
         });
         break;
@@ -526,6 +685,7 @@ export function normalizedToChatMessages(messages: NormalizedMessage[]): ChatMes
     }
   }
 
+  attachTurnProgress(converted, turnProgress);
   const timed = attachTurnDurations(converted);
 
   // ── Reconcile pass (B-94 / C3) ─────────────────────────────────────────────

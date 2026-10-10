@@ -27,6 +27,18 @@ type SessionWriter = Readonly<{
   }>): number;
 }>;
 
+type SessionReader = Readonly<{
+  readOwnerAuthSession(input: Readonly<{
+    sessionTokenHash: string; installationId: string; userId: number; nowMs: number;
+  }>): Readonly<{ sessionId: string; csrfTokenHash: string; authTime: number; expiresAt: number }> | null;
+}>;
+
+/** Read side of the installed adapter: the exact store and installation sessions are minted in. */
+export type ConnectorOwnerSessionReader = Readonly<{
+  installationId: string;
+  repository: SessionReader;
+}>;
+
 type CookieResponse = Pick<express.Response, 'cookie' | 'clearCookie'>;
 
 const sha256 = (value: string): string => createHash('sha256').update(value).digest('hex');
@@ -150,20 +162,32 @@ export const createConnectorOwnerAuthSessionAdapter = (deps: Readonly<{
 });
 
 let productionAdapter: ReturnType<typeof createConnectorOwnerAuthSessionAdapter> | null = null;
+// Set together with productionAdapter by the single configure point and never reset
+// separately: the reader always names the store and installation the adapter writes.
+let productionReader: ConnectorOwnerSessionReader | null = null;
 
 /**
  * Installed once, synchronously, by the connector substrate composition root
  * at boot. It is the only configure point (a second writer would race it).
  */
 export const configureConnectorOwnerAuthSessionProduction = (deps: Readonly<{
-  repository: SessionWriter; installationId: string; resolveOrigin: () => string | null;
+  repository: SessionWriter & SessionReader; installationId: string; resolveOrigin: () => string | null;
   executeWrite: (effect: () => void) => boolean;
 }>): void => {
   productionAdapter = createConnectorOwnerAuthSessionAdapter(deps);
+  productionReader = Object.freeze({ installationId: deps.installationId, repository: deps.repository });
 };
 
 /** True once the substrate composition installed the adapter (it can mint sessions). */
 export const connectorOwnerSessionAvailable = (): boolean => productionAdapter !== null;
+
+/**
+ * Session store and installation the step-up writes to, or null before the
+ * substrate installed the adapter. Independent of the profile-management
+ * runtime, which cannot exist until an origin is persisted: readiness uses it
+ * so the pre-origin owner wizard can receive its CSRF token.
+ */
+export const connectorOwnerSessionReader = (): ConnectorOwnerSessionReader | null => productionReader;
 
 /** Live origin the recent-auth cookies are issued for, or null when unconfigured. */
 export const connectorOwnerSessionOrigin = (): string | null => productionAdapter?.resolveOrigin() ?? null;

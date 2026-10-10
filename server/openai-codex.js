@@ -47,6 +47,12 @@ import { PROCESS_TAG_ENV_VAR } from './services/session-process-monitor.js';
 import { permissionProcessTag } from './modules/execution-permissions/process-tag-identity.js';
 import { classifyCodexFailure } from './modules/providers/list/codex/codex-failure.js';
 import {
+  createCodexLiveProgressPhases,
+  isCodexProgressItem,
+  stampCodexProgressPhase,
+} from './modules/providers/list/codex/codex-progress.js';
+import { createCodexRunSubagentTail } from './modules/providers/list/codex/codex-rollout-tail.js';
+import {
   accumulateCodexCoordinatorUsage,
   extractCodexTokenBudget,
   selectCodexPostTurnUsage,
@@ -76,6 +82,11 @@ import { captureCodexReceiptWindow, resolveCodexUserProof, codexReceiptPayloadHa
 
 // Track active sessions
 const activeCodexSessions = new Map();
+// ADR-134 v1: native multi-agent delegation is denied on every launch. One source for the
+// Codex config override AND the ADR-199 P4b rollout tail gate, so the tail opens nothing
+// (no fd, no permit, no polling) while spawning is impossible.
+const CODEX_MULTI_AGENT_CONFIG = Object.freeze({ 'features.multi_agent': false });
+const CODEX_MULTI_AGENT_ENABLED = CODEX_MULTI_AGENT_CONFIG['features.multi_agent'] === true;
 const activeCodexTurnLocks = new Set();
 
 async function prepareCodexInput(command, images) {
@@ -238,6 +249,17 @@ function transformCodexEvent(event, turnNonce) {
             itemType: 'todo_list',
             uuid,
             items: item.items
+          };
+
+        // ADR-199 P4a: the stream's only multi-agent signal (spawn is not
+        // streamed); mapped to an anonymous subagent record by the adapter.
+        case 'collab_tool_call':
+          return {
+            type: 'item',
+            itemType: 'collab_tool_call',
+            uuid,
+            tool: item.tool,
+            status: item.status
           };
 
         case 'error':
@@ -569,6 +591,8 @@ async function queryCodexOwned(invocation) {
     throw new Error('PERMISSION_EXECUTION_HANDLE_INVALID');
   }
   let sawFinalAssistant = false;
+  // ADR-199 P4a: run-scoped phases of plan/subagent items; dies with the run.
+  const progressPhases = createCodexLiveProgressPhases();
   // B-31: verify the project directory exists before spawning Codex.
   const cwdToCheck = options.cwd || options.projectPath;
   if (cwdToCheck) {
@@ -728,6 +752,19 @@ async function queryCodexOwned(invocation) {
   let turnBaseline = capturedSessionId
     ? await captureCodexTurnBaseline(capturedSessionId)
     : null;
+  // ADR-199 P4b: one parent-rollout tail per run, rooted at the principal CODEX_HOME the
+  // spawn env uses; started at thread.started, stopped after the stream and in finally.
+  const subagentTail = createCodexRunSubagentTail({
+    enabled: CODEX_MULTI_AGENT_ENABLED,
+    codexHome: () => resolveCodexHomeForUser(requesterUserId),
+    signal: abortController.signal,
+    sessionId: () => capturedSessionId || sessionId || null,
+    emit: (msg) => {
+      stampCoordinatorId(msg, ws?.userId);
+      Object.assign(msg, clientMsgIdField, responseToMessageIdField);
+      sendMessage(ws, msg);
+    },
+  });
 
   // B-395: the "Running" badge / busy dot / active-conversations count all come
   // from the process monitor, and codex-sdk hides the CLI's pid — so tag the
@@ -837,7 +874,7 @@ async function queryCodexOwned(invocation) {
         // ADR-134 v1 denies MCP and external delegation as surfaces, not merely
         // as UI choices. These parent-controlled overrides replace any entries
         // in the user's config before the CLI starts.
-        'features.multi_agent': false,
+        ...CODEX_MULTI_AGENT_CONFIG,
         mcp_servers: {},
         developer_instructions: getRuntimeInstructions(options?.coordinationLevel),
         ...(sandboxMode === 'workspace-write' && docsWritableRoots.length > 0
@@ -950,6 +987,8 @@ async function queryCodexOwned(invocation) {
       // Capture thread/session id lazily from the stream (Codex emits this asynchronously).
       if (event.type === 'thread.started') {
         const discoveredSessionId = event.thread_id || event.id || null;
+        subagentTail.onThreadStarted(discoveredSessionId, Boolean(sessionId && !isCrossHomeBranch),
+          turnBaseline?.filePath ?? null);
         if (discoveredSessionId && !capturedSessionId) {
           // Reserve the SDK-minted ID before any observer can submit a resumed turn.
           if (activeCodexTurnLocks.has(discoveredSessionId)) throw new Error('CODEX_NEW_THREAD_ID_COLLISION');
@@ -1039,7 +1078,9 @@ async function queryCodexOwned(invocation) {
       ) {
         turnStartedAt = new Date().toISOString();
       }
-      if (event.type === 'item.started' || event.type === 'item.updated') {
+      // Plan and subagent items also forward their start and updates so the
+      // live percent moves before the turn ends (ADR-199 P4a); others do not.
+      if ((event.type === 'item.started' || event.type === 'item.updated') && !isCodexProgressItem(event.item)) {
         continue;
       }
 
@@ -1094,6 +1135,13 @@ async function queryCodexOwned(invocation) {
       }
 
       const transformed = transformCodexEvent(event, turnNonce);
+      if (!stampCodexProgressPhase(progressPhases, event.type, event.item, transformed)) {
+        continue;
+      }
+      // A labelled spawn from the rollout replaces the anonymous collab card (ADR-199 §20).
+      if (subagentTail.hidesCollab(transformed)) {
+        continue;
+      }
 
       // Normalize the transformed event into NormalizedMessage(s) via adapter
       const normalizedMsgs = sessionsService.normalizeMessage('codex', transformed, capturedSessionId || sessionId || null);
@@ -1114,6 +1162,8 @@ async function queryCodexOwned(invocation) {
       }
 
     }
+    // Read the rollout's last appended spawns/settlements, then release the fd.
+    await subagentTail.stop({ drain: !turnAborted && !terminalFailure });
 
     // Send completion event
     if (!terminalFailure && !turnAborted) {
@@ -1285,6 +1335,8 @@ async function queryCodexOwned(invocation) {
     // B-395: clear the badge on EVERY exit path (success, turn.failed, thrown
     // spawn error, abort) — this finally is the only one all of them share.
     runPresence.end();
+    // ADR-199 P4b: the rollout fd never outlives the run (idempotent after the drain above).
+    await subagentTail.stop();
     if (imagesTempDir) {
       await fs.rm(imagesTempDir, { recursive: true, force: true }).catch((error) => {
         console.warn('[Codex] Failed to clean temporary images:', error?.message || error);

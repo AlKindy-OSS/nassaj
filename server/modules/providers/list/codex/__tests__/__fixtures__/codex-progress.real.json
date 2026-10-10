@@ -1,0 +1,221 @@
+{
+ "_provenance": {
+  "stream": "codex exec --json 0.160.0, temp cwd /var/tmp/codex-cap-*, CODEX_HOME user 1, 2026-10-09; only thread.started and the collab_tool_call events kept verbatim",
+  "rollout": "rollout of the same capture thread; spawn_agent/wait_agent calls+outputs, SubAgentActivity, FINAL_ANSWER agent_message, task start/complete. spawn message (encrypted blob) replaced; task name replaced with agent_1",
+  "updatePlan": "one real update_plan function_call; structure, statuses, field names and order kept; step text replaced with \"step 1\"..\"step 5\"; call_id replaced"
+ },
+ "stream": [
+  {
+   "type": "thread.started",
+   "thread_id": "00000000-0000-7000-8000-000000000001"
+  },
+  {
+   "type": "item.started",
+   "item": {
+    "id": "item_5",
+    "type": "collab_tool_call",
+    "tool": "wait",
+    "sender_thread_id": "00000000-0000-7000-8000-000000000001",
+    "receiver_thread_ids": [],
+    "prompt": null,
+    "agents_states": {},
+    "status": "in_progress"
+   }
+  },
+  {
+   "type": "item.completed",
+   "item": {
+    "id": "item_5",
+    "type": "collab_tool_call",
+    "tool": "wait",
+    "sender_thread_id": "00000000-0000-7000-8000-000000000001",
+    "receiver_thread_ids": [],
+    "prompt": null,
+    "agents_states": {},
+    "status": "completed"
+   }
+  }
+ ],
+ "rollout": [
+  {
+   "timestamp": "2026-10-09T07:17:05.663Z",
+   "ordinal": 1,
+   "type": "event_msg",
+   "payload": {
+    "type": "task_started",
+    "turn_id": "00000000-0000-7000-8000-000000000002",
+    "root_turn_id": "00000000-0000-7000-8000-000000000002",
+    "started_at": 1791530225,
+    "model_context_window": 258400,
+    "collaboration_mode_kind": "default"
+   }
+  },
+  {
+   "timestamp": "2026-10-09T07:17:42.160Z",
+   "ordinal": 41,
+   "type": "response_item",
+   "payload": {
+    "type": "function_call",
+    "id": "fc_06894d20062fa73a016ac89514d0c88191815ece2fb0c8d80f",
+    "name": "spawn_agent",
+    "namespace": "collaboration",
+    "arguments": "{\"task_name\":\"agent_1\",\"message\":\"gAAAAA-SCRUBBED-ENCRYPTED-BLOB\",\"fork_turns\":\"none\"}",
+    "call_id": "call_e5656dae1b7a404980a968644f059dc3",
+    "internal_chat_message_metadata_passthrough": {
+     "turn_id": "00000000-0000-7000-8000-000000000002",
+     "create_time": 1791530260.8291593
+    }
+   },
+   "metadata": {
+    "client_authored": false,
+    "user_input_order": 3
+   }
+  },
+  {
+   "timestamp": "2026-10-09T07:17:42.224Z",
+   "ordinal": 42,
+   "type": "event_msg",
+   "payload": {
+    "type": "item_completed",
+    "thread_id": "00000000-0000-7000-8000-000000000001",
+    "turn_id": "00000000-0000-7000-8000-000000000002",
+    "item": {
+     "type": "SubAgentActivity",
+     "id": "call_e5656dae1b7a404980a968644f059dc3",
+     "kind": "started",
+     "agent_thread_id": "00000000-0000-7000-8000-000000000003",
+     "agent_path": "/root/agent_1"
+    },
+    "started_at_ms": 1791530262224,
+    "completed_at_ms": 1791530262224
+   }
+  },
+  {
+   "timestamp": "2026-10-09T07:17:42.600Z",
+   "ordinal": 44,
+   "type": "response_item",
+   "payload": {
+    "type": "function_call_output",
+    "id": "fco_01a11f86-6048-7262-86ff-9bac834d7c85",
+    "call_id": "call_e5656dae1b7a404980a968644f059dc3",
+    "output": "{\"task_name\":\"/root/agent_1\"}",
+    "internal_chat_message_metadata_passthrough": {
+     "turn_id": "00000000-0000-7000-8000-000000000002",
+     "create_time": 1791530262.6002443
+    }
+   },
+   "metadata": {
+    "client_authored": false,
+    "fallback_token_limit_override": 12000
+   }
+  },
+  {
+   "timestamp": "2026-10-09T07:17:46.145Z",
+   "ordinal": 47,
+   "type": "response_item",
+   "payload": {
+    "type": "function_call",
+    "id": "fc_06894d20062fa73a016ac8951976f48191b1aa62f008a4a791",
+    "name": "wait_agent",
+    "namespace": "collaboration",
+    "arguments": "{\"timeout_ms\":10000}",
+    "call_id": "call_c3ec5fe2ebef47cfb21a1bf8679f8f58",
+    "internal_chat_message_metadata_passthrough": {
+     "turn_id": "00000000-0000-7000-8000-000000000002",
+     "create_time": 1791530265.7045662
+    }
+   },
+   "metadata": {
+    "client_authored": false,
+    "user_input_order": 4
+   }
+  },
+  {
+   "timestamp": "2026-10-09T07:17:49.015Z",
+   "ordinal": 49,
+   "type": "event_msg",
+   "payload": {
+    "type": "item_completed",
+    "thread_id": "00000000-0000-7000-8000-000000000001",
+    "turn_id": "00000000-0000-7000-8000-000000000002",
+    "item": {
+     "type": "SubAgentActivity",
+     "id": "subagent-completed-00000000-0000-7000-8000-000000000004",
+     "kind": "completed",
+     "agent_thread_id": "00000000-0000-7000-8000-000000000003",
+     "agent_path": "/root/agent_1"
+    },
+    "started_at_ms": 1791530269015,
+    "completed_at_ms": 1791530269015
+   }
+  },
+  {
+   "timestamp": "2026-10-09T07:17:49.044Z",
+   "ordinal": 51,
+   "type": "response_item",
+   "payload": {
+    "type": "function_call_output",
+    "id": "fco_01a11f86-7974-7a53-b129-46c5345a73de",
+    "call_id": "call_c3ec5fe2ebef47cfb21a1bf8679f8f58",
+    "output": "{\"message\":\"Wait completed.\",\"timed_out\":false}",
+    "internal_chat_message_metadata_passthrough": {
+     "turn_id": "00000000-0000-7000-8000-000000000002",
+     "create_time": 1791530269.0447702
+    }
+   },
+   "metadata": {
+    "client_authored": false,
+    "fallback_token_limit_override": 12000
+   }
+  },
+  {
+   "timestamp": "2026-10-09T07:17:49.049Z",
+   "ordinal": 54,
+   "type": "response_item",
+   "payload": {
+    "type": "agent_message",
+    "id": "amsg_01a11f86-7979-7ce2-841a-4f52393706c9",
+    "author": "/root/agent_1",
+    "recipient": "/root",
+    "content": [
+     {
+      "type": "input_text",
+      "text": "Message Type: FINAL_ANSWER\nTask name: /root\nSender: /root/agent_1\nPayload:\nOK"
+     }
+    ],
+    "internal_chat_message_metadata_passthrough": {
+     "turn_id": "00000000-0000-7000-8000-000000000002",
+     "create_time": 1791530269.0490148
+    }
+   },
+   "metadata": {
+    "client_authored": false,
+    "user_input_order": 5
+   }
+  },
+  {
+   "timestamp": "2026-10-09T07:17:51.292Z",
+   "ordinal": 59,
+   "type": "event_msg",
+   "payload": {
+    "type": "task_complete",
+    "turn_id": "00000000-0000-7000-8000-000000000002",
+    "last_agent_message": "DONE",
+    "started_at": 1791530225,
+    "completed_at": 1791530271,
+    "duration_ms": 45636,
+    "time_to_first_token_ms": 7296
+   }
+  }
+ ],
+ "updatePlan": {
+  "timestamp": "2026-08-08T18:30:34.767Z",
+  "type": "response_item",
+  "payload": {
+   "type": "function_call",
+   "name": "update_plan",
+   "arguments": "{\"plan\":[{\"step\":\"step 1\",\"status\":\"in_progress\"},{\"step\":\"step 2\",\"status\":\"pending\"},{\"step\":\"step 3\",\"status\":\"pending\"},{\"step\":\"step 4\",\"status\":\"pending\"},{\"step\":\"step 5\",\"status\":\"pending\"}]}",
+   "call_id": "call_update_plan_scrubbed"
+  }
+ }
+}

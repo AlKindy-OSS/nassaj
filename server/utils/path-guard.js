@@ -21,9 +21,15 @@
 
 import path from 'node:path';
 import fs from 'node:fs';
-import { realpath } from 'node:fs/promises';
+import { open, realpath } from 'node:fs/promises';
 
-import { isForbiddenProjectRoot, isSecretPath } from '@/shared/secret-path-guard.js';
+import {
+  SQLITE_HEADER,
+  hasSqliteHeader,
+  isForbiddenProjectRoot,
+  isSecretPath,
+  isSqliteFileName,
+} from '@/shared/secret-path-guard.js';
 
 /**
  * Canonicalize a client-supplied path against a project root and confirm — after
@@ -45,6 +51,8 @@ import { isForbiddenProjectRoot, isSecretPath } from '@/shared/secret-path-guard
  * B-1373: a root that is (or contains) the service user's home or a secret
  * location is refused outright (FORBIDDEN_ROOT), and a target resolving into a
  * secret location is refused even under an allowed root (SECRET_PATH).
+ * Reads also refuse any SQLite database or sidecar by name (SECRET_PATH): copies
+ * of the configured database carry its secrets under arbitrary backup names.
  *
  * @returns {Promise<
  *   { valid: true, resolved: string, realResolved: string } |
@@ -88,11 +96,47 @@ export async function resolveReadPathInProject(projectRoot, requestedPath) {
     return { valid: false, code: 'SYMLINK_ESCAPE', error: 'Path must be under project root' };
   }
 
-  if (isSecretPath(resolved) || isSecretPath(realResolved)) {
+  if (isSecretPath(resolved) || isSecretPath(realResolved)
+    || isSqliteFileName(path.basename(resolved)) || isSqliteFileName(path.basename(realResolved))) {
     return { valid: false, code: 'SECRET_PATH', error: 'Path must be under project root' };
   }
 
   return { valid: true, resolved, realResolved };
+}
+
+/**
+ * `resolveReadPathInProject`, then OPEN the verified real path and refuse it
+ * when its first bytes are the SQLite header (a database copy under any name).
+ * The sniff reads from the same descriptor the caller then reads/streams, so
+ * the checked bytes are the served bytes. The caller owns `handle` and must
+ * close it (a FileHandle stream closes it on end by default).
+ *
+ * @param {string} projectRoot   Absolute project root directory.
+ * @param {string} requestedPath Client-supplied path (absolute or project-relative).
+ * @returns {Promise<
+ *   { valid: true, resolved: string, realResolved: string, handle: import('node:fs/promises').FileHandle } |
+ *   { valid: false, code: string, error: string }
+ * >}
+ */
+export async function openReadableProjectFile(projectRoot, requestedPath) {
+  const guard = await resolveReadPathInProject(projectRoot, requestedPath);
+  if (!guard.valid) return guard;
+  const handle = await open(guard.realResolved, 'r');
+  try {
+    const stats = await handle.stat();
+    if (stats.isFile()) {
+      const head = Buffer.alloc(SQLITE_HEADER.length);
+      const { bytesRead } = await handle.read(head, 0, head.length, 0);
+      if (hasSqliteHeader(head.subarray(0, bytesRead))) {
+        await handle.close();
+        return { valid: false, code: 'SECRET_PATH', error: 'Path must be under project root' };
+      }
+    }
+  } catch (error) {
+    await handle.close();
+    throw error;
+  }
+  return { ...guard, handle };
 }
 
 /**

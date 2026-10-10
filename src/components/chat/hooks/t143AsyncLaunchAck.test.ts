@@ -71,6 +71,7 @@ describe('T-143: background-launch acknowledgment is not final completion', () =
         id: 'm2', kind: 'tool_use', role: 'assistant',
         toolName: 'Agent', toolId: PARENT_ID,
         toolInput: { description: 'خلفية', subagent_type: 'general' },
+        subagent: { id: PARENT_ID, parentId: null, label: 'خلفية', state: 'started' },
         timestamp: ts(2),
       },
       // Shape-equivalent launch acknowledgment arrives before delegated work ends.
@@ -78,6 +79,7 @@ describe('T-143: background-launch acknowledgment is not final completion', () =
         id: 'm3', kind: 'tool_result', role: 'user', toolId: PARENT_ID,
         content: 'launched', timestamp: ts(2),
         toolUseResult: { isAsync: true, status: 'async_launched', agentId: 'a1' },
+        subagent: { id: PARENT_ID, parentId: null, label: 'خلفية', state: 'running' },
       },
     ] as NormalizedMessage[];
 
@@ -106,6 +108,7 @@ describe('T-143: background-launch acknowledgment is not final completion', () =
         id: 'm2', kind: 'tool_use', role: 'assistant',
         toolName: 'Agent', toolId: PARENT_ID,
         toolInput: { description: 'مباشرة', subagent_type: 'general' },
+        subagent: { id: PARENT_ID, parentId: null, label: 'مباشرة', state: 'started' },
         timestamp: ts(2),
       },
       // Foreground delegation: the tool_result carries the final aggregated

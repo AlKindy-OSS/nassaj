@@ -1,10 +1,14 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import { after, mock, test } from 'node:test';
 
-const root = await fs.mkdtemp(path.join(process.env.TMPDIR!, 'agy-history-'));
-const transcript = path.join(root, 'transcript.jsonl');
+// B-1564: agy history reads only transcripts under a brain root (the sandbox HOME's brain).
+const { AGY_BRAIN_UNDER_HOME } = await import('../modules/providers/list/antigravity/agy-brain-layout.js');
+const root = path.join(os.homedir(), AGY_BRAIN_UNDER_HOME, '00000000-0000-4000-8000-0000000000b1');
+const transcript = path.join(root, '.system_generated', 'logs', 'transcript.jsonl');
+await fs.mkdir(path.dirname(transcript), { recursive: true });
 after(() => fs.rm(root, { recursive: true, force: true }));
 mock.module('@/modules/database/index.js', { namedExports: {
   sessionsDb: { getSessionById: () => ({ jsonl_path: transcript }) },

@@ -331,29 +331,24 @@ export const AskUserQuestionPanel: React.FC<PermissionPanelProps> = ({
                       e.stopPropagation();
                     }}
                     placeholder={t('askUser.answerPlaceholder')}
-                    // No `outline-none`: measured live (production build, real
-                    // Chromium) that Tailwind's `outline-none` utility
-                    // (`outline: 2px solid transparent; outline-offset: 2px`)
-                    // on THIS input made its value and placeholder paint
-                    // nothing — DOM value, computed color/layout were all
-                    // correct, but zero dark pixels rendered at the glyph
-                    // positions (pixel-sampled) — while every other input in
-                    // the app, none of which sets `outline-none`, painted
-                    // fine. A clean two-page A/B test that changed only this
-                    // one class confirmed it: with `outline-none` present,
-                    // 0 dark pixels; with it removed, ~1700. The focus ring
-                    // is already drawn by `ring-1`/`focus:ring-2`
-                    // (box-shadow, not outline), so dropping `outline-none`
-                    // costs nothing but restores the browser's native
-                    // focus outline as a harmless extra on top.
-                    className="w-full rounded-lg border-0 bg-muted px-3 py-1.5 text-[13px] text-foreground ring-1 ring-gray-200 transition-shadow duration-200 placeholder:text-muted-foreground focus:ring-2 focus:ring-blue-400 dark:ring-gray-700 dark:placeholder:text-muted-foreground dark:focus:ring-blue-500"
+                    // `outline-none` is safe here: the focus ring is drawn by
+                    // `ring-1`/`focus:ring-2` (box-shadow). An earlier comment
+                    // blamed `outline-none` for invisible text; that A/B was
+                    // confounded. The real cause was the badge below.
+                    className="w-full rounded-lg border-0 bg-muted ps-3 pe-14 py-1.5 text-[13px] text-foreground outline-none ring-1 ring-gray-200 transition-shadow duration-200 placeholder:text-muted-foreground focus:ring-2 focus:ring-blue-400 dark:ring-gray-700 dark:placeholder:text-muted-foreground dark:focus:ring-blue-500"
                   />
-                  {/* pointer-events-none: prevents the badge from intercepting
-                      clicks aimed at the input, which would leave the input
-                      unfocused and drop all subsequent keystrokes. */}
-                  <kbd className="pointer-events-none absolute end-2 top-1/2 -translate-y-1/2 rounded border border-border bg-muted px-1 py-0.5 font-mono text-[9px] text-gray-300 dark:text-muted-foreground">
+                  {/* Root cause of "typed text invisible" (measured in Chromium):
+                      a <kbd> is forced to `direction: ltr` by the global
+                      `:root[dir="rtl"] kbd` rule, so tailwindcss-rtl's
+                      `[dir=rtl] .end-2 {left}` plus the LTR-resolved
+                      `inset-inline-end` (= right) set BOTH insets. The badge
+                      stretched over the whole input and its opaque bg-muted
+                      painted over the value and placeholder. A <span> is not an
+                      LTR island, so `end-2` resolves to one side only.
+                      pointer-events-none keeps clicks reaching the input. */}
+                  <span aria-hidden="true" className="pointer-events-none absolute end-2 top-1/2 -translate-y-1/2 rounded border border-border bg-muted px-1 py-0.5 font-mono text-[9px] text-gray-300 dark:text-muted-foreground">
                     Enter
-                  </kbd>
+                  </span>
                 </div>
               </div>
             )}

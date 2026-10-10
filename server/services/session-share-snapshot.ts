@@ -95,6 +95,8 @@ const SUBAGENT_MARKERS = [
   'originKind', 'parentToolUseId', 'parent_tool_use_id', 'isSidechain', 'agentId', 'subagentId',
   'isSubagent', 'isMeta', 'isSynthetic', 'isReplay', 'isCompactSummary', 'isLocalCommand',
   'isLocalCommandStdout', 'isTaskNotification', 'isSkillLoad',
+  // ADR-199: any row carrying subagent lifecycle is machine routing, never shared prose.
+  'subagent',
 ] as const;
 
 /** Typed 409 helper. */

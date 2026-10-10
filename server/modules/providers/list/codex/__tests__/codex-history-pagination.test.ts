@@ -3,10 +3,9 @@ import { createHmac } from 'node:crypto';
 import { after, describe, it } from 'node:test';
 import fs from 'node:fs';
 import path from 'node:path';
+import { codexSessionsSandbox } from '@/shared/__tests__/provider-root-sandbox.js';
 
-const sandbox = fs.mkdtempSync(path.join(
-  process.env.TMPDIR || path.join(process.cwd(), '.artifacts'), 'nassaj-codex-history-',
-));
+const sandbox = codexSessionsSandbox('nassaj-codex-history-');
 process.env.DATABASE_PATH = path.join(sandbox, 'db.sqlite');
 // Start an empty fixture, preventing the connection layer's legacy DB import.
 fs.writeFileSync(process.env.DATABASE_PATH, '');

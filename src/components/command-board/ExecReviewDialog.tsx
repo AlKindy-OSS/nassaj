@@ -49,6 +49,8 @@ export type RawCommand = {
   digest: string;
   requestedBy?: string | null;
   requestedAt?: string | null;
+  /** Chat session that queued the command; null/absent when unknown. */
+  sessionId?: string | null;
 };
 
 type RawExecResult = {

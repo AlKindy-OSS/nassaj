@@ -182,6 +182,35 @@ describe('B-247 — the raw queue is visible in the panel', () => {
     expect(screen.getByText(attribution)).toBeTruthy();
   });
 
+  it('shows the request date as DD/MM/YYYY HH:mm, never the US order', () => {
+    render(<PendingActionsPanel {...baseProps({
+      rawCommands: [{ ...RAW_ROW, requestedAt: new Date(2026, 8, 10, 2, 0, 40).toISOString() }],
+    })} />);
+    expect(screen.getByText('10/09/2026 02:00')).toBeTruthy();
+  });
+
+  it('hides an unparseable request date', () => {
+    render(<PendingActionsPanel {...baseProps({
+      rawCommands: [{ ...RAW_ROW, requestedAt: 'garbage' }],
+    })} />);
+    expect(screen.queryByText(/Invalid Date/)).toBeNull();
+  });
+
+  it('links to the requesting session when sessionId is present', () => {
+    const props = baseProps({ rawCommands: [{ ...RAW_ROW, sessionId: 'sess-42' }] });
+    render(<PendingActionsPanel {...props} />);
+    fireEvent.click(screen.getByText(enSidebar.pendingActions.openSession));
+    expect(navigate).toHaveBeenCalledWith('/session/sess-42');
+    expect(props.onClose).toHaveBeenCalled();
+  });
+
+  it('renders no session link when sessionId is absent or null', () => {
+    render(<PendingActionsPanel {...baseProps({
+      rawCommands: [RAW_ROW, { ...RAW_ROW_2, sessionId: null }],
+    })} />);
+    expect(screen.queryByText(enSidebar.pendingActions.openSession)).toBeNull();
+  });
+
   it('renders nothing red when the server handed over no rows', () => {
     render(<PendingActionsPanel {...baseProps({ rawCommands: [] })} />);
     expect(screen.queryByText(enSidebar.pendingActions.rawTitle)).toBeNull();

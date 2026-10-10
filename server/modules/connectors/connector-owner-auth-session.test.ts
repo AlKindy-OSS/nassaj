@@ -142,6 +142,7 @@ const recordingRepository = (log: string[]) => ({
   recordOwnerAuthSession: () => { log.push('write'); },
   revokeOwnerAuthSessions: () => { log.push('rotate'); return 0; },
   revokeOwnerAuthSession: () => { log.push('revoke'); return true; },
+  readOwnerAuthSession: () => null,
 });
 
 const cookieJar = (log: string[]) => ({

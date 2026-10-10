@@ -10,6 +10,7 @@
 import os from 'os';
 import path from 'path';
 
+import { AGY_BRAIN_UNDER_HOME } from './agy-brain-layout.js';
 import { credentialPrincipalId } from '../../../../services/isolation/credential-principal.js';
 import { userConfigDir } from '../../../../services/isolation/provision-user-dirs.js';
 import { isProviderIsolated } from '../../../../services/provider-sharing.js';
@@ -25,5 +26,5 @@ export function getAgyBrainDir(userId = null) {
     // T-1675: under a credential grant the brain lives in the OWNER's tree, the
     // same root resolveProviderEnv sets HOME to for this user.
     const homeRoot = shouldIsolate ? userConfigDir(credentialPrincipalId(userId, 'agy'), '') : os.homedir();
-    return path.join(homeRoot, '.gemini', 'antigravity-cli', 'brain');
+    return path.join(homeRoot, AGY_BRAIN_UNDER_HOME);
 }

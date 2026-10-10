@@ -140,6 +140,55 @@ export interface ProviderUiCapabilities {
    * - الباقون: true — نقطة النهاية تكتب المفتاح وresolveResumeModel يقرأه.
    */
   modelSwitch: { supported: boolean };
+  /**
+   * ADR-199: which neutral progress signals (`plan`, `subagent`) this provider's
+   * adapter emits, and when. `live` = shown while running; `turn` = within
+   * the turn, but only once settled or at turn end;
+   * `history` = only after reload; `none` = never. The computed task bar shows
+   * only when `plan !== 'none'`; the agent-declared `⏳ N%` line shows for any
+   * provider because it is read from the agent's own text.
+   */
+  progress: ProgressCapability;
+}
+
+export type ProgressSignalTiming = 'live' | 'turn' | 'history' | 'none';
+export interface ProgressCapability {
+  plan: ProgressSignalTiming;
+  subagents: ProgressSignalTiming;
+}
+
+const PROGRESS_NONE: ProgressCapability = { plan: 'none', subagents: 'none' };
+
+/**
+ * ADR-199 Decision 5: every server-registered provider (provider.registry.ts)
+ * listed explicitly, including retired bodies that still open old sessions
+ * through the fallback descriptor. Upgrade a value only with a real capture.
+ * - claude: plan and subagents live (claude-progress.ts, P1).
+ * - codex: plan live (todo_list); subagents live but anonymous (P4a).
+ * - antigravity: plan and subagents once per turn (task.md, P5).
+ * - opencode: plan live (each todowrite part settles at once); subagents
+ *   `turn` — `run --format json` emits only settled parts, so a delegation
+ *   appears when it finishes (Addendum B, Decisions 16–18).
+ * - kimi: the native CLI is unreachable; Kimi as a model runs inside the
+ *   opencode body and is covered there (Decision 19).
+ * - the rest: none until their adapters are proven.
+ */
+const PROGRESS_CAPABILITIES: Readonly<Record<string, ProgressCapability>> = Object.freeze({
+  claude: { plan: 'live', subagents: 'live' },
+  codex: { plan: 'live', subagents: 'live' },
+  antigravity: { plan: 'turn', subagents: 'turn' },
+  opencode: { plan: 'live', subagents: 'turn' },
+  kimi: PROGRESS_NONE,
+  qwen: PROGRESS_NONE,
+  cursor: PROGRESS_NONE,
+  deepseek: PROGRESS_NONE,
+  glm: PROGRESS_NONE,
+  sakana: PROGRESS_NONE,
+});
+
+/** Progress capability for any provider id; unknown ids get `none`/`none`. */
+export function getProgressCapability(id: string): ProgressCapability {
+  return Object.prototype.hasOwnProperty.call(PROGRESS_CAPABILITIES, id) ? PROGRESS_CAPABILITIES[id] : PROGRESS_NONE;
 }
 
 // المجموعة الافتراضية لأي مزوّد لم يُخصَّص له سلوك أذونات خاص — مطابقة
@@ -180,6 +229,7 @@ function safeFallbackCapabilities(id: string): ProviderUiCapabilities {
     coordinationLevel: { supported: false, enforcement: 'none' },
     // fail-closed للمزوّد المجهول — انظر تعليق JSDoc أعلاه.
     modelSwitch: { supported: false },
+    progress: getProgressCapability(id),
   };
 }
 
@@ -206,6 +256,7 @@ export const PROVIDER_UI_CAPABILITIES: Record<ActiveBodyProvider, ProviderUiCapa
     coordinationLevel: { supported: true, enforcement: COORDINATION_ENFORCEMENT.claude },
     // T-1028: تبديل النموذج وسط المحادثة — مدعوم (نقطة النهاية active-model تكتب المفتاح).
     modelSwitch: { supported: true },
+    progress: getProgressCapability('claude'),
   },
   codex: {
     id: 'codex',
@@ -230,6 +281,7 @@ export const PROVIDER_UI_CAPABILITIES: Record<ActiveBodyProvider, ProviderUiCapa
     coordinationLevel: { supported: true, enforcement: COORDINATION_ENFORCEMENT.codex },
     // T-1028: مدعوم — resolveResumeModel يقرأ المفتاح ويمرّره لـcodex.
     modelSwitch: { supported: true },
+    progress: getProgressCapability('codex'),
   },
   opencode: {
     id: 'opencode',
@@ -248,6 +300,7 @@ export const PROVIDER_UI_CAPABILITIES: Record<ActiveBodyProvider, ProviderUiCapa
     coordinationLevel: { supported: true, enforcement: COORDINATION_ENFORCEMENT.opencode },
     // T-1028: مدعوم — المعرِّف المؤهَّل (glm/glm-5.2) يُمرَّر حرفياً (T-1021/6be3c7ab).
     modelSwitch: { supported: true },
+    progress: getProgressCapability('opencode'),
   },
   antigravity: {
     id: 'antigravity',
@@ -265,6 +318,7 @@ export const PROVIDER_UI_CAPABILITIES: Record<ActiveBodyProvider, ProviderUiCapa
     // agy يحذف --model عند الاستئناف العادي لكنه يقرأ التغيير الصريح عبر
     // getChangedActiveModel وinline switcher هذا تغييرٌ صريح (agy-cli.js:530-535).
     modelSwitch: { supported: true },
+    progress: getProgressCapability('antigravity'),
   },
   deepseek: {
     id: 'deepseek',
@@ -280,6 +334,7 @@ export const PROVIDER_UI_CAPABILITIES: Record<ActiveBodyProvider, ProviderUiCapa
     coordinationLevel: { supported: true, enforcement: COORDINATION_ENFORCEMENT.deepseek },
     // T-1028: مدعوم — نقطة النهاية active-model تكتب المفتاح.
     modelSwitch: { supported: true },
+    progress: getProgressCapability('deepseek'),
   },
   glm: {
     id: 'glm',
@@ -302,6 +357,7 @@ export const PROVIDER_UI_CAPABILITIES: Record<ActiveBodyProvider, ProviderUiCapa
     coordinationLevel: { supported: true, enforcement: COORDINATION_ENFORCEMENT.glm },
     // T-1028: مدعوم للجلسات التاريخية glm — نقطة النهاية active-model تكتب المفتاح.
     modelSwitch: { supported: true },
+    progress: getProgressCapability('glm'),
   },
   sakana: {
     id: 'sakana',
@@ -323,6 +379,7 @@ export const PROVIDER_UI_CAPABILITIES: Record<ActiveBodyProvider, ProviderUiCapa
     // T-1028: false — sakana مزوّد stub (STUB_API_PROVIDERS في provider.routes.ts:547)،
     // لا تنفيذ حقيقي لـchangeActiveModel؛ تفعيله يُضلِّل بلا تأثير فعلي.
     modelSwitch: { supported: false },
+    progress: getProgressCapability('sakana'),
   },
 };
 

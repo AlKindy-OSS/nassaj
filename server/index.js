@@ -67,7 +67,7 @@ import { isTrustedOrigin, multiAccountSwitchingEnabled, trustedOriginPolicy } fr
 import { corsAllowedOrigins } from './config/cors-origins.js';
 import { serverPort } from './config/server-port.js';
 import { sanitizeAttachmentName, resolveCollisionFreeDest } from './utils/attachment-helpers.js';
-import { resolveReadPathInProject, isResolvedPathInsideRootReal } from './utils/path-guard.js';
+import { openReadableProjectFile, isResolvedPathInsideRootReal } from './utils/path-guard.js';
 import { isForbiddenProjectRoot, isSecretPath } from '@/shared/secret-path-guard.js';
 import { sanitizeSvg } from './services/svg-sanitizer.js';
 import { createChatImagesRouter } from './routes/chat-images.js';
@@ -2426,8 +2426,9 @@ app.get('/api/projects/:projectId/file', authenticateToken, async (req, res) => 
 
         // Resolve + canonicalize (follows symlinks) via the shared read guard so
         // a symlink inside the tree pointing outside it cannot leak an arbitrary
-        // file (B-159). Open only the verified real path.
-        const guard = await resolveReadPathInProject(projectRoot, filePath);
+        // file (B-159). Open only the verified real path; SQLite content is
+        // refused from the opened descriptor before anything is returned.
+        const guard = await openReadableProjectFile(projectRoot, filePath);
         if (!guard.valid) {
             if (guard.code === 'ENOENT') {
                 return res.status(404).json({ error: 'File not found' });
@@ -2439,7 +2440,12 @@ app.get('/api/projects/:projectId/file', authenticateToken, async (req, res) => 
         // but forbid MIME sniffing anyway so the response can never be coerced
         // into an active document.
         res.setHeader('X-Content-Type-Options', 'nosniff');
-        const content = await fsPromises.readFile(guard.realResolved, 'utf8');
+        let content;
+        try {
+            content = await guard.handle.readFile('utf8');
+        } finally {
+            await guard.handle.close();
+        }
         res.json({ content, path: guard.resolved });
     } catch (error) {
         console.error('Error reading file:', error);
@@ -2481,7 +2487,8 @@ app.get('/api/projects/:projectId/files/content', authenticateToken, async (req,
         // inside the tree pointing outside it stream an arbitrary file (B-159).
         // The realpath check runs BEFORE the file is opened; we then stream only
         // the verified real path. A missing file/component surfaces as ENOENT.
-        const guard = await resolveReadPathInProject(projectRoot, filePath);
+        // SQLite content is refused from the opened descriptor (header sniff).
+        const guard = await openReadableProjectFile(projectRoot, filePath);
         if (!guard.valid) {
             if (guard.code === 'ENOENT') {
                 return res.status(404).json({ error: 'File not found' });
@@ -2494,9 +2501,9 @@ app.get('/api/projects/:projectId/files/content', authenticateToken, async (req,
         // keep a direct (cookie-authenticated) navigation inert (B-158, M9).
         applyRawFileResponseHeaders(res, mime.lookup(guard.resolved) || 'application/octet-stream');
 
-        // Stream the verified real path (not the lexical one) to avoid a
-        // symlink swap between the check and the open.
-        const fileStream = fs.createReadStream(guard.realResolved);
+        // Stream the already-opened, sniffed descriptor (closed on end) so the
+        // checked bytes are the served bytes.
+        const fileStream = guard.handle.createReadStream();
         fileStream.pipe(res);
 
         fileStream.on('error', (error) => {

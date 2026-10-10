@@ -13,6 +13,22 @@ import { isCodexBootstrapContext, isCodexGoalContext } from './codex-receipt-pro
 import { createCodexFinalResponseTracker } from './codex-fork-cutoff.js';
 import { extractCodexBranchCommand } from './codex-branch-context.js';
 import { extractCodexTokenBudget } from './codex-token-budget.js';
+import { resolveCodexHistoryTranscriptPath } from './codex-transcript-path.js';
+import {
+  codexCollabSubagent,
+  codexSpawnSubagent,
+  extractCodexTextContent,
+  humanizeCodexToolName,
+  parseCodexSubagentMessage,
+  codexTodoListPlan,
+  codexUpdatePlanPlan,
+} from './codex-progress.js';
+import {
+  boundProgressPlan,
+  boundProgressSubagent,
+  type ProgressPlan,
+  type ProgressSubagent,
+} from '@/shared/progress-normalize.js';
 import { createCodexReceiptCollector, codexHistoryIdentity, setCodexHistoryIdentities } from './codex-receipt-identity.js';
 
 const PROVIDER = 'codex';
@@ -136,31 +152,6 @@ function isVisibleCodexUserMessage(payload: AnyRecord | null | undefined): boole
   }
 
   return typeof payload.message === 'string' && payload.message.trim().length > 0;
-}
-
-function extractCodexTextContent(content: unknown): string {
-  if (!Array.isArray(content)) {
-    return typeof content === 'string' ? content : '';
-  }
-
-  return content
-    .map((item) => {
-      if (!item || typeof item !== 'object') {
-        return '';
-      }
-
-      const record = item as AnyRecord;
-      if (
-        (record.type === 'input_text' || record.type === 'output_text' || record.type === 'text')
-        && typeof record.text === 'string'
-      ) {
-        return record.text;
-      }
-
-      return '';
-    })
-    .filter(Boolean)
-    .join('\n');
 }
 
 function extractCodexToolOutput(output: unknown, lease?: HistoryReadLease): string {
@@ -381,37 +372,13 @@ function translateCodexExecInput(input: unknown, lease?: HistoryReadLease): { to
   };
 }
 
-function humanizeCodexToolName(toolName: string): string {
-  return toolName
-    .replace(/__/g, ' ')
-    .replace(/_/g, ' ')
-    .replace(/\b\w/g, (character) => character.toUpperCase());
-}
-
 type CodexSubagentRecord = {
   toolCallId: string;
   agentPath?: string;
   isComplete: boolean;
+  /** Plain label of the delegation, reused by its settling row (ADR-199). */
+  label?: string;
 };
-
-function parseCodexSubagentMessage(payload: AnyRecord): {
-  author: string;
-  messageType: string;
-  result: string;
-} | null {
-  const text = extractCodexTextContent(payload.content);
-  const header = /Message Type:\s*([^\r\n]+)[\s\S]*?Sender:\s*([^\r\n]+)[\s\S]*?Payload:\s*\r?\n([\s\S]*)/i.exec(text);
-  const author = readNonEmptyString(payload.author) || header?.[2]?.trim();
-  if (!author) {
-    return null;
-  }
-
-  return {
-    author,
-    messageType: header?.[1]?.trim().toUpperCase() || 'MESSAGE',
-    result: header?.[3]?.trim() || '',
-  };
-}
 
 const CODEX_COLLABORATION_CONTROL_TOOLS = new Set([
   'followup_task',
@@ -519,7 +486,9 @@ async function getCodexSessionMessages(
 ): Promise<CodexHistoryResult> {
   const stringify = (value: unknown) => lease ? lease.stringify(value) : JSON.stringify(value);
   try {
-    const sessionFilePath = lease?.mainFile ?? sessionsDb.getSessionById(sessionId)?.jsonl_path;
+    // B-1564: only a contained rollout is read; no raw stored-path fallback.
+    const sessionFilePath = lease?.mainFile
+      ?? await resolveCodexHistoryTranscriptPath(sessionsDb.getSessionById(sessionId)?.jsonl_path);
 
     if (!sessionFilePath) {
       console.warn(`Codex session file not found for session ${sessionId}`);
@@ -766,6 +735,7 @@ async function getCodexSessionMessages(
             if (!subagent) {
               const fallbackCallId = entry.payload.id || generateMessageId('codex-subagent');
               const taskName = agentMessage.author.split('/').filter(Boolean).pop() || 'agent';
+              const label = humanizeCodexToolName(taskName);
               messages.push({
                 uuid: fallbackCallId,
                 type: 'tool_use',
@@ -773,14 +743,16 @@ async function getCodexSessionMessages(
                 toolName: 'Task',
                 toolInput: stringify({
                   subagent_type: 'Codex',
-                  description: humanizeCodexToolName(taskName),
+                  description: label,
                 }),
                 toolCallId: fallbackCallId,
+                subagent: codexSpawnSubagent(fallbackCallId, label, 'started'),
               });
               subagent = {
                 toolCallId: fallbackCallId,
                 agentPath: agentMessage.author,
                 isComplete: false,
+                label,
               };
               subagentsByCallId.set(fallbackCallId, subagent);
               subagentsByPath.set(agentMessage.author, subagent);
@@ -793,6 +765,7 @@ async function getCodexSessionMessages(
                 timestamp: entry.timestamp,
                 toolCallId: subagent.toolCallId,
                 output: agentMessage.result,
+                subagent: codexSpawnSubagent(subagent.toolCallId, subagent.label, 'completed'),
               });
               subagent.isComplete = true;
             }
@@ -819,6 +792,7 @@ async function getCodexSessionMessages(
               // The activity event can still provide the canonical agent path.
             }
 
+            const label = humanizeCodexToolName(taskName);
             messages.push({
               uuid: entry.payload.call_id,
               type: 'tool_use',
@@ -826,14 +800,16 @@ async function getCodexSessionMessages(
               toolName: 'Task',
               toolInput: stringify({
                 subagent_type: 'Codex',
-                description: humanizeCodexToolName(taskName),
+                description: label,
                 ...(prompt ? { prompt } : {}),
               }),
               toolCallId: entry.payload.call_id,
+              subagent: codexSpawnSubagent(entry.payload.call_id, label, 'started'),
             });
             subagentsByCallId.set(entry.payload.call_id, {
               toolCallId: entry.payload.call_id,
               isComplete: false,
+              label,
             });
             ignoredToolCallIds.add(entry.payload.call_id);
             continue;
@@ -876,6 +852,7 @@ async function getCodexSessionMessages(
             toolName,
             toolInput,
             toolCallId: entry.payload.call_id,
+            ...(toolName === 'update_plan' ? { plan: readCodexUpdatePlan(toolInput, lease) } : {}),
           });
         }
 
@@ -1027,6 +1004,74 @@ async function getCodexSessionMessages(
   }
 }
 
+/** Plan of a history `update_plan` call; null when its arguments hold no usable step. */
+function readCodexUpdatePlan(argumentsText: unknown, lease?: HistoryReadLease): ProgressPlan | null {
+  try {
+    const text = String(argumentsText || '{}');
+    return codexUpdatePlanPlan(lease ? lease.parseNested(text) : JSON.parse(text));
+  } catch {
+    return null;
+  }
+}
+
+/** Re-bounded neutral progress fields carried on a history row (ADR-199). */
+function historyProgressFields(raw: AnyRecord): { plan?: ProgressPlan; subagent?: ProgressSubagent } {
+  const plan = boundProgressPlan(raw.plan);
+  const subagent = boundProgressSubagent(raw.subagent);
+  return { ...(plan ? { plan } : {}), ...(subagent ? { subagent } : {}) };
+}
+
+/**
+ * ADR-199 P4a: rows for a live plan/subagent item. The first phase seen opens
+ * one tool card (no result yet, so it shows as running); later phases settle
+ * it with a `tool_result` row carrying the newest snapshot, which the client
+ * pairs by `toolId` (last result wins). Each row has its own id because the
+ * client keeps the first row per id. A completed item whose start was never
+ * seen keeps the old single settled card.
+ */
+function codexLiveProgressRows(
+  raw: AnyRecord,
+  baseId: string,
+  sessionId: string | null,
+  ts: string,
+  toolName: string,
+  toolInput: unknown,
+  progress: { plan?: ProgressPlan | null; subagent?: ProgressSubagent | null },
+): NormalizedMessage[] {
+  const fields = {
+    ...(progress.plan ? { plan: progress.plan } : {}),
+    ...(progress.subagent ? { subagent: progress.subagent } : {}),
+  };
+  const isError = raw.status === 'failed';
+  if (raw.progressOpened === true) {
+    return [createNormalizedMessage({
+      id: `${baseId}-r${Number(raw.progressRevision) || 0}`,
+      sessionId,
+      timestamp: ts,
+      provider: PROVIDER,
+      kind: 'tool_result',
+      toolId: baseId,
+      content: '',
+      isError,
+      ...fields,
+    })];
+  }
+  const settled = raw.progressPhase === undefined || raw.progressPhase === 'completed';
+  return [createNormalizedMessage({
+    id: baseId,
+    sessionId,
+    timestamp: ts,
+    provider: PROVIDER,
+    kind: 'tool_use',
+    toolName,
+    toolInput,
+    toolId: baseId,
+    // No `status` on TodoListItem (@openai/codex-sdk): a completed event is terminal.
+    ...(settled ? { toolResult: { content: '', isError } } : {}),
+    ...fields,
+  })];
+}
+
 export class CodexSessionsProvider implements IProviderSessions {
   /**
    * Normalizes a persisted Codex JSONL entry.
@@ -1126,6 +1171,7 @@ export class CodexSessionsProvider implements IProviderSessions {
         toolName: raw.toolName || 'Unknown',
         toolInput: raw.toolInput,
         toolId: raw.toolCallId || baseId,
+        ...historyProgressFields(raw),
       })];
     }
 
@@ -1139,6 +1185,7 @@ export class CodexSessionsProvider implements IProviderSessions {
         toolId: raw.toolCallId || '',
         content: raw.output || '',
         isError: Boolean(raw.isError),
+        ...historyProgressFields(raw),
       })];
     }
 
@@ -1260,18 +1307,17 @@ export class CodexSessionsProvider implements IProviderSessions {
             toolResult: { content: '', isError: false },
           })];
         case 'todo_list':
-          return [createNormalizedMessage({
-            id: baseId,
-            sessionId,
-            timestamp: ts,
-            provider: PROVIDER,
-            kind: 'tool_use',
-            toolName: 'TodoList',
-            toolInput: { items: raw.items },
-            toolId: baseId,
-            // No `status` on TodoListItem either — same reasoning as above.
-            toolResult: { content: '', isError: false },
-          })];
+          return codexLiveProgressRows(raw, baseId, sessionId, ts, 'TodoList', { items: raw.items }, {
+            plan: codexTodoListPlan(raw.items),
+          });
+        case 'collab_tool_call': {
+          // `updated` adds nothing for the anonymous record; start and end do.
+          if (raw.progressPhase === 'updated') return [];
+          const phase = raw.progressPhase === 'started' ? 'started' : 'completed';
+          return codexLiveProgressRows(raw, baseId, sessionId, ts, 'collab_tool_call', { tool: raw.tool }, {
+            subagent: codexCollabSubagent(baseId, phase, raw.status),
+          });
+        }
         case 'error':
           return [createNormalizedMessage({
             id: baseId,
@@ -1367,6 +1413,9 @@ export class CodexSessionsProvider implements IProviderSessions {
         const toolResult = toolResultMap.get(msg.toolId);
         if (toolResult) {
           msg.toolResult = { content: toolResult.content, isError: toolResult.isError };
+          // ADR-199: result rows are dropped below, so their settled state moves onto the call.
+          if (toolResult.subagent) msg.subagent = toolResult.subagent;
+          if (toolResult.plan) msg.plan = toolResult.plan;
         }
       }
     }

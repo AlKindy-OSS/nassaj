@@ -15,8 +15,9 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { after, describe, it, mock } from 'node:test';
+import { codexSessionsSandbox } from '@/shared/__tests__/provider-root-sandbox.js';
 
-const sandbox = fs.mkdtempSync(path.join(process.cwd(), '.artifacts/codex-exec-command-'));
+const sandbox = codexSessionsSandbox('codex-exec-command-');
 const transcript = path.join(sandbox, 'rollout.jsonl');
 mock.module('@/modules/database/index.js', { namedExports: {
   sessionsDb: { getSessionById: () => ({ jsonl_path: transcript }) },

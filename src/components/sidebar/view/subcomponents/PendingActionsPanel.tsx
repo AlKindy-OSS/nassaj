@@ -40,6 +40,7 @@ import {
 
 import { Button } from '../../../../shared/view/ui';
 import { useAuth } from '../../../auth/context/AuthContext';
+import { formatDayMonthYear } from '../../../../utils/formatDayMonthYear';
 import { ExecReviewDialog, type RawCommand } from '../../../command-board/ExecReviewDialog';
 import { HistoryTab } from '../../../command-board/HistoryTab';
 import { resolveErrorKey } from '../../../command-board/actionErrorKey';
@@ -587,6 +588,10 @@ export default function PendingActionsPanel({
   const { t, i18n } = useTranslation('sidebar');
   const { user } = useAuth();
   const navigate = useNavigate();
+  const openSession = useCallback((sessionId: string) => {
+    navigate(`/session/${sessionId}`);
+    onClose();
+  }, [navigate, onClose]);
   const isOwner = user?.role === 'owner';
   const accountScope = `${user?.id ?? ''}:${user?.role ?? ''}`;
   const accountScopeRef = useRef(accountScope);
@@ -1202,6 +1207,7 @@ export default function PendingActionsPanel({
               busyId={historyBusyId}
               onRetry={entry => void handleHistoryRetry(entry)}
               onRemove={entry => void handleHistoryRemove(entry)}
+              onOpenSession={openSession}
               t={t}
             />
           ) : (
@@ -1665,10 +1671,20 @@ export default function PendingActionsPanel({
                         {t('pendingActions.rawUnattributed')}
                       </span>
                     )}
-                    {cmd.requestedAt && (
+                    {formatDayMonthYear(cmd.requestedAt) && (
                       <span dir="ltr" style={{ unicodeBidi: 'isolate' }}>
-                        {new Date(cmd.requestedAt).toLocaleString()}
+                        {formatDayMonthYear(cmd.requestedAt)}
                       </span>
+                    )}
+                    {cmd.sessionId && (
+                      <button
+                        type="button"
+                        onClick={() => openSession(cmd.sessionId as string)}
+                        className="flex items-center gap-1 text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+                      >
+                        <ExternalLink className="h-3 w-3" aria-hidden="true" />
+                        {t('pendingActions.openSession')}
+                      </button>
                     )}
                   </div>
 

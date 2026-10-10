@@ -3,6 +3,7 @@ import fsSync from 'node:fs';
 import Database from 'better-sqlite3';
 
 import { readResponseModel } from '@/modules/providers/shared/response-model.js';
+import { formatToolContent, openCodeToolPart } from '@/modules/providers/list/opencode/opencode-tool-part.js';
 import { redactQwenPlanSecrets } from '@/services/isolation/opencode-qwen-plan.js';
 import type { IProviderSessions } from '@/shared/interfaces.js';
 import type { AnyRecord, FetchHistoryOptions, FetchHistoryResult, NormalizedMessage } from '@/shared/types.js';
@@ -42,22 +43,6 @@ const openOpenCodeDatabase = (): Database.Database | null => {
   }
 
   return new Database(dbPath, { readonly: true, fileMustExist: true });
-};
-
-const formatToolContent = (value: unknown): string => {
-  if (value === undefined || value === null) {
-    return '';
-  }
-
-  if (typeof value === 'string') {
-    return value;
-  }
-
-  try {
-    return JSON.stringify(value, null, 2);
-  } catch {
-    return String(value);
-  }
 };
 
 /**
@@ -329,27 +314,23 @@ export class OpenCodeSessionsProvider implements IProviderSessions {
     }
 
     if (type === 'tool_use') {
-      const toolName = readOptionalString(raw.tool) ?? readOptionalString(raw.name) ?? 'Tool';
-      const toolId = readOptionalString(raw.callID) ?? readOptionalString(raw.toolCallId) ?? baseId;
-      const toolMessage = createNormalizedMessage({
+      // B-1560: real lines nest the tool under `part` (`part.tool`, `part.callID`,
+      // `part.state.{status,input,output}`); the flat `raw.*` reads stay a fallback.
+      const tool = openCodeToolPart(raw.part, raw);
+      return [createNormalizedMessage({
         id: baseId,
         sessionId: eventSessionId,
         timestamp,
         provider: PROVIDER,
         kind: 'tool_use',
-        toolName,
-        toolInput: raw.input ?? raw.arguments ?? {},
-        toolId,
-      });
-
-      if (raw.output !== undefined || raw.error !== undefined) {
-        toolMessage.toolResult = {
-          content: formatToolContent(raw.output ?? raw.error),
-          isError: raw.error !== undefined,
-        };
-      }
-
-      return [toolMessage];
+        toolName: tool.toolName,
+        toolInput: tool.toolInput,
+        toolId: tool.toolId ?? baseId,
+        ...(tool.toolResult ? { toolResult: tool.toolResult } : {}),
+        // ADR-199 Addendum B §16: live stamps every todowrite snapshot.
+        ...(tool.plan ? { plan: tool.plan } : {}),
+        ...(tool.subagent ? { subagent: tool.subagent } : {}),
+      })];
     }
 
     if (type === 'error') {
@@ -456,6 +437,13 @@ export class OpenCodeSessionsProvider implements IProviderSessions {
   private normalizeHistoryRows(rows: OpenCodeHistoryRow[], sessionId: string): NormalizedMessage[] {
     const normalized: NormalizedMessage[] = [];
     const emittedMessageErrors = new Set<string>();
+    // ADR-199 Addendum B §16: each todowrite is a full snapshot, so history
+    // stamps only the last one of each turn (a user message opens a turn).
+    let turnPlan: { message: NormalizedMessage; plan: NonNullable<NormalizedMessage['plan']> } | null = null;
+    const closeTurn = (): void => {
+      if (turnPlan) turnPlan.message.plan = turnPlan.plan;
+      turnPlan = null;
+    };
 
     for (const storedRow of rows) {
       // T-1906: a Coding Plan key a model echoed into opencode.db is redacted
@@ -469,6 +457,9 @@ export class OpenCodeSessionsProvider implements IProviderSessions {
       const baseId = `${row.message_id}_${row.part_id ?? normalized.length}`;
       const messageInfo = readJsonRecord(row.message_data);
       const messageRole = readOptionalString(messageInfo?.role);
+      if (messageRole === 'user') {
+        closeTurn();
+      }
 
       if (
         messageInfo
@@ -530,24 +521,21 @@ export class OpenCodeSessionsProvider implements IProviderSessions {
       }
 
       if (partType === 'tool') {
-        const state = readObjectRecord(partData.state) ?? {};
-        const status = readOptionalString(state.status);
+        const tool = openCodeToolPart(partData);
         const toolMessage = createNormalizedMessage({
           id: baseId,
           sessionId,
           timestamp,
           provider: PROVIDER,
           kind: 'tool_use',
-          toolName: readOptionalString(partData.tool) ?? 'Tool',
-          toolInput: state.input ?? partData.input ?? {},
-          toolId: readOptionalString(partData.callID) ?? row.part_id,
+          toolName: tool.toolName,
+          toolInput: tool.toolInput,
+          toolId: tool.toolId ?? row.part_id,
+          ...(tool.toolResult ? { toolResult: tool.toolResult } : {}),
+          ...(tool.subagent ? { subagent: tool.subagent } : {}),
         });
-
-        if (status === 'completed' || status === 'error') {
-          toolMessage.toolResult = {
-            content: formatToolContent(state.output ?? state.error),
-            isError: status === 'error',
-          };
+        if (tool.plan) {
+          turnPlan = { message: toolMessage, plan: tool.plan };
         }
 
         normalized.push(toolMessage);
@@ -579,6 +567,7 @@ export class OpenCodeSessionsProvider implements IProviderSessions {
       }
     }
 
+    closeTurn();
     return normalized;
   }
 }

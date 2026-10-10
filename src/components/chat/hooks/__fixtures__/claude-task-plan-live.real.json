@@ -1,0 +1,212 @@
+{
+ "_provenance": "Output of the server live path (ClaudeSessionsProvider.normalizeMessage + createClaudeProgressFold('live'), commit 970a6dbfe) run over server/modules/providers/list/claude/__tests__/__fixtures__/claude-task-plan.real.json rows humanPrompt, createHello/createBye/updateHelloInProgress use+result, agentCompletedUse, agentFailedUse and both notifications, converted to SDK shape as claude-task-plan.test.ts does and re-stamped one second apart. Only userId:1 was added to the human prompt row (the socket stamps it live).",
+ "rows": [
+  {
+   "id": "10df7b2b-592c-49d0-bd09-9510d3bd5a9e",
+   "kind": "text",
+   "role": "user",
+   "content": "Use TaskCreate to create two tasks: 'Say hello' and 'Say bye'. Then use TaskUpdate to mark the first in_progress then completed, and mark the second deleted. Then reply done. No other tools.\n",
+   "timestamp": "2026-10-09T06:00:00.000Z",
+   "sessionId": "00000000-0000-4000-8000-000000000002",
+   "provider": "claude",
+   "userId": 1
+  },
+  {
+   "id": "f1819300-e50a-4de6-9031-7bd4f7856627_0",
+   "kind": "tool_use",
+   "toolName": "TaskCreate",
+   "toolId": "toolu_01VxgH7f98D9mcBMnA3sWfBb",
+   "toolInput": {
+    "subject": "Say hello",
+    "description": "Say hello"
+   },
+   "timestamp": "2026-10-09T06:00:01.000Z",
+   "sessionId": "00000000-0000-4000-8000-000000000002",
+   "provider": "claude"
+  },
+  {
+   "id": "4b03e0da-8005-4f36-9ba7-eae45223d74a_tr_toolu_01VxgH7f98D9mcBMnA3sWfBb",
+   "kind": "tool_result",
+   "toolId": "toolu_01VxgH7f98D9mcBMnA3sWfBb",
+   "isError": false,
+   "content": "Task #1 created successfully: Say hello",
+   "plan": {
+    "source": "tool",
+    "items": [
+     {
+      "id": "1",
+      "label": "Say hello",
+      "status": "pending"
+     }
+    ]
+   },
+   "timestamp": "2026-10-09T06:00:02.000Z",
+   "sessionId": "00000000-0000-4000-8000-000000000002",
+   "provider": "claude"
+  },
+  {
+   "id": "7128fabf-b4ac-41ab-a5ee-84e98d99dc91_0",
+   "kind": "tool_use",
+   "toolName": "TaskCreate",
+   "toolId": "toolu_012sdX5iNFL4y5VnmU3uLAx4",
+   "toolInput": {
+    "subject": "Say bye",
+    "description": "Say bye"
+   },
+   "timestamp": "2026-10-09T06:00:03.000Z",
+   "sessionId": "00000000-0000-4000-8000-000000000002",
+   "provider": "claude"
+  },
+  {
+   "id": "f9d5d233-05b8-4f6e-9ec1-efa0bf53601b_tr_toolu_012sdX5iNFL4y5VnmU3uLAx4",
+   "kind": "tool_result",
+   "toolId": "toolu_012sdX5iNFL4y5VnmU3uLAx4",
+   "isError": false,
+   "content": "Task #2 created successfully: Say bye",
+   "plan": {
+    "source": "tool",
+    "items": [
+     {
+      "id": "1",
+      "label": "Say hello",
+      "status": "pending"
+     },
+     {
+      "id": "2",
+      "label": "Say bye",
+      "status": "pending"
+     }
+    ]
+   },
+   "timestamp": "2026-10-09T06:00:04.000Z",
+   "sessionId": "00000000-0000-4000-8000-000000000002",
+   "provider": "claude"
+  },
+  {
+   "id": "f09e8604-f36b-4448-b962-17febf0b4a8b_0",
+   "kind": "tool_use",
+   "toolName": "TaskUpdate",
+   "toolId": "toolu_01AYMHKB1Kn3F47MLu1NgdXx",
+   "toolInput": {
+    "taskId": "1",
+    "status": "in_progress"
+   },
+   "timestamp": "2026-10-09T06:00:05.000Z",
+   "sessionId": "00000000-0000-4000-8000-000000000002",
+   "provider": "claude"
+  },
+  {
+   "id": "97c91b69-9f36-4c61-8c58-7dbbcce3d0b9_tr_toolu_01AYMHKB1Kn3F47MLu1NgdXx",
+   "kind": "tool_result",
+   "toolId": "toolu_01AYMHKB1Kn3F47MLu1NgdXx",
+   "isError": false,
+   "content": "Updated task #1 status",
+   "plan": {
+    "source": "tool",
+    "items": [
+     {
+      "id": "1",
+      "label": "Say hello",
+      "status": "in_progress"
+     },
+     {
+      "id": "2",
+      "label": "Say bye",
+      "status": "pending"
+     }
+    ]
+   },
+   "timestamp": "2026-10-09T06:00:06.000Z",
+   "sessionId": "00000000-0000-4000-8000-000000000002",
+   "provider": "claude"
+  },
+  {
+   "id": "bdeb7a34-0a32-4e0c-b7de-1fc834431029_0",
+   "kind": "tool_use",
+   "toolName": "Agent",
+   "toolId": "toolu_01H48H2qDEZsGjV6DhgMGGrh",
+   "toolInput": {
+    "subagent_type": "devops",
+    "description": "Review change",
+    "run_in_background": true,
+    "prompt": "[scrubbed prompt]"
+   },
+   "subagent": {
+    "id": "toolu_01H48H2qDEZsGjV6DhgMGGrh",
+    "parentId": null,
+    "label": "Review change",
+    "state": "started"
+   },
+   "timestamp": "2026-10-09T06:00:07.000Z",
+   "sessionId": "00000000-0000-4000-8000-000000000002",
+   "provider": "claude"
+  },
+  {
+   "id": "595b966f-4811-47b0-8ffe-7e9dbc23287d_0",
+   "kind": "tool_use",
+   "toolName": "Agent",
+   "toolId": "toolu_01M53A5Rb27vy4bsis9151KZ",
+   "toolInput": {
+    "description": "Diagnose gate",
+    "subagent_type": "backend-dev",
+    "run_in_background": true,
+    "prompt": "[scrubbed prompt]"
+   },
+   "subagent": {
+    "id": "toolu_01M53A5Rb27vy4bsis9151KZ",
+    "parentId": null,
+    "label": "Diagnose gate",
+    "state": "started"
+   },
+   "timestamp": "2026-10-09T06:00:08.000Z",
+   "sessionId": "00000000-0000-4000-8000-000000000002",
+   "provider": "claude"
+  },
+  {
+   "id": "113b8bf5-47ef-462e-83f5-682d98d93f00",
+   "kind": "text",
+   "role": "user",
+   "content": "<task-notification>\n<task-id>a81682cbae4551760</task-id>\n<tool-use-id>toolu_01H48H2qDEZsGjV6DhgMGGrh</tool-use-id>\n<output-file>/var/tmp/redacted.output</output-file>\n<status>completed</status>\n<summary>Agent \"Review change\" finished</summary>\n<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>\n<result>[scrubbed report]</result>\n\n</task-notification>",
+   "timestamp": "2026-10-09T06:00:09.000Z",
+   "originKind": "task-notification",
+   "sessionId": "00000000-0000-4000-8000-000000000002",
+   "provider": "claude"
+  },
+  {
+   "id": "113b8bf5-47ef-462e-83f5-682d98d93f00_settle_toolu_01H48H2qDEZsGjV6DhgMGGrh",
+   "kind": "status",
+   "subagent": {
+    "id": "toolu_01H48H2qDEZsGjV6DhgMGGrh",
+    "parentId": null,
+    "label": "Review change",
+    "state": "completed"
+   },
+   "timestamp": "2026-10-09T06:00:09.000Z",
+   "sessionId": "00000000-0000-4000-8000-000000000002",
+   "provider": "claude"
+  },
+  {
+   "id": "4bd3e378-277f-4359-94e0-003a95984dd9",
+   "kind": "text",
+   "role": "user",
+   "content": "<task-notification>\n<task-id>addeca81d20d8d065</task-id>\n<tool-use-id>toolu_01M53A5Rb27vy4bsis9151KZ</tool-use-id>\n<output-file>/var/tmp/redacted.output</output-file>\n<status>failed</status>\n<summary>Agent \"Diagnose gate\" failed: Agent terminated early due to an API error: API Error: 529 Overloaded.</summary>\n<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>\n</task-notification>",
+   "timestamp": "2026-10-09T06:00:10.000Z",
+   "originKind": "task-notification",
+   "sessionId": "00000000-0000-4000-8000-000000000002",
+   "provider": "claude"
+  },
+  {
+   "id": "4bd3e378-277f-4359-94e0-003a95984dd9_settle_toolu_01M53A5Rb27vy4bsis9151KZ",
+   "kind": "status",
+   "subagent": {
+    "id": "toolu_01M53A5Rb27vy4bsis9151KZ",
+    "parentId": null,
+    "label": "Diagnose gate",
+    "state": "failed"
+   },
+   "timestamp": "2026-10-09T06:00:10.000Z",
+   "sessionId": "00000000-0000-4000-8000-000000000002",
+   "provider": "claude"
+  }
+ ]
+}

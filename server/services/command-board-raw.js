@@ -988,6 +988,20 @@ function writeQueue(list) {
  * is ignored (an agent's row often ends in a newline the chat fence does not
  * carry). The stored/executed bytes and the review digest are NOT affected.
  */
+/** Opaque chat-session token: bounded, never reaches a shell or a path. */
+const RAW_SESSION_ID_RE = /^[A-Za-z0-9._:-]{1,200}$/;
+
+/**
+ * Normalizes an originating chat session id: a valid token is kept verbatim,
+ * anything else (absent, wrong type, unsafe charset, too long) becomes null.
+ * Never a reason to reject the command itself.
+ * @param {unknown} value
+ * @returns {string|null}
+ */
+export function normalizeRawSessionId(value) {
+  return typeof value === 'string' && RAW_SESSION_ID_RE.test(value) ? value : null;
+}
+
 function sameCommand(a, b) {
   return typeof a === 'string' && typeof b === 'string' && a.trim() === b.trim();
 }
@@ -997,10 +1011,11 @@ function sameCommand(a, b) {
  * validation. Stores ONLY the verbatim command + metadata (never a digest field
  * that could drift from the text — the digest is always recomputed from the
  * stored bytes).
- * @returns {{ok:true, value:{id,command,digest,requestedBy,requestedAt}} |
+ * A reused twin keeps its own sessionId (never mutated by a later insert).
+ * @returns {{ok:true, value:{id,command,digest,requestedBy,requestedAt,sessionId}} |
  *           {ok:false, error:string, position?:number}}
  */
-export function insertRawCommand({ command, requestedBy } = {}) {
+export function insertRawCommand({ command, requestedBy, sessionId } = {}) {
   const v = validateRawCommand(command);
   if (!v.ok) return v;
   const list = readQueue();
@@ -1019,6 +1034,7 @@ export function insertRawCommand({ command, requestedBy } = {}) {
         digest: v.value.digest,
         requestedBy: typeof twin.requestedBy === 'string' ? twin.requestedBy : null,
         requestedAt: typeof twin.requestedAt === 'string' ? twin.requestedAt : null,
+        sessionId: normalizeRawSessionId(twin.sessionId),
       },
     };
   }
@@ -1030,6 +1046,7 @@ export function insertRawCommand({ command, requestedBy } = {}) {
     command: v.value.command,
     requestedBy: typeof requestedBy === 'string' ? requestedBy.slice(0, 200) : null,
     requestedAt: new Date().toISOString(),
+    sessionId: normalizeRawSessionId(sessionId),
   };
   list.push(row);
   writeQueue(list);
@@ -1041,6 +1058,7 @@ export function insertRawCommand({ command, requestedBy } = {}) {
       digest: v.value.digest,
       requestedBy: row.requestedBy,
       requestedAt: row.requestedAt,
+      sessionId: row.sessionId,
     },
   };
 }
@@ -1053,13 +1071,15 @@ export function listRawCommands() {
     digest: computeDigest(e.command),
     requestedBy: typeof e.requestedBy === 'string' ? e.requestedBy : null,
     requestedAt: typeof e.requestedAt === 'string' ? e.requestedAt : null,
+    sessionId: normalizeRawSessionId(e.sessionId),
   }));
 }
 
 /** Returns a single stored raw row by id, or null. */
 export function getRawCommand(id) {
   if (typeof id !== 'string') return null;
-  return readQueue().find((e) => e.id === id) ?? null;
+  const row = readQueue().find((e) => e.id === id);
+  return row ? { ...row, sessionId: normalizeRawSessionId(row.sessionId) } : null;
 }
 
 /** Deletes a raw row by id. Idempotent. */
@@ -1175,7 +1195,7 @@ function pruneHistory(list, now = Date.now()) {
  * reproduce the very gap this closes.
  *
  * @param {{id:string, command:string, requestedBy?:string|null,
- *          requestedAt?:string|null, executedBy?:string|null,
+ *          requestedAt?:string|null, sessionId?:string|null, executedBy?:string|null,
  *          outcome:'success'|'failure'|'unknown', exitCode?:number|null,
  *          reasonCode?:string|null, stdout?:string, stderr?:string}} execution
  * @returns {{id:string, executedAt:string}|null} null when the input is unusable.
@@ -1190,6 +1210,7 @@ export function recordRawExecution(execution = {}) {
     command: redactSecretsForAudit(command) ?? '',
     requestedBy: typeof execution.requestedBy === 'string' ? execution.requestedBy.slice(0, 200) : null,
     requestedAt: typeof execution.requestedAt === 'string' ? execution.requestedAt : null,
+    sessionId: normalizeRawSessionId(execution.sessionId),
     executedBy: typeof execution.executedBy === 'string' ? execution.executedBy.slice(0, 200) : null,
     executedAt: new Date().toISOString(),
     outcome,
@@ -1218,7 +1239,7 @@ export function listRawHistory() {
   if (kept.length !== stored.length) {
     appConfigDb.set(RAW_HISTORY_CONFIG_KEY, JSON.stringify(kept));
   }
-  return kept;
+  return kept.map((e) => ({ ...e, sessionId: normalizeRawSessionId(e.sessionId) }));
 }
 
 // ── Durable execution ledger ────────────────────────────────────────────────

@@ -34,7 +34,8 @@ import type {
 import { AppError } from '@/shared/utils.js';
 
 import { projectVendorHistoryReceipts } from '../shared/vendor/vendor-receipt-identity.js';
-import { resolveStoredClaudeTranscript } from '../list/claude/claude-projects-roots.js';
+import { resolveClaudeHistoryTranscriptPath } from '../list/claude/claude-transcript-path.js';
+import { resolveCodexHistoryTranscriptPath } from '../list/codex/codex-transcript-path.js';
 import { applyClaudeSteerInjections, projectClaudeHistoryReceipts } from '../list/claude/claude-receipt-identity.js';
 import { projectCodexHistoryIdentities, copyCodexHistoryIdentities } from '../list/codex/codex-receipt-identity.js';
 import { withCoordinationDirective } from '../../../../shared/coordinationDirectives.js';
@@ -655,9 +656,12 @@ export const sessionsService = {
       const deadline = new AbortController();
       timer = setTimeout(() => deadline.abort(new HistoryBudgetError('HISTORY_TIMEOUT')), HISTORY_LIMITS.executionMs);
       lease = new HistoryReadLease(AbortSignal.any([signal, deadline.signal]));
-      await lease.initialize(session.provider === 'claude'
-        ? resolveStoredClaudeTranscript(session.jsonl_path) ?? session.jsonl_path
-        : session.jsonl_path);
+      // B-1564: the lease opens only a contained transcript; no raw stored path.
+      const mainFile = session.provider === 'claude'
+        ? await resolveClaudeHistoryTranscriptPath({ session_id: sessionId, jsonl_path: session.jsonl_path })
+        : await resolveCodexHistoryTranscriptPath(session.jsonl_path);
+      if (!mainFile) throw new HistoryBudgetError('HISTORY_SOURCE_UNAVAILABLE');
+      await lease.initialize(mainFile);
       authorize();
       payload = await this.fetchHistory(sessionId, requesterUserId, { ...options, historyLease: lease });
       await lease.verify(); authorize(); lease.reserveDto(payload); lease.check();

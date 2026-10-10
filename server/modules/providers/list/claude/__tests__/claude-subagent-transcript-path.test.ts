@@ -19,10 +19,10 @@
  */
 
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { mkdir, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
+import { claudeProjectsSandbox } from '@/shared/__tests__/provider-root-sandbox.js';
 
 import { closeConnection, initializeDatabase, sessionsDb } from '@/modules/database/index.js';
 import { ClaudeSessionsProvider } from '@/modules/providers/list/claude/claude-sessions.provider.js';
@@ -35,7 +35,7 @@ async function withIsolatedDatabase(
   runTest: (projectDir: string) => Promise<void>,
 ): Promise<void> {
   const previousDatabasePath = process.env.DATABASE_PATH;
-  const tempDirectory = await mkdtemp(path.join(tmpdir(), 'claude-subagent-'));
+  const tempDirectory = claudeProjectsSandbox('claude-subagent-');
   const databasePath = path.join(tempDirectory, 'auth.db');
   const projectDir = path.join(tempDirectory, 'projects', '-home-user-demo');
   await mkdir(projectDir, { recursive: true });

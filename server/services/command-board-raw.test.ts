@@ -91,6 +91,7 @@ const {
   findForbiddenControlChar,
   insertRawCommand,
   listRawCommands,
+  getRawCommand,
   redactSecretsForAudit,
   listRawHistory,
   recordRawExecution,
@@ -1238,4 +1239,81 @@ test('39: sweep and reuse are audited with the real actors; lookup validates inp
     user: OWNER, body: {},
   });
   assert.equal(bad2.status, 400);
+});
+
+// ── Originating chat session on raw rows ─────────────────────────────────────
+// The board links each queued/executed raw command back to the chat session
+// that placed it. Optional, strictly validated, never a reason to reject.
+
+test('40: a valid sessionId is stored and served by insert, list, get and history', async () => {
+  resetState();
+  enableRaw();
+  nextExitCode = 0;
+  const sid = 'b1f2-c3d4.e5:f6_7';
+  const r = await call('POST', '/api/system/command-board-raw', {
+    user: OWNER, body: { command: 'echo sid', sessionId: sid },
+  });
+  assert.equal(r.status, 201);
+  const { command } = await r.json();
+  assert.equal(command.sessionId, sid);
+  assert.equal(listRawCommands()[0]!.sessionId, sid);
+  assert.equal(getRawCommand(command.id)!.sessionId, sid);
+  await call('POST', `/api/system/command-board-raw/${command.id}/execute`, {
+    user: OWNER, body: { confirmationDigest: computeDigest('echo sid') },
+  });
+  assert.equal(listRawHistory()[0]!.sessionId, sid);
+});
+
+test('41: an invalid sessionId is stored as null and the command is still queued', async () => {
+  resetState();
+  enableRaw();
+  const bad = ['../etc/passwd', 'a b', 'x'.repeat(201), 42, '', { id: 'x' }, 'sid;rm'];
+  for (const [i, sessionId] of bad.entries()) {
+    const r = await call('POST', '/api/system/command-board-raw', {
+      user: OWNER, body: { command: `echo bad${i}`, sessionId },
+    });
+    assert.equal(r.status, 201);
+    assert.equal((await r.json()).command.sessionId, null);
+  }
+  assert.equal(listRawCommands().length, bad.length);
+  assert.ok(listRawCommands().every((row) => row.sessionId === null));
+  const ok = insertRawCommand({ command: 'echo max', sessionId: 'x'.repeat(200) });
+  assert.equal((ok as any).value.sessionId, 'x'.repeat(200));
+});
+
+test('42: legacy rows and history entries without the field return sessionId null', () => {
+  resetState();
+  const now = new Date().toISOString();
+  appConfigDb.set(RAW_QUEUE_CONFIG_KEY, JSON.stringify([
+    { id: 'old', command: 'echo legacy', requestedBy: 'agent', requestedAt: now },
+  ]));
+  appConfigDb.set(RAW_HISTORY_CONFIG_KEY, JSON.stringify([{
+    id: 'h', command: 'echo legacy', requestedBy: null, requestedAt: now, executedBy: null,
+    executedAt: now, outcome: 'success', exitCode: 0, reasonCode: null,
+    stdoutTail: '', stderrTail: '',
+  }]));
+  assert.equal(listRawCommands()[0]!.sessionId, null);
+  assert.equal(getRawCommand('old')!.sessionId, null);
+  assert.equal(listRawHistory()[0]!.sessionId, null);
+  recordRawExecution({ id: 'n', command: 'echo n', outcome: 'success', sessionId: 'bad id' });
+  assert.equal(listRawHistory()[0]!.sessionId, null);
+});
+
+test('43: twin reuse keeps the twin sessionId and never mutates it', async () => {
+  resetState();
+  enableRaw();
+  insertRawCommand({ command: 'echo twin-sid', requestedBy: 'agent' });
+  const r = await call('POST', '/api/system/command-board-raw', {
+    user: OWNER, body: { command: 'echo twin-sid', sessionId: 'later-session' },
+  });
+  assert.equal((await r.json()).command.sessionId, null);
+  assert.equal(listRawCommands()[0]!.sessionId, null);
+  assert.equal('sessionId' in JSON.parse(String(appConfigDb.get(RAW_QUEUE_CONFIG_KEY)))[0], true);
+
+  insertRawCommand({ command: 'echo twin-kept', sessionId: 'first-session' });
+  const again = insertRawCommand({ command: 'echo twin-kept', sessionId: 'second-session' });
+  assert.equal((again as any).reused, true);
+  assert.equal((again as any).value.sessionId, 'first-session');
+  assert.equal(listRawCommands().find((e) => e.command === 'echo twin-kept')!.sessionId,
+    'first-session');
 });

@@ -56,4 +56,15 @@ describe('SidebarSearchRow', () => {
     fireEvent.click(screen.getByRole('button', { name: 'tooltips.clearSearch' }));
     expect(onClearSearchFilter).toHaveBeenCalledTimes(1);
   });
+
+  it('renders the command-palette hint as a span, not a kbd (RTL LTR-island stretch)', () => {
+    renderRow();
+
+    const hint = document.querySelector('[aria-hidden="true"][title="tooltips.openCommandPalette"]');
+    expect(hint).toBeTruthy();
+    expect(hint?.tagName).toBe('SPAN');
+    expect(hint?.className).toContain('pointer-events-none');
+    expect(hint?.className).toContain('font-mono');
+    expect(document.querySelector('kbd')).toBeNull();
+  });
 });

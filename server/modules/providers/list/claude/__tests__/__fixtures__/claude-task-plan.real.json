@@ -1,0 +1,377 @@
+{
+ "_provenance": "Real Claude JSONL rows, scrubbed. TaskCreate/TaskUpdate rows: Claude Code 2.1.289 capture (claude -p, haiku, /var/tmp cwd, 2026-10-09). Compaction rows: operator session 2026-10-05. Agent calls and <task-notification> rows: two operator sessions (completed, failed). Prompts, summaries, reports, paths and session ids scrubbed; keys, ids and status values verbatim. Tests re-stamp timestamps to compose scenarios.",
+ "rows": {
+  "humanPrompt": {
+   "type": "user",
+   "uuid": "10df7b2b-592c-49d0-bd09-9510d3bd5a9e",
+   "parentUuid": null,
+   "isSidechain": false,
+   "timestamp": "2026-10-09T06:35:07.745Z",
+   "sessionId": "00000000-0000-4000-8000-000000000002",
+   "message": {
+    "role": "user",
+    "content": "Use TaskCreate to create two tasks: 'Say hello' and 'Say bye'. Then use TaskUpdate to mark the first in_progress then completed, and mark the second deleted. Then reply done. No other tools.\n"
+   }
+  },
+  "createHelloUse": {
+   "type": "assistant",
+   "uuid": "f1819300-e50a-4de6-9031-7bd4f7856627",
+   "parentUuid": "788f8dbf-371f-43fc-a675-122e556bba10",
+   "isSidechain": false,
+   "timestamp": "2026-10-09T06:35:14.602Z",
+   "sessionId": "00000000-0000-4000-8000-000000000002",
+   "message": {
+    "role": "assistant",
+    "model": "claude-haiku-4-5-20251001",
+    "content": [
+     {
+      "type": "tool_use",
+      "id": "toolu_01VxgH7f98D9mcBMnA3sWfBb",
+      "name": "TaskCreate",
+      "input": {
+       "subject": "Say hello",
+       "description": "Say hello"
+      }
+     }
+    ]
+   }
+  },
+  "createHelloResult": {
+   "type": "user",
+   "uuid": "4b03e0da-8005-4f36-9ba7-eae45223d74a",
+   "parentUuid": "f1819300-e50a-4de6-9031-7bd4f7856627",
+   "isSidechain": false,
+   "timestamp": "2026-10-09T06:35:14.610Z",
+   "toolUseResult": {
+    "task": {
+     "id": "1",
+     "subject": "Say hello"
+    }
+   },
+   "sessionId": "00000000-0000-4000-8000-000000000002",
+   "message": {
+    "role": "user",
+    "content": [
+     {
+      "tool_use_id": "toolu_01VxgH7f98D9mcBMnA3sWfBb",
+      "type": "tool_result",
+      "content": "Task #1 created successfully: Say hello"
+     }
+    ]
+   }
+  },
+  "createByeUse": {
+   "type": "assistant",
+   "uuid": "7128fabf-b4ac-41ab-a5ee-84e98d99dc91",
+   "parentUuid": "4b03e0da-8005-4f36-9ba7-eae45223d74a",
+   "isSidechain": false,
+   "timestamp": "2026-10-09T06:35:14.821Z",
+   "sessionId": "00000000-0000-4000-8000-000000000002",
+   "message": {
+    "role": "assistant",
+    "model": "claude-haiku-4-5-20251001",
+    "content": [
+     {
+      "type": "tool_use",
+      "id": "toolu_012sdX5iNFL4y5VnmU3uLAx4",
+      "name": "TaskCreate",
+      "input": {
+       "subject": "Say bye",
+       "description": "Say bye"
+      }
+     }
+    ]
+   }
+  },
+  "createByeResult": {
+   "type": "user",
+   "uuid": "f9d5d233-05b8-4f6e-9ec1-efa0bf53601b",
+   "parentUuid": "7128fabf-b4ac-41ab-a5ee-84e98d99dc91",
+   "isSidechain": false,
+   "timestamp": "2026-10-09T06:35:14.826Z",
+   "toolUseResult": {
+    "task": {
+     "id": "2",
+     "subject": "Say bye"
+    }
+   },
+   "sessionId": "00000000-0000-4000-8000-000000000002",
+   "message": {
+    "role": "user",
+    "content": [
+     {
+      "tool_use_id": "toolu_012sdX5iNFL4y5VnmU3uLAx4",
+      "type": "tool_result",
+      "content": "Task #2 created successfully: Say bye"
+     }
+    ]
+   }
+  },
+  "updateHelloInProgressUse": {
+   "type": "assistant",
+   "uuid": "f09e8604-f36b-4448-b962-17febf0b4a8b",
+   "parentUuid": "4fb47184-6b8d-4695-a1d1-5db743dcfa24",
+   "isSidechain": false,
+   "timestamp": "2026-10-09T06:35:18.424Z",
+   "sessionId": "00000000-0000-4000-8000-000000000002",
+   "message": {
+    "role": "assistant",
+    "model": "claude-haiku-4-5-20251001",
+    "content": [
+     {
+      "type": "tool_use",
+      "id": "toolu_01AYMHKB1Kn3F47MLu1NgdXx",
+      "name": "TaskUpdate",
+      "input": {
+       "taskId": "1",
+       "status": "in_progress"
+      }
+     }
+    ]
+   }
+  },
+  "updateHelloInProgressResult": {
+   "type": "user",
+   "uuid": "97c91b69-9f36-4c61-8c58-7dbbcce3d0b9",
+   "parentUuid": "f09e8604-f36b-4448-b962-17febf0b4a8b",
+   "isSidechain": false,
+   "timestamp": "2026-10-09T06:35:18.429Z",
+   "toolUseResult": {
+    "success": true,
+    "taskId": "1",
+    "updatedFields": [
+     "status"
+    ],
+    "statusChange": {
+     "from": "pending",
+     "to": "in_progress"
+    }
+   },
+   "sessionId": "00000000-0000-4000-8000-000000000002",
+   "message": {
+    "role": "user",
+    "content": [
+     {
+      "tool_use_id": "toolu_01AYMHKB1Kn3F47MLu1NgdXx",
+      "type": "tool_result",
+      "content": "Updated task #1 status"
+     }
+    ]
+   }
+  },
+  "updateHelloCompletedUse": {
+   "type": "assistant",
+   "uuid": "650b995d-b6eb-44a4-94a8-752cf202120e",
+   "parentUuid": "97c91b69-9f36-4c61-8c58-7dbbcce3d0b9",
+   "isSidechain": false,
+   "timestamp": "2026-10-09T06:35:18.582Z",
+   "sessionId": "00000000-0000-4000-8000-000000000002",
+   "message": {
+    "role": "assistant",
+    "model": "claude-haiku-4-5-20251001",
+    "content": [
+     {
+      "type": "tool_use",
+      "id": "toolu_01ThJPXNLqSDtqyAkQxtU28w",
+      "name": "TaskUpdate",
+      "input": {
+       "taskId": "1",
+       "status": "completed"
+      }
+     }
+    ]
+   }
+  },
+  "updateHelloCompletedResult": {
+   "type": "user",
+   "uuid": "f646da4c-8ec0-4ab0-833d-7b484be01373",
+   "parentUuid": "650b995d-b6eb-44a4-94a8-752cf202120e",
+   "isSidechain": false,
+   "timestamp": "2026-10-09T06:35:18.587Z",
+   "toolUseResult": {
+    "success": true,
+    "taskId": "1",
+    "updatedFields": [
+     "status"
+    ],
+    "statusChange": {
+     "from": "in_progress",
+     "to": "completed"
+    }
+   },
+   "sessionId": "00000000-0000-4000-8000-000000000002",
+   "message": {
+    "role": "user",
+    "content": [
+     {
+      "tool_use_id": "toolu_01ThJPXNLqSDtqyAkQxtU28w",
+      "type": "tool_result",
+      "content": "Updated task #1 status"
+     }
+    ]
+   }
+  },
+  "deleteByeUse": {
+   "type": "assistant",
+   "uuid": "f8838888-b173-492a-8bf7-aff71c86fbf5",
+   "parentUuid": "f646da4c-8ec0-4ab0-833d-7b484be01373",
+   "isSidechain": false,
+   "timestamp": "2026-10-09T06:35:18.648Z",
+   "sessionId": "00000000-0000-4000-8000-000000000002",
+   "message": {
+    "role": "assistant",
+    "model": "claude-haiku-4-5-20251001",
+    "content": [
+     {
+      "type": "tool_use",
+      "id": "toolu_01Nq7faiiqbVL8mXaGx3CXof",
+      "name": "TaskUpdate",
+      "input": {
+       "taskId": "2",
+       "status": "deleted"
+      }
+     }
+    ]
+   }
+  },
+  "deleteByeResult": {
+   "type": "user",
+   "uuid": "1bb67051-5d53-4bdf-ae15-5e0811cef493",
+   "parentUuid": "f8838888-b173-492a-8bf7-aff71c86fbf5",
+   "isSidechain": false,
+   "timestamp": "2026-10-09T06:35:18.652Z",
+   "toolUseResult": {
+    "success": true,
+    "taskId": "2",
+    "updatedFields": [
+     "deleted"
+    ],
+    "statusChange": {
+     "from": "pending",
+     "to": "deleted"
+    }
+   },
+   "sessionId": "00000000-0000-4000-8000-000000000002",
+   "message": {
+    "role": "user",
+    "content": [
+     {
+      "tool_use_id": "toolu_01Nq7faiiqbVL8mXaGx3CXof",
+      "type": "tool_result",
+      "content": "Updated task #2 deleted"
+     }
+    ]
+   }
+  },
+  "compactBoundary": {
+   "type": "system",
+   "subtype": "compact_boundary",
+   "uuid": "82682d95-10c5-41ba-8ee4-c8de042f9886",
+   "parentUuid": null,
+   "isSidechain": false,
+   "isMeta": false,
+   "timestamp": "2026-10-05T10:16:00.842Z",
+   "content": "Conversation compacted",
+   "level": "info",
+   "sessionId": "00000000-0000-4000-8000-000000000002",
+   "compactMetadata": {
+    "trigger": "manual"
+   }
+  },
+  "compactSummary": {
+   "type": "user",
+   "uuid": "1372ab79-32ea-46af-9b8e-1798330fa62b",
+   "parentUuid": "82682d95-10c5-41ba-8ee4-c8de042f9886",
+   "isSidechain": false,
+   "timestamp": "2026-10-05T10:16:00.841Z",
+   "isCompactSummary": true,
+   "isVisibleInTranscriptOnly": true,
+   "sessionId": "00000000-0000-4000-8000-000000000002",
+   "message": {
+    "role": "user",
+    "content": "This session is being continued from a previous conversation that ran out of context. [scrubbed summary]"
+   }
+  },
+  "agentCompletedUse": {
+   "type": "assistant",
+   "uuid": "bdeb7a34-0a32-4e0c-b7de-1fc834431029",
+   "parentUuid": "a23208e6-3d58-404b-811e-494167b23e0a",
+   "isSidechain": false,
+   "timestamp": "2026-10-06T09:45:14.200Z",
+   "sessionId": "00000000-0000-4000-8000-000000000002",
+   "message": {
+    "role": "assistant",
+    "model": "claude-opus-5-5",
+    "content": [
+     {
+      "type": "tool_use",
+      "id": "toolu_01H48H2qDEZsGjV6DhgMGGrh",
+      "name": "Agent",
+      "input": {
+       "subagent_type": "devops",
+       "description": "Review change",
+       "run_in_background": true,
+       "prompt": "[scrubbed prompt]"
+      }
+     }
+    ]
+   }
+  },
+  "agentCompletedNotification": {
+   "type": "user",
+   "uuid": "113b8bf5-47ef-462e-83f5-682d98d93f00",
+   "parentUuid": "8359e7df-cdbc-433c-9cf5-57a6106169ed",
+   "isSidechain": false,
+   "timestamp": "2026-10-06T09:47:38.595Z",
+   "origin": {
+    "kind": "task-notification",
+    "producer": "session-task"
+   },
+   "sessionId": "00000000-0000-4000-8000-000000000002",
+   "message": {
+    "role": "user",
+    "content": "<task-notification>\n<task-id>a81682cbae4551760</task-id>\n<tool-use-id>toolu_01H48H2qDEZsGjV6DhgMGGrh</tool-use-id>\n<output-file>/var/tmp/redacted.output</output-file>\n<status>completed</status>\n<summary>Agent \"Review change\" finished</summary>\n<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>\n<result>[scrubbed report]</result>\n\n</task-notification>"
+   }
+  },
+  "agentFailedUse": {
+   "type": "assistant",
+   "uuid": "595b966f-4811-47b0-8ffe-7e9dbc23287d",
+   "parentUuid": "d6c71b37-0da7-4e55-8cb6-4ceed67896c8",
+   "isSidechain": false,
+   "timestamp": "2026-09-30T10:37:08.482Z",
+   "sessionId": "00000000-0000-4000-8000-000000000002",
+   "message": {
+    "role": "assistant",
+    "model": "claude-opus-5-5",
+    "content": [
+     {
+      "type": "tool_use",
+      "id": "toolu_01M53A5Rb27vy4bsis9151KZ",
+      "name": "Agent",
+      "input": {
+       "description": "Diagnose gate",
+       "subagent_type": "backend-dev",
+       "run_in_background": true,
+       "prompt": "[scrubbed prompt]"
+      }
+     }
+    ]
+   }
+  },
+  "agentFailedNotification": {
+   "type": "user",
+   "uuid": "4bd3e378-277f-4359-94e0-003a95984dd9",
+   "parentUuid": "0c338ab6-f3cd-4021-ac89-32230fa278cd",
+   "isSidechain": false,
+   "timestamp": "2026-09-30T10:40:39.647Z",
+   "origin": {
+    "kind": "task-notification"
+   },
+   "sessionId": "00000000-0000-4000-8000-000000000002",
+   "message": {
+    "role": "user",
+    "content": "<task-notification>\n<task-id>addeca81d20d8d065</task-id>\n<tool-use-id>toolu_01M53A5Rb27vy4bsis9151KZ</tool-use-id>\n<output-file>/var/tmp/redacted.output</output-file>\n<status>failed</status>\n<summary>Agent \"Diagnose gate\" failed: Agent terminated early due to an API error: API Error: 529 Overloaded.</summary>\n<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>\n</task-notification>"
+   }
+  }
+ }
+}

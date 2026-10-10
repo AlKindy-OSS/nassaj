@@ -7,6 +7,7 @@ import { writeFile } from 'node:fs/promises';
 import { initializeDatabase, closeConnection, sessionsDb, userDb, messageCoordinationDb, participantsDb } from '@/modules/database/index.js';
 
 import { CodexSessionsProvider } from '../codex-sessions.provider.js';
+import { codexSessionsSandbox } from '@/shared/__tests__/provider-root-sandbox.js';
 import { projectCodexHistoryIdentities as projectWithReader, copyCodexHistoryIdentities, createCodexReceiptCollector, codexHistoryIdentity } from '../codex-receipt-identity.js';
 import { codexReceiptPayloadHash } from '../codex-receipt-proof.js';
 import { sessionsService } from '../../../services/sessions.service.js';
@@ -19,10 +20,11 @@ const projectCodexHistoryIdentities = (result: Parameters<typeof projectWithRead
 
 const image = 'data:image/png;base64,YQ==';
 let owner: number, other: number, counter = 0;
+const rollouts = codexSessionsSandbox('codex-identity-');
 before(async () => { await initializeDatabase(); owner = userDb.createUser('codex-receipt-owner', 'hash', 'user').id; other = userDb.createUser('codex-receipt-other', 'hash', 'user').id; });
 after(closeConnection);
 async function fixture(withImage = false, duplicate = false, imageOnly = false, resumedContext = false) {
-  const session = `codex-identity-${++counter}`, file = path.join((process.env.NASSAJ_TEST_TMP ?? process.env.TMPDIR)!, `${session}.jsonl`);
+  const session = `codex-identity-${++counter}`, file = path.join(rollouts, `${session}.jsonl`);
   const prompt = imageOnly ? '' : 'same request';
   const raw = { type: 'response_item', payload: { type: 'message', role: 'user', id: 'native-human',
     internal_chat_message_metadata_passthrough: { turn_id: 'turn-native' },
