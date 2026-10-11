@@ -38,7 +38,9 @@
   "binaryFile": {
     "title": "Binary File",
     "message": "The file \"{{fileName}}\" cannot be displayed in the text editor because it is a binary file.",
-    "close": "Close"
+    "close": "Close",
+    "download": "Download",
+    "downloadError": "Unable to download the file."
   },
   "editorSidebar": {
     "dragToResize": "Drag to resize"

@@ -33,7 +33,9 @@
   "binaryFile": {
     "title": "ملف ثنائي",
     "message": "لا يمكن عرض الملف \"{{fileName}}\" في محرر النصوص لأنه ملف ثنائي.",
-    "close": "إغلاق"
+    "close": "إغلاق",
+    "download": "تحميل",
+    "downloadError": "تعذّر تحميل الملف."
   },
   "filePreview": {
     "loading": "جارٍ تحميل المعاينة...",

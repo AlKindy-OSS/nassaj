@@ -37,6 +37,8 @@
   },
   "binaryFile": {
     "title": "File binario",
-    "message": "Il file \"{{fileName}}\" non può essere visualizzato nell'editor di testo perché è un file binario."
+    "message": "Il file \"{{fileName}}\" non può essere visualizzato nell'editor di testo perché è un file binario.",
+    "download": "Scarica",
+    "downloadError": "Impossibile scaricare il file."
   }
 }

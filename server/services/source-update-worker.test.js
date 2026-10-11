@@ -319,3 +319,172 @@ test('W7: no rearm once candidate is sealed — rearmDeferred returns noop and j
     // The state must NOT be awaiting_sessions
     assert.notEqual(job.state, 'awaiting_sessions', 'sealed job must not transition to awaiting_sessions');
 });
+
+// ---------------------------------------------------------------------------
+// B-1585 — lease renewal, a visible fenced outcome, and the equal-target guard.
+// ---------------------------------------------------------------------------
+
+function sealingRun(_job, _release, context) {
+    context.beforeQueue({
+        transaction_id: updateResult.transactionId, release_commit: updateResult.commit,
+        expected_server_build_id: updateResult.expectedServerBuildId,
+        expected_client_build_id: updateResult.expectedClientBuildId,
+        activation_identity_sha256: updateResult.activationIdentitySha256,
+    });
+    return updateResult;
+}
+
+function recordingLog() {
+    const lines = [];
+    return { lines, line: (_id, message) => lines.push(message), append: () => undefined };
+}
+
+test('B-1585: renewLease extends the lease through the store CAS and aborts when it is lost', async () => {
+    const jobs = fakeJobs('staging');
+    const renewed = [];
+    const worker = createSourceUpdateWorker({
+        jobs, identity, resolveRelease: async () => { throw new Error('must not resolve'); },
+        runUpdate: async (job, rel, context) => {
+            assert.equal(context.renewLease(), true);
+            renewed.push(jobs.calls.filter(([kind]) => kind === 'renew').length);
+            return sealingRun(job, rel, context);
+        },
+    });
+    assert.equal(await worker.processOne(), true);
+    assert.ok(renewed[0] >= 1, 'renewLease writes a renewal');
+
+    const lost = fakeJobs('staging', { renew: false });
+    let thrown = null;
+    const fencedWorker = createSourceUpdateWorker({
+        jobs: lost, identity, resolveRelease: async () => { throw new Error('must not resolve'); },
+        runUpdate: async (_job, _release, context) => {
+            try { context.renewLease(); } catch (error) { thrown = error; throw error; }
+            return updateResult;
+        },
+    });
+    assert.equal(await fencedWorker.processOne(), false);
+    assert.equal(thrown?.message, 'source_update_worker_fenced');
+    assert.equal(lost.calls.some(([kind, , next]) => kind === 'transition' && next === 'restart_queued'), false);
+});
+
+test('B-1585: a fenced worker logs, settles its lapsed lease and releases it', async () => {
+    const jobs = fakeJobs('staging');
+    let fence = true;
+    jobs.assertFence = () => fence;
+    const abandoned = [];
+    jobs.abandonLapsedLease = (...args) => {
+        abandoned.push(args);
+        return { outcome: 'failed', state: 'staging', receipt: { sequence: 3, factsJson: '{}', factsSha256: 'f'.repeat(64) } };
+    };
+    const terminal = [];
+    const jobLog = recordingLog();
+    const worker = createSourceUpdateWorker({
+        jobs, identity, jobLog, resolveRelease: async () => { throw new Error('must not resolve'); },
+        afterTerminal: (context) => { terminal.push(context.state); },
+        runUpdate: async (_job, _release, context) => { fence = false; context.assertFence(); return updateResult; },
+    });
+    assert.equal(await worker.processOne(), false);
+    assert.deepEqual(abandoned, [['job-1', 'worker', 7, 'source_update_worker_lease_lost',
+        'The update worker lost its lease before finishing; retry the update.']]);
+    assert.ok(jobLog.lines.includes('✗ source_update_worker_fenced'));
+    assert.ok(jobLog.lines.includes('✗ source_update_worker_lease_lost'));
+    assert.deepEqual(terminal, ['failed']);
+    assert.equal(jobs.calls.at(-1)[0], 'release', 'the lease CAS release runs after fencing');
+});
+
+test('B-1585: a fenced worker whose lease a newer epoch owns writes nothing', async () => {
+    const jobs = fakeJobs('staging');
+    let fence = true;
+    jobs.assertFence = () => fence;
+    jobs.abandonLapsedLease = () => ({ outcome: 'not_owner', receipt: null });
+    const terminal = [];
+    const worker = createSourceUpdateWorker({
+        jobs, identity, resolveRelease: async () => { throw new Error('must not resolve'); },
+        afterTerminal: (context) => { terminal.push(context.state); },
+        runUpdate: async (_job, _release, context) => { fence = false; context.assertFence(); return updateResult; },
+    });
+    assert.equal(await worker.processOne(), false);
+    assert.equal(jobs.calls.some(([kind]) => kind === 'transition'), false);
+    assert.deepEqual(terminal, []);
+});
+
+test('B-1585: a re-claimed job whose target the runtime already runs settles superseded without building', async () => {
+    const jobs = fakeJobs('staging');
+    let ran = false;
+    const terminal = [];
+    const worker = createSourceUpdateWorker({
+        jobs, identity, resolveRelease: async () => { throw new Error('must not resolve'); },
+        loadedRuntimeCommit: () => release.commit,
+        afterTerminal: (context) => { terminal.push(context.state); },
+        runUpdate: async () => { ran = true; return updateResult; },
+    });
+    assert.equal(await worker.processOne(), false);
+    assert.equal(ran, false);
+    assert.equal(jobs.job.state, 'superseded');
+    assert.equal(jobs.job.error_code, 'source_update_target_already_loaded');
+    assert.ok(jobs.calls.some(([kind, phase, recordKind, facts]) => kind === 'receipt' && phase === 'staging'
+        && recordKind === 'recovery' && facts.code === 'source_update_target_already_loaded'));
+    assert.deepEqual(terminal, ['superseded']);
+});
+
+test('B-1585: a different or unreadable runtime commit never trips the equal-target guard', async () => {
+    for (const loaded of [() => 'f'.repeat(40), () => null, () => 'unknown', () => { throw new Error('unreadable'); }]) {
+        const jobs = fakeJobs('staging');
+        const worker = createSourceUpdateWorker({
+            jobs, identity, resolveRelease: async () => { throw new Error('must not resolve'); },
+            loadedRuntimeCommit: loaded, runUpdate: sealingRun,
+        });
+        assert.equal(await worker.processOne(), true);
+        assert.equal(jobs.job.state, 'restart_queued');
+    }
+});
+
+test('B-1585: the updater refusing an already-loaded target settles superseded, not failed', async () => {
+    const jobs = fakeJobs('staging');
+    const worker = createSourceUpdateWorker({
+        jobs, identity, resolveRelease: async () => { throw new Error('must not resolve'); },
+        runUpdate: async () => {
+            throw Object.assign(new Error('already running'), { code: 'source_update_target_already_loaded' });
+        },
+    });
+    assert.equal(await worker.processOne(), false);
+    assert.equal(jobs.job.state, 'superseded');
+    assert.equal(jobs.calls.some(([kind, , next]) => kind === 'transition' && next === 'failed'), false);
+});
+
+test('B-1585: settleLostLease handed to the updater settles once and reports the outcome', async () => {
+    const jobs = fakeJobs('staging');
+    let fence = true;
+    jobs.assertFence = () => fence;
+    let abandons = 0;
+    jobs.abandonLapsedLease = () => {
+        abandons += 1;
+        return { outcome: 'failed', state: 'staging', receipt: { sequence: 2, factsJson: '{}', factsSha256: 'f'.repeat(64) } };
+    };
+    const outcomes = [];
+    const worker = createSourceUpdateWorker({
+        jobs, identity, resolveRelease: async () => { throw new Error('must not resolve'); },
+        runUpdate: async (_job, _release, context) => {
+            fence = false;
+            try { context.assertFence(); } catch (error) {
+                outcomes.push(await context.settleLostLease(), await context.settleLostLease());
+                throw error;
+            }
+            return updateResult;
+        },
+    });
+    assert.equal(await worker.processOne(), false);
+    assert.deepEqual(outcomes, ['failed', 'failed']);
+    assert.equal(abandons, 1, 'the worker catch reuses the settled outcome');
+});
+
+test('B-1585: an older target refused by the updater settles superseded with its own message', async () => {
+    const jobs = fakeJobs('staging');
+    const worker = createSourceUpdateWorker({
+        jobs, identity, resolveRelease: async () => { throw new Error('must not resolve'); },
+        runUpdate: async () => { throw Object.assign(new Error('older'), { code: 'source_update_target_not_newer' }); },
+    });
+    assert.equal(await worker.processOne(), false);
+    assert.equal(jobs.job.state, 'superseded');
+    assert.equal(jobs.job.error_message, 'The requested release is older than the running version.');
+});

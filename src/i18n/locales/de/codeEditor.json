@@ -37,6 +37,8 @@
   },
   "binaryFile": {
     "title": "Binärdatei",
-    "message": "Die Datei \"{{fileName}}\" kann im Texteditor nicht angezeigt werden, da es sich um eine Binärdatei handelt."
+    "message": "Die Datei \"{{fileName}}\" kann im Texteditor nicht angezeigt werden, da es sich um eine Binärdatei handelt.",
+    "download": "Herunterladen",
+    "downloadError": "Die Datei konnte nicht heruntergeladen werden."
   }
 }

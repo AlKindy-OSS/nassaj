@@ -5,10 +5,16 @@ import path from 'node:path';
 
 import { sourceUpdateJobsDb } from '../modules/database/index.js';
 import { normalizeManifestDrift } from './update-job-snapshot.js';
+import { SUPERSEDING_TARGET_CODES, TARGET_ALREADY_LOADED, isTargetAlreadyLoaded } from './source-update-target-guard.js';
 
 const LEASE_MS = 30_000;
 const POLL_MS = 1_000;
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
+// B-1585: states before the candidate is sealed; only these may be settled by
+// the worker itself (a sealed candidate belongs to the activation path).
+const PRE_SEAL_STATES = ['accepted', 'resolving', 'resolved', 'downloading', 'archive_verified', 'extracting', 'staging'];
+export const WORKER_LEASE_LOST = 'source_update_worker_lease_lost';
+const WORKER_LEASE_LOST_MESSAGE = 'The update worker lost its lease before finishing; retry the update.';
 
 function readText(file, fallback) {
     try { return fs.readFileSync(file, 'utf8').trim() || fallback; } catch { return fallback; }
@@ -114,6 +120,7 @@ export function createSourceUpdateWorker({
     beforeWorkerClaim = () => undefined,
     afterTerminal = () => undefined,
     jobLog = null,
+    loadedRuntimeCommit = () => null,
 } = {}) {
     if (typeof runUpdate !== 'function' || typeof resolveRelease !== 'function') {
         throw new TypeError('source update worker requires runUpdate and resolveRelease');
@@ -141,6 +148,18 @@ export function createSourceUpdateWorker({
                 throw new Error('source_update_worker_fenced');
             }
             return true;
+        };
+        // B-1585: a long synchronous step blocks the heartbeat timer, so the
+        // updater renews explicitly around it. renew() is a CAS on the exact
+        // (job, worker, fence epoch): it can extend a lapsed lease nobody
+        // claimed, never one a newer epoch owns — that still aborts here.
+        const renewLease = () => {
+            if (abortController.signal.aborted || !jobs.renew(job.id, identity.workerId, fence, now(), leaseMs)) {
+                fenced = true;
+                abortController.abort(new Error('source_update_worker_fenced'));
+                throw new Error('source_update_worker_fenced');
+            }
+            return assertFence();
         };
         const transition = (expected, next, fields = {}) => {
             assertFence();
@@ -186,6 +205,48 @@ export function createSourceUpdateWorker({
                     receipts: jobs.listReceipts?.(job.id) || [], gate: readGateMetrics(), state,
                 }));
             } catch { /* a fenced or unreadable worker still reports its terminal state */ }
+        };
+        const references = () => jobs.listRuntimeReferences?.() || [];
+        /** B-1585: a target the runtime already runs is moot; settle, never rebuild. */
+        const settleSuperseded = async (code) => {
+            receipt(job.state, 'recovery', { code, intervention: 'automatic' });
+            transition([job.state], 'superseded', { error_code: code, error_message: SUPERSEDING_TARGET_CODES[code] });
+            logLine(`✓ ${code}`);
+            measure('superseded', 'recovery', 'superseded');
+            await afterTerminal({ jobId: job.id, state: 'superseded', references: references() });
+        };
+        /**
+         * B-1585: a fenced worker used to return silently, keep the lease and
+         * leave the job showing its last state forever. Log it, then — only if
+         * this worker still holds the exact lease — fail a pre-seal job with a
+         * bounded code and release the lease. A newer owner is never touched.
+         */
+        let lostLeaseOutcome = null;
+        const settleLostLease = async () => {
+            // Runs once: the updater may call it first to scope its waiter.
+            lostLeaseOutcome ??= settleLostLeaseOnce();
+            return lostLeaseOutcome;
+        };
+        const settleLostLeaseOnce = async () => {
+            logLine('✗ source_update_worker_fenced');
+            if (typeof jobs.abandonLapsedLease !== 'function') return 'unavailable';
+            let settled;
+            try {
+                settled = jobs.abandonLapsedLease(job.id, identity.workerId, fence,
+                    WORKER_LEASE_LOST, WORKER_LEASE_LOST_MESSAGE);
+            } catch { return 'error'; /* the lease row stays authoritative; a later claim recovers */ }
+            if (settled?.outcome !== 'failed') return settled?.outcome ?? 'unavailable';
+            logLine(`✗ ${WORKER_LEASE_LOST}`);
+            // The job is terminal in SQLite from here; the mirror and hook are best effort.
+            try {
+                if (receiptRoot && settled.receipt) durableReceiptFile(receiptRoot, {
+                    schemaVersion: 2, jobId: job.id, sequence: settled.receipt.sequence,
+                    workerFence: fence, phase: settled.state, kind: 'rollback',
+                    factsJson: settled.receipt.factsJson, factsSha256: settled.receipt.factsSha256,
+                });
+                await afterTerminal({ jobId: job.id, state: 'failed', references: references() });
+            } catch { /* SQLite holds the authoritative receipt */ }
+            return 'failed';
         };
         const heartbeat = setInterval(() => {
             if (!jobs.renew(job.id, identity.workerId, fence, now(), leaseMs)) {
@@ -247,6 +308,10 @@ export function createSourceUpdateWorker({
                     commit: job.release_commit, version: job.expected_version,
                 };
             }
+            if (PRE_SEAL_STATES.includes(job.state) && isTargetAlreadyLoaded(release.commit, loadedRuntimeCommit)) {
+                await settleSuperseded(TARGET_ALREADY_LOADED);
+                return false;
+            }
             if (job.state === 'resolved') transition(['resolved'], job.strategy === 'release-layout-v2' ? 'downloading' : 'staging');
             const sealBeforeQueue = (facts) => {
                 if (job.state === 'candidate_sealed') {
@@ -259,7 +324,7 @@ export function createSourceUpdateWorker({
             };
             const result = await runUpdate(job, release, {
                 jobId: job.id, workerId: identity.workerId, fence,
-                signal: abortController.signal, assertFence, checkpoint,
+                signal: abortController.signal, assertFence, renewLease, settleLostLease, checkpoint,
                 receipt, registerEffect, completeEffect, onOutput: logOutput,
                 effectGateRoot: receiptRoot ? path.join(path.dirname(receiptRoot), 'effect-gates') : null,
                 beforeQueue: sealBeforeQueue,
@@ -289,9 +354,16 @@ export function createSourceUpdateWorker({
             measure('restart_queued', 'done', 'restart_queued');
             return true;
         } catch (error) {
-            if (fenced || abortController.signal.aborted) return false;
+            if (fenced || abortController.signal.aborted) {
+                await settleLostLease();
+                return false;
+            }
             const code = typeof error?.code === 'string' ? error.code : (error?.message || 'update_failed');
             const message = typeof error?.message === 'string' ? error.message.slice(0, 500) : 'Update failed';
+            if (Object.hasOwn(SUPERSEDING_TARGET_CODES, code) && PRE_SEAL_STATES.includes(job.state)) {
+                try { await settleSuperseded(code); } catch { /* a newer fence owns recovery */ }
+                return false;
+            }
             logLine(`✗ ${code}`);
             try {
                 // T-1730 W7: a deferred job whose updater refuses on live
@@ -347,7 +419,10 @@ export function createSourceUpdateWorker({
             return false;
         } finally {
             clearInterval(heartbeat);
-            if (!fenced) jobs.release(job.id, identity.workerId, fence);
+            // B-1585: release() is a CAS on (job, worker, fence epoch), so it is
+            // safe after fencing too: it frees a lapsed lease this worker still
+            // names and is a no-op once a newer epoch owns the job.
+            jobs.release(job.id, identity.workerId, fence);
             running = false;
         }
     };

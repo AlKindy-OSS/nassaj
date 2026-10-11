@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync, symlinkSync, lstatSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync, symlinkSync, lstatSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -12,7 +12,7 @@ import {
   applySourceManifest,
     exchangeGenerations, planSourceManifest, planSourceRollback, prepareBootstrapDescriptor, rollbackGenerations,
     validateCandidate, verifyRuntimeIdentities, inspectGitRuntimeRecovery,
-  rollbackSourceManifest,
+  rollbackSourceManifest, readBootstrapActivationAction,
 } from './source-update-activation.mjs';
 
 function generation(directory, name, content, provenance = null) {
@@ -562,4 +562,58 @@ test('legacy lost-done receipt cannot invent the old identity or exchange any ge
         }
         assert.equal(exchanges, 0);
     } finally { rmSync(value.projectRoot, { recursive: true, force: true }); }
+});
+
+// ── B-1584: the replacement process's boot-time action read ────────────────────
+
+/** A candidate directory holding one action file written as the updater writes it. */
+function bootstrapFixture(t, overrides = {}, { mode = 0o600 } = {}) {
+    const base = mkdtempSync(path.join(os.tmpdir(), 'nassaj-bootstrap-action-'));
+    t.after(() => rmSync(base, { recursive: true, force: true }));
+    const transactionId = 'update-bootstrap-1';
+    const candidateRoot = path.join(base, transactionId);
+    mkdirSync(candidateRoot);
+    const action = {
+        schema: 'nassaj-source-update-activation/v1', transactionId, originalHead: 'a'.repeat(40),
+        targetCommit: 'c'.repeat(40), version: '1.0.0.2', manifestPath: path.join(candidateRoot, 'candidate-manifest.json'),
+        manifestSha256: 'd'.repeat(64), expectedServerBuildId: 'b'.repeat(64), previousRuntimeOid: 'e'.repeat(40),
+        ...overrides,
+    };
+    const file = path.join(candidateRoot, 'activation-action.json');
+    writeFileSync(file, `${JSON.stringify(action)}\n`, { mode });
+    chmodSync(file, mode);
+    return { base, candidateRoot, transactionId, action, file };
+}
+
+test('readBootstrapActivationAction returns a valid owner-only action as written', (t) => {
+    const { candidateRoot, transactionId, action } = bootstrapFixture(t);
+    assert.deepEqual(readBootstrapActivationAction(candidateRoot, transactionId), action);
+});
+
+test('readBootstrapActivationAction refuses a symlinked action file as unsafe', (t) => {
+    const { base, candidateRoot, transactionId, file } = bootstrapFixture(t);
+    const real = path.join(base, 'real-action.json');
+    renameSync(file, real);
+    symlinkSync(real, file);
+    assert.throws(() => readBootstrapActivationAction(candidateRoot, transactionId), /source_update_activation_action_unsafe/);
+});
+
+test('readBootstrapActivationAction refuses a group/world-readable (0644) action as unsafe', (t) => {
+    const { candidateRoot, transactionId } = bootstrapFixture(t, {}, { mode: 0o644 });
+    assert.throws(() => readBootstrapActivationAction(candidateRoot, transactionId), /source_update_activation_action_unsafe/);
+});
+
+test('readBootstrapActivationAction refuses a wrong schema as invalid', (t) => {
+    const { candidateRoot, transactionId } = bootstrapFixture(t, { schema: 'nassaj-source-update-activation/v0' });
+    assert.throws(() => readBootstrapActivationAction(candidateRoot, transactionId), /source_update_activation_action_invalid/);
+});
+
+test('readBootstrapActivationAction refuses another transaction as invalid', (t) => {
+    const { candidateRoot } = bootstrapFixture(t);
+    assert.throws(() => readBootstrapActivationAction(candidateRoot, 'update-other'), /source_update_activation_action_invalid/);
+});
+
+test('readBootstrapActivationAction refuses a non-canonical manifest path as invalid', (t) => {
+    const { candidateRoot, transactionId } = bootstrapFixture(t, { manifestPath: '/elsewhere/candidate-manifest.json' });
+    assert.throws(() => readBootstrapActivationAction(candidateRoot, transactionId), /source_update_activation_action_invalid/);
 });

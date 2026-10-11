@@ -48,6 +48,32 @@ function provenance(directory) {
     return readJsonFile(path.join(directory, 'BUILD_PROVENANCE.json'));
 }
 
+/**
+ * The replacement process's read of `activation-action.json` at boot
+ * (completeBootstrappedSourceUpdate in server/index.js), exported so the
+ * upgrade-path gate (B-1584) runs the candidate's own boot-time check on the
+ * action the previous release wrote: owner-only regular file, schema,
+ * transaction and canonical manifest path. Strict shape checks stay with the
+ * command-board and recovery readers.
+ * @param {string} candidateRoot `<control root>/candidates/<transactionId>`
+ * @param {string} transactionId the transaction the bootstrap ownership names
+ * @returns {object} the parsed action
+ */
+export function readBootstrapActivationAction(candidateRoot, transactionId) {
+    const actionFile = path.join(candidateRoot, 'activation-action.json');
+    const metadata = lstatSync(actionFile);
+    if (!metadata.isFile() || metadata.isSymbolicLink() || (metadata.mode & 0o077) !== 0) {
+        throw new Error('source_update_activation_action_unsafe');
+    }
+    const action = JSON.parse(readFileSync(actionFile, 'utf8'));
+    if (action?.schema !== 'nassaj-source-update-activation/v1'
+        || action.transactionId !== transactionId
+        || action.manifestPath !== path.join(candidateRoot, 'candidate-manifest.json')) {
+        throw new Error('source_update_activation_action_invalid');
+    }
+    return action;
+}
+
 /** Verify all content identities before the caller closes the final journal gate. */
 export function validateCandidate(options) {
     const projectRoot = realDirectory(options.projectRoot, 'Project root');

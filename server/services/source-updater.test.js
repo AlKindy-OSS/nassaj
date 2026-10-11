@@ -5,9 +5,11 @@ import path from 'path';
 import { execFileSync, spawn } from 'child_process';
 import test from 'node:test';
 
+import { readClientPublicationBlockers } from '../../scripts/lib/client-publication-control.mjs';
 import { isSourceUpdateActionShape } from '../../scripts/lib/source-update-action-schema.mjs';
 
 import { createUpdateMaintenanceGate } from './update-maintenance-gate.js';
+import { createSourceUpdateWorker } from './source-update-worker.js';
 import { assertUpdateStorage, defaultSourceUpdateControlRoot, evaluateUpdateStorage, publicStorageFigures, createSourceUpdater as createSourceUpdaterImpl, defaultGitCheckoutProbe as defaultGitCheckoutProbeExport, releaseGitEnvironment, resolveCandidateScript, resolveGovernedSshCommand, resolveUpdateHostCapability, runFile, SourceUpdateError, sourceUpdateErrorPayload } from './source-updater.js';
 
 // A non-tmpfs device with ample free space keeps the T-1553 storage gate out of
@@ -354,7 +356,9 @@ function governedRunner({
             return response(`${options?.cwd?.includes('/nassaj-source-update/candidates/') ? release : currentHead}\n`);
         }
         if (joined.includes('merge-base --is-ancestor') && joined.includes('/branch')) return response('', tagOnBranch ? 0 : 1);
-        if (joined.includes('merge-base --is-ancestor')) return response('', 0);
+        // Only the source HEAD is an ancestor of the release; any other pair
+        // (e.g. the release against a loaded runtime commit) is unrelated.
+        if (joined.includes('merge-base --is-ancestor')) return response('', joined.endsWith(`${original} ${release}`) ? 0 : 1);
         if (joined.includes(`show ${release}:package.json`)) return response('{"name":"nassaj","version":"1.42.0.1"}\n');
         if (args.includes('merge')) {
             currentHead = release;
@@ -820,3 +824,229 @@ test('independent DB or TMPDIR device exhaustion rejects despite ample candidate
         assert.equal(result.requiredBytes, 2 * 1024 ** 3);
     } finally { fs.rmSync(appRoot, { recursive: true, force: true }); }
 });
+
+// ---------------------------------------------------------------------------
+// B-1585 — lease renewal across long synchronous steps, cleanup of a fenced
+// candidate, and the equal-target guard.
+// ---------------------------------------------------------------------------
+
+/** A lease on a fake clock: assertFence is strict; renewLease is the owner CAS. */
+function fakeLease({ leaseMs = 30_000 } = {}) {
+    const state = { now: 0, expiresAt: leaseMs, owned: true, renewals: 0 };
+    const controller = new AbortController();
+    const fencedError = () => {
+        controller.abort(new Error('source_update_worker_fenced'));
+        return new Error('source_update_worker_fenced');
+    };
+    const assertFence = () => {
+        if (controller.signal.aborted || !state.owned || state.now >= state.expiresAt) throw fencedError();
+        return true;
+    };
+    const renewLease = () => {
+        if (controller.signal.aborted || !state.owned) throw fencedError();
+        state.renewals += 1;
+        state.expiresAt = state.now + leaseMs;
+        return assertFence();
+    };
+    return { state, signal: controller.signal, assertFence, renewLease };
+}
+
+test('B-1585: the lease is renewed across a long synchronous step instead of lapsing', async (t) => {
+    const appRoot = fixture();
+    t.after(() => fs.rmSync(appRoot, { recursive: true, force: true }));
+    const fake = governedRunner();
+    const lease = fakeLease();
+    const update = createSourceUpdater({
+        appRoot, activeSessionCount: () => 0, commandRunner: fake.runner,
+        // The planner is synchronous: the event loop (and the heartbeat) is blocked for 40s.
+        sourcePlanner: () => { lease.state.now += 40_000; return { paths: 0 }; },
+    });
+    const result = await update('1.42.0.1', { signal: lease.signal, assertFence: lease.assertFence, renewLease: lease.renewLease });
+    assert.equal(result.commit, fake.release);
+    assert.ok(lease.state.renewals >= 4, `renewed around each heavy step (${lease.state.renewals})`);
+});
+
+test('B-1585: without renewLease the same long step still fences strictly', async (t) => {
+    const appRoot = fixture();
+    t.after(() => fs.rmSync(appRoot, { recursive: true, force: true }));
+    const fake = governedRunner();
+    const lease = fakeLease();
+    const update = createSourceUpdater({
+        appRoot, activeSessionCount: () => 0, commandRunner: fake.runner,
+        sourcePlanner: () => { lease.state.now += 40_000; return { paths: 0 }; },
+    });
+    await assert.rejects(update('1.42.0.1', { signal: lease.signal, assertFence: lease.assertFence }),
+        /source_update_worker_fenced/);
+});
+
+test('B-1585: a genuinely lost lease aborts, then removes only its own private candidate and refs', async (t) => {
+    const appRoot = fixture();
+    t.after(() => fs.rmSync(appRoot, { recursive: true, force: true }));
+    const fake = governedRunner();
+    const lease = fakeLease();
+    const runner = async (command, args, options) => {
+        const result = await fake.runner(command, args, options);
+        // Another worker takes over while the candidate is being built.
+        if (command === process.execPath && args.includes('--plan')) lease.state.owned = false;
+        return result;
+    };
+    const queued = [];
+    const update = createSourceUpdater({
+        appRoot, activeSessionCount: () => 0, commandRunner: runner,
+        queueRestartAction: async (action) => { queued.push(action); return true; },
+    });
+    await assert.rejects(update('1.42.0.1', { signal: lease.signal, assertFence: lease.assertFence, renewLease: lease.renewLease }),
+        /source_update_worker_fenced/);
+    assert.deepEqual(queued, []);
+    const candidates = path.join(appRoot, '.git', 'nassaj-source-update', 'candidates');
+    assert.deepEqual(fs.existsSync(candidates) ? fs.readdirSync(candidates) : [], []);
+    const removed = fake.calls.filter(({ args }) => args.includes('worktree') && args.includes('remove'));
+    assert.equal(removed.length, 1);
+    assert.match(removed[0].args.at(-1), /\/candidates\/update-[^/]+\/source$/);
+    const refs = fake.calls.filter(({ args }) => args.includes('update-ref') && args.includes('-d')).map(({ args }) => args.at(-1));
+    assert.equal(refs.length, 2);
+    assert.ok(refs.every((ref) => ref.startsWith('refs/nassaj-update/')));
+});
+
+test('B-1585: a release equal to the loaded runtime commit is refused before any staging', async (t) => {
+    const appRoot = fixture();
+    t.after(() => fs.rmSync(appRoot, { recursive: true, force: true }));
+    const fake = governedRunner();
+    const update = createSourceUpdater({
+        appRoot, activeSessionCount: () => 0, commandRunner: fake.runner,
+        loadedRuntimeCommit: () => fake.release,
+    });
+    await assert.rejects(update('1.42.0.1'), (error) => error.code === 'source_update_target_already_loaded');
+    assert.equal(fake.calls.some(({ args }) => args.includes('worktree') && args.includes('add')), false);
+    assert.equal(fake.calls.some(({ command, args }) => command === process.execPath && args.includes('--plan')), false);
+});
+
+/** The governed runner, with the ancestry of the release against `loaded` under test control. */
+function ancestryRunner(fake, { loaded, releaseInLoaded = false, fastForward = true }) {
+    return async (command, args, options) => {
+        const joined = args.join(' ');
+        if (joined.includes('merge-base --is-ancestor') && args.at(-1) === loaded) {
+            fake.calls.push({ command, args, options });
+            return response('', releaseInLoaded ? 0 : 1);
+        }
+        if (joined.includes('merge-base --is-ancestor') && !joined.includes('/branch') && !fastForward) {
+            fake.calls.push({ command, args, options });
+            return response('', 1);
+        }
+        return fake.runner(command, args, options);
+    };
+}
+
+/** A one-job store for driving the real worker over the real updater. */
+function singleJobStore(state = 'staging') {
+    const job = {
+        id: 'job-ancestor', state, worker_fence: 3, expected_version: '1.42.0.1', strategy: 'git-checkout-v2',
+        release_id: '1', release_tag: 'v1.42.0.1', release_asset_id: '1', release_asset_name: 'source',
+        release_asset_size: 1, release_asset_sha256: 'e'.repeat(64), release_commit: 'b'.repeat(40),
+    };
+    let claimable = true;
+    return {
+        job,
+        claim() { if (!claimable) return null; claimable = false; return { ...job }; },
+        renew: () => true, assertFence: () => true, release: () => true,
+        listRuntimeReferences: () => [], listReceipts: () => [],
+        appendReceipt: (_id, fence) => ({ sequence: 1, factsJson: '{}', factsSha256: 'f'.repeat(64), workerFence: fence }),
+        transition(_id, _fence, expected, next, fields = {}) {
+            if (!expected.includes(job.state)) return false;
+            job.state = next; Object.assign(job, fields); return true;
+        },
+    };
+}
+
+test('B-1585: a node already running a newer release refuses the older target before any build', async (t) => {
+    // The node was installed to 2.3.1.3 (loaded) while a job for 2.3.1.2 (release) was stranded.
+    const appRoot = fixture();
+    t.after(() => fs.rmSync(appRoot, { recursive: true, force: true }));
+    const fake = governedRunner();
+    const loaded = 'd'.repeat(40);
+    const queued = [];
+    const update = createSourceUpdater({
+        appRoot, activeSessionCount: () => 0, loadedRuntimeCommit: () => loaded,
+        commandRunner: ancestryRunner(fake, { loaded, releaseInLoaded: true }),
+        queueRestartAction: async (action) => { queued.push(action); return true; },
+    });
+    await assert.rejects(update('1.42.0.1'), (error) => error.code === 'source_update_target_not_newer' && error.status === 409);
+    assert.ok(fake.calls.some(({ args }) => args.join(' ') === `-c core.hooksPath=/dev/null merge-base --is-ancestor ${fake.release} ${loaded}`));
+    assert.equal(fake.calls.some(({ args }) => args.includes('worktree') && args.includes('add')), false);
+    assert.deepEqual(queued, []);
+});
+
+test('B-1585: the worker settles a stranded older-target job superseded, never failed and never queued', async (t) => {
+    const appRoot = fixture();
+    t.after(() => fs.rmSync(appRoot, { recursive: true, force: true }));
+    const fake = governedRunner();
+    const loaded = 'd'.repeat(40);
+    const queued = [];
+    const update = createSourceUpdater({
+        appRoot, activeSessionCount: () => 0, loadedRuntimeCommit: () => loaded,
+        commandRunner: ancestryRunner(fake, { loaded, releaseInLoaded: true }),
+        queueRestartAction: async (action) => { queued.push(action); return true; },
+    });
+    const jobs = singleJobStore('staging');
+    const worker = createSourceUpdateWorker({
+        jobs, identity: { workerId: 'w', pid: 1, startTicks: '1', bootId: 'b', pgid: 1 },
+        loadedRuntimeCommit: () => loaded,
+        resolveRelease: async () => { throw new Error('must not resolve'); },
+        runUpdate: (job, _release, context) => update(job.expected_version, {
+            signal: context.signal, assertFence: context.assertFence, renewLease: context.renewLease,
+        }),
+    });
+    assert.equal(await worker.processOne(), false);
+    assert.equal(jobs.job.state, 'superseded');
+    assert.equal(jobs.job.error_code, 'source_update_target_not_newer');
+    assert.equal(fake.calls.some(({ command, args }) => command === process.execPath && args.includes('--plan')), false);
+    assert.deepEqual(queued, []);
+});
+
+test('B-1585: a target not contained in the loaded runtime still stages normally', async (t) => {
+    const appRoot = fixture();
+    t.after(() => fs.rmSync(appRoot, { recursive: true, force: true }));
+    const fake = governedRunner();
+    const loaded = 'd'.repeat(40);
+    const update = createSourceUpdater({
+        appRoot, activeSessionCount: () => 0, loadedRuntimeCommit: () => loaded,
+        commandRunner: ancestryRunner(fake, { loaded, releaseInLoaded: false }),
+    });
+    const result = await update('1.42.0.1');
+    assert.equal(result.commit, fake.release);
+});
+
+test('non_fast_forward: a release the source HEAD is not an ancestor of is refused before any build', async (t) => {
+    const appRoot = fixture();
+    t.after(() => fs.rmSync(appRoot, { recursive: true, force: true }));
+    const fake = governedRunner();
+    const update = createSourceUpdater({
+        appRoot, activeSessionCount: () => 0,
+        commandRunner: ancestryRunner(fake, { loaded: null, fastForward: false }),
+    });
+    await assert.rejects(update('1.42.0.1'), (error) => error.code === 'non_fast_forward' && error.status === 409);
+    assert.ok(fake.calls.some(({ args }) => args.join(' ').endsWith(`merge-base --is-ancestor ${fake.original} ${fake.release}`)));
+    assert.equal(fake.calls.some(({ args }) => args.includes('worktree') && args.includes('add')), false);
+});
+
+for (const [outcome, released] of [['failed', true], ['not_owner', false], [undefined, false]]) {
+    test(`B-1585: a fenced attempt fails its release waiter only when the job is proven terminal (${outcome})`, async (t) => {
+        const appRoot = fixture();
+        t.after(() => fs.rmSync(appRoot, { recursive: true, force: true }));
+        const fake = governedRunner();
+        const lease = fakeLease();
+        const runner = async (command, args, options) => {
+            const result = await fake.runner(command, args, options);
+            if (command === process.execPath && args.includes('--plan')) lease.state.owned = false;
+            return result;
+        };
+        const settleCalls = [];
+        const update = createSourceUpdater({ appRoot, activeSessionCount: () => 0, commandRunner: runner });
+        await assert.rejects(update('1.42.0.1', {
+            signal: lease.signal, assertFence: lease.assertFence, renewLease: lease.renewLease,
+            ...(outcome ? { settleLostLease: async () => { settleCalls.push(1); return outcome; } } : {}),
+        }), /source_update_worker_fenced/);
+        assert.equal(settleCalls.length, outcome ? 1 : 0);
+        assert.equal(readClientPublicationBlockers(appRoot).fullUpdates.length, released ? 0 : 1);
+    });
+}

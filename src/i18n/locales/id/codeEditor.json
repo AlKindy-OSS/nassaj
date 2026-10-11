@@ -37,6 +37,8 @@
   },
   "binaryFile": {
     "title": "Berkas Biner",
-    "message": "Berkas \"{{fileName}}\" tidak dapat ditampilkan di editor teks karena merupakan berkas biner."
+    "message": "Berkas \"{{fileName}}\" tidak dapat ditampilkan di editor teks karena merupakan berkas biner.",
+    "download": "Unduh",
+    "downloadError": "Tidak dapat mengunduh berkas."
   }
 }
