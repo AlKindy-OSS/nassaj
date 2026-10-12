@@ -67,6 +67,13 @@ export function isSourceUpdateLeaseOwnerAlive(control: Record<string, unknown>):
   try { process.kill(pid, 0); return true; } catch (error) { return (error as { code?: string }).code === 'EPERM'; }
 }
 
+/** Release the worker lease and the active slot, only while `jobId` holds them. */
+function releaseControlOf(db: ReturnType<typeof getConnection>, jobId: string): void {
+  db.prepare(`UPDATE source_update_control SET active_job_id = NULL, worker_id = NULL,
+      pid = NULL, start_ticks = NULL, boot_id = NULL, pgid = NULL, lease_expires_at = NULL,
+      updated_at = CURRENT_TIMESTAMP WHERE singleton = 1 AND active_job_id = ?`).run(jobId);
+}
+
 function mapJob(row: JobRow | undefined): JobRow | null {
   return row ? { ...row } : null;
 }
@@ -502,9 +509,7 @@ export const sourceUpdateJobsDb = {
         next, identity.jobId, identity.transactionId, identity.activationIdentitySha256, ...expected,
       ).changes === 1;
       if (changed && terminal) {
-        db.prepare(`UPDATE source_update_control SET active_job_id = NULL, worker_id = NULL,
-          pid = NULL, start_ticks = NULL, boot_id = NULL, pgid = NULL, lease_expires_at = NULL,
-          updated_at = CURRENT_TIMESTAMP WHERE singleton = 1 AND active_job_id = ?`).run(identity.jobId);
+        releaseControlOf(db, identity.jobId);
       }
       return changed;
     })();
@@ -533,6 +538,72 @@ export const sourceUpdateJobsDb = {
       }
       this.release(jobId, workerId, fence);
       return { outcome: receipt ? 'failed' as const : 'released' as const, state: owned.state, receipt };
+    })();
+  },
+
+  /** The singleton worker-lease row (read only). */
+  readControl() {
+    const row = getConnection().prepare('SELECT * FROM source_update_control WHERE singleton = 1').get() as Record<string, unknown> | undefined;
+    return row ? { ...row } : null;
+  },
+
+  /** Whether any detached effect of this job is still recorded as running. */
+  hasRunningEffects(jobId: string): boolean {
+    return Boolean(getConnection().prepare(
+      "SELECT 1 FROM source_update_effects WHERE job_id = ? AND state = 'running' LIMIT 1",
+    ).get(jobId));
+  },
+
+  /**
+   * B-1605: the owner abandons a stuck job. The caller has already proven that
+   * nothing was launched; this CAS on (state, progress_seq) makes that proof and
+   * the write agree on the same row. The job becomes `failed` with `code`, a
+   * human-intervention receipt is appended and the control lease is released.
+   * Re-running on an already abandoned job reports `already` (idempotent).
+   */
+  abandonByOwner(input: { jobId: string; ownerId: number; expectedState: SourceUpdateState; expectedProgressSeq: number;
+    code: string; message: string; facts: Record<string, unknown> }) {
+    const db = getConnection();
+    return db.transaction(() => {
+      const job = db.prepare('SELECT * FROM source_update_jobs WHERE id = ? AND owner_id = ?')
+        .get(input.jobId, input.ownerId) as JobRow | undefined;
+      if (!job) return { outcome: 'not_found' as const, job: null, receipt: null };
+      if (job.state === 'failed' && job.error_code === input.code) return { outcome: 'already' as const, job: mapJob(job), receipt: null };
+      if (TERMINAL.has(job.state)) return { outcome: 'terminal' as const, job: mapJob(job), receipt: null };
+      if (job.state !== input.expectedState || Number(job.progress_seq) !== input.expectedProgressSeq) {
+        return { outcome: 'changed' as const, job: mapJob(job), receipt: null };
+      }
+      const factsJson = JSON.stringify(input.facts);
+      const factsSha256 = crypto.createHash('sha256').update(factsJson).digest('hex');
+      const next = db.prepare('SELECT COALESCE(MAX(sequence), 0) + 1 AS sequence FROM source_update_receipts WHERE job_id = ?')
+        .get(input.jobId) as { sequence: number };
+      db.prepare(`INSERT INTO source_update_receipts(job_id, sequence, worker_fence, phase, kind, facts_json, facts_sha256)
+        VALUES (?, ?, ?, ?, 'recovery', ?, ?)`).run(input.jobId, next.sequence, job.worker_fence ?? 0, job.state, factsJson, factsSha256);
+      db.prepare(`UPDATE source_update_jobs SET state = 'failed', error_code = ?, error_message = ?,
+          progress_seq = progress_seq + 1, updated_at = CURRENT_TIMESTAMP, completed_at = CURRENT_TIMESTAMP
+        WHERE id = ? AND state = ? AND progress_seq = ?`).run(input.code, input.message, input.jobId, job.state, input.expectedProgressSeq);
+      releaseControlOf(db, input.jobId);
+      return { outcome: 'abandoned' as const, job: this.getById(input.jobId), receipt: { sequence: next.sequence, factsSha256 } };
+    })();
+  },
+
+  /**
+   * B-1603: settle a `restart_queued` job at boot with a named terminal state
+   * and code, after its recovery receipt. Releases the control lease. Returns
+   * false when the job is no longer `restart_queued` (idempotent).
+   */
+  settleRestartQueued(identity: { jobId: string; transactionId: string; activationIdentitySha256: string },
+    next: 'failed' | 'superseded', code: string, message: string): boolean {
+    const db = getConnection();
+    return db.transaction(() => {
+      const changed = db.prepare(`UPDATE source_update_jobs SET state = ?, error_code = ?, error_message = ?,
+          progress_seq = progress_seq + 1, updated_at = CURRENT_TIMESTAMP, completed_at = CURRENT_TIMESTAMP
+        WHERE id = ? AND transaction_id = ? AND activation_identity_sha256 = ? AND state = 'restart_queued'`)
+        .run(next, code, message, identity.jobId, identity.transactionId, identity.activationIdentitySha256).changes === 1;
+      if (changed) {
+        releaseControlOf(db, identity.jobId);
+      }
+      return changed;
     })();
   },
 

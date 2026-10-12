@@ -160,3 +160,84 @@ test('readSourceHead reads a branch ref, loose or packed, without launching git 
     git('checkout', '-q', '--detach');
     assert.equal(readSourceHead(root), head);
 });
+
+// ── B-1603: a queued job whose action file is missing or unusable ──────────
+const OPEN_GATE = { state: 'OPEN', phase: 'ACTIVE_VERIFIED', gateClosed: false, degraded: null, oidAdmissionIntentPending: false,
+    transactionId: 'update-previous-transaction-0001' };
+type GateRun = { runtimeCommit?: string | null; head?: string | null; gate?: () => unknown };
+const runWithGate = (options: GateRun = {}) => reconcileSupersededQueuedSourceUpdates({
+    runtimeCommit: options.runtimeCommit ?? PREVIOUS, readHead: () => options.head ?? ORIGINAL, controlRoot,
+    readGate: options.gate ?? (() => OPEN_GATE),
+});
+const jobRow = (id: string) => getConnection().prepare('SELECT * FROM source_update_jobs WHERE id = ?').get(id) as Record<string, any>;
+const actionFile = (id: string) => path.join(controlRoot, 'candidates', jobRow(id).transaction_id, 'activation-action.json');
+/** The receipt a sealed job now carries (worker facts), naming the commit it was prepared from. */
+const recordOriginalHead = (id: string) => {
+    const row = jobRow(id);
+    sourceUpdateJobsDb.appendActivationReceipt({ jobId: id, transactionId: row.transaction_id,
+        activationIdentitySha256: row.activation_identity_sha256 }, 'restart_queued', 'done',
+    { transactionId: row.transaction_id, originalHead: ORIGINAL, previousRuntimeOid: PREVIOUS });
+};
+
+test('B-1603: action file missing, HEAD still at originalHead: failed action_missing, row failed, lock released', () => {
+    const job = queuedJob();
+    recordOriginalHead(job.id);
+    fs.rmSync(actionFile(job.id));
+    getConnection().prepare('UPDATE source_update_control SET active_job_id = ? WHERE singleton = 1').run(job.id);
+    // The leftover descriptor of the finished previous transaction is inert.
+    fs.writeFileSync(path.join(controlRoot, 'bootstrap-handoff.json'), `${JSON.stringify({ transactionId: OPEN_GATE.transactionId })}\n`);
+    const result = runWithGate().find((entry) => entry.jobId === job.id);
+    assert.deepEqual(result, { jobId: job.id, settled: true, state: 'failed', code: 'source_update_action_missing', rows: 1 });
+    const row = jobRow(job.id);
+    assert.deepEqual([row.state, row.error_code], ['failed', 'source_update_action_missing']);
+    const action = pendingServerActionsDb.getById(job.rowId!)!;
+    assert.deepEqual([action.status, action.error], ['failed', 'source_update_action_missing']);
+    assert.equal(getConnection().prepare('SELECT active_job_id FROM source_update_control WHERE singleton = 1').pluck().get(), null);
+    const last = (sourceUpdateJobsDb.listReceipts(job.id) as { kind: string; facts_json: string }[]).at(-1)!;
+    assert.deepEqual([last.kind, JSON.parse(last.facts_json).code], ['recovery', 'source_update_action_missing']);
+    assert.ok(auditLogDb.recent(20).some((entry) => entry.action === 'source_update_action_missing_at_boot'));
+    // Idempotent, and the node can start a new update.
+    assert.equal(runWithGate().some((entry) => entry.jobId === job.id), false);
+    const key = crypto.randomUUID();
+    const fresh = sourceUpdateJobsDb.createOrReuse({ id: key, ownerId, expectedVersion: '1.0.0.2', strategy: 'git-checkout-v2',
+        idempotencyKeyHash: hashSourceUpdateIdempotencyKey(key),
+        requestFingerprint: sourceUpdateRequestFingerprint(ownerId, '1.0.0.2', 'git-checkout-v2') });
+    assert.equal(fresh.reused, false);
+    getConnection().prepare("UPDATE source_update_jobs SET state = 'failed' WHERE id = ?").run(key);
+    fs.rmSync(path.join(controlRoot, 'bootstrap-handoff.json'));
+    job.retire();
+});
+
+test('B-1603: unbound action, HEAD and runtime moved past originalHead: superseded source_moved', () => {
+    const job = queuedJob();
+    // The strict reader refuses it (its target no longer matches the job); its bytes still bind the job.
+    getConnection().prepare('UPDATE source_update_jobs SET release_commit = ? WHERE id = ?').run('e'.repeat(40), job.id);
+    const result = runWithGate({ head: 'f'.repeat(40), runtimeCommit: 'f'.repeat(40) }).find((entry) => entry.jobId === job.id);
+    assert.deepEqual(result, { jobId: job.id, settled: true, state: 'superseded', code: 'source_update_source_moved', rows: 1 });
+    assert.deepEqual([jobRow(job.id).state, jobRow(job.id).error_code], ['superseded', 'source_update_source_moved']);
+    assert.equal(pendingServerActionsDb.getById(job.rowId!)?.status, 'failed');
+    job.retire();
+});
+
+test('B-1603: a missing action is left alone when nothing proves the outcome or the gate is not open', () => {
+    const cases: [string, boolean, GateRun][] = [
+        ['no record of originalHead', false, {}],
+        ['gate MANUAL', true, { gate: () => ({ ...OPEN_GATE, state: 'MANUAL', gateClosed: true }) }],
+        ['gate unreadable', true, { gate: () => { throw new Error('update_existing_control_unsafe'); } }],
+        ['HEAD moved but runtime still previous', true, { head: 'f'.repeat(40) }],
+        ['HEAD unreadable', true, { head: 'not-a-commit' }],
+        ['pending handoff of another transaction', true, {}],
+    ];
+    for (const [label, withReceipt, options] of cases) {
+        const job = queuedJob();
+        if (withReceipt) recordOriginalHead(job.id);
+        fs.rmSync(actionFile(job.id));
+        const handoff = path.join(controlRoot, 'bootstrap-handoff.json');
+        if (label.startsWith('pending handoff')) fs.writeFileSync(handoff, '{"transactionId":"update-not-the-journal-tx"}\n');
+        else fs.rmSync(handoff, { force: true });
+        assert.deepEqual(runWithGate(options).find((entry) => entry.jobId === job.id), { jobId: job.id, settled: false }, label);
+        assert.equal(jobRow(job.id).state, 'restart_queued', label);
+        assert.equal(pendingServerActionsDb.getById(job.rowId!)?.status, 'executing', label);
+        job.retire();
+    }
+});

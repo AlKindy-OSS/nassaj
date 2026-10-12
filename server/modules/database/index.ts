@@ -95,7 +95,7 @@ export { responseTurnMetricsDb } from '@/modules/database/repositories/response-
 export type { ResponseTurnMetric } from '@/modules/database/repositories/response-turn-metrics.db.js';
 export { notificationPreferencesDb } from '@/modules/database/repositories/notification-preferences.js';
 export { pendingServerActionsDb, RESTART_DEFERRAL_REASON_CODES } from '@/modules/database/repositories/pending-server-actions.db.js';
-export { sourceUpdateJobsDb, hashSourceUpdateIdempotencyKey, sourceUpdateRequestFingerprint } from '@/modules/database/repositories/source-update-jobs.db.js';
+export { sourceUpdateJobsDb, hashSourceUpdateIdempotencyKey, sourceUpdateRequestFingerprint, isSourceUpdateLeaseOwnerAlive } from '@/modules/database/repositories/source-update-jobs.db.js';
 export type { SourceUpdateState, SourceUpdateStrategy } from '@/modules/database/repositories/source-update-jobs.db.js';
 export type {
   InsertPendingServerAction,

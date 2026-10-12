@@ -34,6 +34,7 @@ import { isResolvedPathInsideRootReal } from './utils/path-guard.js';
 import { classifySecretPath } from './shared/secret-path-guard.js';
 import { isSecretFileConfirmed, sendSecretFileConfirmationRequired } from './utils/secret-file-access.js';
 import { buildPendingAction } from './services/server-actions.js';
+import { toActiveUpdateJobPayload } from './routes/update-job-abandon.js';
 import { isShareableDocument, saveSharedDocumentAtomically } from './services/document-share-files.js';
 
 const INDEX_PATH = path.join(path.dirname(fileURLToPath(import.meta.url)), 'index.js');
@@ -401,9 +402,10 @@ test('system update — active discovery is guarded, read-only and handles a mis
   const job = { id: 'owned', state: 'awaiting_sessions', expected_version: '2.2.0.1' };
   for (const ownerId of [1, 2, undefined, -1]) {
     const calls = [];
-    const handler = new Function('sourceUpdateJobsDb', `return (req, res) => ${body};`)({
+    const handler = new Function('sourceUpdateJobsDb', 'toActiveUpdateJobPayload', 'updateJobAbandoner',
+      `return (req, res) => ${body};`)({
       getActiveForOwner(id) { calls.push(id); return id === 1 ? job : null; },
-    });
+    }, toActiveUpdateJobPayload, { evaluate: () => ({ abandonable: false, abandonBlockedReason: 'gate_closed' }) });
     const { res, sent } = makeResponseDouble();
     res.set = (key, value) => { assert.equal(key, 'Cache-Control'); assert.equal(value, 'no-store'); };
     handler({ user: { id: ownerId } }, res);
@@ -413,8 +415,19 @@ test('system update — active discovery is guarded, read-only and handles a mis
     } else {
       assert.deepEqual(calls, [ownerId]);
       assert.equal(sent[0].payload.job?.jobId ?? null, ownerId === 1 ? 'owned' : null);
+      // B-1605: the payload says whether the dialog may offer "abandon", and why not.
+      if (ownerId === 1) {
+        assert.deepEqual([sent[0].payload.job.abandonable, sent[0].payload.job.abandonBlockedReason], [false, 'gate_closed']);
+      }
     }
   }
+});
+
+test('B-1605: the polled job snapshot carries the same abandon fields as /jobs/active', () => {
+  const start = INDEX_SOURCE.indexOf("app.get('/api/system/update/jobs/:jobId'");
+  assert.ok(start > 0);
+  const body = sliceBalancedBlock(INDEX_SOURCE, start);
+  assert.ok(body.includes('...abandonFields(updateJobAbandoner.evaluate(job))'));
 });
 
 test('system update — persists exact advertised version and returns the async 202 contract', async () => {

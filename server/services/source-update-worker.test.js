@@ -65,6 +65,26 @@ test('worker persists exact discovery, seals before queue, and reaches restart_q
     assert.equal(jobs.job.release_asset_sha256, release.assetSha256);
 });
 
+test('B-1603: the queued receipts name originalHead and previousRuntimeOid only when they are commits', async () => {
+    for (const [extra, expected] of [
+        [{ originalHead: 'f'.repeat(40), previousRuntimeOid: '1'.repeat(40) }, { originalHead: 'f'.repeat(40), previousRuntimeOid: '1'.repeat(40) }],
+        [{ originalHead: 'HEAD', previousRuntimeOid: null }, {}],
+    ]) {
+        const jobs = fakeJobs();
+        const worker = createSourceUpdateWorker({
+            jobs, identity, resolveRelease: async () => ({ release }),
+            runUpdate: async () => ({ ...updateResult, ...extra }),
+        });
+        assert.equal(await worker.processOne(), true);
+        const queued = jobs.calls.find(([kind, phase, receiptKind]) => kind === 'receipt' && phase === 'restart_queued' && receiptKind === 'intent');
+        assert.deepEqual(queued[3], {
+            transactionId: updateResult.transactionId, releaseCommit: updateResult.commit,
+            expectedServerBuildId: updateResult.expectedServerBuildId, expectedClientBuildId: updateResult.expectedClientBuildId,
+            activationIdentitySha256: updateResult.activationIdentitySha256, ...expected,
+        });
+    }
+});
+
 test('renew failure aborts in-flight work and permits no later transition or receipt', async () => {
     const jobs = fakeJobs('staging', { renew: false });
     const worker = createSourceUpdateWorker({

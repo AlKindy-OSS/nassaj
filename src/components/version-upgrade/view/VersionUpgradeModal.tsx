@@ -17,6 +17,7 @@ import {
     parseBlockedStorage,
     phaseListForStrategy,
     pollingDelay,
+    mergeAbandonFields,
     readStoredUpdateAttempt,
     RELEASE_LAYOUT_V2_PHASES,
     safeStatusPath,
@@ -36,6 +37,7 @@ import { UpdateConsentPanel } from "./UpdateConsentPanel";
 import { DeferralWaitingPanel } from "./DeferralWaitingPanel";
 import { ScheduledWaitPanel } from "./ScheduledWaitPanel";
 import { CloseTerminalsAction } from "./CloseTerminalsAction";
+import { AbandonUpdateAction } from "./AbandonUpdateAction";
 
 type Translate = ReturnType<typeof useTranslation>['t'];
 
@@ -620,7 +622,7 @@ export function VersionUpgradeModal({
                     return;
                 }
                 const snapshot = normalizeUpdateJob(data, statusPath);
-                setJob(snapshot);
+                setJob(prev => mergeAbandonFields(prev, snapshot));
                 setUpdateError('');
                 if (isTerminalUpdateState(snapshot.state)) {
                     if (snapshot.state !== 'manual_recovery_required') clearStoredUpdateAttempt();
@@ -705,7 +707,7 @@ export function VersionUpgradeModal({
                 };
                 stopPolling();
                 storeUpdateAttempt(attempt);
-                setJob(snapshot);
+                setJob(prev => mergeAbandonFields(prev, snapshot));
                 setReused(true);
                 pollJob(attempt);
             })
@@ -1096,6 +1098,23 @@ export function VersionUpgradeModal({
                                     }}
                                 />
                             </div>
+                        )}
+
+                        {/* Owner-only: stop a stuck attempt without a restart */}
+                        {job && (
+                            <AbandonUpdateAction
+                                job={job}
+                                jobId={jobIdFromUrl(job.statusUrl)}
+                                onAbandoned={(payload) => {
+                                    const snapshot = normalizeUpdateJob(payload, job.statusUrl);
+                                    if (isTerminalUpdateState(snapshot.state)) {
+                                        stopPolling();
+                                        clearStoredUpdateAttempt();
+                                    }
+                                    setJob(snapshot);
+                                    setUpdateError('');
+                                }}
+                            />
                         )}
 
                         {/* Error details for failed states */}

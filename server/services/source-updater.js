@@ -964,6 +964,9 @@ export function createSourceUpdater({
                     expectedServerBuildId: manifest.serverBuildId,
                     expectedClientBuildId: manifest.clientBuildId,
                     activationIdentitySha256,
+                    // B-1603: recorded in the job's receipts so boot can still
+                    // judge the job if its action file is later lost.
+                    originalHead, previousRuntimeOid,
                 };
             } catch (error) {
                 if (!jobIdentity.signal?.aborted && restartQueued && typeof removeRestartAction === 'function') {

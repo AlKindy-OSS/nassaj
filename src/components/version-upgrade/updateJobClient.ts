@@ -190,7 +190,17 @@ export interface UpdateJobSnapshot {
   scheduledDueSoon?: ScheduledDueSoon | null;
   /** Which client-asset files drifted, when the failure was a manifest mismatch (T-1804). */
   manifestDrift?: ManifestDrift | null;
+  /** Owner may stop this stuck attempt without a restart (server-computed). */
+  abandonable?: boolean;
+  /** Why it cannot be stopped now; null when it can, or when the server sent none. */
+  abandonBlockedReason?: AbandonBlockedReason | null;
 }
+
+export type AbandonBlockedReason = 'in_flight_restart' | 'gate_closed' | 'head_moved_unverified' | 'terminal';
+
+const ABANDON_BLOCKED_REASONS: ReadonlyArray<string> = [
+  'in_flight_restart', 'gate_closed', 'head_moved_unverified', 'terminal',
+];
 
 /** One drift group: how many files, and a bounded sample of dist-relative paths. */
 export interface ManifestDriftGroup {
@@ -509,7 +519,79 @@ export function normalizeUpdateJob(payload: unknown, fallbackStatusUrl?: string)
     deferral: normalizeDeferral(source.deferral),
     scheduledDueSoon: normalizeScheduledDueSoon(source.scheduledDueSoon),
     manifestDrift: normalizeManifestDrift(source.manifestDrift),
+    // Strict boolean; an omitted/malformed flag stays `undefined` (unknown) so a
+    // snapshot from an endpoint that lacks it can be merged, not read as false.
+    abandonable: typeof source.abandonable === 'boolean' ? source.abandonable : undefined,
+    abandonBlockedReason: source.abandonBlockedReason === null ? null
+      : typeof source.abandonBlockedReason === 'string'
+        && ABANDON_BLOCKED_REASONS.includes(source.abandonBlockedReason)
+        ? source.abandonBlockedReason as AbandonBlockedReason : undefined,
   };
+}
+
+/**
+ * Keep the last known abandon fields when a polled snapshot of the SAME job
+ * omits them (an endpoint that does not carry them must not erase the button).
+ * A different job, or a snapshot that states the fields, always wins.
+ */
+export function mergeAbandonFields(
+  prev: UpdateJobSnapshot | null,
+  next: UpdateJobSnapshot,
+): UpdateJobSnapshot {
+  if (!prev || !prev.statusUrl || prev.statusUrl !== next.statusUrl) return next;
+  return {
+    ...next,
+    abandonable: next.abandonable ?? prev.abandonable,
+    abandonBlockedReason: next.abandonBlockedReason === undefined
+      ? prev.abandonBlockedReason : next.abandonBlockedReason,
+  };
+}
+
+/**
+ * Outcome of the owner's "stop stuck update":
+ * - `abandoned`: the server settled the attempt; `job` is its fresh payload.
+ * - `error`: a refusal with the server code, HTTP status and (for 409
+ *   `update_not_abandonable`) the sanitized `reason`.
+ */
+export type AbandonUpdateResult =
+  | { kind: 'abandoned'; job: unknown }
+  | { kind: 'error'; code: string; status: number; reason: AbandonBlockedReason | null };
+
+/**
+ * `POST /api/system/update/jobs/:jobId/abandon` (owner only). Never throws —
+ * a network failure is `{ kind: 'error', code: 'network', status: 0 }`.
+ */
+export async function abandonUpdateJob(
+  fetcher: (url: string, init?: RequestInit) => Promise<Response>,
+  jobId: string,
+): Promise<AbandonUpdateResult> {
+  let response: Response;
+  try {
+    response = await fetcher(`/api/system/update/jobs/${encodeURIComponent(jobId)}/abandon`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ confirm: true }),
+    });
+  } catch {
+    return { kind: 'error', code: 'network', status: 0, reason: null };
+  }
+  let body: Record<string, unknown> = {};
+  try {
+    const parsed = await response.json() as unknown;
+    if (parsed && typeof parsed === 'object') body = parsed as Record<string, unknown>;
+  } catch { /* an unreadable body falls through to the status-derived code */ }
+  if (response.ok && body.abandoned === true) return { kind: 'abandoned', job: body.job };
+  const err = body.error && typeof body.error === 'object' ? body.error as Record<string, unknown> : {};
+  const code = typeof err.code === 'string' ? err.code : '';
+  const rawReason = typeof err.reason === 'string' ? err.reason : body.reason;
+  const reason = typeof rawReason === 'string' && ABANDON_BLOCKED_REASONS.includes(rawReason)
+    ? rawReason as AbandonBlockedReason : null;
+  if (code) return { kind: 'error', code, status: response.status, reason };
+  if (response.status === 429) return { kind: 'error', code: 'rate_limited', status: 429, reason: null };
+  if (response.status === 401 || response.status === 403) {
+    return { kind: 'error', code: 'forbidden', status: response.status, reason: null };
+  }
+  return { kind: 'error', code: 'unknown', status: response.status, reason: null };
 }
 
 export function readStoredUpdateAttempt(): StoredUpdateAttempt | null {

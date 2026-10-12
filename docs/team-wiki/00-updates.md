@@ -1,3 +1,20 @@
+## 2.3.1.5 — 2026-10-13
+
+زرّ «إيقاف التحديث العالق» للمالك (B-1605): POST /api/system/update/jobs/:id/abandon، مغلق عند الشك
+(يرفض أثناء إعادة تشغيل أو تفعيل جارٍ، أو البوابة مغلقة، أو ما لم يثبت أن الخادم على نسخة ما قبل التحديث)،
+يسوّي المهمة العالقة وصفّ إعادة التشغيل الآمن ويحرّر قفل التحديث بلا إعادة تشغيل. يسوّي الإقلاع مهام
+restart_queued التي فُقد ملف تفعيلها (B-1603)، ويُحكم على ملفات تسليم الإقلاع البائتة بسجلّ الصيانة،
+ويسجّل العامل originalHead وpreviousRuntimeOid. العُقد على 2.3.1.0 أو 2.3.1.1 تحتاج الجسر لمرة واحدة
+إلى 2.3.1.5 (B-1583)، وبعده تُسوّى المهمة العالقة عند الإقلاع ويعود الزرّ للعمل.
+
+Owner "Stop stuck update" button (B-1605): POST /api/system/update/jobs/:id/abandon, fail-closed (refused
+while a restart or activation is in flight, the gate is closed, or the runtime is not provably
+pre-update); settles the stuck job and its safe-restart row and releases the update lock without
+restarting. Boot settles restart_queued jobs whose activation file is missing (B-1603), stale bootstrap
+handoff files are judged by the maintenance journal, and the worker records originalHead and
+previousRuntimeOid. Nodes on 2.3.1.0 or 2.3.1.1 need the one-time bridge to 2.3.1.5 (B-1583); after it
+the stuck job settles at boot and the button works again.
+
 ## 2.3.1.4 — 2026-10-12
 
 مفاتيح المزوّدين الموحّدة (ADR-200) مفعّلة افتراضياً: مخزن معتمد واحد لكل مستخدم يوزّع على Claude وCodex

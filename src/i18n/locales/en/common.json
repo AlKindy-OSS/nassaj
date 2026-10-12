@@ -805,6 +805,33 @@
       "more": "… and {{count}} more",
       "recoveryAvailable": "Move any hand-placed file out of the Nassaj tree, then publish it with the Nassaj public page publisher and retry the update.",
       "recoveryUnavailable": "Move any hand-placed file out of the Nassaj tree and retry the update."
+    },
+    "abandon": {
+      "button": "Stop stuck update",
+      "confirmTitle": "Stop the stuck update?",
+      "confirmMessage": "This stops the stuck update attempt without restarting the server. Afterwards you can start a new update. Do you want to continue?",
+      "confirm": "Yes, stop the update",
+      "cancel": "Cancel",
+      "done": "The stuck update attempt was stopped. You can now start a new update.",
+      "blocked": {
+        "in_flight_restart": "This update cannot be stopped right now because a restart is in progress. Wait for it to finish.",
+        "gate_closed": "This update cannot be stopped right now because the update gate is closed.",
+        "head_moved_unverified": "This update cannot be stopped right now because the code state changed and the server could not verify it."
+      },
+      "errors": {
+        "jobNotFound": "This update no longer exists. Close this window and open it again.",
+        "forbidden": "Only the owner can stop a stuck update.",
+        "rateLimited": "Too many attempts. Wait a minute, then try again.",
+        "network": "Could not reach the server. Check the connection, then try again.",
+        "unknown": "Stopping the update failed. Nothing was changed by this attempt.",
+        "notAbandonable": {
+          "unknown": "This update cannot be stopped right now.",
+          "in_flight_restart": "The update cannot be stopped because a restart is in progress. Wait for it to finish.",
+          "gate_closed": "The update cannot be stopped because the update gate is closed.",
+          "head_moved_unverified": "The update cannot be stopped because the code state changed and the server could not verify it.",
+          "terminal": "This update has already finished, so there is nothing to stop."
+        }
+      }
     }
   },
   "sessionProcessState": {
