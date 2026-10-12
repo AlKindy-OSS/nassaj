@@ -4,14 +4,17 @@ import { randomUUID } from 'node:crypto';
 import { getConnection, messageAuthorsDb, participantsDb, sessionsDb } from '@/modules/database/index.js';
 import {
   appendVendorTranscriptEventIdempotent,
+  collectOpenCodeSessionSecrets,
+  collectOpenCodeTurnSecrets,
   vendorTranscriptPath,
 } from '@/modules/providers/index.js';
+import { redactLiteralSecrets } from '@/services/isolation/opencode-qwen-plan.js';
 
 // eslint-disable-next-line boundaries/no-unknown -- root-verified process context is a builtins-only leaf outside feature barrels.
 import { requireStartupAdmission } from '../../bootstrap-startup-context.js';
 
 import { createCodexCliAdapter } from './adapters/codex-cli-adapter.js';
-import { createExtendedCliAdapter } from './adapters/extended-cli-adapter.js';
+import { createExtendedCliAdapter, isSpawnOnlyOpenCodeModel } from './adapters/extended-cli-adapter.js';
 import { TurnAdapterRegistry } from './adapters/registry.js';
 import type { CliTurnProvider, TurnAdapterRegistration } from './adapters/types.js';
 import {
@@ -33,6 +36,52 @@ export type CliHarnessProvider = Exclude<CliTurnProvider, 'claude'>;
 export type CliHarnessMode = 'chat';
 
 const SUPERVISED_PROVIDERS = Object.freeze(['codex', 'qwen', 'opencode'] as const);
+
+/**
+ * ADR-200 §8 / M-6: an opencode turn redacts every key that can enter the
+ * sender's turn (their slots and auth.json, the grantor's under a grant) before
+ * its prompt is persisted. Other providers are unchanged.
+ */
+function redactOpenCodePrompt(provider: string, userId: number, text: string): string {
+  return provider === 'opencode' ? redactLiteralSecrets(text, collectOpenCodeTurnSecrets(userId)) : text;
+}
+
+/** Same rule for persisted assistant text: the keys of every session sender. */
+function redactOpenCodeSessionText(provider: string, sessionId: string, text: string): string {
+  return provider === 'opencode' ? redactLiteralSecrets(text, collectOpenCodeSessionSecrets(sessionId)) : text;
+}
+
+type ResultRepository = typeof turnSupervisorRepository;
+
+/**
+ * M-6: for an opencode turn, the repository the orchestrator persists the
+ * hosted result through redacts `hostedResult.text` before it is stored, so the
+ * hosted-result-store never holds a raw key. Every other method and provider is
+ * passed through untouched.
+ */
+function redactingResultRepository(
+  provider: string, sessionId: string, repository: ResultRepository = turnSupervisorRepository,
+): ResultRepository {
+  if (provider !== 'opencode') return repository;
+  return new Proxy(repository, {
+    get(target, property, receiver) {
+      const value = Reflect.get(target, property, receiver) as unknown;
+      if (property !== 'finishExecution' || typeof value !== 'function') {
+        return typeof value === 'function' ? value.bind(target) : value;
+      }
+      return (input: Parameters<ResultRepository['finishExecution']>[0]) => value.call(target, input.hostedResult
+        ? { ...input, hostedResult: {
+          ...input.hostedResult, text: redactOpenCodeSessionText(provider, sessionId, input.hostedResult.text),
+        } }
+        : input);
+    },
+  });
+}
+
+/** @internal Test seam for the persisted-text redaction rule (M-6). */
+export const cliTurnSupervisorRedactionInternals = Object.freeze({
+  redactOpenCodePrompt, redactOpenCodeSessionText, redactingResultRepository,
+});
 const ADAPTER_IDS: Readonly<Record<CliHarnessProvider, string>> = Object.freeze({
   codex: 'codex-cli-ephemeral', qwen: 'qwen-cli-supervisor-ephemeral',
   opencode: 'opencode-cli-supervisor-ephemeral',
@@ -105,16 +154,27 @@ export class CliTurnSupervisorRuntime {
     provider: string; mode: string; coordinationLevel: CoordinationLevel; model?: string;
   }): boolean {
     if (!isCliTurnSupervisorEnabled(input.provider, input.mode, this.env)) return false;
+    if (this.#routesToSpawnPath(input)) return false;
     if (input.coordinationLevel === 'delegate_review') {
       const reviewer = this.env[`NASSAJ_TURN_SUPERVISOR_${input.provider.toUpperCase()}_REVIEW_MODEL`]?.trim();
       const root = input.model?.trim() || DEFAULT_MODELS[input.provider as CliHarnessProvider];
-      return Boolean(reviewer && reviewer !== root);
+      return Boolean(reviewer && reviewer !== root && !isSpawnOnlyOpenCodeModel(reviewer, this.env));
     }
     return true;
   }
 
-  enabledCell(input: { provider: string; mode: string }): boolean {
-    return isCliTurnSupervisorArmed(input.provider, input.mode, this.env);
+  /**
+   * True when the cell is armed for this turn. B-1550: an opencode turn on a
+   * spawn-only model (qwen-plan/*, moonshot/*, deepseek/*) is not a cell turn,
+   * so it falls through to spawnOpenCode instead of being refused.
+   */
+  enabledCell(input: { provider: string; mode: string; model?: string }): boolean {
+    return isCliTurnSupervisorArmed(input.provider, input.mode, this.env) && !this.#routesToSpawnPath(input);
+  }
+
+  /** ADR-200 S8 (B-1550): an opencode model that only spawnOpenCode may run. */
+  #routesToSpawnPath(input: { provider: string; model?: string }): boolean {
+    return input.provider === 'opencode' && isSpawnOnlyOpenCodeModel(input.model, this.env);
   }
 
   async #ensureReady(): Promise<void> {
@@ -188,7 +248,10 @@ export class CliTurnSupervisorRuntime {
         timestamp: new Date().toISOString(), type: 'response_item',
         payload: {
           type: 'message', id: `${claimed.turnId}:assistant`, role: 'assistant',
-          phase: 'final_answer', content: [{ type: 'output_text', text: claimed.text }],
+          phase: 'final_answer',
+          content: [{
+            type: 'output_text', text: redactOpenCodeSessionText(claimed.provider, claimed.sessionId, claimed.text),
+          }],
         },
       }, `${claimed.turnId}:assistant`);
       if (!this.#resultStore!.markTranscriptWritten(result.turnId)) {
@@ -224,7 +287,9 @@ export class CliTurnSupervisorRuntime {
       }
       await this.#flushResult(replay);
       input.onSession(replay.sessionId, replay.isNewSession);
-      return { text: replay.text, model: replay.model, sessionId: replay.sessionId, isNewSession: replay.isNewSession };
+      // M-6: a row stored before the redaction existed is still redacted on replay.
+      const text = redactOpenCodeSessionText(replay.provider, replay.sessionId, replay.text);
+      return { text, model: replay.model, sessionId: replay.sessionId, isNewSession: replay.isNewSession };
     }
     const model = input.model?.trim() || DEFAULT_MODELS[input.provider];
     const sessionId = input.sessionId ?? `${input.provider}_supervised_${randomUUID()}`;
@@ -250,18 +315,24 @@ export class CliTurnSupervisorRuntime {
       input.onSession(sessionId, isNewSession);
       const projectPath = input.projectPath ?? process.cwd();
       const transcriptPath = vendorTranscriptPath(input.provider, sessionId, projectPath);
+      const persistedPrompt = redactOpenCodePrompt(input.provider, input.userId, input.prompt);
       await appendVendorTranscriptEventIdempotent(input.provider, sessionId, projectPath, {
         timestamp: new Date().toISOString(), type: 'event_msg',
-        payload: { type: 'user_message', kind: 'plain', message: input.prompt },
+        payload: { type: 'user_message', kind: 'plain', message: persistedPrompt },
       }, `${adopted.turn.turnId}:user`);
-      sessionsDb.createSession(sessionId, input.provider, projectPath, undefined, undefined, undefined, transcriptPath);
+      sessionsDb.recordDiscoveredSession({
+        sessionId,
+        provider: input.provider,
+        projectPath,
+        jsonlPath: transcriptPath,
+      });
       participantsDb.recordSpawn(sessionId, input.userId, { provider: input.provider, projectPath });
-      messageAuthorsDb.recordUserMessage(sessionId, input.userId, input.prompt);
+      messageAuthorsDb.recordUserMessage(sessionId, input.userId, persistedPrompt);
       const target = Object.freeze({ provider: input.provider, model });
       const reviewerModel = this.env[`NASSAJ_TURN_SUPERVISOR_${input.provider.toUpperCase()}_REVIEW_MODEL`]?.trim();
       const dependencies: OrchestratorDependencies = {
         registry: this.#registry,
-        repository: turnSupervisorRepository,
+        repository: redactingResultRepository(input.provider, sessionId),
         admitRun: async () => admitResources(getConnection(), {
           turnId: adopted.turn.turnId, userId: input.userId, ownerId: CLI_TURN_SUPERVISOR_OWNER_ID,
           ownerPid: process.pid, reservation: { cpuPercent: 10, memoryPercent: 10 },
@@ -312,7 +383,9 @@ export class CliTurnSupervisorRuntime {
       const durable = this.#resultStore!.get(adopted.turn.turnId);
       if (!durable) throw new CliTurnSupervisorError('RECOVERY_REPLAY_UNAVAILABLE');
       await this.#flushResult(durable);
-      return { text: result.text, model, sessionId, isNewSession };
+      // M-6: the live reply to the client carries the same redaction as storage.
+      const text = redactOpenCodeSessionText(input.provider, sessionId, result.text);
+      return { text, model, sessionId, isNewSession };
     } finally {
       this.#active.get(sessionId)?.resolveSettled();
       if (registryOpened) this.#registry.abandonUndispatchedExecution(adopted.run.runId, writerEpoch);

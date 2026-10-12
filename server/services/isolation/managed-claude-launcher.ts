@@ -200,6 +200,8 @@ export async function runManagedClaudeLauncher(
     authoritativeStoredPin: targetSessionId !== null,
     requireKnownResumePin: targetSessionId !== null,
     failOnAmbiguous: true,
+    // The terminal env was built on the member's OWN tree (grants off), B-1546.
+    honorGrants: false,
     // The child below is spawned without `cwd`, so it inherits this one.
     cwd: process.cwd(),
   });

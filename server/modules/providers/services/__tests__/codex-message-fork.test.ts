@@ -63,6 +63,10 @@ mock.module('../../../../services/codex-app-server.js', { namedExports: {
     assert.equal(user, 7); assert.equal(method, 'thread/fork');
     assert.deepEqual(params, { lastTurnId: 'turn-1', ephemeral: false, excludeTurns: true, threadSource: 'user' });
     assert.equal(options.experimentalApi, true); assert.equal(options.authenticatedPrincipal, principal);
+    // B-1546/B-1547: the link-mode run gate refuses inside callCodexAppServer, before any submit.
+    if (scenario.startsWith('LINK_MODE_') || scenario === 'pre-submit-failure') {
+      throw Object.assign(new Error(`refused: ${scenario}`), { code: scenario === 'pre-submit-failure' ? 'EOTHER' : scenario });
+    }
     await options.beforeRequest(); options.onRequestSent(); rpcCalls++;
     if (scenario === 'pending') await new Promise<void>(resolve => { releaseRpc = resolve; });
     if (scenario === 'lost') throw new Error('response lost after mutation');
@@ -109,6 +113,16 @@ test('concurrent exact clicks coalesce only after each caller is authorized', as
   releaseRpc!();
   assert.deepEqual(await first, await second);
   assert.equal(rpcCalls, 1);
+});
+
+test('B-1547: a link-mode run refusal keeps its code and message, not runtime_not_ready', async () => {
+  for (const code of ['LINK_MODE_KEY_MISSING', 'LINK_MODE_RECORD_UNREADABLE']) {
+    scenario = code;
+    await assert.rejects(forkSessionAtMessage({ ...params, requestId: `link-${code}` }), { code, message: `refused: ${code}` });
+  }
+  scenario = 'pre-submit-failure';
+  await assert.rejects(forkSessionAtMessage({ ...params, requestId: 'link-other' }), { code: 'runtime_not_ready' });
+  assert.equal(rpcCalls, 0);
 });
 
 test('lost mutation result remains unknown and same request never forks again', async () => {

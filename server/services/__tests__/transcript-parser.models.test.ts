@@ -25,7 +25,13 @@ import path from 'node:path';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
-import { parseClaudeStyleTranscript } from '../transcript-parser.js';
+import { withPinnedTranscript } from '@/shared/__tests__/provider-root-sandbox.js';
+
+import { parseClaudeStyleTranscript as parsePinned } from '../transcript-parser.js';
+
+/** ADR-201 A1: the parser reads only a pinned descriptor; pin the fixture as the history service would. */
+const parseClaudeStyleTranscript = (file: string) =>
+  withPinnedTranscript(file, 'fixture-session', 'claude', (transcript) => parsePinned(transcript));
 
 const FIXTURE = path.join(
   path.dirname(fileURLToPath(import.meta.url)),

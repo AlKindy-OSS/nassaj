@@ -18,9 +18,9 @@ import { reconcileAgentMessages } from '@/modules/providers/list/claude/agent-re
 
 import type { HistoryReadLease } from '../../services/history-budget.service.js';
 
-import { resolveContainedFile } from '../../shared/contained-file.js';
+import type { SessionTranscriptHandle } from '../../shared/session-transcript-reader.js';
 
-import { resolveClaudeHistoryTranscriptPath } from './claude-transcript-path.js';
+import { claudeHistorySource, type ClaudeHistorySource } from './claude-history-source.js';
 import { detectClaudeSkillLoad } from './claude-skill-load.js';
 import { createClaudeRawIdentityCollector, markSteerCandidate, readQueuedSteerPrompt } from './claude-receipt-identity.js';
 
@@ -52,32 +52,33 @@ type ClaudeHistoryMessagesResult =
   };
 
 /**
- * Lists the subagent transcript file names in a session's `subagents` directory.
+ * Lists the subagent transcript file names of a session (`agent-*.jsonl`).
  *
  * Returns an empty array when the directory does not exist yet — a session with
  * no spawned subagents simply has no such folder, and that must not be treated
- * as an error. Only `agent-*.jsonl` files are returned (the sidecar
- * `agent-*.meta.json` files are ignored).
+ * as an error.
  */
-async function readAgentFileNames(subagentsDir: string, lease?: HistoryReadLease): Promise<string[]> {
+async function readAgentFileNames(source: ClaudeHistorySource): Promise<string[]> {
   try {
-    const files = lease ? await lease.directory(subagentsDir) : await fsp.readdir(subagentsDir);
-    return files.filter((file) => file.endsWith('.jsonl') && file.startsWith('agent-'));
+    return await source.agentFileNames();
   } catch (error) {
     const fileError = error as NodeJS.ErrnoException;
     if (fileError.code !== 'ENOENT') {
-      console.warn(`Error reading subagents directory ${subagentsDir}:`, fileError.message);
+      console.warn('Error reading subagents directory:', fileError.message);
     }
     return [];
   }
 }
 
-async function parseAgentTools(filePath: string, lease?: HistoryReadLease): Promise<AnyRecord[]> {
+async function parseAgentTools(
+  source: ClaudeHistorySource, fileName: string, lease?: HistoryReadLease,
+): Promise<AnyRecord[]> {
   const tools: AnyRecord[] = [];
   const progress = createClaudeChildToolsProgress();
 
   try {
-    const fileStream = lease ? lease.stream(filePath) : fs.createReadStream(filePath);
+    const fileStream = await source.agent(fileName);
+    if (!fileStream) return tools;
     const rl = readline.createInterface({
       input: fileStream,
       crlfDelay: Infinity,
@@ -138,20 +139,10 @@ async function parseAgentTools(filePath: string, lease?: HistoryReadLease): Prom
   } catch (error) {
     lease?.check();
     const message = error instanceof Error ? error.message : String(error);
-    console.warn(`Error parsing agent file ${filePath}:`, message);
+    console.warn(`Error parsing agent file ${fileName}:`, message);
   }
 
   return tools;
-}
-
-/**
- * Contained transcript of `sessionId`, or null (B-1564). There is no raw-path
- * fallback: a stored path that does not resolve under a Claude projects root
- * reads as "no transcript", never as the file it names.
- */
-async function storedClaudeTranscript(sessionId: string): Promise<string | null> {
-  const row = sessionsDb.getSessionById(sessionId);
-  return row ? resolveClaudeHistoryTranscriptPath(row) : null;
 }
 
 /**
@@ -172,31 +163,28 @@ async function getSessionMessages(
   offset: number,
   identity?: ReturnType<typeof createClaudeRawIdentityCollector>,
   lease?: HistoryReadLease,
+  transcript?: SessionTranscriptHandle | null,
 ): Promise<ClaudeHistoryMessagesResult> {
+  let source: ClaudeHistorySource | null = null;
   try {
-    const jsonLPath = lease?.mainFile ?? await storedClaudeTranscript(sessionId);
-
-    if (!jsonLPath) {
+    // ADR-201 A1: only the lease or a pinned, contained, id-bound transcript is read.
+    source = await claudeHistorySource(sessionId, lease, transcript);
+    if (!source) {
       return { messages: [], total: 0, hasMore: false };
     }
 
     // Claude writes subagent transcripts into a per-session `subagents`
     // subdirectory NEXT TO the main transcript, not into the project directory
-    // itself: `<projectDir>/<sessionId>/subagents/agent-<id>.jsonl`. The old
-    // `path.dirname(jsonLPath)` lookup scanned the project directory, where no
-    // `agent-*.jsonl` ever exists, so subagent tool output was never attached
-    // (B-30). The session id is the transcript file's basename.
-    const projectDir = path.dirname(jsonLPath);
-    const transcriptSessionId = path.basename(jsonLPath, '.jsonl');
-    const subagentsDir = path.join(projectDir, transcriptSessionId, 'subagents');
-    const agentFiles = await readAgentFileNames(subagentsDir, lease);
+    // itself: `<projectDir>/<sessionId>/subagents/agent-<id>.jsonl` (B-30). The
+    // history source derives it from the pinned transcript's realpath.
+    const sessionDir = path.join(path.dirname(source.mainFile), path.basename(source.mainFile, '.jsonl'));
+    const agentFiles = await readAgentFileNames(source);
 
     const messages: AnyRecord[] = [];
     const agentToolsCache = new Map<string, AnyRecord[]>();
 
-    const fileStream = lease ? lease.stream(jsonLPath) : fs.createReadStream(jsonLPath);
     const rl = readline.createInterface({
-      input: fileStream,
+      input: source.main(),
       crlfDelay: Infinity,
     });
 
@@ -231,13 +219,9 @@ async function getSessionMessages(
         continue;
       }
 
-      // B-1564: an agent file is read only when it resolves inside its own
-      // subagents directory (the lease enforces the same for bounded reads).
-      const agentFilePath = lease
-        ? path.join(subagentsDir, agentFileName)
-        : await resolveContainedFile(path.join(subagentsDir, agentFileName), [subagentsDir]);
-      if (!agentFilePath) continue;
-      const tools = await parseAgentTools(agentFilePath, lease);
+      // B-1564/ADR-201: an agent file is opened only through the pinned
+      // subagents directory (or the lease's scoped open for bounded reads).
+      const tools = await parseAgentTools(source, agentFileName, lease);
       agentToolsCache.set(agentId, tools);
     }
 
@@ -265,9 +249,9 @@ async function getSessionMessages(
     const stoppedAtMs = findLatestStoppedNotificationMs(messages);
     const reconcileMessages = await reconcileWorkflowMessages(
       sessionId,
-      path.dirname(subagentsDir),
+      sessionDir,
       stoppedAtMs,
-      { historyLease: lease },
+      { historyLease: lease, journals: source.workflows() },
     );
     for (const reconcileMessage of reconcileMessages) {
       messages.push(reconcileMessage as unknown as AnyRecord);
@@ -310,6 +294,8 @@ async function getSessionMessages(
     lease?.check();
     console.error(`Error reading messages for session ${sessionId}:`, error);
     return limit === null ? [] : { messages: [], total: 0, hasMore: false };
+  } finally {
+    await source?.close();
   }
 }
 
@@ -830,7 +816,7 @@ export class ClaudeSessionsProvider implements IProviderSessions {
     try {
       // Load full history first so `total` reflects frontend-normalized messages,
       // not raw JSONL records.
-      result = await getSessionMessages(sessionId, null, 0, identity, options.historyLease);
+      result = await getSessionMessages(sessionId, null, 0, identity, options.historyLease, options.transcript);
     } catch (error) {
       options.historyLease?.check();
       const message = error instanceof Error ? error.message : String(error);

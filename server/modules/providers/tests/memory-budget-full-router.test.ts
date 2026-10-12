@@ -15,6 +15,9 @@ import ts from 'typescript';
 import Database from 'better-sqlite3';
 
 import { assistantRecord } from '../../../../tests/helpers/memory-c0-adversarial-fixtures.mjs';
+import {
+  claudeHeaderLine, claudeTranscriptPath, codexHeaderLine, codexRolloutPath,
+} from '../services/cost/__tests__/bound-transcripts.js';
 
 const project = path.resolve(import.meta.dirname, '../../../..'), scratch = process.env.HOME!;
 assert.ok(scratch.startsWith(project + '/.memory-c0-full-router-'), 'run only in the dedicated isolated project-disk child');
@@ -78,14 +81,18 @@ before(async () => {
   // eslint-disable-next-line boundaries/dependencies -- full-router integration seeds the real sessions table.
   const { getConnection } = await import('@/modules/database/connection.js');
   for (const provider of ['claude', 'codex']) {
-    // B-1564: history reads only transcripts under the provider's root in this HOME.
+    // B-1564 / ADR-201 A1: history reads only a transcript under the provider's root
+    // in this HOME (HOME = scratch), named after the session and opening with the
+    // CLI's id-bearing header, as the CLIs write them.
     const session = `memory-router-${provider}`, source = provider === 'claude'
-      ? path.join(scratch, '.claude', 'projects', '-memory-router', `${session}.jsonl`)
-      : path.join(scratch, '.codex', 'sessions', `${provider}.jsonl`);
+      ? claudeTranscriptPath(session, null, '-memory-router')
+      : codexRolloutPath(session);
+    assert.ok(source.startsWith(scratch + '/'), 'fixture transcripts live in the isolated HOME');
     await fs.mkdir(path.dirname(source), { recursive: true });
     const record = assistantRecord(provider, 0, 'history العربية 🧵');
     if (provider === 'claude') record.sessionId = session;
-    await fs.writeFile(source, JSON.stringify(record) + '\n'); sources.set(provider, source);
+    const header = provider === 'claude' ? claudeHeaderLine(session) : codexHeaderLine(session);
+    await fs.writeFile(source, header + JSON.stringify(record) + '\n'); sources.set(provider, source);
     db.sessionsDb.createSession(session, provider, scratch);
     getConnection().prepare('UPDATE sessions SET jsonl_path=? WHERE session_id=?').run(source, session);
     db.participantsDb.recordSpawn(session, owner.id);
@@ -164,7 +171,9 @@ for (const provider of ['claude', 'codex']) {
       await fs.writeFile(source, original.subarray(0, original.length - 2));
       resetHistorySnapshotCacheForTests();
       let result = await call(provider, ownerToken); assert.equal(result.status, 409); assert.equal(result.body.error.code, 'HISTORY_SOURCE_INCOMPLETE');
-      await fs.writeFile(source, Buffer.alloc(4 * 1048576 + 1, 32));
+      // Oversized but still bound: the id header stays first, as in a real long session.
+      const header = original.subarray(0, original.indexOf(10) + 1);
+      await fs.writeFile(source, Buffer.concat([header, Buffer.alloc(4 * 1048576 + 1, 32)]));
       resetHistorySnapshotCacheForTests();
       result = await call(provider, ownerToken); assert.equal(result.status, 413); assert.equal(result.body.error.code, 'HISTORY_BUDGET_EXCEEDED');
     } finally { await fs.writeFile(source, original); }

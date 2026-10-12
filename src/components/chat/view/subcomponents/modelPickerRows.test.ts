@@ -130,3 +130,40 @@ describe('qwen-plan models under OpenCode are gated behind the Alibaba key (T-19
     expect(rows.some((r) => r.model.startsWith('qwen-plan/'))).toBe(false);
   });
 });
+
+describe('unified key mode lists only supported, linked cells (ADR-200 S9)', () => {
+  const OPENCODE = def(
+    'opencode/big-pickle',
+    'moonshot/kimi-k2.6',
+    'moonshotai/kimi-k2.6',
+    'moonshotai-cn/kimi-k2.6',
+    'Moonshot/kimi-k2.6',
+    'deepseek/deepseek-chat',
+    'glm/glm-5.2',
+  );
+  const catalog = { ...CATALOG, opencode: OPENCODE };
+  const ids = (rows: ReturnType<typeof rowsForBody>) => rows.map((row) => row.model);
+
+  it('hides a locked engine row instead of showing it greyed', () => {
+    const rows = rowsForBody('claude', CATALOG, { glm: true }, undefined, { hideUnlinked: true });
+    expect(rows.some((row) => row.locked)).toBe(false);
+    expect(rows.some((row) => row.engineProvider === 'kimi')).toBe(false);
+    expect(rows.some((row) => row.engineProvider === 'glm')).toBe(true);
+  });
+
+  it('keeps the locked CTA row when the mode is off (default)', () => {
+    expect(rowsForBody('claude', CATALOG, { glm: true }).some((row) => row.locked)).toBe(true);
+  });
+
+  it('drops OpenCode cells whose vendor has no key, and only those', () => {
+    const rows = rowsForBody('opencode', catalog, { kimi: true, glm: false, deepseek: false }, undefined, { hideUnlinked: true });
+    expect(ids(rows)).toEqual(['opencode/big-pickle', 'moonshot/kimi-k2.6']);
+  });
+
+  it('lists the canonical vendor id only: no moonshotai, moonshot-cn or case variants', () => {
+    const rows = rowsForBody('opencode', catalog, { kimi: true, glm: true, deepseek: true }, undefined, { hideUnlinked: true });
+    expect(ids(rows)).toEqual(['opencode/big-pickle', 'moonshot/kimi-k2.6', 'deepseek/deepseek-chat', 'glm/glm-5.2']);
+    // Aliases are spellings of one vendor and never rows, with the mode on or off.
+    expect(ids(rowsForBody('opencode', catalog, { kimi: true })).some((id) => /^moonshotai|^Moonshot/.test(id))).toBe(false);
+  });
+});

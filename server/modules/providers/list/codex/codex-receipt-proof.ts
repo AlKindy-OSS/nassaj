@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
-import { open, lstat, type FileHandle } from 'node:fs/promises';
-import { constants, type Stats } from 'node:fs';
+import { lstat, type FileHandle } from 'node:fs/promises';
+import type { Stats } from 'node:fs';
 import { setImmediate as yieldImmediate } from 'node:timers/promises';
 
 import * as database from '@/modules/database/index.js';
@@ -8,11 +8,20 @@ import type { CodexUserProof } from '@/shared/utils.js';
 export type { CodexUserProof } from '@/shared/utils.js';
 
 import { validateCodexImageInput } from '../../../../../shared/codex-image-input.js';
+import { openPinned } from '../../shared/pinned-fd.js';
+import { withRecordedTranscript, type SessionTranscriptHandle } from '../../shared/session-transcript-reader.js';
 
 import type { CodexTurnBaseline } from './codex-turn-metrics.js';
 
 type Row = Record<string, any>;
-export type CodexReceiptWindow = CodexTurnBaseline & { mode: 'resume' | 'new'; sessionId: string; birthtimeMs: number; boundarySha256: string };
+/**
+ * A pre-run window on the session's rollout (ADR-201 A1). `filePath` is the
+ * realpath of the transcript pinned and id-bound at capture; `recordedPath` is
+ * the row's `jsonl_path` then, so a re-indexed row ends the window.
+ */
+export type CodexReceiptWindow = CodexTurnBaseline & {
+  mode: 'resume' | 'new'; sessionId: string; birthtimeMs: number; boundarySha256: string; recordedPath: string;
+};
 const MAX_BYTES = 4 * 1024 * 1024;
 const boundedId = (value: unknown): value is string => typeof value === 'string'
   && value.length > 0 && value.length <= 256 && !/[\x00-\x20\x7f]/u.test(value);
@@ -252,32 +261,66 @@ export function codexUserProofFromJsonl(text: string, sessionId: string, mode: '
   } catch { return null; }
 }
 
-/** Pin a real complete-line boundary; a new-thread window is explicitly zero-offset. */
-export async function captureCodexReceiptWindow(sessionId: string, mode: 'resume' | 'new'): Promise<CodexReceiptWindow | null> {
-  const filePath = database.sessionsDb.getSessionById(sessionId)?.jsonl_path;
-  if (!filePath) return null;
+/** The row's recorded transcript path now, or null. */
+function recordedPathOf(sessionId: string): string | null {
   try {
-    const file = await open(filePath, constants.O_RDONLY | constants.O_NOFOLLOW);
-    try {
-      const stat = await file.stat();
-      if (!stat.isFile()) return null;
-      if (mode === 'resume' && stat.size) {
-        const last = Buffer.alloc(1); await file.read(last, 0, 1, stat.size - 1);
-        if (last[0] !== 10) return null;
-      }
-      const byteOffset = mode === 'new' ? 0 : stat.size;
-      const boundary = Buffer.alloc(Math.min(4096, byteOffset));
-      await file.read(boundary, 0, boundary.length, byteOffset - boundary.length);
-      return { sessionId, mode, filePath, device: stat.dev, inode: stat.ino, byteOffset,
-        birthtimeMs: stat.birthtimeMs, boundarySha256: createHash('sha256').update(boundary).digest('hex') };
-    } finally { await file.close(); }
+    return database.sessionsDb.getSessionById(sessionId)?.jsonl_path ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** Window on a pinned, id-bound rollout; null when a resumed file does not end on a line boundary. */
+async function windowOf(
+  transcript: SessionTranscriptHandle, sessionId: string, mode: 'resume' | 'new', recordedPath: string,
+): Promise<CodexReceiptWindow | null> {
+  const file = transcript.fd;
+  const stat = await file.stat();
+  if (!stat.isFile()) return null;
+  if (mode === 'resume' && stat.size) {
+    const last = Buffer.alloc(1); await file.read(last, 0, 1, stat.size - 1);
+    if (last[0] !== 10) return null;
+  }
+  const byteOffset = mode === 'new' ? 0 : stat.size;
+  const boundary = Buffer.alloc(Math.min(4096, byteOffset));
+  await file.read(boundary, 0, boundary.length, byteOffset - boundary.length);
+  return { sessionId, mode, filePath: transcript.realpath, recordedPath, device: stat.dev, inode: stat.ino, byteOffset,
+    birthtimeMs: stat.birthtimeMs, boundarySha256: createHash('sha256').update(boundary).digest('hex') };
+}
+
+/**
+ * Pin a real complete-line boundary; a new-thread window is explicitly zero-offset.
+ * ADR-201 A1, authorization-free core: this runs inside the run the requester
+ * launched; the rollout is tree-confined, bound to the id by name and
+ * `session_meta`, and read from a pinned fd.
+ */
+export async function captureCodexReceiptWindow(sessionId: string, mode: 'resume' | 'new'): Promise<CodexReceiptWindow | null> {
+  const recordedPath = recordedPathOf(sessionId);
+  if (!recordedPath) return null;
+  try {
+    return await withRecordedTranscript(sessionId, 'codex', 'receipt-proof',
+      (transcript) => windowOf(transcript, sessionId, mode, recordedPath));
   } catch { return null; }
+}
+
+/**
+ * Re-opens the window's file pinned by its captured realpath (no by-name open
+ * of the stored path). The header was bound at capture; the caller requires the
+ * same dev/ino/birthtime, which is the stronger binding.
+ */
+async function openWindowFile(window: CodexReceiptWindow): Promise<FileHandle | null> {
+  if (recordedPathOf(window.sessionId) !== window.recordedPath) return null;
+  try {
+    return (await openPinned(window.filePath, 'file', { singleLink: true })).handle;
+  } catch {
+    return null;
+  }
 }
 
 /** Read once with immutable file identity and size; mutation or oversize preserves the local copy. */
 export async function readCodexReceiptWindow(window: CodexReceiptWindow): Promise<string | null> {
-  if (database.sessionsDb.getSessionById(window.sessionId)?.jsonl_path !== window.filePath) return null;
-  const file = await open(window.filePath, constants.O_RDONLY | constants.O_NOFOLLOW);
+  const file = await openWindowFile(window);
+  if (!file) return null;
   try {
     const before = await file.stat();
     const bytes = before.size - window.byteOffset;
@@ -326,7 +369,7 @@ async function verifyReceiptSnapshot(file: FileHandle, window: CodexReceiptWindo
   if (!matchesReceiptFile(after, window) || !matchesReceiptFile(named, window)
     || after.size !== before.size || after.mtimeMs !== before.mtimeMs || after.ctimeMs !== before.ctimeMs
     || named.size !== after.size || named.mtimeMs !== after.mtimeMs || named.ctimeMs !== after.ctimeMs
-    || database.sessionsDb.getSessionById(window.sessionId)?.jsonl_path !== window.filePath) invalid();
+    || recordedPathOf(window.sessionId) !== window.recordedPath) invalid();
 }
 
 async function scanReceiptRecords(file: FileHandle, window: CodexReceiptWindow, size: number,
@@ -360,8 +403,8 @@ async function scanReceiptRecords(file: FileHandle, window: CodexReceiptWindow, 
 
 async function readCodexProofSnapshot(window: CodexReceiptWindow, expectedHash: string, budget: ReceiptBudget): Promise<CodexUserProof | null> {
   budget.check();
-  if (database.sessionsDb.getSessionById(window.sessionId)?.jsonl_path !== window.filePath) invalid();
-  const file = await open(window.filePath, constants.O_RDONLY | constants.O_NOFOLLOW);
+  const file = await openWindowFile(window);
+  if (!file) invalid();
   try {
     budget.check();
     const before = await file.stat(), size = before.size - window.byteOffset;

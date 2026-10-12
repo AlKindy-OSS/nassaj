@@ -1,5 +1,8 @@
+import fsSync from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+
+import Database from 'better-sqlite3';
 
 import { userDb } from '@/modules/database/index.js';
 import { resolveProviderEnv } from '@/services/isolation/resolve-provider-env.js';
@@ -92,8 +95,43 @@ export function resolveOpenCodeDataHomes(): string[] {
  * an authenticated userId use this instead of the userId-less
  * getOpenCodeDatabasePath so isolated sessions read/write the right database.
  */
-export function resolveOpenCodeDatabasePathForUser(userId: string | number | null): string {
-  return path.join(resolveOpenCodeDataHomeForUser(userId), OPENCODE_DB_FILENAME);
+export function resolveOpenCodeDatabasePathForUser(
+  userId: string | number | null,
+  options: { honorGrants?: boolean } = {},
+): string {
+  return path.join(resolveOpenCodeDataHomeForUser(userId, options), OPENCODE_DB_FILENAME);
+}
+
+/** Whether `sessionId` is a row of `dbPath`: false when the file is absent, null when unreadable. */
+function openCodeSessionPresence(dbPath: string, sessionId: string): boolean | null {
+  if (!fsSync.existsSync(dbPath)) return false;
+  let db: Database.Database | null = null;
+  try {
+    db = new Database(dbPath, { readonly: true, fileMustExist: true });
+    return db.prepare('SELECT 1 FROM session WHERE id = ?').get(sessionId) !== undefined;
+  } catch {
+    return null;
+  } finally {
+    db?.close();
+  }
+}
+
+/**
+ * B-1551 M1: true only when `sessionId` lives in the grantor's opencode data dir
+ * this member runs on under a credential grant AND is positively absent from the
+ * member's OWN data dir. A spawn-vendor turn (own dir) cannot resume it. Any
+ * read failure answers false, so opencode keeps the final word.
+ */
+export function isOpenCodeSessionOnlyOnGrantTree(
+  userId: string | number | null,
+  sessionId: string | null | undefined,
+): boolean {
+  if (!sessionId || userId === null || userId === '') return false;
+  const own = resolveOpenCodeDataHomeForUser(userId, { honorGrants: false });
+  const granted = resolveOpenCodeDataHomeForUser(userId);
+  if (path.resolve(own) === path.resolve(granted)) return false;
+  return openCodeSessionPresence(path.join(own, OPENCODE_DB_FILENAME), sessionId) === false
+    && openCodeSessionPresence(path.join(granted, OPENCODE_DB_FILENAME), sessionId) === true;
 }
 
 /**

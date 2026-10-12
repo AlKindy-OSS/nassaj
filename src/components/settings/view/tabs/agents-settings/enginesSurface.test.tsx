@@ -282,11 +282,12 @@ describe('ADR-085 — one resolved status per row, and no second writer', () => 
   // وما تغيّر هو الوجهة نفسها: صارت تبويب «المورّدون والاعتمادات» لكل مفتاح بلا
   // استثناء، فسقطت معها جملةُ «حساب الوكيل المالك» — وهي التي كانت صحيحةً يوم
   // كان للمفتاح حسابٌ يُدخل فيه.
-  it('points at the one credential home, and only while the credential is the barrier', async () => {
+  it('names the missing key once per row, and only while the credential is the barrier', async () => {
     configuredByProvider = { glm: true, kimi: false };
     render(<EnginesContent agent="claude" />);
-    const pointer = lookup('engines.managedInVendors')!;
-    await waitFor(() => expect(screen.getAllByText(pointer).length).toBeGreaterThan(0));
+    // ADR-200 S9: the neutral line «يحتاج مفتاح {{company}}» replaced the old pointer.
+    const needsKey = new RegExp(lookup('engines.needsKeyLine')!.replace('{{company}}', '.+'));
+    await waitFor(() => expect(screen.getAllByText(needsKey).length).toBeGreaterThan(0));
 
     // العدد يُقاس بعدد الصفوف التي تقول «ينقصه اعتماد» لا برقمٍ مكتوب هنا: رقمٌ
     // ثابت يوثِّق كتالوجَ اليوم فيسقط عند إضافة محرّكٍ جديد بلا عطلٍ حقيقي، وهو
@@ -296,9 +297,8 @@ describe('ADR-085 — one resolved status per row, and no second writer', () => 
     ).length;
     expect(needsCredential).toBeGreaterThan(0);
     expect(
-      screen.getAllByText(pointer).length,
-      'مؤشّرٌ لكل صفٍّ ينقصه مفتاح، ولا مؤشّرَ على صفٍّ مخزَّن — تكرارُ «مخزَّن · يُدار هناك» '
-        + 'تحت شارةٍ تقولها أصلاً هو ما جعل المؤشّرين ينحرفان',
+      screen.getAllByText(needsKey).length,
+      'سطرٌ واحد لكل صفٍّ ينقصه مفتاح، ولا سطرَ على صفٍّ مفتاحُه مخزَّن',
     ).toBe(needsCredential);
 
     // ولا تُقال «حساب هذا الوكيل» ولا «حساب الوكيل المالك»: كلتاهما تسمّي مكاناً

@@ -33,10 +33,15 @@ import {
   OPENCODE_PROJECT_CONFIG_SCOPE,
   assertOpenCodeBaseUrlAllowed,
   assertOpenCodeCarrierServerLocal,
+  assertOpenCodeInlineConfigAllowed,
   assertOpenCodeProjectConfigAllowed,
   resolveOpenCodeConfigPath,
 } from './services/isolation/opencode-baseurl-guard.js';
-import { resolveOpenCodeDatabasePathForUser } from './modules/providers/list/opencode/opencode-home.js';
+import {
+  isOpenCodeSessionOnlyOnGrantTree,
+  resolveOpenCodeDatabasePathForUser,
+} from './modules/providers/list/opencode/opencode-home.js';
+import { collectOpenCodeTurnSecrets } from './modules/providers/list/opencode/opencode-redaction-secrets.js';
 import {
   assertLocalModelAvailable,
   authorizedLocalModelServers,
@@ -50,16 +55,31 @@ import {
   authorizeQwenPlanLaunch,
   createRedactingLineAssembler,
   isQwenPlanModel,
-  redactQwenPlanSecrets,
+  redactLiteralSecrets,
   withQwenPlanEnv,
 } from './services/isolation/opencode-qwen-plan.js';
+import {
+  authorizeSpawnVendorLaunch,
+  canonicalSpawnVendorModel,
+  sessionOnGrantTreeRefusal,
+  spawnVendorAuditModel,
+  spawnVendorOrigins,
+  spawnVendorRunOf,
+  withSpawnVendorEnv,
+} from './services/isolation/opencode-spawn-vendor.js';
 
 /** User-facing text per qwen-plan refusal code (codes are the contract). */
 const QWEN_PLAN_REFUSAL_TEXT = Object.freeze({
-  qwen_plan_disabled: 'تشغيل خطة Qwen Coding عبر OpenCode غير مفعّل على هذا الخادم.',
-  qwen_plan_not_interactive: 'خطة Qwen Coding تعمل فقط برسالة يرسلها صاحب المفتاح بنفسه من المحادثة.',
-  missing_key: 'لا يوجد مفتاح Qwen Coding Plan شخصي محفوظ لحسابك.',
-  incompatible_profile: 'المفتاح المحفوظ ليس مفتاح Coding Plan دولياً، فلا يعمل مع هذا المسار.',
+  qwen_plan_disabled: 'تشغيل Alibaba Token Plan عبر OpenCode غير مفعّل على هذا الخادم.',
+  missing_key: 'لا يوجد مفتاح Alibaba Token Plan شخصي محفوظ لحسابك.',
+  legacy_profile: 'المفتاح المحفوظ من خطة قديمة لم تعد مدعومة؛ احذفه واحفظ مفتاح Token Plan.',
+});
+
+/** ADR-200 S8: user-facing text per spawn-vendor refusal code (Moonshot / DeepSeek). */
+const SPAWN_VENDOR_REFUSAL_TEXT = Object.freeze({
+  missing_key: 'لا يوجد مفتاح API شخصي محفوظ لحسابك لهذا المورّد. احفظ مفتاحك في إعدادات المورّدين.',
+  subscription_token_refused: 'المفتاح المحفوظ لهذا المورّد ليس مفتاح API صالحاً له. احفظ مفتاح المورّد الصحيح.',
+  session_on_grant_tree: 'هذه المحادثة محفوظة في مساحة العضو الذي منحك صلاحيته، ونماذج Moonshot وDeepSeek تعمل بمفتاحك وفي مساحتك أنت. ابدأ محادثة جديدة بهذا النموذج.',
 });
 
 /**
@@ -72,7 +92,23 @@ function auditQwenPlanTurn(action, userId, metadata) {
   const id = Number(userId);
   databaseModule.auditLogDb?.record(action, {
     userId: Number.isInteger(id) && id > 0 ? id : undefined,
-    metadata: { engine: 'opencode', provider: 'qwen-plan', source: 'ws-interactive', ...metadata },
+    metadata: { engine: 'opencode', provider: 'qwen-plan', ...metadata },
+  });
+}
+
+/**
+ * One audit row per spawn-vendor launch decision (ADR-200 S8, M3). Metadata is
+ * { vendor, model, code? } only — never the key or prompt.
+ * @param {'spawn_vendor_execution_allowed'|'spawn_vendor_execution_rejected'} action
+ * @param {string|number|null|undefined} userId
+ * @param {{ id: string }} vendor
+ * @param {Record<string, unknown>} metadata
+ */
+function auditSpawnVendorTurn(action, userId, vendor, metadata) {
+  const id = Number(userId);
+  databaseModule.auditLogDb?.record(action, {
+    userId: Number.isInteger(id) && id > 0 ? id : undefined,
+    metadata: { engine: 'opencode', vendor: vendor.id, ...metadata },
   });
 }
 
@@ -82,11 +118,12 @@ function auditQwenPlanTurn(action, userId, metadata) {
  * fix; the offending file is named relative to the project, never as a host path.
  *
  * @param {any} guardError the thrown guard error
- * @param {boolean} qwenPlanRun whether the turn was a qwen-plan run
+ * @param {Readonly<Record<string, string>>|null} refusalTexts the per-code texts of a
+ *   qwen-plan or spawn-vendor run, or null for any other carrier run
  * @param {string} workingDir the project root
  * @returns {{ kind: 'error', code: string, content: string }}
  */
-function carrierRefusalPayload(guardError, qwenPlanRun, workingDir) {
+function carrierRefusalPayload(guardError, refusalTexts, workingDir) {
   if (guardError?.scope === OPENCODE_PROJECT_CONFIG_SCOPE) {
     const file = typeof guardError.file === 'string' ? guardError.file : '';
     const relative = file ? path.relative(workingDir, file) : '';
@@ -104,9 +141,19 @@ function carrierRefusalPayload(guardError, qwenPlanRun, workingDir) {
     code: guardError?.code || 'opencode_carrier_blocked',
     content: guardError?.code === 'ENGINE_PROVIDER_UNAVAILABLE'
       ? 'خادم النموذج المحلي غير متاح. راجع إعدادات الخادم وصلاحية الوصول.'
-      : (qwenPlanRun && QWEN_PLAN_REFUSAL_TEXT[guardError?.code])
+      : refusalTexts?.[guardError?.code]
         || 'تعذّر تشغيل النموذج بسبب إعدادات الحوكمة أو الاتصال.',
   };
+}
+
+/**
+ * @param {boolean} qwenPlanRun
+ * @param {object|null} spawnVendor
+ * @returns {Readonly<Record<string, string>>|null} the refusal texts of this run kind
+ */
+function refusalTextsFor(qwenPlanRun, spawnVendor) {
+  if (qwenPlanRun) return QWEN_PLAN_REFUSAL_TEXT;
+  return spawnVendor ? SPAWN_VENDOR_REFUSAL_TEXT : null;
 }
 
 /** Fleet flag gating the GLM OpenCode carrier (GL-8 / OCC-15). Default OFF. */
@@ -159,6 +206,9 @@ function isOpenCodeCarrierModel(model) {
  */
 function isOpenCodeCarrierRun(options, env = process.env, resolvedModel = undefined) {
   if (isLocalModel(resolvedModel) || isLocalModel(options?.model)) return true;
+  // ADR-200 S8: a `moonshot/*` or `deepseek/*` turn under the spawn-vendor flag
+  // (NASSAJ_OPENCODE_SPAWN_VENDORS, B-1575) runs the whole guard chain, independent of the GLM carrier flag.
+  if (spawnVendorRunOf(resolvedModel, env) || spawnVendorRunOf(options?.model, env)) return true;
   if (!isOpenCodeCarrierEnabled(env)) {
     return false;
   }
@@ -191,10 +241,11 @@ function readOpenCodeSessionId(event) {
   return event.sessionID || event.sessionId || null;
 }
 
-function readOpenCodeTokenUsage(sessionId, userId = null) {
+function readOpenCodeTokenUsage(sessionId, userId = null, options = {}) {
   // OC-07: read the token totals from the SPAWNING user's opencode.db (their
   // isolated XDG data dir under isolation, the operator dir when shared).
-  const dbPath = resolveOpenCodeDatabasePathForUser(userId);
+  // B-1551 M1: a spawn-vendor turn passes honorGrants:false — its own tree.
+  const dbPath = resolveOpenCodeDatabasePathForUser(userId, options);
   if (!sessionId || !fsSync.existsSync(dbPath)) {
     return null;
   }
@@ -366,9 +417,18 @@ async function spawnOpenCode(command, options = {}, ws) {
     // layer can surface it instead of only the generic dispatch fallback. It is a
     // fixed non-secret string — never the provider's raw message.
     let lastProviderErrorCode = null;
-    // T-1906: the sender's Coding Plan key on a qwen-plan run (else null). Every
-    // byte of child output is redacted against it before ws.send/persist.
+    // T-1906: the sender's Token Plan key on a qwen-plan run (else null).
     let qwenPlanKey = null;
+    // ADR-200 S8: the sender's Moonshot / DeepSeek key on a spawn-vendor run (else null).
+    let spawnVendorKey = null;
+    // B-1551 M1: a spawn-vendor run uses the sender's OWN opencode data dir.
+    let ownDataTreeRun = false;
+    // ADR-200 §8 / M-6 (ingest): every key that can enter this sender's turn —
+    // their vendor slots and auth.json, plus the grantor's under a grant (the
+    // data home follows the grantor). Read up front so the resume-path prompt
+    // record (made before launch authorization) is redacted too. Every byte of
+    // child output and every DB write of user text is redacted before send/persist.
+    const ingestSecrets = collectOpenCodeTurnSecrets(ws?.userId ?? null);
 
     // B-395: feed the process monitor so this run gets the same "Running" badge,
     // project busy dot and active-conversations entry a Claude run gets. A new
@@ -397,7 +457,7 @@ async function spawnOpenCode(command, options = {}, ws) {
         provider: 'opencode',
         projectPath: workingDir,
       });
-      messageAuthorsDb.recordUserMessage(sid, ws.userId, redactQwenPlanSecrets(command, qwenPlanKey));
+      messageAuthorsDb.recordUserMessage(sid, ws.userId, redactLiteralSecrets(command, ingestSecrets));
     };
 
     const notifyTerminalState = ({ code = null, error = null } = {}) => {
@@ -472,7 +532,7 @@ async function spawnOpenCode(command, options = {}, ws) {
         return;
       }
       // T-1906: redact on the ASSEMBLED line, before parse/send/persist.
-      const line = redactQwenPlanSecrets(rawLine, qwenPlanKey);
+      const line = redactLiteralSecrets(rawLine, ingestSecrets);
 
       let response;
       try {
@@ -562,12 +622,19 @@ async function spawnOpenCode(command, options = {}, ws) {
       // registerSession short-circuits when it re-sees the same id, so record
       // participation here so a resumed opencode conversation stays "native".
       recordParticipant(sessionId);
+      // ADR-200 S8: the vendor of a `moonshot/*` / `deepseek/*` RESOLVED model,
+      // any case or models.dev alias (B-1551 M2); null unless
+      // NASSAJ_OPENCODE_SPAWN_VENDORS is on — legacy path unchanged. Its id is
+      // launched in canonical form so it names the inline provider block.
+      const spawnVendor = spawnVendorRunOf(resolvedModel);
+      ownDataTreeRun = spawnVendor !== null;
+      const launchModel = spawnVendor ? canonicalSpawnVendorModel(resolvedModel) : resolvedModel;
       const args = ['run', '--format', 'json'];
       if (sessionId) {
         args.push('--session', sessionId);
       }
-      if (resolvedModel) {
-        args.push('--model', resolvedModel);
+      if (launchModel) {
+        args.push('--model', launchModel);
       }
       // OC-22: attach images (materialized) and files via -f/--file, one per path.
       for (const attachmentPath of attachments.filePaths) {
@@ -604,7 +671,12 @@ async function spawnOpenCode(command, options = {}, ws) {
       const pinnedLocalSession = Boolean(localFeatureOn && sessionId
         && sessionsDb.getSessionEnginePin(sessionId)?.engine === 'local');
       const opencodeBinary = resolveOpenCodeBinaryPath();
-      let childEnv = resolveProviderEnv(ws?.userId ?? null, 'opencode');
+      // B-1551 M1 (owner decision): a spawn-vendor turn is not grantable, so it
+      // also runs on the SENDER's own opencode data dir — the sender's key and
+      // the session it writes never land in a grantor's opencode.db.
+      let childEnv = spawnVendor
+        ? resolveProviderEnv(ws?.userId ?? null, 'opencode', process.env, 'chat', { honorGrants: false })
+        : resolveProviderEnv(ws?.userId ?? null, 'opencode');
 
       if (carrierRun || pinnedLocalSession) {
         // CARRIER MODE ONLY (GL-3/GL-5/GL-6, ADR-062). Every step below is skipped on
@@ -614,13 +686,25 @@ async function spawnOpenCode(command, options = {}, ws) {
           // GL-5: fail-closed governance gate — refuses an ungoverned carrier turn.
           const callerId = ws?.userId ?? null;
           if (qwenPlanRun) {
-            // T-1906: flag, SERVER-set interactive marker, and the SENDER's own
-            // compatible key (ws.userId — never a credential-grant principal).
+            // T-1906 / ADR-200 S7: kill switch and the SENDER's own Token Plan
+            // key (ws.userId — never a credential-grant principal). Automation,
+            // resume and API-key turns may spend it (D9).
             qwenPlanKey = authorizeQwenPlanLaunch({
               userId: callerId,
-              interactiveVerified: options.qwenInteractiveVerified,
               getProfile: (id) => providerSecretsService.getQwenProfile(id),
             }).key;
+          }
+          if (spawnVendor) {
+            // ADR-200 §4: the SENDER's own slot only — a grant holder spends their
+            // own key or is refused with missing_key, never the grantor's.
+            spawnVendorKey = authorizeSpawnVendorLaunch({
+              vendor: spawnVendor,
+              userId: callerId,
+              getOwnKey: (id, slot) => providerSecretsService.getOwnVendorKey(id, slot),
+            }).key;
+            if (isOpenCodeSessionOnlyOnGrantTree(callerId, sessionId)) {
+              throw sessionOnGrantTreeRefusal(spawnVendor.label);
+            }
           }
           // ADR-088: a session pinned to the local engine may not silently continue on
           // another engine when its server/model disappeared.
@@ -673,11 +757,27 @@ async function spawnOpenCode(command, options = {}, ws) {
             childEnv = withQwenPlanEnv(childEnv, qwenPlanKey);
             auditQwenPlanTurn('qwen_execution_allowed', callerId, { model: resolvedModel });
           }
+          if (spawnVendor) {
+            // Set AFTER sanitizing: only this vendor's key and its inline block
+            // reach the child; the allowlist gains only this vendor's origin.
+            childEnv = withSpawnVendorEnv(childEnv, spawnVendor, spawnVendorKey);
+            assertOpenCodeInlineConfigAllowed(childEnv, spawnVendorOrigins(spawnVendor));
+            auditSpawnVendorTurn('spawn_vendor_execution_allowed', callerId, spawnVendor, {
+              model: spawnVendorAuditModel(resolvedModel),
+            });
+          }
         } catch (guardError) {
           qwenPlanKey = null;
+          spawnVendorKey = null;
           if (qwenPlanRun) {
             auditQwenPlanTurn('qwen_execution_rejected', ws?.userId ?? null, {
               model: resolvedModel,
+              code: guardError?.code || 'opencode_carrier_blocked',
+            });
+          }
+          if (spawnVendor) {
+            auditSpawnVendorTurn('spawn_vendor_execution_rejected', ws?.userId ?? null, spawnVendor, {
+              model: spawnVendorAuditModel(resolvedModel),
               code: guardError?.code || 'opencode_carrier_blocked',
             });
           }
@@ -688,7 +788,7 @@ async function spawnOpenCode(command, options = {}, ws) {
             error: guardError instanceof Error ? guardError.message : String(guardError),
           });
           ws.send(createNormalizedMessage({
-            ...carrierRefusalPayload(guardError, qwenPlanRun, workingDir),
+            ...carrierRefusalPayload(guardError, refusalTextsFor(qwenPlanRun, spawnVendor), workingDir),
             sessionId: finalSessionId,
             provider: 'opencode',
           }));
@@ -741,7 +841,7 @@ async function spawnOpenCode(command, options = {}, ws) {
 
       // T-1906: stderr is line-assembled so a key split across two chunks is
       // still redacted before it reaches ws.send (and so every mirror).
-      const stderrLines = createRedactingLineAssembler(qwenPlanKey);
+      const stderrLines = createRedactingLineAssembler(ingestSecrets);
       const sendStderrLines = (lines) => {
         const stderrText = lines.join('\n');
         if (!stderrText.trim()) {
@@ -775,7 +875,9 @@ async function spawnOpenCode(command, options = {}, ws) {
         }
         sendStderrLines(stderrLines.flush());
 
-        const tokenBudget = readOpenCodeTokenUsage(finalSessionId, ws?.userId ?? null);
+        const tokenBudget = readOpenCodeTokenUsage(finalSessionId, ws?.userId ?? null, {
+          honorGrants: !ownDataTreeRun,
+        });
         if (tokenBudget) {
           ws.send(createNormalizedMessage({
             kind: 'status',

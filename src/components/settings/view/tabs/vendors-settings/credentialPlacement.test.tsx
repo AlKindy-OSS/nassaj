@@ -221,21 +221,18 @@ describe('المنزل الواحد يسع الكتالوج كلَّه (T-1219)'
   });
 });
 
-describe('‏`vendorIds` صريحٌ في كل حفظ — العطل النشط (T-1206، منقولاً)', () => {
+describe('الحفظ لا يسمّي مواضع — المورّد هو الوحدة (ADR-200 S9)', () => {
   /**
-   * الحالة التي كانت تكسر: **بطاقةٌ بلا قائمة اختيار**. كان الشرط
-   * `needsChoice && slots.length > 0 ? chosenIds : undefined`، فبطاقةُ OpenRouter
-   * (موضعٌ واحد، بلا اشتراك ⇒ لا مربّعات) كانت ترسل `undefined` — والخادم يقرؤها
-   * «كل مواضع الشركة».
+   * قُلب وعد T-1206: «`vendorIds` صريحٌ دائماً» كان يحمي من كتابةٍ في مواضع لا
+   * تظهر على الشاشة. بعد S9 لا مواضع على الشاشة أصلاً ولا مربّعات: المفتاح واحد
+   * للمورّد، والخادم يقرّر الأجساد التي يغذّيها بنمط ربط كلٍّ منها. فإرسالُ
+   * `vendorIds` من هذا العميل خطأ، لا ضمانة.
    */
-  it('يسمّي الموضع على السلك حتى حين لا تكون هناك مربّعات أصلاً', async () => {
+  it('لا يرسل vendorIds ولا includeSubscription لشركةٍ بموضعٍ واحد', async () => {
     stubServer();
     render(<VendorsSettingsTab />);
     const field = () => document.getElementById('company-api-key-openrouter') as HTMLInputElement;
     await waitFor(() => expect(field()).not.toBeNull());
-
-    // بلا مربّعات: موضعٌ واحد غير مصادَقٍ باشتراك.
-    expect(document.getElementById('vendor-slot-openrouter')).toBeNull();
 
     fireEvent.change(field(), { target: { value: 'sk-or-1' } });
     fireEvent.click(screen.getByLabelText('Save OpenRouter key'));
@@ -243,13 +240,11 @@ describe('‏`vendorIds` صريحٌ في كل حفظ — العطل النشط (
     await waitFor(() => expect(writes.length).toBeGreaterThan(0));
     const write = writes.find((entry) => entry.url.includes('/company/openrouter/key'))!;
     expect(write, 'لم يُرسَل حفظٌ إلى OpenRouter أصلاً').toBeTruthy();
-    expect(
-      write.body.vendorIds,
-      'الغياب يعني عند الخادم «كل المواضع» — فالحقل يُرسل صريحاً دائماً',
-    ).toEqual(['openrouter']);
+    expect(write.body.vendorIds).toBeUndefined();
+    expect(write.body.includeSubscription).toBeUndefined();
   });
 
-  it('لا يرسل الموضع غير المحدَّد حتى حين تُعرض مواضع الشركة كلها', async () => {
+  it('لا يرسل vendorIds لشركةٍ ذات مواضع متعدّدة', async () => {
     stubServer();
     render(<VendorsSettingsTab />);
     const field = () => document.getElementById('company-api-key-anthropic') as HTMLInputElement;
@@ -259,11 +254,8 @@ describe('‏`vendorIds` صريحٌ في كل حفظ — العطل النشط (
     fireEvent.click(screen.getByLabelText('Save Anthropic key'));
 
     await waitFor(() => expect(writes.length).toBeGreaterThan(0));
-    // موضع `claude` داخلٌ باشتراكه فيبدأ بلا تحديد؛ الوجهة الوحيدة المطلوبة هي
-    // ملفّ OpenCode.
     const write = writes.find((entry) => entry.url.includes('/company/anthropic/key'))!;
-    expect(write.body.vendorIds).toEqual(['anthropic-opencode']);
-    expect(write.body.includeSubscription).toBe(false);
+    expect(write.body).toEqual({ apiKey: 'sk-ant-1' });
   });
 });
 
@@ -307,7 +299,7 @@ describe('Alibaba Cloud — CompanyCredentialCard, not a managed connect dialog 
     const write = writes.find((entry) => entry.url.includes('/company/alibaba-cloud/key'))!;
     expect(write, 'no save request reached Alibaba Cloud').toBeTruthy();
     expect(write.body.consent).toBe(true);
-    expect(write.body.vendorIds).toEqual(['alibaba-qwen-coding-plan']);
+    expect(write.body.vendorIds).toBeUndefined();
   });
 
   it('never sends consent for a company with no consent gate', async () => {

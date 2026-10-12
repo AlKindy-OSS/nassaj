@@ -1,13 +1,12 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import test, { before, after } from 'node:test';
-import path from 'node:path';
 import { writeFile } from 'node:fs/promises';
 
 import { initializeDatabase, closeConnection, sessionsDb, userDb, messageCoordinationDb, participantsDb } from '@/modules/database/index.js';
 
 import { CodexSessionsProvider } from '../codex-sessions.provider.js';
-import { codexSessionsSandbox } from '@/shared/__tests__/provider-root-sandbox.js';
+import { codexRolloutPath, codexSessionsSandbox, withCodexSessionMeta } from '@/shared/__tests__/provider-root-sandbox.js';
 import { projectCodexHistoryIdentities as projectWithReader, copyCodexHistoryIdentities, createCodexReceiptCollector, codexHistoryIdentity } from '../codex-receipt-identity.js';
 import { codexReceiptPayloadHash } from '../codex-receipt-proof.js';
 import { sessionsService } from '../../../services/sessions.service.js';
@@ -24,7 +23,7 @@ const rollouts = codexSessionsSandbox('codex-identity-');
 before(async () => { await initializeDatabase(); owner = userDb.createUser('codex-receipt-owner', 'hash', 'user').id; other = userDb.createUser('codex-receipt-other', 'hash', 'user').id; });
 after(closeConnection);
 async function fixture(withImage = false, duplicate = false, imageOnly = false, resumedContext = false) {
-  const session = `codex-identity-${++counter}`, file = path.join(rollouts, `${session}.jsonl`);
+  const session = `codex-identity-${++counter}`, file = codexRolloutPath(rollouts, session);
   const prompt = imageOnly ? '' : 'same request';
   const raw = { type: 'response_item', payload: { type: 'message', role: 'user', id: 'native-human',
     internal_chat_message_metadata_passthrough: { turn_id: 'turn-native' },
@@ -35,7 +34,7 @@ async function fixture(withImage = false, duplicate = false, imageOnly = false, 
     }, content: [{ type: 'input_text', text: '<environment_context>workspace</environment_context>' }] } };
   await writeFile(file, [...(resumedContext ? [environment] : []), raw, ...(duplicate ? [raw] : [])]
     .map(row => JSON.stringify(row)).join('\n') + '\n');
-  sessionsDb.createSession(session, 'codex', '/fixture', undefined, undefined, undefined, file);
+  sessionsDb.createSession(session, 'codex', '/fixture', undefined, undefined, undefined, withCodexSessionMeta(file, session));
   const clientMsgId = `client-${counter}`;
   const imageDigest = createHash('sha256').update(Buffer.from(image.slice(image.indexOf(',') + 1), 'base64')).digest('hex');
   messageCoordinationDb.claim({ sessionId: session, clientMsgId, userId: owner, provider: 'codex', canonicalContent: prompt, coordinationLevel: 'direct',

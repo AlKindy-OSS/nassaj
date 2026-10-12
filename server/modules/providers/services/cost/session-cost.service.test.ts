@@ -11,9 +11,11 @@
  * بـ`utimes` إلى لحظة معلومة — فلا يعتمد أي تأكيد على ساعة الجهاز الحقيقية.
  */
 
+// FIRST import — HOME becomes a /var/tmp sandbox before any provider root is computed.
+import '@/shared/__tests__/sandbox-home.js';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { copyFile, mkdir, mkdtemp, readFile, rm, stat, utimes, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, mkdtemp, readFile, rm, stat, symlink, utimes, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
@@ -38,6 +40,14 @@ import {
 } from '@/modules/providers/services/cost/subscription-config.service.js';
 import { _resetProviderSharingCache, setProviderSharingConfig } from '@/services/provider-sharing.js';
 
+import {
+  claudeHeaderLine,
+  claudeProjectsRoot,
+  codexHeaderLine,
+  codexSessionsRoot,
+  type CodexHeader,
+} from './__tests__/bound-transcripts.js';
+
 const FIXTURES = path.join(path.dirname(fileURLToPath(import.meta.url)), '__fixtures__');
 
 /** كلفة `claude-parent.jsonl` كاملةً بأسعار الجدول (محسوبة من الـfixture). */
@@ -56,8 +66,21 @@ const near = (actual: number, expected: number, message: string): void => {
 type Environment = {
   root: string;
   userId: number;
-  /** ينسخ fixture إلى مسار سجلّ، ويُثبّت زمن تعديله. */
-  addTranscript(name: string, fixture: string, mtime: Date): Promise<string>;
+  /**
+   * ADR-201 A-P2c: a transcript is read only when bound to its session, so it
+   * lives in a sandbox provider root (a fresh Claude project dir / Codex dir),
+   * is named after the id and starts with an id-bearing header.
+   */
+  /** Sandbox Codex dir of this environment (root and linked children live here). */
+  codexDir: string;
+  claudePath(sessionId: string): string;
+  codexPath(threadId: string): string;
+  /** Copies a fixture that already carries its own `session_meta` into the Codex dir. */
+  addCodexFile(name: string, fixture: string, mtime: Date): Promise<string>;
+  /** Header of the bound file + a fixture's text; pins its mtime. */
+  addTranscript(sessionId: string, provider: 'claude' | 'codex', fixture: string, mtime: Date): Promise<string>;
+  /** Writes a Codex rollout of `threadId`: its `session_meta` header, then `body`. */
+  writeRollout(threadId: string, body: string, header?: CodexHeader): Promise<string>;
   /** يُنشئ صفّ جلسة (وينسب المستخدم مشاركاً كما يفعل مسار التشغيل). */
   addSession(sessionId: string, provider: string, jsonlPath: string | null, options?: { participant?: boolean }): void;
 };
@@ -74,15 +97,32 @@ async function withEnvironment(run: (environment: Environment) => Promise<void>)
   _resetProviderSharingCache();
 
   const userId = userDb.createUser('cost-user', 'hash', 'owner').id;
+  const claudeDir = path.join(claudeProjectsRoot(), path.basename(root));
+  const codexDir = path.join(codexSessionsRoot(), path.basename(root));
+  await Promise.all([mkdir(claudeDir, { recursive: true }), mkdir(codexDir, { recursive: true })]);
 
   const environment: Environment = {
     root,
     userId,
-    async addTranscript(name, fixture, mtime) {
-      const target = path.join(root, name);
-      await mkdir(path.dirname(target), { recursive: true });
+    codexDir,
+    claudePath: (sessionId) => path.join(claudeDir, `${sessionId}.jsonl`),
+    codexPath: (threadId) => path.join(codexDir, `rollout-2026-07-26T04-12-29-${threadId}.jsonl`),
+    async addTranscript(sessionId, provider, fixture, mtime) {
+      const target = provider === 'claude' ? environment.claudePath(sessionId) : environment.codexPath(sessionId);
+      const header = provider === 'claude' ? claudeHeaderLine(sessionId) : codexHeaderLine(sessionId);
+      await writeFile(target, header + await readFile(path.join(FIXTURES, fixture), 'utf8'));
+      await utimes(target, mtime, mtime);
+      return target;
+    },
+    async addCodexFile(name, fixture, mtime) {
+      const target = path.join(codexDir, name);
       await copyFile(path.join(FIXTURES, fixture), target);
       await utimes(target, mtime, mtime);
+      return target;
+    },
+    async writeRollout(threadId, body, header) {
+      const target = environment.codexPath(threadId);
+      await writeFile(target, codexHeaderLine(threadId, header) + body);
       return target;
     },
     addSession(sessionId, provider, jsonlPath, options = {}) {
@@ -106,6 +146,8 @@ async function withEnvironment(run: (environment: Environment) => Promise<void>)
       process.env.DATABASE_PATH = previousDatabasePath;
     }
     await rm(root, { recursive: true, force: true });
+    await rm(claudeDir, { recursive: true, force: true });
+    await rm(codexDir, { recursive: true, force: true });
   }
 }
 
@@ -206,7 +248,7 @@ const seedReadyCodexV3 = (sessionId: string): void => {
 
 test('كلفة محادثة كلود: أرقام المحرّك نفسها داخل مظروف العقد', async () => {
   await withEnvironment(async (environment) => {
-    const transcript = await environment.addTranscript('sess.jsonl', 'claude-parent.jsonl', new Date('2026-07-28T12:00:00.000Z'));
+    const transcript = await environment.addTranscript('sess-1', 'claude', 'claude-parent.jsonl', new Date('2026-07-28T12:00:00.000Z'));
     await writeFile(
       transcript,
       `${JSON.stringify({
@@ -246,9 +288,7 @@ test('كلفة محادثة كلود: أرقام المحرّك نفسها دا�
 
 test('v3 on يعيد measurement كاملاً حين تتطابق facts مع response metrics', async () => {
   await withEnvironment(async (environment) => {
-    const transcript = await environment.addTranscript(
-      'v3-on.jsonl', 'codex-rollout.jsonl', new Date('2026-09-22T10:01:00.000Z'),
-    );
+    const transcript = await environment.addTranscript('v3-on', 'codex', 'codex-rollout.jsonl', new Date('2026-09-22T10:01:00.000Z'));
     environment.addSession('v3-on', 'codex', transcript);
     assert.equal(responseTurnMetricsDb.recordCompleted({
       turnId: 'v3-on-turn', sessionId: 'v3-on', assistantMessageId: 'v3-on-message',
@@ -278,9 +318,7 @@ test('v3 on يعيد measurement كاملاً حين تتطابق facts مع res
 
 test('v3 on يرفض نتيجة تغيّرت response metrics أثناء قراءتها', async () => {
   await withEnvironment(async (environment) => {
-    const transcript = await environment.addTranscript(
-      'v3-race.jsonl', 'codex-rollout.jsonl', new Date('2026-09-22T10:01:00.000Z'),
-    );
+    const transcript = await environment.addTranscript('v3-race', 'codex', 'codex-rollout.jsonl', new Date('2026-09-22T10:01:00.000Z'));
     environment.addSession('v3-race', 'codex', transcript);
     assert.equal(responseTurnMetricsDb.recordCompleted({
       turnId: 'v3-race-turn', sessionId: 'v3-race', assistantMessageId: 'v3-race-message',
@@ -310,8 +348,7 @@ test('v3 on يرفض نتيجة تغيّرت response metrics أثناء قرا�
 
 test('كلفة كلود تُبقي تفصيل كل ردّ من صفوف المقياس دون أرضية كودكس', async () => {
   await withEnvironment(async (environment) => {
-    const transcript = await environment.addTranscript(
-      'claude-turns.jsonl', 'claude-parent.jsonl', new Date('2026-07-28T12:00:00.000Z'));
+    const transcript = await environment.addTranscript('claude-turns', 'claude', 'claude-parent.jsonl', new Date('2026-07-28T12:00:00.000Z'));
     environment.addSession('claude-turns', 'claude', transcript);
     const finalUuid = '1f9ab7c1-7899-4232-acf0-f0bd38fa3ef7';
     const outcome = responseTurnMetricsDb.recordCompleted({
@@ -338,11 +375,7 @@ test('ledger reader لا يخدم الواجهة إلا عند العلم الص
     const writer = process.env.USAGE_INGEST_WRITER;
     const reader = process.env.CONVERSATION_SNAPSHOT_READER;
     try {
-      const transcript = await environment.addTranscript(
-        'ledger-claude.jsonl',
-        'claude-parent.jsonl',
-        new Date('2026-08-17T10:00:00.000Z'),
-      );
+      const transcript = await environment.addTranscript('ledger-claude', 'claude', 'claude-parent.jsonl', new Date('2026-08-17T10:00:00.000Z'));
       environment.addSession('ledger-claude', 'claude', transcript);
       process.env.USAGE_INGEST_WRITER = 'on';
       process.env.CONVERSATION_SNAPSHOT_READER = 'ledger';
@@ -372,9 +405,7 @@ test('summary GET never writes usage facts even when the background writer flag 
     const writer = process.env.USAGE_INGEST_WRITER;
     const reader = process.env.CONVERSATION_SNAPSHOT_READER;
     try {
-      const transcript = await environment.addTranscript(
-        'read-only-claude.jsonl', 'claude-parent.jsonl', new Date('2026-08-17T10:00:00.000Z'),
-      );
+      const transcript = await environment.addTranscript('read-only-claude', 'claude', 'claude-parent.jsonl', new Date('2026-08-17T10:00:00.000Z'));
       environment.addSession('read-only-claude', 'claude', transcript);
       process.env.USAGE_INGEST_WRITER = 'on';
       process.env.CONVERSATION_SNAPSHOT_READER = 'legacy';
@@ -396,11 +427,7 @@ test('ledger GET with writer on never resolves manifests, queues work, or mutate
     const writer = process.env.USAGE_INGEST_WRITER;
     const reader = process.env.CONVERSATION_SNAPSHOT_READER;
     try {
-      const rollout = await environment.addTranscript(
-        'bounded/rollout-aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa.jsonl',
-        'codex-rollout.jsonl',
-        new Date('2026-08-17T10:00:00.000Z'),
-      );
+      const rollout = await environment.addTranscript('ledger-off-codex', 'codex', 'codex-rollout.jsonl', new Date('2026-08-17T10:00:00.000Z'));
       environment.addSession('ledger-off-codex', 'codex', rollout);
       // A large adjacent child set makes accidental manifest traversal visible
       // through the explicit seam, without a flaky wall-clock assertion.
@@ -483,14 +510,10 @@ test('ledger GET with writer on never resolves manifests, queues work, or mutate
 
 test('كلفة محادثة كودكس تُقرأ من ملف الـrollout بمُستخرِجه هو', async () => {
   await withEnvironment(async (environment) => {
-    const rollout = await environment.addTranscript(
-      'rollout-2026-07-26.jsonl',
-      'codex-rollout.jsonl',
-      new Date('2026-07-26T05:00:00.000Z'),
-    );
-    environment.addSession('codex-1', 'codex', rollout);
+    const rollout = await environment.addTranscript('00000000-0000-4000-8000-0000000c0de1', 'codex', 'codex-rollout.jsonl', new Date('2026-07-26T05:00:00.000Z'));
+    environment.addSession('00000000-0000-4000-8000-0000000c0de1', 'codex', rollout);
 
-    const cost = await sessionCostService.getSessionCost('codex-1', environment.userId, {
+    const cost = await sessionCostService.getSessionCost('00000000-0000-4000-8000-0000000c0de1', environment.userId, {
       probeAuth: SUBSCRIPTION_PROBE,
     });
 
@@ -513,7 +536,7 @@ test('reader=on يخدم API من facts v3 كاملة مع تطابق الكلف
   await withEnvironment(async (environment) => {
     const previousReader = process.env.USAGE_STATISTICS_V3_READER;
     try {
-      const transcript = path.join(environment.root, 'codex-v3-api.jsonl');
+      const transcript = environment.codexPath('codex-v3-api');
       await writeFile(transcript, `${JSON.stringify({ type: 'session_meta', payload: {
         id: 'codex-v3-api', session_id: 'codex-v3-api', thread_source: 'user',
       } })}\n`);
@@ -552,7 +575,7 @@ test('reader=on fails closed when response metrics change during the v3 cache re
     const previousReader = process.env.USAGE_STATISTICS_V3_READER;
     const originalGetReadyCanonicalRun = usageStatisticsV3Db.getReadyCanonicalRun;
     try {
-      const transcript = path.join(environment.root, 'codex-v3-race.jsonl');
+      const transcript = environment.codexPath('codex-v3-race');
       await writeFile(transcript, `${JSON.stringify({ type: 'session_meta', payload: {
         id: 'codex-v3-race', session_id: 'codex-v3-race', thread_source: 'user',
       } })}\n`);
@@ -588,7 +611,7 @@ test('reader=on fails closed when response metrics change during the v3 cache re
 
 test('كلفة كودكس تعرض تفصيل كل دور مع إجمالي متّسق', async () => {
   await withEnvironment(async (environment) => {
-    const rollout = path.join(environment.root, 'codex-turns.jsonl');
+    const rollout = environment.codexPath('00000000-0000-4000-8000-0000000c0de2');
     const turn = (timestamp: string, id: string, totalInput: number, totalCached: number, totalOutput: number,
       lastInput: number, lastCached: number, lastOutput: number) => [
       JSON.stringify({ timestamp, type: 'response_item', payload: {
@@ -599,7 +622,7 @@ test('كلفة كودكس تعرض تفصيل كل دور مع إجمالي مت
         last_token_usage: { input_tokens: lastInput, cached_input_tokens: lastCached, output_tokens: lastOutput },
       } } }),
     ].join('\n');
-    await writeFile(rollout, [
+    await writeFile(rollout, codexHeaderLine('00000000-0000-4000-8000-0000000c0de2') + [
       JSON.stringify({ type: 'turn_context', payload: { model: 'gpt-5.6-sol' } }),
       turn('2026-09-01T00:00:01.000Z', 'msg-first', 100, 20, 10, 100, 20, 10),
       JSON.stringify({ timestamp: '2026-09-01T00:00:30.000Z', type: 'response_item', payload: {
@@ -607,9 +630,9 @@ test('كلفة كودكس تعرض تفصيل كل دور مع إجمالي مت
       } }),
       turn('2026-09-01T00:01:01.000Z', 'msg-second', 300, 70, 35, 200, 50, 25),
     ].join('\n'));
-    environment.addSession('codex-turns', 'codex', rollout);
+    environment.addSession('00000000-0000-4000-8000-0000000c0de2', 'codex', rollout);
 
-    const cost = await sessionCostService.getSessionCost('codex-turns', environment.userId, {
+    const cost = await sessionCostService.getSessionCost('00000000-0000-4000-8000-0000000c0de2', environment.userId, {
       probeAuth: SUBSCRIPTION_PROBE,
     });
     assert.deepEqual(cost.turns?.map((turn) => turn.assistantMessageId), ['msg-first', 'msg-second']);
@@ -623,7 +646,7 @@ test('كلفة كودكس تعرض تفصيل كل دور مع إجمالي مت
 
 test('V3 off keeps the legacy Codex duplicate/cumulative floor fix', async () => {
   await withEnvironment(async (environment) => {
-    const rollout = path.join(environment.root, 'codex-low-cumulative.jsonl');
+    const rollout = environment.codexPath('00000000-0000-4000-8000-0000000c0de3');
     const turn = (timestamp: string, id: string, totalOutput: number, lastOutput: number) => [
       JSON.stringify({ timestamp, type: 'response_item', payload: {
         type: 'message', role: 'assistant', phase: 'final_answer', id, content: [{ type: 'output_text', text: 'تم' }],
@@ -633,19 +656,19 @@ test('V3 off keeps the legacy Codex duplicate/cumulative floor fix', async () =>
         last_token_usage: { input_tokens: 0, cached_input_tokens: 0, output_tokens: lastOutput },
       } } }),
     ].join('\n');
-    await writeFile(rollout, [
+    await writeFile(rollout, codexHeaderLine('00000000-0000-4000-8000-0000000c0de3') + [
       JSON.stringify({ type: 'turn_context', payload: { model: 'gpt-5.6-sol' } }),
       turn('2026-09-01T00:00:01.000Z', 'msg-first', 1, 1_000),
       turn('2026-09-01T00:01:01.000Z', 'msg-second', 2, 2_000),
     ].join('\n'));
-    environment.addSession('codex-low-cumulative', 'codex', rollout);
+    environment.addSession('00000000-0000-4000-8000-0000000c0de3', 'codex', rollout);
 
     const previousWriter = process.env.USAGE_STATISTICS_V3_WRITER;
     const previousReader = process.env.USAGE_STATISTICS_V3_READER;
     try {
       delete process.env.USAGE_STATISTICS_V3_WRITER;
       delete process.env.USAGE_STATISTICS_V3_READER;
-      const cost = await sessionCostService.getSessionCost('codex-low-cumulative', environment.userId, {
+      const cost = await sessionCostService.getSessionCost('00000000-0000-4000-8000-0000000c0de3', environment.userId, {
         probeAuth: SUBSCRIPTION_PROBE,
       });
       const turnFloor = cost.turns?.reduce((sum, turn) => sum + (turn.costUsd ?? 0), 0) ?? 0;
@@ -664,7 +687,7 @@ test('V3 off keeps the legacy Codex duplicate/cumulative floor fix', async () =>
 
 test('مصالحة كودكس لا تغيّر إجمالياً تراكميّاً طبيعياً ولا تعدّه مرتين', async () => {
   await withEnvironment(async (environment) => {
-    const rollout = path.join(environment.root, 'codex-normal-cumulative.jsonl');
+    const rollout = environment.codexPath('00000000-0000-4000-8000-0000000c0de4');
     const turn = (timestamp: string, id: string, totalOutput: number, lastOutput: number) => [
       JSON.stringify({ timestamp, type: 'response_item', payload: {
         type: 'message', role: 'assistant', phase: 'final_answer', id, content: [{ type: 'output_text', text: 'تم' }],
@@ -674,14 +697,14 @@ test('مصالحة كودكس لا تغيّر إجمالياً تراكميّا�
         last_token_usage: { input_tokens: 0, cached_input_tokens: 0, output_tokens: lastOutput },
       } } }),
     ].join('\n');
-    await writeFile(rollout, [
+    await writeFile(rollout, codexHeaderLine('00000000-0000-4000-8000-0000000c0de4') + [
       JSON.stringify({ type: 'turn_context', payload: { model: 'gpt-5.6-sol' } }),
       turn('2026-09-01T00:00:01.000Z', 'msg-first', 10, 10),
       turn('2026-09-01T00:01:01.000Z', 'msg-second', 35, 25),
     ].join('\n'));
-    environment.addSession('codex-normal-cumulative', 'codex', rollout);
+    environment.addSession('00000000-0000-4000-8000-0000000c0de4', 'codex', rollout);
 
-    const cost = await sessionCostService.getSessionCost('codex-normal-cumulative', environment.userId, {
+    const cost = await sessionCostService.getSessionCost('00000000-0000-4000-8000-0000000c0de4', environment.userId, {
       probeAuth: SUBSCRIPTION_PROBE,
     });
     const turnFloor = cost.turns?.reduce((sum, turn) => sum + (turn.costUsd ?? 0), 0) ?? 0;
@@ -695,8 +718,8 @@ test('مصالحة كودكس لا تغيّر إجمالياً تراكميّا�
 test('نافذة اشتراك كودكس تبقى تفاضلية ولا تخلط أرضية الأدوار', async () => {
   await withEnvironment(async (environment) => {
     subscriptionConfigService.update('codex', { anchorDay: 20 }, environment.userId);
-    const rollout = path.join(environment.root, 'codex-cycle-window.jsonl');
-    await writeFile(rollout, [
+    const rollout = environment.codexPath('00000000-0000-4000-8000-0000000c0de5');
+    await writeFile(rollout, codexHeaderLine('00000000-0000-4000-8000-0000000c0de5') + [
       JSON.stringify({ type: 'turn_context', payload: { model: 'gpt-5.6-sol' } }),
       JSON.stringify({ timestamp: '2026-07-19T12:00:00.000Z', type: 'event_msg', payload: { type: 'token_count', info: {
         total_token_usage: { input_tokens: 100, cached_input_tokens: 0, output_tokens: 10 },
@@ -708,7 +731,7 @@ test('نافذة اشتراك كودكس تبقى تفاضلية ولا تخلط
       } } }),
     ].join('\n'));
     await utimes(rollout, NOW_IN_CYCLE(), NOW_IN_CYCLE());
-    environment.addSession('codex-cycle-window', 'codex', rollout);
+    environment.addSession('00000000-0000-4000-8000-0000000c0de5', 'codex', rollout);
 
     const subscriptions = await sessionCostService.getSubscriptionCosts(environment.userId, {
       probeAuth: probeOnly(['codex']),
@@ -725,8 +748,8 @@ test('نافذة اشتراك كودكس تبقى تفاضلية ولا تخلط
 test('جلسة Codex المنسوبة لا تلتقط أرضية turns من last_token_usage شاذ', async () => {
   await withEnvironment(async (environment) => {
     subscriptionConfigService.update('codex', { anchorDay: 20 }, environment.userId);
-    const rollout = path.join(environment.root, 'codex-attributed-window.jsonl');
-    await writeFile(rollout, [
+    const rollout = environment.codexPath('00000000-0000-4000-8000-0000000c0de6');
+    await writeFile(rollout, codexHeaderLine('00000000-0000-4000-8000-0000000c0de6') + [
       JSON.stringify({ type: 'turn_context', payload: { model: 'gpt-5.6-sol' } }),
       JSON.stringify({ timestamp: '2026-07-19T12:00:00.000Z', type: 'event_msg', payload: { type: 'token_count', info: {
         total_token_usage: { input_tokens: 100, cached_input_tokens: 0, output_tokens: 10 },
@@ -738,7 +761,7 @@ test('جلسة Codex المنسوبة لا تلتقط أرضية turns من last
       } } }),
     ].join('\n'));
     await utimes(rollout, NOW_IN_CYCLE(), NOW_IN_CYCLE());
-    environment.addSession('codex-attributed-window', 'codex', rollout);
+    environment.addSession('00000000-0000-4000-8000-0000000c0de6', 'codex', rollout);
 
     const subscriptions = await sessionCostService.getSubscriptionCosts(environment.userId, {
       probeAuth: probeOnly(['codex']),
@@ -755,24 +778,22 @@ test('جلسة Codex المنسوبة لا تلتقط أرضية turns من last
 test('كلفة كودكس تجمع المنسّق والأبناء المرتبطين وتعدّ كل spawn مرة واحدة', async () => {
   await withEnvironment(async (environment) => {
     const timestamp = new Date('2026-08-10T06:10:00.000Z');
-    const root = await environment.addTranscript(
-      'rollouts/rollout-root-aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa.jsonl',
-      'codex-linked-root.jsonl',
-      timestamp,
-    );
-    const uiChild = await environment.addTranscript(
-      'rollouts/rollout-child-bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb.jsonl',
+    // The fixture root's own session_meta names thread aaaa…: that is the session id.
+    const rootId = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+    const root = await environment.addCodexFile(`rollout-root-${rootId}.jsonl`, 'codex-linked-root.jsonl', timestamp);
+    const uiChild = await environment.addCodexFile(
+      'rollout-child-bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb.jsonl',
       'codex-linked-ui.jsonl',
       timestamp,
     );
-    await environment.addTranscript(
-      'rollouts/rollout-child-cccccccc-cccc-cccc-cccc-cccccccccccc.jsonl',
+    await environment.addCodexFile(
+      'rollout-child-cccccccc-cccc-cccc-cccc-cccccccccccc.jsonl',
       'codex-linked-front.jsonl',
       timestamp,
     );
-    environment.addSession('codex-linked', 'codex', root);
+    environment.addSession(rootId, 'codex', root);
 
-    const cost = await sessionCostService.getSessionCost('codex-linked', environment.userId, {
+    const cost = await sessionCostService.getSessionCost(rootId, environment.userId, {
       probeAuth: SUBSCRIPTION_PROBE,
     });
 
@@ -791,7 +812,7 @@ test('كلفة كودكس تجمع المنسّق والأبناء المرتب�
     const changedChild = (await readFile(uiChild, 'utf8')).replace('"input_tokens":50', '"input_tokens":60');
     await writeFile(uiChild, changedChild);
     await utimes(uiChild, new Date('2026-08-10T06:11:00.000Z'), new Date('2026-08-10T06:11:00.000Z'));
-    const refreshed = await sessionCostService.getSessionCost('codex-linked', environment.userId, {
+    const refreshed = await sessionCostService.getSessionCost(rootId, environment.userId, {
       probeAuth: SUBSCRIPTION_PROBE,
     });
     assert.equal(refreshed.perModel[0].tokens.input, 160, 'تغيير rollout الابن يبطل كاش المحادثة');
@@ -802,8 +823,8 @@ test('كلفة كودكس تنسب دور الابن إلى جواب الأم ح
   await withEnvironment(async (environment) => {
     const rootId = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
     const childId = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb';
-    const root = path.join(environment.root, `rollout-root-${rootId}.jsonl`);
-    const child = path.join(environment.root, `rollout-child-${childId}.jsonl`);
+    const root = path.join(environment.codexDir, `rollout-root-${rootId}.jsonl`);
+    const child = path.join(environment.codexDir, `rollout-child-${childId}.jsonl`);
     const token = (input: number, output: number) => JSON.stringify({ type: 'event_msg', payload: {
       type: 'token_count', info: {
         total_token_usage: { input_tokens: input, output_tokens: output },
@@ -831,9 +852,9 @@ test('كلفة كودكس تنسب دور الابن إلى جواب الأم ح
       } }),
       JSON.stringify({ timestamp: '2026-09-03T00:00:06.000Z', ...JSON.parse(token(50, 5)) }),
     ].join('\n'));
-    environment.addSession('codex-parent-child-turns', 'codex', root);
+    environment.addSession(rootId, 'codex', root);
 
-    const cost = await sessionCostService.getSessionCost('codex-parent-child-turns', environment.userId, {
+    const cost = await sessionCostService.getSessionCost(rootId, environment.userId, {
       probeAuth: SUBSCRIPTION_PROBE,
     });
     assert.deepEqual(cost.turns?.map((turn) => turn.assistantMessageId), ['msg-root']);
@@ -847,7 +868,7 @@ test('رابط كودكس الصريح غير المحلول يجعل snapshot �
   await withEnvironment(async (environment) => {
     const rootId = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
     const missingId = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb';
-    const root = path.join(environment.root, `rollout-root-${rootId}.jsonl`);
+    const root = path.join(environment.codexDir, `rollout-root-${rootId}.jsonl`);
     await writeFile(root, [
       JSON.stringify({
         type: 'session_meta',
@@ -862,9 +883,9 @@ test('رابط كودكس الصريح غير المحلول يجعل snapshot �
         payload: { type: 'token_count', info: { total_token_usage: { input_tokens: 10, output_tokens: 2 } } },
       }),
     ].join('\n'));
-    environment.addSession('codex-incomplete', 'codex', root);
+    environment.addSession(rootId, 'codex', root);
 
-    const cost = await sessionCostService.getSessionCost('codex-incomplete', environment.userId, {
+    const cost = await sessionCostService.getSessionCost(rootId, environment.userId, {
       probeAuth: SUBSCRIPTION_PROBE,
     });
 
@@ -880,7 +901,7 @@ test('نمو rollout بعد manifest وقبل signature لا يُعاد تأطي
   await withEnvironment(async (environment) => {
     const rootId = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
     const lateId = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb';
-    const root = path.join(environment.root, `rollout-race-${rootId}.jsonl`);
+    const root = path.join(environment.codexDir, `rollout-race-${rootId}.jsonl`);
     await writeFile(root, [
       JSON.stringify({
         type: 'session_meta',
@@ -891,9 +912,9 @@ test('نمو rollout بعد manifest وقبل signature لا يُعاد تأطي
         payload: { type: 'token_count', info: { total_token_usage: { input_tokens: 10, output_tokens: 2 } } },
       }),
     ].join('\n'));
-    environment.addSession('codex-manifest-race', 'codex', root);
+    environment.addSession(rootId, 'codex', root);
 
-    const cost = await sessionCostService.getSessionCost('codex-manifest-race', environment.userId, {
+    const cost = await sessionCostService.getSessionCost(rootId, environment.userId, {
       probeAuth: SUBSCRIPTION_PROBE,
       afterCodexManifest: async () => {
         await writeFile(root, `${await readFile(root, 'utf8')}\n${JSON.stringify({
@@ -913,7 +934,7 @@ test('بصمة كودكس العميقة تشمل الابن رقم 129 وتبط
   await withEnvironment(async (environment) => {
     const rootId = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
     const childId = (index: number) => `00000000-0000-4000-8000-${String(index).padStart(12, '0')}`;
-    const rollouts = path.join(environment.root, 'rollouts');
+    const rollouts = environment.codexDir;
     const root = path.join(rollouts, `rollout-root-${rootId}.jsonl`);
     const timestamp = new Date('2026-08-10T06:10:00.000Z');
     const rootLines = [JSON.stringify({
@@ -946,9 +967,9 @@ test('بصمة كودكس العميقة تشمل الابن رقم 129 وتبط
     }));
     await writeFile(root, `${rootLines.join('\n')}\n`);
     await utimes(root, timestamp, timestamp);
-    environment.addSession('codex-129', 'codex', root);
+    environment.addSession(rootId, 'codex', root);
 
-    const first = await sessionCostService.getSessionCost('codex-129', environment.userId, { probeAuth: SUBSCRIPTION_PROBE });
+    const first = await sessionCostService.getSessionCost(rootId, environment.userId, { probeAuth: SUBSCRIPTION_PROBE });
     assert.equal(first.available, true);
     assert.equal(first.perModel[0].requests, 130);
     assert.equal(first.perModel[0].tokens.input, 130);
@@ -959,14 +980,14 @@ test('بصمة كودكس العميقة تشمل الابن رقم 129 وتبط
     const newer = new Date('2026-08-10T06:11:00.000Z');
     await utimes(finalChild, newer, newer);
 
-    const refreshed = await sessionCostService.getSessionCost('codex-129', environment.userId, { probeAuth: SUBSCRIPTION_PROBE });
+    const refreshed = await sessionCostService.getSessionCost(rootId, environment.userId, { probeAuth: SUBSCRIPTION_PROBE });
     assert.equal(refreshed.perModel[0].tokens.input, 131, 'الابن رقم 129 ضمن بصمة الكاش العميقة');
   });
 });
 
 test('مزوّد لا يحفظ استهلاكه: لا رقم ولا صفر — سببٌ مكتوب', async () => {
   await withEnvironment(async (environment) => {
-    const transcript = await environment.addTranscript('agy.jsonl', 'claude-parent.jsonl', new Date('2026-07-28T12:00:00.000Z'));
+    const transcript = await environment.addTranscript('agy-1', 'claude', 'claude-parent.jsonl', new Date('2026-07-28T12:00:00.000Z'));
     environment.addSession('agy-1', 'antigravity', transcript);
 
     const cost = await sessionCostService.getSessionCost('agy-1', environment.userId, {
@@ -1003,7 +1024,7 @@ test('محادثة غير مفهرسة أو بلا سجلّ على القرص ت
 
 test('metered يتبع طريقة المصادقة وفشل الفحص يبقى unknown', async () => {
   await withEnvironment(async (environment) => {
-    const transcript = await environment.addTranscript('sess.jsonl', 'claude-parent.jsonl', new Date('2026-07-28T12:00:00.000Z'));
+    const transcript = await environment.addTranscript('sess-1', 'claude', 'claude-parent.jsonl', new Date('2026-07-28T12:00:00.000Z'));
     environment.addSession('sess-1', 'claude', transcript);
 
     const subscription = await sessionCostService.getSessionCost('sess-1', environment.userId, {
@@ -1049,7 +1070,7 @@ test('metered يتبع طريقة المصادقة وفشل الفحص يبقى 
 test('ملف بنفس البصمة لا يُقرأ ثانية، وأي تغيّر في زمنه يُبطل المخبَّأ', async () => {
   await withEnvironment(async (environment) => {
     const frozen = new Date('2026-07-28T12:00:00.000Z');
-    const transcript = await environment.addTranscript('sess.jsonl', 'claude-parent.jsonl', frozen);
+    const transcript = await environment.addTranscript('sess-1', 'claude', 'claude-parent.jsonl', frozen);
     environment.addSession('sess-1', 'claude', transcript);
 
     const first = await sessionCostService.getSessionCost('sess-1', environment.userId, { probeAuth: SUBSCRIPTION_PROBE });
@@ -1077,14 +1098,14 @@ test('ملف بنفس البصمة لا يُقرأ ثانية، وأي تغيّ�
 test('كتابة وكيل فرعي داخل ملف قائم تُبطل المخبَّأ رغم ثبات ملف الأمّ', async () => {
   await withEnvironment(async (environment) => {
     const frozen = new Date('2026-07-28T12:00:00.000Z');
-    const transcript = await environment.addTranscript('sess.jsonl', 'claude-parent.jsonl', frozen);
+    const transcript = await environment.addTranscript('sess-1', 'claude', 'claude-parent.jsonl', frozen);
     environment.addSession('sess-1', 'claude', transcript);
 
     // مجلّد الوكلاء يُنشأ سلفاً بملف فارغ: بعد ذلك لا يتغيّر زمن المجلّد ولا
     // زمن ملف الأمّ، فلا يكشف الكتابةَ إلا مشيُ الشجرة. وزمن ملف الوكيل مُثبَّت
     // يدوياً لأن دقّة طوابع الملفات خشنة (4ms هنا)، فكتابتان متلاحقتان قد
     // تحملان نفس الطابع ويصير الاختبار رهن سرعة الجهاز.
-    const agentFile = path.join(environment.root, 'sess', 'subagents', 'agent-a42e68ee5814334bd.jsonl');
+    const agentFile = path.join(transcript.replace(/\.jsonl$/, ''), 'subagents', 'agent-a42e68ee5814334bd.jsonl');
     await mkdir(path.dirname(agentFile), { recursive: true });
     await writeFile(agentFile, '');
     const agentCreated = new Date('2026-07-28T12:00:01.000Z');
@@ -1093,7 +1114,8 @@ test('كتابة وكيل فرعي داخل ملف قائم تُبطل المخ�
     const before = await sessionCostService.getSessionCost('sess-1', environment.userId, { probeAuth: SUBSCRIPTION_PROBE });
     assert.deepEqual(before.perModel.map((entry) => entry.model), ['claude-opus-5']);
 
-    await copyFile(path.join(FIXTURES, 'claude-subagent.jsonl'), agentFile);
+    // A subagent file carries its parent's session id (ADR-201 A-P2c binds it by that header).
+    await writeFile(agentFile, claudeHeaderLine('sess-1') + await readFile(path.join(FIXTURES, 'claude-subagent.jsonl'), 'utf8'));
     const agentWritten = new Date('2026-07-28T12:05:00.000Z');
     await utimes(agentFile, agentWritten, agentWritten);
 
@@ -1116,12 +1138,12 @@ test('الدورة تحسب ما كُتب داخلها فقط — لا محاد�
     subscriptionConfigService.update('claude', { anchorDay: 20, plan: 'Max 20x' }, environment.userId);
 
     // داخل الدورة: أسطره في 2026-07-28.
-    const recent = await environment.addTranscript('recent.jsonl', 'claude-parent.jsonl', new Date('2026-07-28T12:00:00.000Z'));
+    const recent = await environment.addTranscript('recent-1', 'claude', 'claude-parent.jsonl', new Date('2026-07-28T12:00:00.000Z'));
     environment.addSession('recent-1', 'claude', recent);
 
     // قبل الدورة محتوىً (‏2026-07-10) وإن كان الملف مكتوباً حديثاً — الترشيح
     // بطابع كل سطر لا بزمن الملف.
-    const older = await environment.addTranscript('older.jsonl', 'claude-subagent.jsonl', new Date('2026-07-28T12:00:00.000Z'));
+    const older = await environment.addTranscript('older-1', 'claude', 'claude-subagent.jsonl', new Date('2026-07-28T12:00:00.000Z'));
     environment.addSession('older-1', 'claude', older);
 
     const [subscription] = await sessionCostService.getSubscriptionCosts(environment.userId, {
@@ -1155,7 +1177,7 @@ test('ملف لم يُكتب فيه شيء منذ بداية الدورة لا �
 
     // محتواه داخل الدورة تماماً، لكن زمن تعديله قبلها: لا سطر يمكن أن يكون
     // كُتب داخل النافذة، فيُتخطّى بـstat وحده. لو قُرئ لأضاف كلفته للمجموع.
-    const cold = await environment.addTranscript('cold.jsonl', 'claude-parent.jsonl', new Date('2026-07-05T12:00:00.000Z'));
+    const cold = await environment.addTranscript('cold-1', 'claude', 'claude-parent.jsonl', new Date('2026-07-05T12:00:00.000Z'));
     environment.addSession('cold-1', 'claude', cold);
 
     const [subscription] = await sessionCostService.getSubscriptionCosts(environment.userId, {
@@ -1172,7 +1194,7 @@ test('سجلّ اختفى من القرص يُخفض «مكتمل» بدل أن 
   await withEnvironment(async (environment) => {
     subscriptionConfigService.update('claude', { anchorDay: 20 }, environment.userId);
 
-    const recent = await environment.addTranscript('recent.jsonl', 'claude-parent.jsonl', new Date('2026-07-28T12:00:00.000Z'));
+    const recent = await environment.addTranscript('recent-1', 'claude', 'claude-parent.jsonl', new Date('2026-07-28T12:00:00.000Z'));
     environment.addSession('recent-1', 'claude', recent);
     environment.addSession('vanished-1', 'claude', path.join(environment.root, 'vanished.jsonl'));
 
@@ -1191,11 +1213,11 @@ test('العزل يحصر المجموع في محادثات صاحب الاشت
   await withEnvironment(async (environment) => {
     subscriptionConfigService.update('claude', { anchorDay: 20 }, environment.userId);
 
-    const mine = await environment.addTranscript('mine.jsonl', 'claude-parent.jsonl', new Date('2026-07-28T12:00:00.000Z'));
+    const mine = await environment.addTranscript('mine-1', 'claude', 'claude-parent.jsonl', new Date('2026-07-28T12:00:00.000Z'));
     environment.addSession('mine-1', 'claude', mine);
 
     // محادثة لا يشارك فيها هذا المستخدم — اعتماد غيره تحت العزل.
-    const theirs = await environment.addTranscript('theirs.jsonl', 'claude-parent.jsonl', new Date('2026-07-28T12:00:00.000Z'));
+    const theirs = await environment.addTranscript('theirs-1', 'claude', 'claude-parent.jsonl', new Date('2026-07-28T12:00:00.000Z'));
     environment.addSession('theirs-1', 'claude', theirs, { participant: false });
 
     const [isolated] = await sessionCostService.getSubscriptionCosts(environment.userId, {
@@ -1243,7 +1265,7 @@ test('مزوّد مُكتشَف بلا قياس يظهر في اللوحة بس�
 test('المخفيّ لا يُحسب ولا يظهر في الاشتراكات', async () => {
   await withEnvironment(async (environment) => {
     subscriptionConfigService.update('claude', { hidden: true }, environment.userId);
-    const transcript = await environment.addTranscript('sess.jsonl', 'claude-parent.jsonl', new Date('2026-07-28T12:00:00.000Z'));
+    const transcript = await environment.addTranscript('sess-1', 'claude', 'claude-parent.jsonl', new Date('2026-07-28T12:00:00.000Z'));
     environment.addSession('sess-1', 'claude', transcript);
 
     const subscriptions = await sessionCostService.getSubscriptionCosts(environment.userId, {
@@ -1252,5 +1274,107 @@ test('المخفيّ لا يُحسب ولا يظهر في الاشتراكات',
     });
 
     assert.deepEqual(subscriptions, []);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ADR-201 A-P2c — cost is attributed only to the session its transcript is bound to
+// ---------------------------------------------------------------------------
+
+const FORGED_REASON = /could not be verified as its own/;
+
+test('A-P2c: رأس يحمل معرّف جلسة أخرى ⇒ لا كلفة لهذه الجلسة ولا للدورة', async () => {
+  await withEnvironment(async (environment) => {
+    subscriptionConfigService.update('claude', { anchorDay: 20 }, environment.userId);
+    const forged = environment.claudePath('victim-1');
+    await writeFile(forged, claudeHeaderLine('attacker-1') + await readFile(path.join(FIXTURES, 'claude-parent.jsonl'), 'utf8'));
+    await utimes(forged, new Date('2026-07-28T12:00:00.000Z'), new Date('2026-07-28T12:00:00.000Z'));
+    environment.addSession('victim-1', 'claude', forged);
+
+    const cost = await sessionCostService.getSessionCost('victim-1', environment.userId, { probeAuth: SUBSCRIPTION_PROBE });
+    assert.equal(cost.available, false);
+    assert.match(cost.reason ?? '', FORGED_REASON);
+    assert.equal(cost.totalUsd, 0);
+
+    const [subscription] = await sessionCostService.getSubscriptionCosts(environment.userId, {
+      probeAuth: CLAUDE_ONLY_PROBE, now: NOW_IN_CYCLE,
+    });
+    assert.equal(subscription.sessions, 0, 'the forged file is not counted in the cycle');
+    assert.equal(subscription.totalUsd, 0);
+    assert.equal(subscription.complete, false, 'a refused transcript lowers «complete»');
+  });
+});
+
+test('A-P2c: سجلّ مسجَّل باسم لا يطابق الجلسة ⇒ مرفوض حتى برأس صحيح', async () => {
+  await withEnvironment(async (environment) => {
+    const misnamed = path.join(path.dirname(environment.claudePath('x')), 'not-the-id.jsonl');
+    await writeFile(misnamed, claudeHeaderLine('named-1') + await readFile(path.join(FIXTURES, 'claude-parent.jsonl'), 'utf8'));
+    environment.addSession('named-1', 'claude', misnamed);
+    const cost = await sessionCostService.getSessionCost('named-1', environment.userId, { probeAuth: SUBSCRIPTION_PROBE });
+    assert.equal(cost.available, false);
+    assert.match(cost.reason ?? '', FORGED_REASON);
+  });
+});
+
+test('A-P2c: لا احتياط إلى مسار مشتقّ من المشروع — ما لم يُسجَّل ليس سجلّ الجلسة', async () => {
+  await withEnvironment(async (environment) => {
+    // A file sits where the removed fallback looked (<projects>/<encoded project>/<id>.jsonl),
+    // but the row records no path: the cost path must not find it.
+    const encoded = path.join(environment.root, 'workspace').replace(/[^a-zA-Z0-9-]/g, '-');
+    const derived = path.join(claudeProjectsRoot(), encoded, 'derived-1.jsonl');
+    await mkdir(path.dirname(derived), { recursive: true });
+    await writeFile(derived, claudeHeaderLine('derived-1') + await readFile(path.join(FIXTURES, 'claude-parent.jsonl'), 'utf8'));
+    try {
+      environment.addSession('derived-1', 'claude', null);
+      const cost = await sessionCostService.getSessionCost('derived-1', environment.userId, { probeAuth: SUBSCRIPTION_PROBE });
+      assert.equal(cost.available, false);
+      assert.equal(cost.totalUsd, 0);
+    } finally {
+      await rm(path.dirname(derived), { recursive: true, force: true });
+    }
+  });
+});
+
+test('A-P2c: مسار في شجرة /10 يُحلّ إلى ملف في شجرة /1 ⇒ مرفوض (فخّ البادئة)', async () => {
+  await withEnvironment(async (environment) => {
+    const project = path.basename(environment.root);
+    const memberOne = path.join(claudeProjectsRoot('1'), project);
+    const memberTen = path.join(claudeProjectsRoot('10'), project);
+    await mkdir(memberOne, { recursive: true });
+    await mkdir(path.dirname(memberTen), { recursive: true });
+    try {
+      const real = path.join(memberOne, 'tree-1.jsonl');
+      await writeFile(real, claudeHeaderLine('tree-1') + await readFile(path.join(FIXTURES, 'claude-parent.jsonl'), 'utf8'));
+      await symlink(memberOne, memberTen);
+      environment.addSession('tree-1', 'claude', path.join(memberTen, 'tree-1.jsonl'));
+      const cost = await sessionCostService.getSessionCost('tree-1', environment.userId, { probeAuth: SUBSCRIPTION_PROBE });
+      assert.equal(cost.available, false);
+      assert.match(cost.reason ?? '', FORGED_REASON);
+    } finally {
+      await rm(memberOne, { recursive: true, force: true });
+      await rm(memberTen, { force: true });
+    }
+  });
+});
+
+test('A-P2c: سجلّ كودكس رمزي أو برأس خيط آخر ⇒ لا كلفة', async () => {
+  await withEnvironment(async (environment) => {
+    const threadId = '00000000-0000-4000-8000-0000000c0de7';
+    const otherId = '00000000-0000-4000-8000-0000000c0de8';
+    const body = await readFile(path.join(FIXTURES, 'codex-rollout.jsonl'), 'utf8');
+    const forged = environment.codexPath(threadId);
+    await writeFile(forged, codexHeaderLine(otherId) + body);
+    environment.addSession(threadId, 'codex', forged);
+    const forgedCost = await sessionCostService.getSessionCost(threadId, environment.userId, { probeAuth: SUBSCRIPTION_PROBE });
+    assert.equal(forgedCost.available, false);
+    assert.match(forgedCost.reason ?? '', FORGED_REASON);
+
+    const realOther = await environment.writeRollout(otherId, body);
+    const linkId = '00000000-0000-4000-8000-0000000c0de9';
+    const link = environment.codexPath(linkId);
+    await symlink(realOther, link);
+    environment.addSession(linkId, 'codex', link);
+    const linked = await sessionCostService.getSessionCost(linkId, environment.userId, { probeAuth: SUBSCRIPTION_PROBE });
+    assert.equal(linked.available, false, 'a symlink resolving to another thread binds nothing');
   });
 });

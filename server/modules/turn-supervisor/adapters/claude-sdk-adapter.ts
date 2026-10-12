@@ -3,8 +3,10 @@ import { query, type Options, type SDKMessage, type SDKResultMessage } from '@an
 // eslint-disable-next-line boundaries/dependencies -- admission is a synchronous leaf; importing the providers barrel here creates the provider-auth graph during adapter boot.
 import { isSpawnBlockedForRunProvider } from '../../providers/harness-update/spawn-admission.js';
 import { assertAnthropicBaseUrlAllowed, assertSettingsEnvAllowed } from '../../../services/isolation/anthropic-base-url-guard.js';
+import { assertLinkModeRunAllowed } from '../../../services/isolation/link-mode-run-gate.js';
 import { resolveHarnessBinary } from '../../../shared/harness-binaries.js';
 
+import { admitLinkModeRun, type LinkModeRunGate } from './link-mode-admission.js';
 import {
   TurnAdapterError,
   type TurnAdapterCapabilities,
@@ -43,6 +45,8 @@ export interface ClaudeSdkTurnAdapterOptions {
     userId: string | number,
     baseEnv: NodeJS.ProcessEnv,
   ) => NodeJS.ProcessEnv | Promise<NodeJS.ProcessEnv>;
+  /** B-1546 seam: the link-mode run gate (throws `LINK_MODE_KEY_MISSING`). */
+  readonly assertRunAllowed?: LinkModeRunGate;
 }
 
 /**
@@ -62,10 +66,15 @@ export function createClaudeSdkTurnAdapter(
       return providerAuthService.getProviderAuthStatus('claude', userId);
     });
   const queryFactory = options.queryFactory ?? ((input) => query(input));
+  const assertRunAllowed = options.assertRunAllowed
+    ?? ((userId: string | number) => assertLinkModeRunAllowed(userId, 'claude'));
   const resolveEnvironment = options.resolveEnvironment
     ?? (async (userId, baseEnv) => {
       const { resolveProviderEnv } = await import('../../../services/isolation/resolve-provider-env.js');
-      return resolveProviderEnv(userId, 'claude', baseEnv);
+      const { reconcileClaudeSkillsForEnv } = await import('../../../services/isolation/claude-skills-link.js');
+      const env = resolveProviderEnv(userId, 'claude', baseEnv);
+      reconcileClaudeSkillsForEnv(env); // ADR-203: shared/private skills link
+      return env;
     });
 
   const adapter: TurnAdapterRegistration = {
@@ -95,6 +104,7 @@ export function createClaudeSdkTurnAdapter(
       if (isSpawnBlockedForRunProvider('claude')) {
         throw new TurnAdapterError('provider_unavailable', 'The claude runtime is being updated right now');
       }
+      await admitLinkModeRun(assertRunAllowed, request.userId);
 
       const abortController = new AbortController();
       const forwardAbort = (): void => abortController.abort(request.signal?.reason);

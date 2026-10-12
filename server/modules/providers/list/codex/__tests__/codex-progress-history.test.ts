@@ -14,7 +14,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { after, test, mock } from 'node:test';
-import { codexSessionsSandbox } from '@/shared/__tests__/provider-root-sandbox.js';
+import { codexSessionsSandbox, withPinnedTranscript } from '@/shared/__tests__/provider-root-sandbox.js';
 
 const sandbox = codexSessionsSandbox('codex-progress-');
 const transcript = path.join(sandbox, 'rollout.jsonl');
@@ -34,7 +34,9 @@ const planArgs = () => JSON.parse(real.updatePlan.payload.arguments) as { plan: 
 
 async function history(lines: Row[]) {
   fs.writeFileSync(transcript, `${lines.map((line) => JSON.stringify(line)).join('\n')}\n`);
-  return (await provider.fetchHistory('codex-progress-session')).messages as Row[];
+  const result = await withPinnedTranscript(transcript, 'codex-progress-session', 'codex',
+    (pinned) => provider.fetchHistory('codex-progress-session', { transcript: pinned }));
+  return result.messages as Row[];
 }
 
 test('history spawn_agent: the Task row carries the subagent, settled by its FINAL_ANSWER', async () => {

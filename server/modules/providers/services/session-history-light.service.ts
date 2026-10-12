@@ -222,11 +222,21 @@ async function statFingerprint(filePath: string): Promise<string | null> {
   }
 }
 
+/** Pinned transcript (ADR-201): fingerprint from fstat of the descriptor actually read. */
+type PinnedTranscript = { fd: import('node:fs/promises').FileHandle; realpath: string };
+
+async function pinnedFingerprint(transcript: PinnedTranscript): Promise<string> {
+  const stat = await transcript.fd.stat({ bigint: true });
+  return `${path.basename(transcript.realpath)}=file:${stat.ino}:${stat.size}:${stat.mtimeNs}`;
+}
+
 async function sourceFingerprint(
   sessionId: string,
   requesterUserId: number | null,
   source: SessionSource,
+  transcript?: PinnedTranscript,
 ): Promise<string> {
+  if (transcript) return pinnedFingerprint(transcript);
   let filePath = source.provider === 'cursor' || source.provider === 'opencode'
     ? null
     : source.jsonlPath;
@@ -284,6 +294,8 @@ export async function loadStableHistorySnapshot(input: {
   source: SessionSource;
   pageKey: string;
   historyLease?: import('./history-budget.service.js').HistoryReadLease;
+  /** Unleased reads: the pinned transcript the provider reads (ADR-201 A1). */
+  transcript?: PinnedTranscript;
   load: () => Promise<FetchHistoryResult>;
 }): Promise<{ result: FetchHistoryResult; revision: string }> {
   if (input.historyLease) {
@@ -295,7 +307,7 @@ export async function loadStableHistorySnapshot(input: {
     return { result, revision: historyRevision(before) };
   }
   for (let attempt = 0; attempt < 2; attempt += 1) {
-    const before = await sourceFingerprint(input.sessionId, input.requesterUserId, input.source);
+    const before = await sourceFingerprint(input.sessionId, input.requesterUserId, input.source, input.transcript);
     const key = `${input.source.provider}:${input.sessionId}:${input.pageKey}:${before}`;
     evictExpired();
     const hit = cache.get(key);
@@ -306,7 +318,7 @@ export async function loadStableHistorySnapshot(input: {
     if (!pending) {
       pending = (async () => {
         const result = await input.load();
-        const after = await sourceFingerprint(input.sessionId, input.requesterUserId, input.source);
+        const after = await sourceFingerprint(input.sessionId, input.requesterUserId, input.source, input.transcript);
         return { result, fingerprint: after };
       })();
       inflight.set(key, pending);

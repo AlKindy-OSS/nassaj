@@ -2,6 +2,7 @@ import type { ActiveBodyProvider } from '../../../../../../types/app';
 import type { AgentCategoryContentSectionProps } from '../types';
 import type { McpProject } from '../../../../../mcp/types';
 import { McpServers } from '../../../../../mcp';
+import { useHarnessFiles } from '../../../../../harness-files/useHarnessFiles';
 import { ProviderSkills } from '../../../../../skills';
 import type { SkillsProject } from '../../../../../skills/types';
 
@@ -15,6 +16,7 @@ import ComingSoonContent from './content/ComingSoonContent';
 import CredentialGrantsSection from './content/CredentialGrantsSection';
 import EnginesContent from './content/EnginesContent';
 import InstructionSourcesContent from './content/InstructionSourcesContent';
+import HarnessFilesSection from './HarnessFilesSection';
 import HarnessVersionSection from './HarnessVersionSection';
 import PermissionsContent from './content/PermissionsContent';
 
@@ -30,6 +32,8 @@ export default function AgentCategoryContentSection({
   projects,
   onOpenSystemTab,
 }: AgentCategoryContentSectionProps) {
+  // ADR-203: one harness-files state for the section and the list it scopes.
+  const harnessFiles = useHarnessFiles(selectedCategory === 'skills');
   // Coming-soon providers (e.g. deepseek T-1760): no categories, no tabs — show
   // the coming-soon panel in place of the entire category content tree.
   if (COMING_SOON_SETTINGS_PROVIDERS.includes(selectedAgent)) {
@@ -190,15 +194,19 @@ export default function AgentCategoryContentSection({
       )}
 
       {selectedCategory === 'skills' && (
-        <ProviderSkills
-          selectedProvider={selectedAgent}
-          currentProjects={projects.map<SkillsProject>((project) => ({
-            projectId: project.name,
-            displayName: project.displayName,
-            fullPath: project.fullPath,
-            path: project.path,
-          }))}
-        />
+        <div className="space-y-8">
+          <HarnessFilesSection state={harnessFiles} />
+          <ProviderSkills
+            selectedProvider={selectedAgent}
+            filesMode={harnessFiles.view?.me.effective ?? 'shared'}
+            currentProjects={projects.map<SkillsProject>((project) => ({
+              projectId: project.name,
+              displayName: project.displayName,
+              fullPath: project.fullPath,
+              path: project.path,
+            }))}
+          />
+        </div>
       )}
     </div>
   );

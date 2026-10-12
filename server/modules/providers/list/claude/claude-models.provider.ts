@@ -1,7 +1,5 @@
-import { readFile } from 'node:fs/promises';
-
 import { getClaudeModelCatalog } from '@/modules/providers/list/claude/claude-catalog.client.js';
-import { sessionsDb } from '@/modules/database/index.js';
+import { withRecordedTranscript } from '@/modules/providers/shared/session-transcript-reader.js';
 import type { IProviderModels } from '@/shared/interfaces.js';
 import type {
   ProviderChangeActiveModelInput,
@@ -178,16 +176,16 @@ const extractClaudeModelFromMessageContent = (content: unknown): string | null =
  * Exported for the B-313 regression test only — the reader is the unit that owns
  * the sentinel rule, and `getCurrentActiveModel` around it needs the sessions DB.
  */
-export const __readClaudeSessionModelFromJsonlForTests = (
+export const __readClaudeSessionModelFromJsonlForTests = async (
   sessionId: string,
-  jsonlPath: string,
-): Promise<ProviderCurrentActiveModel | null> => readClaudeSessionModelFromJsonl(sessionId, jsonlPath);
+  content: string,
+): Promise<ProviderCurrentActiveModel | null> => readClaudeSessionModelFromText(sessionId, content);
 
-const readClaudeSessionModelFromJsonl = async (
+/** Latest real model the transcript text names for `sessionId` (walked from the end), or null. */
+const readClaudeSessionModelFromText = (
   sessionId: string,
-  jsonlPath: string,
-): Promise<ProviderCurrentActiveModel | null> => {
-  const content = await readFile(jsonlPath, 'utf8');
+  content: string,
+): ProviderCurrentActiveModel | null => {
   const lines = content
     .split(/\r?\n/)
     .map((line) => line.trim())
@@ -239,10 +237,10 @@ export class ClaudeProviderModels implements IProviderModels {
     }
 
     try {
-      const jsonlPath = sessionsDb.getSessionById(sessionId)?.jsonl_path;
-      const activeModel = jsonlPath
-        ? await readClaudeSessionModelFromJsonl(sessionId, jsonlPath)
-        : null;
+      // ADR-201 A1, authorization-free core: callers are fenced session routes or
+      // an already-authorised resume, and only a model id leaves this method.
+      const activeModel = await withRecordedTranscript(sessionId, 'claude', 'models',
+        async (transcript) => readClaudeSessionModelFromText(sessionId, await transcript.fd.readFile({ encoding: 'utf8' })));
       if (activeModel?.model) {
         return activeModel;
       }

@@ -56,7 +56,8 @@ async function withLedger(runTest: (harness: Harness) => Promise<void>): Promise
   }
 }
 
-async function restamp(fixture: string, when: Date, cwd: string): Promise<string> {
+/** Restamps real fixture lines; every Claude line carries its session id (ADR-201 A-P2c binds by it). */
+async function restamp(fixture: string, when: Date, cwd: string, sessionId: string): Promise<string> {
   const raw = await readFile(path.join(FIXTURES, fixture), 'utf8');
   return `${raw
     .split('\n')
@@ -65,6 +66,7 @@ async function restamp(fixture: string, when: Date, cwd: string): Promise<string
       const entry = JSON.parse(line) as Record<string, unknown>;
       entry.timestamp = when.toISOString();
       entry.cwd = cwd;
+      entry.sessionId = sessionId;
       return JSON.stringify(entry);
     })
     .join('\n')}\n`;
@@ -79,10 +81,10 @@ test('كنسُ ملف الأمّ لا يُضاعف إنفاق وكلائه ال�
     const day = localNoon(2026, 3, 10);
 
     const parent = path.join(projectDir, 'session-a.jsonl');
-    await writeFile(parent, await restamp('claude-parent.jsonl', day, workspace));
+    await writeFile(parent, await restamp('claude-parent.jsonl', day, workspace, 'session-a'));
     await writeFile(
       path.join(projectDir, 'session-a', 'subagents', 'agent-1.jsonl'),
-      await restamp('claude-subagent.jsonl', day, workspace),
+      await restamp('claude-subagent.jsonl', day, workspace, 'session-a'),
     );
 
     await costLedgerService.scan({ claudeRoots: [root], harnesses: ['claude'] });
@@ -106,7 +108,7 @@ test('مجلّد وكلاء يتيم لم تُمسح أمّه قطّ يُحتس�
     await mkdir(path.join(projectDir, 'session-b', 'subagents'), { recursive: true });
     await writeFile(
       path.join(projectDir, 'session-b', 'subagents', 'agent-1.jsonl'),
-      await restamp('claude-subagent.jsonl', localNoon(2026, 3, 10), workspace),
+      await restamp('claude-subagent.jsonl', localNoon(2026, 3, 10), workspace, 'session-b'),
     );
 
     // لا ملف أمّ ولا علامة مائية له: المجلّد هو السجلّ الوحيد لهذا الإنفاق.
@@ -125,8 +127,8 @@ test('إعادة كتابة سجلّ أقصر لا تمحو أيام إنفاق 
     const dayTwo = localNoon(2026, 3, 11);
     await writeFile(
       transcript,
-      (await restamp('claude-parent.jsonl', dayOne, workspace)) +
-        (await restamp('claude-parent.jsonl', dayTwo, workspace)),
+      (await restamp('claude-parent.jsonl', dayOne, workspace, 'session-c')) +
+        (await restamp('claude-parent.jsonl', dayTwo, workspace, 'session-c')),
     );
 
     await costLedgerService.scan({ claudeRoots: [root], harnesses: ['claude'] });
@@ -134,7 +136,7 @@ test('إعادة كتابة سجلّ أقصر لا تمحو أيام إنفاق 
     assert.equal(before.activeDays, 2);
 
     // ضغطٌ/تدوير يُبقي اليوم الأخير وحده — الحجم والطابع يتغيّران فيُعاد القراءة.
-    await writeFile(transcript, await restamp('claude-parent.jsonl', dayTwo, workspace));
+    await writeFile(transcript, await restamp('claude-parent.jsonl', dayTwo, workspace, 'session-c'));
     await costLedgerService.scan({ claudeRoots: [root], harnesses: ['claude'], force: true });
 
     const after = costLedgerService.getProjectTotal(projectIdFor(workspace));
@@ -162,7 +164,7 @@ test('مشروع مقيس فعلاً يُعلَن مقيساً', async () => {
     await mkdir(projectDir, { recursive: true });
     await writeFile(
       path.join(projectDir, 'session-d.jsonl'),
-      await restamp('claude-parent.jsonl', localNoon(2026, 3, 10), workspace),
+      await restamp('claude-parent.jsonl', localNoon(2026, 3, 10), workspace, 'session-d'),
     );
 
     await costLedgerService.scan({ claudeRoots: [root], harnesses: ['claude'] });
@@ -179,7 +181,7 @@ test('طلب `force` أثناء مسحٍ جارٍ يُصطفّ ولا يُبتل
     await mkdir(projectDir, { recursive: true });
     await writeFile(
       path.join(projectDir, 'session-e.jsonl'),
-      await restamp('claude-parent.jsonl', localNoon(2026, 3, 10), workspace),
+      await restamp('claude-parent.jsonl', localNoon(2026, 3, 10), workspace, 'session-e'),
     );
 
     const options = { claudeRoots: [root], harnesses: ['claude'] as const };

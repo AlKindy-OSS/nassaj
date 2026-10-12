@@ -13,6 +13,7 @@ import { useProviderCycles } from '../../../../../../quick-settings-panel/hooks/
 import { findCycleRow, resolveCycleDisplay } from '../../../../../../quick-settings-panel/providerCycleHelpers';
 
 import { hasDualAuthPaths } from './authPaths';
+import LinkModeSection from './LinkModeSection';
 import { BILLING_LINKS } from './billingLinks';
 import { formatExpiryMoment, resolveLinkExpiryDisplay } from './linkExpiryHelpers';
 
@@ -628,6 +629,9 @@ export default function AccountContent({ agent, authStatus, onLogin, userLink }:
           والمطويّ يبقى **ناطقاً بحالته**: الشارة في سطر الطيّ نفسه، فالطيُّ
           يخفي التحكّم لا المعلومة.
       */}
+      {/* ADR-200 S9: نمط الربط المختار بجانب الفعلي — لـClaude وCodex وحدهما، ولا شيء مع العلم مطفأً. */}
+      {(agent === 'claude' || agent === 'codex') && <LinkModeSection agent={agent} />}
+
       {subscriptionFolded ? (
         <SettingsCollapsible
           summary={

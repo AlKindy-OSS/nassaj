@@ -30,6 +30,8 @@ import os from 'os';
 import path from 'path';
 
 import { acceptFixtureRuntimeCompat, createCodexMachineFixture } from './shared/tests/codex-release-fixture.js';
+// Pure string/path helpers (no module-level home read), safe before the bootstrap below.
+import { codexHeaderLine } from './modules/providers/services/cost/__tests__/bound-transcripts.js';
 
 // ---------------------------------------------------------------------------
 // Bootstrap — MUST run before importing any project module (mirrors
@@ -158,10 +160,12 @@ const fakeRolloutPath = path.join(
   String(permissionTestUser.id),
   '.codex',
   'sessions',
-  'fake-thread.jsonl',
+  // ADR-201 A1: a rollout is read only when named after its thread and opened by its session_meta.
+  'rollout-2026-07-26T04-12-29-fake-thread-id.jsonl',
 );
+const FAKE_ROLLOUT_HEADER = codexHeaderLine('fake-thread-id');
 fs.mkdirSync(path.dirname(fakeRolloutPath), { recursive: true });
-fs.writeFileSync(fakeRolloutPath, '');
+fs.writeFileSync(fakeRolloutPath, FAKE_ROLLOUT_HEADER);
 sessionsDb.createSession('fake-thread-id', 'codex', sandboxCwd, undefined, undefined, undefined, fakeRolloutPath);
 participantsDb.recordSpawn('fake-thread-id', permissionTestUser.id);
 
@@ -661,7 +665,7 @@ describe('queryCodex live spawn — modelReasoningEffort forwarding (T-905)', ()
 
 describe('queryCodex post-turn context refresh', () => {
   it('reads the native token_count through authorized history after the stream ends', async () => {
-    fs.writeFileSync(fakeRolloutPath, '');
+    fs.writeFileSync(fakeRolloutPath, FAKE_ROLLOUT_HEADER);
     runStreamedEvents = async function* persistedContextEvents() {
       yield { type: 'item.completed', item: { type: 'agent_message', id: 'item_1', text: 'done' } };
       const observedAt = new Date(Date.now() + 1000).toISOString();

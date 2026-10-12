@@ -65,6 +65,7 @@ export default function CodeEditor({
     saveSuccess,
     saveError,
     isBinary,
+    secretDeclined,
     previewKind,
     fileProjectId,
     handleSave,
@@ -218,8 +219,9 @@ export default function CodeEditor({
     );
   }
 
-  // Binary file display
-  if (isBinary) {
+  // Binary file display; also used when the user declined to open a secrets
+  // file (B-1593), so no empty buffer can be typed into and saved over it.
+  if (isBinary || secretDeclined) {
     return (
       <CodeEditorBinaryFile
         file={file}
@@ -228,8 +230,12 @@ export default function CodeEditor({
         isFullscreen={isFullscreen}
         onClose={onClose}
         onToggleFullscreen={() => setIsFullscreen((previous) => !previous)}
-        title={t('binaryFile.title', 'Binary File')}
-        message={t('binaryFile.message', 'The file "{{fileName}}" cannot be displayed in the text editor because it is a binary file.', { fileName: file.name })}
+        title={secretDeclined
+          ? t('common:secretFile.title', 'Secrets file')
+          : t('binaryFile.title', 'Binary File')}
+        message={secretDeclined
+          ? t('common:secretFile.declined', 'Not opened: this is a secrets file and opening it was not confirmed.')
+          : t('binaryFile.message', 'The file "{{fileName}}" cannot be displayed in the text editor because it is a binary file.', { fileName: file.name })}
       />
     );
   }

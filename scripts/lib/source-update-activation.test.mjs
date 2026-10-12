@@ -608,6 +608,22 @@ test('readBootstrapActivationAction refuses a wrong schema as invalid', (t) => {
     assert.throws(() => readBootstrapActivationAction(candidateRoot, transactionId), /source_update_activation_action_invalid/);
 });
 
+test('T-2004: readBootstrapActivationAction ignores an unknown key and accepts a newer minor', (t) => {
+    const overrides = { schema: 'nassaj-source-update-activation/v1.2', addedLater: true };
+    const { candidateRoot, transactionId, action } = bootstrapFixture(t, overrides);
+    assert.deepEqual(readBootstrapActivationAction(candidateRoot, transactionId), action);
+});
+
+test('T-2004: readBootstrapActivationAction refuses a newer major by name', (t) => {
+    const { candidateRoot, transactionId } = bootstrapFixture(t, { schema: 'nassaj-source-update-activation/v2' });
+    assert.throws(() => readBootstrapActivationAction(candidateRoot, transactionId), /source_update_action_schema_unsupported/);
+});
+
+test('T-2004: readBootstrapActivationAction refuses a missing required key as invalid', (t) => {
+    const { candidateRoot, transactionId } = bootstrapFixture(t, { manifestSha256: undefined });
+    assert.throws(() => readBootstrapActivationAction(candidateRoot, transactionId), /source_update_activation_action_invalid/);
+});
+
 test('readBootstrapActivationAction refuses another transaction as invalid', (t) => {
     const { candidateRoot } = bootstrapFixture(t);
     assert.throws(() => readBootstrapActivationAction(candidateRoot, 'update-other'), /source_update_activation_action_invalid/);

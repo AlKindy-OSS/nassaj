@@ -51,6 +51,115 @@ test(
 
     try {
       // A skill the owner wrote by hand: real SKILL.md, real supporting script,
+      // and NO install marker. Codex's `~/.agents/skills` is the writable root —
+      // claude's library is read-only since T-2003 (see skills.read-only-shared).
+      const codexSkillsRoot = path.join(tempRoot, '.agents', 'skills');
+      const handmadeDir = path.join(codexSkillsRoot, 'handmade');
+      await fs.mkdir(path.join(handmadeDir, 'scripts'), { recursive: true });
+      await fs.writeFile(
+        path.join(handmadeDir, 'SKILL.md'),
+        skillMarkdown('handmade', 'Hand-authored body.'),
+        'utf8',
+      );
+      await fs.writeFile(path.join(handmadeDir, 'scripts', 'run.sh'), 'echo original\n', 'utf8');
+
+      // DELETE must refuse (404 is reserved for "absent"; this is 409 "not ours").
+      await assert.rejects(
+        () => providerSkillsService.removeProviderSkill('codex', 'handmade'),
+        (error: Error & { code?: string; statusCode?: number }) => {
+          assert.equal(error.code, 'PROVIDER_SKILL_NOT_APP_MANAGED');
+          assert.equal(error.statusCode, 409);
+          return true;
+        },
+        'deleting a folder this app did not install must be refused',
+      );
+
+      // POST (overwrite) must refuse too — the rm -rf is the destructive part.
+      await assert.rejects(
+        () => providerSkillsService.addProviderSkills('codex', {
+          entries: [{
+            directoryName: 'handmade',
+            content: skillMarkdown('handmade', 'Attacker body.'),
+          }],
+        }),
+        (error: Error & { code?: string; statusCode?: number }) => {
+          assert.equal(error.code, 'PROVIDER_SKILL_NOT_APP_MANAGED');
+          assert.equal(error.statusCode, 409);
+          return true;
+        },
+        'overwriting a folder this app did not install must be refused',
+      );
+
+      // The owner's bytes are untouched by both refusals.
+      assert.match(
+        await fs.readFile(path.join(handmadeDir, 'SKILL.md'), 'utf8'),
+        /Hand-authored body\./,
+      );
+      assert.equal(
+        await fs.readFile(path.join(handmadeDir, 'scripts', 'run.sh'), 'utf8'),
+        'echo original\n',
+      );
+    } finally {
+      restoreHomeDir();
+      await fs.rm(tempRoot, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
+  'app-installed skills carry the marker and stay overwritable and removable',
+  { concurrency: false },
+  async () => {
+    const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'skills-managed-roundtrip-'));
+    const restoreHomeDir = patchHomeDir(tempRoot);
+
+    try {
+      const [installed] = await providerSkillsService.addProviderSkills('codex', {
+        entries: [{
+          directoryName: 'app-owned',
+          content: skillMarkdown('app-owned', 'First body.'),
+          files: [{ relativePath: 'scripts/run.js', content: 'first', encoding: 'utf8' }],
+        }],
+      });
+
+      const installedDir = path.dirname(installed.sourcePath);
+      const marker = JSON.parse(await fs.readFile(path.join(installedDir, MARKER_FILE), 'utf8'));
+      assert.equal(marker.managedBy, 'nassaj');
+      assert.equal(marker.provider, 'codex');
+      assert.equal(marker.name, 'app-owned');
+      assert.equal(typeof marker.installedAt, 'string');
+
+      // Re-install over the app's own directory still works (and still prunes
+      // stale supporting files), and the marker survives the replace.
+      await providerSkillsService.addProviderSkills('codex', {
+        entries: [{
+          directoryName: 'app-owned',
+          content: skillMarkdown('app-owned', 'Second body.'),
+        }],
+      });
+      assert.match(await fs.readFile(installed.sourcePath, 'utf8'), /Second body\./);
+      assert.equal(await pathExists(path.join(installedDir, 'scripts', 'run.js')), false);
+      assert.equal(await pathExists(path.join(installedDir, MARKER_FILE)), true);
+
+      const removed = await providerSkillsService.removeProviderSkill('codex', 'app-owned');
+      assert.equal(removed.name, 'app-owned');
+      assert.equal(await pathExists(installedDir), false);
+    } finally {
+      restoreHomeDir();
+      await fs.rm(tempRoot, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
+  'claude library: a hand-authored folder is read-only to delete and never overwritten (T-2003)',
+  { concurrency: false },
+  async () => {
+    const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'skills-managed-guard-'));
+    const restoreHomeDir = patchHomeDir(tempRoot);
+
+    try {
+      // A skill the owner wrote by hand: real SKILL.md, real supporting script,
       // and NO install marker.
       const claudeSkillsRoot = path.join(tempRoot, '.claude', 'skills');
       const handmadeDir = path.join(claudeSkillsRoot, 'handmade');
@@ -62,11 +171,12 @@ test(
       );
       await fs.writeFile(path.join(handmadeDir, 'scripts', 'run.sh'), 'echo original\n', 'utf8');
 
-      // DELETE must refuse (404 is reserved for "absent"; this is 409 "not ours").
+      // DELETE must refuse: in the operator-shared library an unmarked skill is
+      // read-only (T-2003) — 409, nothing deleted.
       await assert.rejects(
         () => providerSkillsService.removeProviderSkill('claude', 'handmade'),
         (error: Error & { code?: string; statusCode?: number }) => {
-          assert.equal(error.code, 'PROVIDER_SKILL_NOT_APP_MANAGED');
+          assert.equal(error.code, 'PROVIDER_SKILL_READ_ONLY');
           assert.equal(error.statusCode, 409);
           return true;
         },
@@ -106,7 +216,7 @@ test(
 );
 
 test(
-  'app-installed skills carry the marker and stay overwritable and removable',
+  'claude library: the owner adds a skill through the app and deletes it again (T-2003)',
   { concurrency: false },
   async () => {
     const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'skills-managed-roundtrip-'));

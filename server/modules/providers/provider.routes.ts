@@ -15,15 +15,10 @@ import { claudeUsageService } from '@/modules/providers/services/claude-usage.se
 import { providerAuthService } from '@/modules/providers/services/provider-auth.service.js';
 import { providerMcpService } from '@/modules/providers/services/mcp.service.js';
 import { providerModelsService } from '@/modules/providers/services/provider-models.service.js';
-import {
-  companyConsentVersion,
-  companyCredentialsService,
-} from '@/modules/providers/services/company-credentials.service.js';
+import { companyCredentialsService } from '@/modules/providers/services/company-credentials.service.js';
+import { vendorKeyMigrationService } from '@/modules/providers/services/vendor-key-migration.runtime.js';
 import { providerCredentialsService } from '@/modules/providers/services/provider-credentials.service.js';
-import {
-  QWEN_CONSENT_VERSION,
-  providerSecretsService,
-} from '@/modules/providers/services/provider-secrets.service.js';
+import { providerSecretsService } from '@/modules/providers/services/provider-secrets.service.js';
 import { providerGovernanceLinkService } from '@/modules/providers/services/provider-governance-link.service.js';
 import {
   providerGovernanceService,
@@ -62,6 +57,9 @@ import { OFFICIAL_ENGINE, PIN_SOURCE } from '@/services/isolation/engine-pin.js'
 import { credentialPrincipalId } from '@/services/isolation/credential-principal.js';
 import { resolveSlotKey } from '@/services/isolation/provider-slot-key.js';
 import { isVendorSecretProvider } from '@/services/isolation/provider-secrets-store.js';
+import { withHarnessFilesLock } from '@/services/isolation/harness-files-lock.js';
+import { resolveHarnessFilesState, type PrivateSkillsHarness } from '@/services/isolation/harness-files-mode.js';
+import { privateSkillsStoreRoot } from '@/services/isolation/private-skills-store.js';
 import { coerceUserId } from '@/modules/projects/index.js';
 import { isProviderIsolated } from '@/services/provider-sharing.js';
 import type {
@@ -85,6 +83,8 @@ import { authorizeRuntimeUserProviderEffect } from '@/modules/execution-permissi
 // eslint-disable-next-line boundaries/dependencies
 import { runAuthorizedInProcessRead } from '@/modules/execution-permissions/in-process-read.js';
 
+// eslint-disable-next-line boundaries/no-unknown -- shared HTTP rate limiter, as in connectors.
+import { createRateLimiter } from '../../middleware/rate-limit.js';
 import {
   ELIGIBLE_ENGINE_PROVIDERS,
   type EligibleEngineProviderId,
@@ -1360,10 +1360,9 @@ const setCompanyKey = asyncHandler(async (req: Request, res: Response) => {
   const result = await companyCredentialsService.setKey(userId, companyId, apiKey, {
     isElevated: isElevatedCaller(req),
     includeSubscription,
+    replaceForeignKey: body?.replaceForeignKey === true,
     authenticatedPrincipal: (req as Request & { user?: unknown }).user,
     vendorIds: readVendorIds(body?.vendorIds),
-    // T-1906: only a literal `true` is consent (alibaba-cloud requires it).
-    consent: body?.consent === true,
     auditContext: readAuditContext(req),
   });
   res.json(createApiSuccessResponse(result));
@@ -1384,8 +1383,69 @@ router.delete(
       // single id. Absent still means "every slot", for the whole-company
       // removal the older client sent.
       vendorIds: readVendorIds(req.query.vendorIds ?? (req.body as Record<string, unknown> | undefined)?.vendorIds),
+      // ADR-200 S6 (in-flag): the explicit confirm to also remove adopted and
+      // foreign projections. Only a literal true (or "true" in the query) counts.
+      removeForeignKey: req.query.removeForeignKey === 'true'
+        || (req.body as Record<string, unknown> | undefined)?.removeForeignKey === true,
       auditContext: readAuditContext(req),
     });
+    res.json(createApiSuccessResponse(result));
+  }),
+);
+
+// ----------------- Vendor-key migration (ADR-200 S5/S6) -----------------
+// D9: the member picks which existing key a vendor in conflict keeps; §3
+// rollback: one harness file restored from its backup — the API-key fields only
+// by default, the exact bytes only with `{ mode: 'full', confirm: true }`. Both
+// act on the caller's OWN tree only and never return a key.
+const vendorKeyActionLimiter = createRateLimiter({
+  windowMs: 60_000,
+  max: 10,
+  message: 'Too many vendor-key changes; try again in a minute.',
+  code: 'VENDOR_KEY_RATE_LIMITED',
+});
+
+const MIGRATION_SOURCE_HARNESSES: readonly string[] = ['store', 'claude', 'codex', 'opencode'];
+
+/** `{ harness, target }` naming one conflicting key source; a 400 for anything else. */
+const readKeySourceChoice = (body: unknown): { harness: 'store' | 'claude' | 'codex' | 'opencode'; target: string | null } => {
+  const value = (body ?? {}) as Record<string, unknown>;
+  const target = value.target === undefined || value.target === null ? null : value.target;
+  if (!MIGRATION_SOURCE_HARNESSES.includes(value.harness as string) || (target !== null && typeof target !== 'string')) {
+    throw new AppError('`harness` and `target` must name one key source.', { code: 'INVALID_KEY_SOURCE', statusCode: 400 });
+  }
+  return { harness: value.harness as 'store' | 'claude' | 'codex' | 'opencode', target };
+};
+
+router.post(
+  '/company/:companyId/key/conflict',
+  vendorKeyActionLimiter,
+  asyncHandler(async (req: Request, res: Response) => {
+    const companyId = readPathParam(req.params.companyId, 'companyId');
+    const result = await vendorKeyMigrationService.resolveConflict(
+      readAuthenticatedUserId(req), companyId, readKeySourceChoice(req.body),
+    );
+    res.json(createApiSuccessResponse(result));
+  }),
+);
+
+router.post(
+  '/vendor-keys/backups/:harness/restore',
+  vendorKeyActionLimiter,
+  asyncHandler(async (req: Request, res: Response) => {
+    const harness = readPathParam(req.params.harness, 'harness');
+    if (!['claude', 'codex', 'opencode'].includes(harness)) {
+      throw new AppError('Unknown harness.', { code: 'INVALID_HARNESS', statusCode: 400 });
+    }
+    assertCredentialWriteAllowed(req, harness);
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    if (body.mode !== undefined && body.mode !== 'keys' && body.mode !== 'full') {
+      throw new AppError('`mode` must be "keys" or "full".', { code: 'INVALID_RESTORE_MODE', statusCode: 400 });
+    }
+    const result = await vendorKeyMigrationService.restoreBackup(
+      readAuthenticatedUserId(req), harness as 'claude' | 'codex' | 'opencode',
+      { mode: body.mode as 'keys' | 'full' | undefined, confirm: body.confirm === true },
+    );
     res.json(createApiSuccessResponse(result));
   }),
 );
@@ -1405,15 +1465,12 @@ router.get(
     const writable = status.slots.some(
       (slot) => !providerCredentialsService.requiresElevatedRole(slot.provider) || isElevatedCaller(req),
     );
-    // T-1906: tell the client a consent checkbox is required, and (for the
-    // Qwen slot) whether the saved key can drive qwen-plan models.
-    const consentVersion = companyConsentVersion(companyId);
+    // T-1906 / ADR-200 S7: for the Qwen slot, whether the saved key can drive
+    // qwen-plan models (`ok`, `missing_key` or `legacy_profile`).
     const qwenPlan = status.slots.some((slot) => slot.provider === 'qwen')
       ? { qwenPlan: providerSecretsService.getQwenPlanStatus(userId) }
       : {};
-    res.json(createApiSuccessResponse({
-      ...status, writable, consentRequired: consentVersion !== null, consentVersion, ...qwenPlan,
-    }));
+    res.json(createApiSuccessResponse({ ...status, writable, ...qwenPlan }));
   }),
 );
 
@@ -1430,23 +1487,63 @@ const setProviderApiKey = asyncHandler(async (req: Request, res: Response) => {
   const userId = readAuthenticatedUserId(req);
   const apiKey = readApiKeyFromBody(req.body);
   const target = readOptionalTarget((req.body as Record<string, unknown> | undefined)?.target);
-  const body = req.body as Record<string, unknown> | undefined;
-  const qwenOptions = provider === 'qwen'
-    ? { plan: body?.plan, region: body?.region }
-    : undefined;
   // T-1906: the Qwen audit row is written by providerSecretsService itself.
+  // ADR-200 S7: a Qwen key is always saved as Token Plan / international; any
+  // `plan`, `region` or `consent` field in the body is ignored.
+  // ADR-200 S4 (in-flag): for claude/codex this route is read-only for keys —
+  // the choke point refuses with 409 LINK_MODE_SUBSCRIPTION / LINK_MODE_UNSET /
+  // LEGACY_KEY_ROUTE_READ_ONLY. A Claude setup-token (a subscription act) still
+  // saves while the harness is not in API-key mode.
   const result = await providerCredentialsService.setKey(
-    userId, provider, apiKey, target, qwenOptions,
+    userId, provider, apiKey, target,
     (req as Request & { user?: unknown }).user,
-    // T-1906: only a literal `consent: true` records the personal-use version;
-    // providerSecretsService refuses a qwen write without it (400 CONSENT_REQUIRED).
-    { ...readAuditContext(req), consentVersion: body?.consent === true ? QWEN_CONSENT_VERSION : null },
+    readAuditContext(req),
+    { origin: 'legacy_route' },
   );
   res.json(createApiSuccessResponse(result));
 });
 
 router.post('/:provider/api-key', setProviderApiKey);
 router.put('/:provider/api-key', setProviderApiKey);
+
+// ----------------- Link mode (ADR-200 S4, in-flag) -----------------
+// Claude and Codex only. GET is the caller's chosen mode beside the effective
+// one; PUT is the explicit switch (one confirm line). Both act on the caller's
+// OWN tree; a shared-scoped harness needs owner/admin, like a key write.
+const linkModeWriteLimiter = createRateLimiter({
+  windowMs: 60_000,
+  max: 20,
+  message: 'Too many link-mode changes; try again in a minute.',
+  code: 'LINK_MODE_RATE_LIMITED',
+});
+
+router.get(
+  '/:provider/link-mode',
+  asyncHandler(async (req: Request, res: Response) => {
+    const provider = normalizeProviderParam(req.params.provider);
+    const status = await providerAuthService.getLinkModeStatus(provider, readAuthenticatedUserId(req));
+    res.json(createApiSuccessResponse(status));
+  }),
+);
+
+router.put(
+  '/:provider/link-mode',
+  linkModeWriteLimiter,
+  asyncHandler(async (req: Request, res: Response) => {
+    const provider = normalizeProviderParam(req.params.provider);
+    assertCredentialWriteAllowed(req, provider);
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const result = await providerAuthService.switchLinkMode(provider, readAuthenticatedUserId(req), {
+      mode: body.mode,
+      confirm: body.confirm,
+      removeForeignKey: body.removeForeignKey,
+      removeSetupToken: body.removeSetupToken,
+      authenticatedPrincipal: (req as Request & { user?: unknown }).user,
+      auditContext: readAuditContext(req),
+    });
+    res.json(createApiSuccessResponse(result));
+  }),
+);
 
 router.delete(
   '/:provider/api-key',
@@ -2070,33 +2167,68 @@ router.get(
   }),
 );
 
-// Skill writes touch the shared owner home (os.homedir()/.claude and siblings)
-// with no per-user CLAUDE_CONFIG_DIR isolation (B-26), so one member's write
-// mutates skills for everyone. The write surface is restricted to owner/admin by
-// an IN-HANDLER role check (same idiom as POST /mcp/servers/global). This is done
-// inside the handler rather than via mounted middleware deliberately: a route
-// module must stay auth-agnostic (boundaries), and — critically — Express routing
-// is case-INSENSITIVE, so a path-matching guard could be slipped via `/SKILLS`;
+// Skill writes in SHARED mode touch the shared owner home (os.homedir()/.claude
+// and siblings) with no per-user CLAUDE_CONFIG_DIR isolation (B-26), so one
+// member's write would mutate skills for everyone: owner/admin only, checked
+// IN-HANDLER (same idiom as POST /mcp/servers/global). This is done inside the
+// handler rather than via mounted middleware deliberately: a route module must
+// stay auth-agnostic (boundaries), and — critically — Express routing is
+// case-INSENSITIVE, so a path-matching guard could be slipped via `/SKILLS`;
 // reading req.user.role in the handler is immune to path casing/formatting.
-// Discovery below stays open to any authenticated member.
+// ADR-203 (T-2003): for claude/codex a MEMBER may also write, but only while
+// their effective mode is private; the provider then resolves the target to the
+// caller's own store from the token (never a body field) and validates every
+// path component. Discovery below stays open to any authenticated member.
+const PRIVATE_SKILL_PROVIDERS: ReadonlySet<string> = new Set(['claude', 'codex']);
+
+/**
+ * Destination pin for a member's write: their own private store. Owner/admin get
+ * none (they may write the shared root). The provider refuses any other root.
+ */
+const requiredSkillRoot = (req: Request, provider: string): string | undefined => {
+  const role = readAuthenticatedUserRole(req);
+  if (role === 'owner' || role === 'admin') return undefined;
+  const userId = readAuthenticatedUserId(req);
+  if (userId === null || !PRIVATE_SKILL_PROVIDERS.has(provider)) return undefined;
+  return privateSkillsStoreRoot(userId, provider as PrivateSkillsHarness);
+};
+
+const runSkillWrite = async <T>(req: Request, provider: string, write: () => Promise<T>): Promise<T> => {
+  const role = readAuthenticatedUserRole(req);
+  const elevated = role === 'owner' || role === 'admin';
+  const userId = readAuthenticatedUserId(req);
+  const privateCapable = PRIVATE_SKILL_PROVIDERS.has(provider) && userId !== null;
+  const observed = privateCapable ? resolveHarnessFilesState(userId) : null;
+  if (!elevated && observed?.effective !== 'private') {
+    throw new AppError('Managing provider skills requires an admin or owner.', {
+      code: 'PROVIDER_SKILL_WRITE_FORBIDDEN',
+      statusCode: 403,
+    });
+  }
+  if (!privateCapable || !observed) return write();
+  // Condition 2: re-read the mode under the per-user lock; a change aborts.
+  return withHarnessFilesLock(userId, async () => {
+    if (resolveHarnessFilesState(userId).effective !== observed.effective) {
+      throw new AppError('The files mode changed while this request was running. Reload and retry.', {
+        code: 'HARNESS_FILES_MODE_CHANGED', statusCode: 409,
+      });
+    }
+    return write();
+  });
+};
+
 router.post(
   '/:provider/skills',
   asyncHandler(async (req: Request, res: Response) => {
-    const role = readAuthenticatedUserRole(req);
-    if (role !== 'owner' && role !== 'admin') {
-      throw new AppError('Managing provider skills requires an admin or owner.', {
-        code: 'PROVIDER_SKILL_WRITE_FORBIDDEN',
-        statusCode: 403,
-      });
-    }
     const provider = parseBodyProvider(req.params.provider);
-    const input = parseProviderSkillCreatePayload(req.body);
-    const skills = await providerSkillsService.addProviderSkills(provider, {
-      ...input,
+    // The payload is parsed inside the gate so a forbidden caller gets 403, not 400.
+    const skills = await runSkillWrite(req, provider, () => providerSkillsService.addProviderSkills(provider, {
+      ...parseProviderSkillCreatePayload(req.body),
       // Spread FIRST so a client-supplied `userId` in the body can never win over
       // the token-sourced one (B-153, same idiom as the MCP upsert route).
       userId: readAuthenticatedUserId(req),
-    });
+      requiredRootDir: requiredSkillRoot(req, provider),
+    }));
     res.json(createApiSuccessResponse({ provider, skills: skills.map(redactSkillHomePath) }));
   }),
 );
@@ -2104,18 +2236,12 @@ router.post(
 router.delete(
   '/:provider/skills/:name',
   asyncHandler(async (req: Request, res: Response) => {
-    const role = readAuthenticatedUserRole(req);
-    if (role !== 'owner' && role !== 'admin') {
-      throw new AppError('Managing provider skills requires an admin or owner.', {
-        code: 'PROVIDER_SKILL_WRITE_FORBIDDEN',
-        statusCode: 403,
-      });
-    }
     const provider = parseBodyProvider(req.params.provider);
     const name = readPathParam(req.params.name, 'name');
-    const skill = await providerSkillsService.removeProviderSkill(provider, name, {
+    const skill = await runSkillWrite(req, provider, () => providerSkillsService.removeProviderSkill(provider, name, {
       userId: readAuthenticatedUserId(req),
-    });
+      requiredRootDir: requiredSkillRoot(req, provider),
+    }));
     res.json(createApiSuccessResponse({ provider, skill: redactSkillHomePath(skill) }));
   }),
 );

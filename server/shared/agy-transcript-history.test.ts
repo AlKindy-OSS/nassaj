@@ -16,6 +16,7 @@ mock.module('@/modules/database/index.js', { namedExports: {
 } });
 const { AntigravitySessionsProvider } = await import('../modules/providers/list/antigravity/antigravity-sessions.provider.js');
 const { finalAgyTranscriptMessage } = await import('../modules/providers/list/antigravity/agy-transcript-identity.js');
+const { withPinnedTranscript } = await import('./__tests__/provider-root-sandbox.js');
 
 test('AGY native final timing identity joins repeated actual history reads after the turn baseline', async () => {
   const contents = [0, 1].map(step_index => JSON.stringify({
@@ -26,8 +27,11 @@ test('AGY native final timing identity joins repeated actual history reads after
   const final = finalAgyTranscriptMessage(contents, 'agy-history-fixture', 0);
   assert.ok(final);
   const reader = new AntigravitySessionsProvider();
-  const first = await reader.fetchHistory('agy-history-fixture');
-  const second = await reader.fetchHistory('agy-history-fixture');
+  // ADR-201: the history service supplies the pinned transcript to the reader.
+  const read = () => withPinnedTranscript(transcript, 'agy-history-fixture', 'antigravity',
+    (pinned) => reader.fetchHistory('agy-history-fixture', { transcript: pinned }));
+  const first = await read();
+  const second = await read();
   assert.deepEqual(first, second);
   assert.equal(first.messages.find(message => message.id === final.id)?.content, 'reply-1');
   assert.equal(finalAgyTranscriptMessage(contents, 'agy-history-fixture', 1), null);

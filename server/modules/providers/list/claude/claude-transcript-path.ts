@@ -1,39 +1,16 @@
 import path from 'node:path';
 
 import { operatorClaudeHome, resolveClaudeHomeForUser } from './claude-home.js';
-import {
-  isStrictlyUnder, realFileOf, realRoots, resolveProviderTranscript,
-} from '../../shared/contained-file.js';
-
-import { resolveStoredClaudeTranscript } from './claude-projects-roots.js';
 
 /**
- * Transcript-path resolution for Claude sessions, shared by every reader that
- * needs the file behind a session row (B-823).
- *
- * The location cannot be re-derived from the project: a session launched inside
- * a nassaj session overlay runs with cwd
- * `<repo>/.git/nassaj-session-overlays/instances/<id>/workspace`, so Claude
- * writes its transcript under the OVERLAY-encoded directory while the session
- * row still names the repo project. Re-deriving `<projects>/<encoded
- * project_path>/<sessionId>.jsonl` therefore points at a file that never
- * existed. `sessions.jsonl_path` — written by the synchronizer from the file it
- * actually found — is the only source that survives that divergence.
- *
- * `jsonl_path` is a database column, so a reader that trusts it blindly becomes
- * an arbitrary-file-read primitive the moment anything can write that column.
- * Every candidate returned here is therefore realpath-resolved and required to
- * live under a Claude projects root. Containment is checked on the RESOLVED
- * path, not the literal one: on this box `~/.claude` is a symlink to
- * `nassaj-core`, and the database holds rows spelled both ways, so a textual
- * prefix test would reject perfectly valid transcripts.
+ * Claude project-directory helpers (B-823). The by-path transcript resolver
+ * that lived here was removed with ADR-201 A-P2b: every transcript read goes
+ * through the pinned reader (shared/session-transcript.ts), whose candidate is
+ * the recorded `jsonl_path` only. A path re-derived from the project is wrong
+ * for overlay sessions (Claude writes under the overlay-encoded directory),
+ * which is why the recorded path, written at launch or by the synchronizer,
+ * is the only source.
  */
-
-export type ClaudeTranscriptRow = {
-  session_id: string;
-  project_path?: string | null;
-  jsonl_path?: string | null;
-};
 
 /** Claude's on-disk project folder name: every char outside [A-Za-z0-9-] → '-'. */
 export function encodeClaudeProjectDir(projectPath: string): string {
@@ -57,78 +34,4 @@ export function claudeProjectRoots(userId: string | number | null): string[] {
   roots.add(path.join(operatorClaudeHome(), 'projects'));
 
   return [...roots];
-}
-
-/** True when the already-resolved path sits under any resolved root. */
-function isContained(target: string, roots: string[]): boolean {
-  return roots.some((root) => isStrictlyUnder(target, root));
-}
-
-/**
- * Resolves the transcript file for a Claude session row, or null when no
- * trusted file exists. Null is a real answer — "this session has no readable
- * transcript" — and callers must render it as such rather than as zero usage.
- */
-export async function resolveClaudeTranscriptPath(
-  row: ClaudeTranscriptRow,
-  userId: string | number | null,
-): Promise<string | null> {
-  const sessionId = (row.session_id ?? '').trim();
-  if (!sessionId || sessionId !== path.basename(sessionId)) {
-    return null;
-  }
-
-  const roots = await realRoots(claudeProjectRoots(userId));
-  if (roots.length === 0) {
-    return null;
-  }
-
-  const fileName = `${sessionId}.jsonl`;
-
-  const stored = (row.jsonl_path ?? '').trim();
-  if (stored) {
-    // T-1880: a pre-separation spelling falls back to `<root>/<same rel path>`.
-    const located = resolveStoredClaudeTranscript(stored);
-    const resolved = located ? await realFileOf(located) : null;
-    if (resolved && path.basename(resolved) === fileName && isContained(resolved, roots)) {
-      return resolved;
-    }
-  }
-
-  // Fallback for rows the synchronizer has not indexed yet: the encoded path.
-  const projectPath = (row.project_path ?? '').trim();
-  if (!projectPath) {
-    return null;
-  }
-
-  const encoded = encodeClaudeProjectDir(projectPath);
-  for (const root of roots) {
-    const resolved = await realFileOf(path.join(root, encoded, fileName));
-    if (resolved && isContained(resolved, roots)) {
-      return resolved;
-    }
-  }
-
-  return null;
-}
-
-/**
- * B-1564: transcript file for HISTORY reads of a session row, or null. A session
- * is readable by every member allowed to see it, not only its author, so the
- * file may live under the operator's (or the shared) Claude projects root or
- * under a member tree's `.claude/projects`; it must realpath-resolve under one
- * of them, be a regular file and be named `<sessionId>.jsonl`. A stored path
- * outside every root is never opened. Nothing is enumerated or provisioned.
- */
-export async function resolveClaudeHistoryTranscriptPath(row: ClaudeTranscriptRow): Promise<string | null> {
-  const sessionId = (row.session_id ?? '').trim();
-  const stored = (row.jsonl_path ?? '').trim();
-  if (!sessionId || sessionId !== path.basename(sessionId) || !stored) {
-    return null;
-  }
-  const shared = [operatorClaudeHome(), process.env.CLAUDE_CONFIG_DIR?.trim() || operatorClaudeHome()]
-    .map((home) => path.join(home, 'projects'));
-  // T-1880: a pre-separation spelling falls back to `<root>/<same rel path>`.
-  return resolveProviderTranscript(resolveStoredClaudeTranscript(stored), shared, path.join('.claude', 'projects'),
-    (resolved) => path.basename(resolved) === `${sessionId}.jsonl`);
 }

@@ -484,9 +484,14 @@ test('B-GIT-SEC-4: dash-prefixed refs are rejected, and user values are fenced',
 
   spawnCalls = [];
   await request('GET', `/api/git/commit-diff?project=${PUBLIC_PROJECT}&commit=HEAD`);
-  const showCall = spawnCalls.find((call) => call.args[0] === 'show');
-  assert.ok(showCall, 'commit-diff ran');
-  assert.deepEqual(showCall.args, ['show', '--end-of-options', 'HEAD^{commit}']);
+  const showCalls = spawnCalls.filter((call) => call.args.includes('show'));
+  assert.ok(showCalls.length > 0, 'commit-diff ran');
+  // B-1592: listing, header and patch calls all fence the peeled ref.
+  for (const call of showCalls) {
+    const refIndex = call.args.indexOf('HEAD^{commit}');
+    assert.ok(refIndex > 0, call.args.join(' '));
+    assert.equal(call.args[refIndex - 1], '--end-of-options', call.args.join(' '));
+  }
 });
 
 test('every git spawn runs with literal pathspecs (no glob magic on user paths)', async () => {

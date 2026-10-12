@@ -19,6 +19,7 @@ import test, { after, before } from 'node:test';
 
 import { isForbiddenProjectRoot, isSecretPath } from './shared/secret-path-guard.js';
 import { openReadableProjectFile } from './utils/path-guard.js';
+import { isSecretFileConfirmed, sendSecretFileConfirmationRequired } from './utils/secret-file-access.js';
 
 const INDEX_SOURCE = fs.readFileSync(
   path.join(path.dirname(fileURLToPath(import.meta.url)), 'index.js'),
@@ -154,6 +155,9 @@ function buildReadHandler(projectRoot) {
     coerceUserId: (id) => id,
     projectsDb: { getProjectPathById: async () => projectRoot },
     openReadableProjectFile,
+    isSecretFileConfirmed,
+    sendSecretFileConfirmationRequired,
+    auditSecretFileAccess: () => {},
     console: quiet,
   });
 }

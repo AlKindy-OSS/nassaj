@@ -41,7 +41,8 @@ test('actual compatible writer updates existing rows without INSERT triggers, pr
   sessionsDb.createSession('s','claude','/fixture',undefined,'2026-01-01','2026-01-02','/source');
   const row=sessionsDb.getSessionById('s')!;assert.equal(row.custom_name,'saved');assert.equal(row.isArchived,1);assert.equal(row.engine_provider,'anthropic');assert.equal(row.created_at,'2025-01-01T00:00:00.000Z');assert.equal(row.updated_at,'2026-01-02T00:00:00.000Z');assert.ok(db.prepare('SELECT 1 FROM fixture_children').get());
   assert.throws(()=>sessionsDb.createSession('late','claude','/fixture'));
-  assert.throws(()=>sessionsDb.createSession('s','codex','/fixture'));
+  // ADR-201 A2: a provider relabel is refused before any write (no UPDATE reaches the guards).
+  assert.doesNotThrow(()=>sessionsDb.createSession('s','codex','/fixture'));
   assert.equal(sessionsDb.getSessionById('s')!.provider,'claude');
   assert.equal(db.pragma('integrity_check',{simple:true}),'ok');assert.deepEqual(db.pragma('foreign_key_check'),[]);
   assert.deepEqual(denied,[]);

@@ -275,10 +275,12 @@ function handOverSpawnKey({ ws, from, to, spawnStartedAtMs, workspaceBound, clea
         // The destination row must exist before the handover checks it and
         // before the client is sent to it. The upsert preserves custom_name
         // and the archived flag.
-        sessionsDb.createSession(
-            to, 'antigravity', cleanCwd, undefined, undefined, undefined,
-            buildTranscriptPath(to, userId),
-        );
+        sessionsDb.recordDiscoveredSession({
+            sessionId: to,
+            provider: 'antigravity',
+            projectPath: cleanCwd,
+            jsonlPath: buildTranscriptPath(to, userId),
+        });
     } catch (err) {
         console.error('[agy] failed to register handover target row:', err?.message || err);
     }
@@ -492,15 +494,12 @@ async function discoverAndRegisterBrainSession(state, priorBrainIds, cleanCwd, f
     }
 
     try {
-        sessionsDb.createSession(
-            discoveredBrainUUID,
-            'antigravity',
-            cleanCwd,
-            undefined,
-            undefined,
-            undefined,
-            buildTranscriptPath(discoveredBrainUUID, userId),
-        );
+        sessionsDb.recordDiscoveredSession({
+            sessionId: discoveredBrainUUID,
+            provider: 'antigravity',
+            projectPath: cleanCwd,
+            jsonlPath: buildTranscriptPath(discoveredBrainUUID, userId),
+        });
     } catch (err) {
         console.error('[agy] failed to register session in DB:', err?.message || err);
     }

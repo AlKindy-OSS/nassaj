@@ -31,6 +31,7 @@ import type {
 
 import { clearStaleNativeStageBeforeLaunch } from './native-staging.js';
 import {
+  deriveHarnessNotices,
   getHarnessDescriptor,
   HARNESS_IDS,
   HARNESS_UPDATE_DESCRIPTORS,
@@ -338,9 +339,10 @@ function updateFacts(
   compatVerified: (provider: string) => boolean,
 ): Pick<HarnessVersionStatus, 'manualOnly' | 'notices' | 'restoreCompatible'> {
   const restore = descriptor.restoreCompatible;
+  const notices = deriveHarnessNotices(descriptor);
   return {
     ...(descriptor.manualOnly ? { manualOnly: true } : {}),
-    ...(descriptor.notices ? { notices: { ...descriptor.notices } } : {}),
+    ...(notices ? { notices } : {}),
     ...(restore ? { restoreCompatible: { version: restore.version, verified: safeFlag(compatVerified, descriptor.id) } } : {}),
   };
 }

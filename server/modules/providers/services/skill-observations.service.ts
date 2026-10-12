@@ -5,6 +5,10 @@ import path from 'node:path';
 import os from 'node:os';
 
 import { participantsDb, sessionsDb } from '@/modules/database/index.js';
+import {
+  claudeFileBinder, codexThreadBinder, isTranscriptHandle, openBoundFile, openRecordedTranscript,
+  openSessionArtifactDir, SessionArtifactDir, TranscriptRefusedError, type SessionTranscriptHandle,
+} from '@/modules/providers/shared/session-transcript.js';
 import { credentialPrincipalId } from '@/services/isolation/credential-principal.js';
 import { userConfigDir } from '@/services/isolation/provision-user-dirs.js';
 import { isProviderIsolated } from '@/services/provider-sharing.js';
@@ -15,7 +19,14 @@ import type { ProjectSkillProjection, SessionSkillProjection, SkillCoverage, Ski
 
 import { assertSessionAccessible } from './sessions.service.js';
 import { record, safeNativeId, skillHash, summarizeSkills } from './skill-observation-parser.js';
-import { canScan, newSkillSource, scanSkillSource, type ScanBudget, type SkillScanState } from './skill-observation-scan.js';
+import { isStrictlyUnder } from '../shared/contained-file.js';
+import { listPinnedDirectory, openPinned } from '../shared/pinned-fd.js';
+import { scanHeaderRecords } from '../shared/transcript-header-scan.js';
+
+import {
+  canScan, newSkillSource, scanSkillSource,
+  type RootTranscriptBinding, type ScanBudget, type SkillScanState, type SkillSourceOpener,
+} from './skill-observation-scan.js';
 
 type Entry = { state: SkillScanState; flight?: Promise<void>; lastUsed: number; epoch: string };
 const cache = new Map<string, Entry>();
@@ -53,33 +64,101 @@ function emptyCoverage(supported: boolean, reason: SkillCoverage['reasons'][numb
 const emptyProjection = (supported: boolean, reason?: SkillCoverage['reasons'][number]): SessionSkillProjection =>
   ({ observations: [], summary: summarizeSkills([]), coverage: emptyCoverage(supported, reason) });
 
+/**
+ * ADR-201 M1: the session's recorded transcript through the pinned reader
+ * (tree-confined, single link, name and header bound to the id), and still the
+ * file first admitted for this state, in the owner's tree. Throws on refusal.
+ */
+async function openRootTranscript(binding: RootTranscriptBinding): Promise<SessionTranscriptHandle> {
+  const opened = await openRecordedTranscript(
+    { session_id: binding.sessionId, provider: binding.provider, jsonl_path: binding.recorded }, 'skill-observations');
+  if (!isTranscriptHandle(opened)) throw new TranscriptRefusedError(opened.reason);
+  if (opened.root === binding.root && opened.realpath === binding.realpath) return opened;
+  await opened.fd.close().catch(() => undefined);
+  throw new TranscriptRefusedError('outside_tree');
+}
+
+const rootOpener = (binding: RootTranscriptBinding): SkillSourceOpener => async () => {
+  const transcript = await openRootTranscript(binding);
+  return { handle: transcript.fd, release: () => transcript.fd.close().catch(() => undefined) };
+};
+
+/** Pinned `subagents` dir of the bound transcript (derived from its pinned realpath), or the refusal. */
+async function openSubagentsDir(binding: RootTranscriptBinding): Promise<SessionArtifactDir | { reason: string }> {
+  const transcript = await openRootTranscript(binding);
+  try {
+    return await openSessionArtifactDir(transcript, 'subagents');
+  } finally {
+    await transcript.fd.close().catch(() => undefined);
+  }
+}
+
+/** A Claude subagent file, opened through the pinned dir and bound to the parent session id. */
+const subagentOpener = (binding: RootTranscriptBinding, name: string): SkillSourceOpener => async () => {
+  const dir = await openSubagentsDir(binding);
+  if (!(dir instanceof SessionArtifactDir)) throw new TranscriptRefusedError('missing');
+  try {
+    const child = await dir.openFile(name);
+    if (!('handle' in child)) throw new TranscriptRefusedError(child.reason);
+    const verdict = await claudeFileBinder(binding.sessionId, false)(child.realpath,
+      (paths, visit) => scanHeaderRecords(child.handle, paths, visit));
+    if (verdict !== null) throw new TranscriptRefusedError(verdict);
+    return { handle: child.handle, release: () => dir.close() };
+  } catch (error) {
+    await dir.close();
+    throw error;
+  }
+};
+
+/** A linked Codex child rollout: pinned single-link under the root, bound to its thread id. */
+const codexChildOpener = (root: string, file: string, thread: string): SkillSourceOpener => async () => {
+  const opened = await openBoundFile(root, file, codexThreadBinder(thread, false));
+  if ('reason' in opened) throw new TranscriptRefusedError(opened.reason);
+  return { handle: opened.handle, release: () => opened.handle.close().catch(() => undefined) };
+};
+
+/** Catalog roots under the owner's home and the workspace that stay inside their boundary. */
+async function skillCatalogRoots(home: string, provider: 'claude' | 'codex', workspace: string | null) {
+  const candidates = [{ directory: path.join(home, 'skills'), boundary: home },
+    { directory: path.join(home, 'plugins', 'cache'), boundary: home }];
+  if (workspace) candidates.push({ directory: path.join(workspace, `.${provider}`, 'skills'), boundary: workspace },
+    { directory: path.join(workspace, '.agents', 'skills'), boundary: workspace });
+  const skillRoots: string[] = [];
+  const skillBoundaries = new Map<string, string>();
+  for (const item of candidates) {
+    try {
+      const [directory, boundary] = await Promise.all([realpath(item.directory), realpath(item.boundary)]);
+      if (directory.startsWith(`${boundary}${path.sep}`)) {
+        skillRoots.push(item.directory); skillBoundaries.set(item.directory, boundary);
+      }
+    } catch { /* Absent catalog roots do not grant historical arbitrary-path identities. */ }
+  }
+  return { skillRoots, skillBoundaries };
+}
+
+/** The admitted root transcript of the session in the owner's tree, or null. */
+async function bindRootTranscript(provider: 'claude' | 'codex', sessionId: string, recorded: string,
+  home: string): Promise<RootTranscriptBinding | null> {
+  const ownerRoot = await realpath(path.join(home, provider === 'codex' ? 'sessions' : 'projects'));
+  const opened = await openRecordedTranscript({ session_id: sessionId, provider, jsonl_path: recorded }, 'skill-observations');
+  if (!isTranscriptHandle(opened)) return null;
+  await opened.fd.close().catch(() => undefined);
+  // In ANY admissible tree is not enough: it must be the session owner's (or their grantor's).
+  return opened.root === ownerRoot ? { sessionId, provider, recorded, root: ownerRoot, realpath: opened.realpath } : null;
+}
+
 async function createState(principal: number, provider: 'claude' | 'codex', sessionId: string,
   owner: number, file: string | null, workspace: string | null, scope: string): Promise<SkillScanState | null> {
   if (!file) return null;
   // Do not call resolveProviderEnv: it provisions directories and applies policy on read.
   const home = readOnlyHome(owner, provider);
   try {
-    const root = await realpath(path.join(home, provider === 'codex' ? 'sessions' : 'projects'));
-    const target = await realpath(file);
-    if (!target.startsWith(`${root}${path.sep}`)) return null;
-    if (provider === 'claude' ? path.basename(target) !== `${sessionId}.jsonl`
-      : !path.basename(target).endsWith(`-${sessionId}.jsonl`)) return null;
-    const candidates = [{ directory: path.join(home, 'skills'), boundary: home },
-      { directory: path.join(home, 'plugins', 'cache'), boundary: home }];
-    if (workspace) candidates.push({ directory: path.join(workspace, `.${provider}`, 'skills'), boundary: workspace },
-      { directory: path.join(workspace, '.agents', 'skills'), boundary: workspace });
-    const skillRoots: string[] = [];
-    const skillBoundaries = new Map<string, string>();
-    for (const item of candidates) {
-      try {
-        const [directory, boundary] = await Promise.all([realpath(item.directory), realpath(item.boundary)]);
-        if (directory.startsWith(`${boundary}${path.sep}`)) {
-          skillRoots.push(item.directory); skillBoundaries.set(item.directory, boundary);
-        }
-      } catch { /* Absent catalog roots do not grant historical arbitrary-path identities. */ }
-    }
-    return { provider, principal, owner, sessionId, sourceRoot: root, skillRoots,
-      sources: new Map([[target, newSkillSource(target, sessionId, 'root')]]), observations: new Map(),
+    const binding = await bindRootTranscript(provider, sessionId, file, home);
+    if (!binding) return null;
+    const { skillRoots, skillBoundaries } = await skillCatalogRoots(home, provider, workspace);
+    const root = newSkillSource(binding.realpath, rootOpener(binding), sessionId, 'root');
+    return { provider, principal, owner, sessionId, sourceRoot: binding.root, rootTranscript: binding, skillRoots,
+      sources: new Map([[binding.realpath, root]]), observations: new Map(),
       reasons: new Set(), generation: 1, updatedAt: 0, discoveryComplete: false,
       definitions: new Map(), invocationDefinitions: new Map(), catalogLoaded: false, registryScope: scope, skillBoundaries };
   } catch { return null; }
@@ -151,56 +230,54 @@ async function loadCatalog(state: SkillScanState, budget: ScanBudget): Promise<v
   state.catalogLoaded = true;
 }
 
-async function smallJson(file: string, root: string, budget: ScanBudget): Promise<Record<string, unknown>> {
+/** A small JSON sidecar (≤8 KiB) read through the pinned subagents dir. */
+async function smallJson(dir: SessionArtifactDir, name: string, budget: ScanBudget): Promise<Record<string, unknown>> {
   if (!canScan(budget)) return {};
   budget.operations += 4;
+  const opened = await dir.openFile(name);
+  if (!('handle' in opened)) return {};
   try {
-    const target = await realpath(file);
-    if (!canScan(budget) || !target.startsWith(`${root}${path.sep}`)) return {};
-    const handle = await open(target, constants.O_RDONLY | constants.O_NOFOLLOW);
-    try {
-      const stats = await handle.stat();
-      if (!stats.isFile() || stats.size > 8192 || stats.size > 8 * 1024 * 1024 - budget.bytes || !canScan(budget)) return {};
-      const buffer = Buffer.alloc(stats.size);
-      const result = await handle.read(buffer, 0, buffer.length, 0);
-      budget.bytes += result.bytesRead;
-      return canScan(budget) ? record(JSON.parse(buffer.toString('utf8', 0, result.bytesRead))) : {};
-    } finally { await handle.close(); }
-  } catch { return {}; }
+    const size = Number(opened.stat.size);
+    if (size > 8192 || size > 8 * 1024 * 1024 - budget.bytes || !canScan(budget)) return {};
+    const buffer = Buffer.alloc(size);
+    const result = await opened.handle.read(buffer, 0, buffer.length, 0);
+    budget.bytes += result.bytesRead;
+    return canScan(budget) ? record(JSON.parse(buffer.toString('utf8', 0, result.bytesRead))) : {};
+  } catch { return {}; } finally { await dir.closeFile(opened); }
+}
+
+/** Registers the subagent sources listed in the pinned dir; false when the scan stopped early. */
+async function addSubagentSources(state: SkillScanState, dir: SessionArtifactDir, budget: ScanBudget): Promise<boolean> {
+  const root = [...state.sources.values()][0];
+  for (const name of await dir.list()) {
+    budget.entries++; budget.operations++;
+    if (!canScan(budget)) return false;
+    if (!/^agent-[A-Za-z0-9_-]+\.jsonl$/.test(name)) continue;
+    const file = path.join(dir.realpath, name);
+    const existing = state.sources.get(file);
+    if (!existing && state.sources.size >= 65) { state.reasons.add('source_limit'); return false; }
+    const meta = await smallJson(dir, name.replace(/\.jsonl$/, '.meta.json'), budget);
+    const parentId = meta.parentAgentId;
+    const bridge = !parentId && safeNativeId(meta.toolUseId) && root.spawns.has(meta.toolUseId) ? meta.toolUseId : null;
+    if (existing) existing.actorToolCallId = bridge;
+    else state.sources.set(file, newSkillSource(file, subagentOpener(state.rootTranscript, name), name.slice(6, -6), 'subagent', bridge));
+    if (!bridge) state.reasons.add('unresolved_attribution');
+  }
+  return true;
 }
 
 async function discoverClaude(state: SkillScanState, budget: ScanBudget): Promise<void> {
-  const root = [...state.sources.values()][0];
-  const directory = path.join(path.dirname(root.path), state.sessionId, 'subagents');
   budget.operations += 2;
-  let iterator;
-  try {
-    const resolved = await realpath(directory);
-    if (!canScan(budget) || !resolved.startsWith(`${state.sourceRoot}${path.sep}`)) {
-      state.reasons.add('source_unavailable'); return;
-    }
-    iterator = await opendir(resolved);
-  } catch (error) {
-    state.discoveryComplete = (error as NodeJS.ErrnoException).code === 'ENOENT'; return;
+  let dir: SessionArtifactDir | { reason: string };
+  try { dir = await openSubagentsDir(state.rootTranscript); } catch { state.reasons.add('source_unavailable'); return; }
+  if (!(dir instanceof SessionArtifactDir)) {
+    if (dir.reason === 'missing') state.discoveryComplete = true;
+    else state.reasons.add('source_unavailable');
+    return;
   }
-  let complete = true;
   try {
-    for await (const entry of iterator) {
-      budget.entries++; budget.operations++;
-      if (!canScan(budget)) { complete = false; break; }
-      if (!entry.isFile() || !/^agent-[A-Za-z0-9_-]+\.jsonl$/.test(entry.name)) continue;
-      const file = path.join(directory, entry.name);
-      const existing = state.sources.get(file);
-      if (!existing && state.sources.size >= 65) { state.reasons.add('source_limit'); complete = false; break; }
-      const meta = await smallJson(file.replace(/\.jsonl$/, '.meta.json'), state.sourceRoot, budget);
-      const parentId = meta.parentAgentId;
-      const bridge = !parentId && safeNativeId(meta.toolUseId) && root.spawns.has(meta.toolUseId) ? meta.toolUseId : null;
-      if (existing) existing.actorToolCallId = bridge;
-      else state.sources.set(file, newSkillSource(file, entry.name.slice(6, -6), 'subagent', bridge));
-      if (!bridge) state.reasons.add('unresolved_attribution');
-    }
-  } finally { await iterator.close().catch(() => undefined); }
-  state.discoveryComplete = complete;
+    state.discoveryComplete = await addSubagentSources(state, dir, budget);
+  } finally { await dir.close(); }
   const bridges = new Map<string, number>();
   for (const source of state.sources.values()) if (source.actorToolCallId) {
     bridges.set(source.actorToolCallId, (bridges.get(source.actorToolCallId) ?? 0) + 1);
@@ -216,6 +293,23 @@ async function discoverClaude(state: SkillScanState, budget: ScanBudget): Promis
   }
 }
 
+/**
+ * Name of `thread`'s rollout in the directory of the pinned parent `parentRealpath`
+ * (listed through a pinned descriptor, confined to the root), or null.
+ */
+async function findCodexChild(state: SkillScanState, parentRealpath: string, thread: string,
+  budget: ScanBudget): Promise<string | null> {
+  const directory = path.dirname(parentRealpath);
+  if (!isStrictlyUnder(directory, state.sourceRoot)) return null;
+  let pinned;
+  try { pinned = await openPinned(directory, 'directory'); } catch { return null; }
+  try {
+    const names = await listPinnedDirectory(pinned.handle, Math.max(0, 256 - budget.entries));
+    budget.entries += names.length; budget.operations += names.length;
+    return names.find((name) => name.startsWith('rollout-') && name.endsWith(`-${thread}.jsonl`)) ?? null;
+  } catch { return null; } finally { await pinned.handle.close().catch(() => undefined); }
+}
+
 async function discoverCodex(state: SkillScanState, budget: ScanBudget): Promise<void> {
   let complete = true;
   for (const parent of [...state.sources.values()]) {
@@ -223,20 +317,12 @@ async function discoverCodex(state: SkillScanState, budget: ScanBudget): Promise
       if (!thread || [...state.sources.values()].some((item) => item.identity === thread)) continue;
       if (!canScan(budget) || state.sources.size >= 65) { complete = false; break; }
       budget.operations++;
-      let directory;
-      try { directory = await opendir(path.dirname(parent.path)); } catch { complete = false; continue; }
-      let found = false;
-      try {
-        for await (const item of directory) {
-          budget.entries++; budget.operations++;
-          if (!canScan(budget)) break;
-          if (!item.isFile() || !item.name.endsWith(`-${thread}.jsonl`)) continue;
-          const file = path.join(path.dirname(parent.path), item.name);
-          const source = newSkillSource(file, thread, 'subagent', parent.actorKind === 'root' ? callId : null);
-          source.expectedParent = parent.identity; state.sources.set(file, source); found = true; break;
-        }
-      } finally { await directory.close().catch(() => undefined); }
-      if (!found) complete = false;
+      const name = await findCodexChild(state, parent.path, thread, budget);
+      if (!name) { complete = false; continue; }
+      const file = path.join(path.dirname(parent.path), name);
+      const source = newSkillSource(file, codexChildOpener(state.sourceRoot, file, thread), thread, 'subagent',
+        parent.actorKind === 'root' ? callId : null);
+      source.expectedParent = parent.identity; state.sources.set(file, source);
     }
   }
   state.discoveryComplete = complete;

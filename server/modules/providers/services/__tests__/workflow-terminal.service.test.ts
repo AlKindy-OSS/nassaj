@@ -12,6 +12,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { after, before, describe, it } from 'node:test';
 
+import { openPinned } from '../../shared/pinned-fd.js';
 import {
   __resetWorkflowTerminalScan,
   extractTerminalWorkflowIds,
@@ -55,6 +56,17 @@ describe('extractTerminalWorkflowIds — production-shaped synthetic rows', () =
   });
 });
 
+/** Reads through a pinned descriptor, the way the status service hands the transcript over (ADR-201 A1). */
+async function readPinned(file: string): Promise<ReadonlySet<string>> {
+  const realpath = fs.realpathSync(file);
+  const { handle } = await openPinned(realpath, 'file');
+  try {
+    return await readTerminalWorkflowIds({ fd: handle, realpath });
+  } finally {
+    await handle.close();
+  }
+}
+
 describe('readTerminalWorkflowIds — incremental cursor', () => {
   let dir: string;
   let file: string;
@@ -73,13 +85,13 @@ describe('readTerminalWorkflowIds — incremental cursor', () => {
     const [first, second] = Object.values(SYNTHETIC_NOTIFICATION_LINES);
     await fsp.writeFile(file, `${first}\n`, 'utf8');
 
-    const afterFirst = await readTerminalWorkflowIds(file);
+    const afterFirst = await readPinned(file);
     assert.ok(afterFirst.size >= 1);
     const sizeAfterFirst = afterFirst.size;
 
     // Appending must be picked up; nothing already learned may be lost.
     await fsp.appendFile(file, `${second}\n`, 'utf8');
-    const afterSecond = await readTerminalWorkflowIds(file);
+    const afterSecond = await readPinned(file);
     assert.ok(afterSecond.size >= sizeAfterFirst);
   });
 
@@ -88,27 +100,26 @@ describe('readTerminalWorkflowIds — incremental cursor', () => {
     const partialFile = path.join(dir, 'partial.jsonl');
     // Half a notification, no newline yet — the writer is mid-flush.
     await fsp.writeFile(partialFile, line.slice(0, Math.floor(line.length / 2)), 'utf8');
-    assert.equal((await readTerminalWorkflowIds(partialFile)).size, 0);
+    assert.equal((await readPinned(partialFile)).size, 0);
 
     // Completed on the next poll.
     await fsp.writeFile(partialFile, `${line}\n`, 'utf8');
-    assert.ok((await readTerminalWorkflowIds(partialFile)).size >= 1);
+    assert.ok((await readPinned(partialFile)).size >= 1);
   });
 
-  it('degrades to empty (never throws) for a missing transcript or a null path', async () => {
+  it('degrades to empty (never throws) without a pinned transcript', async () => {
     assert.equal((await readTerminalWorkflowIds(null)).size, 0);
-    assert.equal((await readTerminalWorkflowIds(path.join(dir, 'nope.jsonl'))).size, 0);
   });
 
   it('keeps what it learned when the file is truncated under it', async () => {
     const line = Object.values(SYNTHETIC_NOTIFICATION_LINES)[0]!;
     const rotating = path.join(dir, 'rotating.jsonl');
     await fsp.writeFile(rotating, `${line}\n`, 'utf8');
-    const before = await readTerminalWorkflowIds(rotating);
+    const before = await readPinned(rotating);
     assert.ok(before.size >= 1);
 
     fs.writeFileSync(rotating, '', 'utf8'); // rotation
-    const afterRotation = await readTerminalWorkflowIds(rotating);
+    const afterRotation = await readPinned(rotating);
     assert.ok(
       afterRotation.size >= before.size,
       'a terminal verdict must never be un-learned by rotation',

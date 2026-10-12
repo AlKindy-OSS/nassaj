@@ -15,7 +15,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { after, describe, it, mock } from 'node:test';
-import { codexSessionsSandbox } from '@/shared/__tests__/provider-root-sandbox.js';
+import { codexSessionsSandbox, withPinnedTranscript } from '@/shared/__tests__/provider-root-sandbox.js';
 
 const sandbox = codexSessionsSandbox('codex-exec-command-');
 const transcript = path.join(sandbox, 'rollout.jsonl');
@@ -37,7 +37,10 @@ const MiB = 1024 * 1024;
 async function history(text: string, withLease: boolean) {
   fs.writeFileSync(transcript, text);
   const provider = new CodexSessionsProvider();
-  if (!withLease) return provider.fetchHistory('exec-command-session');
+  if (!withLease) {
+    return withPinnedTranscript(transcript, 'exec-command-session', 'codex',
+      (pinned) => provider.fetchHistory('exec-command-session', { transcript: pinned }));
+  }
   const lease = new HistoryReadLease(new AbortController().signal);
   try {
     await lease.initialize(transcript);

@@ -10,7 +10,9 @@
 // Usage (release gate; trees already installed by the orchestrator):
 //   node scripts/release-upgrade-path-gate.mjs --previous-tag <tag> --previous-root <dir> \
 //     --candidate-root <dir> --candidate-commit <sha> --candidate-version <v> --source-repo <dir>
-// Owner escape for a RECORDED known-incompatible baseline only:
+// One installed candidate alone, through the candidate-leaves leg only (ADR-204 S0):
+//   node scripts/release-upgrade-path-gate.mjs --only candidate-leaves --candidate-ref v2.3.1.0
+// Owner escape for a RECORDED known-incompatible baseline only (never candidate-leaves):
 //   --acknowledge-upgrade-incompatible <tag>   (repeatable; see the policy file)
 //
 // Exit: 0 pass (or an acknowledged known-incompatible baseline), 1 the gate failed,
@@ -20,8 +22,10 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { LEAVES_LEG } from './lib/upgrade-path-candidate-leaves.mjs';
 import {
-    assertDiskBacked, decideUpgradePath, formatUpgradePathReport, git, loadKnownIncompatible, runUpgradePathLegs,
+    assertDiskBacked, decideUpgradePath, formatUpgradePathReport, git, loadKnownIncompatible, runCandidateLeavesOnly,
+    runUpgradePathLegs,
 } from './lib/upgrade-path-gate.mjs';
 import { ensurePrivateDirectory, installedTree } from './lib/upgrade-path-trees.mjs';
 
@@ -30,6 +34,7 @@ const VALUE_FLAGS = Object.freeze({
     '--previous-tag': 'previousTag', '--previous-root': 'previousRoot', '--candidate-root': 'candidateRoot',
     '--candidate-ref': 'candidateRef', '--candidate-commit': 'candidateCommit',
     '--candidate-version': 'candidateVersion', '--source-repo': 'sourceRepo', '--work-parent': 'workParent',
+    '--only': 'only',
 });
 
 /** Parse argv; every value flag takes exactly one value. */
@@ -46,7 +51,10 @@ export function parseArgs(argv) {
         if (key === 'acknowledged') options.acknowledged.push(value);
         else options[key] = value;
     }
-    if (!/^v\d+\.\d+\.\d+\.\d+$/.test(options.previousTag || '')) throw new Error('--previous-tag vN.N.N.N is required');
+    if (options.only !== undefined && options.only !== LEAVES_LEG) throw new Error(`--only accepts ${LEAVES_LEG}`);
+    if (!options.only && !/^v\d+\.\d+\.\d+\.\d+$/.test(options.previousTag || '')) {
+        throw new Error('--previous-tag vN.N.N.N is required');
+    }
     if (!options.candidateRoot && !options.candidateRef) throw new Error('--candidate-root or --candidate-ref is required');
     return options;
 }
@@ -63,13 +71,17 @@ function resolveTrees(options) {
     ensurePrivateDirectory(workParent);
     assertDiskBacked(workParent);
     const treesRoot = path.join(workParent, 'trees');
-    const previousCommit = git(sourceRepo, ['rev-parse', '--verify', `${options.previousTag}^{commit}`]);
     const candidateCommit = options.candidateCommit
         || git(sourceRepo, ['rev-parse', '--verify', `${options.candidateRef || 'HEAD'}^{commit}`]);
-    return {
+    const resolved = {
         ...options, sourceRepo, workParent, candidateCommit,
-        previousRoot: path.resolve(options.previousRoot || installedTree({ sourceRepo, commit: previousCommit, treesRoot })),
         candidateRoot: path.resolve(options.candidateRoot || installedTree({ sourceRepo, commit: candidateCommit, treesRoot })),
+    };
+    if (options.only) return resolved;
+    const previousCommit = git(sourceRepo, ['rev-parse', '--verify', `${options.previousTag}^{commit}`]);
+    return {
+        ...resolved,
+        previousRoot: path.resolve(options.previousRoot || installedTree({ sourceRepo, commit: previousCommit, treesRoot })),
     };
 }
 
@@ -82,7 +94,7 @@ async function main() {
         return 2;
     }
     const started = Date.now();
-    const report = runUpgradePathLegs(options);
+    const report = options.only ? await runCandidateLeavesOnly(options) : await runUpgradePathLegs(options);
     const decision = decideUpgradePath(report, {
         knownIncompatible: loadKnownIncompatible(), acknowledged: options.acknowledged,
     });

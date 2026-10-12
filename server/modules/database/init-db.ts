@@ -34,6 +34,7 @@ import { migrateSessionShares } from './session-shares.js';
 import { migrateDeviceAccountSessions } from './device-account-sessions.migration.js';
 import { inspectExistingSecurityState } from './existing-security-state.js';
 import { migrateSsoOidc } from './sso-oidc-config.migration.js';
+import { migrateUserHarnessFilesMode } from './harness-files-mode.migration.js';
 
 /** True when a ledger project path still resolves to a real directory. */
 const projectPathResolves = (projectPath: string): boolean => {
@@ -64,6 +65,9 @@ export const initializeAdmittedDatabase = (db: ReturnType<typeof getConnection>,
     // ADR-194 (T-1962): without these tables the SSO state model reads a
     // missing table and locks every linked member out (enforced, unavailable).
     migrateSsoOidc(db);
+    // ADR-203 (T-2003): one additive CREATE TABLE; without it the private-skills
+    // switch reads a missing table on update-button nodes (fails safe to shared).
+    migrateUserHarnessFilesMode(db);
     const result = initializeConnectorPolicyV2SubstrateOnly(db, authorityRootPath);
     if (!result.ready) throw new Error(`existing_security_connector_initialization_failed:${result.reason}`);
 };

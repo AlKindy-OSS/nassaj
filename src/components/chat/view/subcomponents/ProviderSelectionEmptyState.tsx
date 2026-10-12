@@ -4,6 +4,7 @@ import { Trans, useTranslation } from "react-i18next";
 
 import { useAntigravityActiveModel } from "../../hooks/useAntigravityActiveModel";
 import { usePaletteOps } from "../../../../contexts/PaletteOpsContext";
+import { useUnifiedKeysEnabled } from "../../../provider-auth/hooks/useLinkMode";
 import { useVendorKeyStatuses } from "../../../provider-auth/hooks/useVendorKeyStatuses";
 import {
   isVendorProvider,
@@ -273,6 +274,9 @@ export default function ProviderSelectionEmptyState({
   // invisible here until a full remount — the row stayed locked after a
   // successful save, and the CTA led back to the same locked row (T-1139).
   const { statuses: vendorKeyStatuses, refresh: refreshVendorKeys } = useVendorKeyStatuses();
+  // ADR-200 S9: with the unified key mode on, the picker lists only runnable
+  // cells — an unlinked vendor is absent, not greyed. Off: the locked CTA stays.
+  const hideUnlinked = useUnifiedKeysEnabled();
 
   // Per-user favourites — stored server-side in user_ui_preferences, no
   // localStorage. isLoading hides the group until the first GET resolves so
@@ -397,6 +401,8 @@ export default function ProviderSelectionEmptyState({
           models: providerDisabledMap[p.id] ? [] : models,
         };
       })
+      // ADR-200 S9: an unlinked vendor body is not offered at all in the unified mode.
+      .filter((g) => !(hideUnlinked && isVendorProvider(g.id) && !vendorKeyStatuses[g.id]))
       // Post-load: drop groups with 0 models when catalog has finished loading
       // and the group is not just disabled-awaiting-auth.
       .filter((g) => {
@@ -404,7 +410,7 @@ export default function ProviderSelectionEmptyState({
         if (providerModelsLoading) return true; // fail-open during load
         return g.models.length > 0;
       });
-  }, [providerModelCatalog, providerVisibilityMap, providerDisabledMap, providerModelsLoading]);
+  }, [providerModelCatalog, providerVisibilityMap, providerDisabledMap, providerModelsLoading, hideUnlinked, vendorKeyStatuses]);
 
   // Flat list of all rows across all visible groups — used by resolveFavoriteRows
   // to handle stale favourites: a favourite key that is no longer in this flat
@@ -424,9 +430,9 @@ export default function ProviderSelectionEmptyState({
 
   const allFlatRows = useMemo<PickerRow[]>(() => {
     return visibleProviderGroups.flatMap((group) =>
-      rowsForBody(group.id, providerModelCatalog, vendorKeyStatuses, authModes),
+      rowsForBody(group.id, providerModelCatalog, vendorKeyStatuses, authModes, { hideUnlinked }),
     );
-  }, [visibleProviderGroups, providerModelCatalog, vendorKeyStatuses, authModes]);
+  }, [visibleProviderGroups, providerModelCatalog, vendorKeyStatuses, authModes, hideUnlinked]);
 
   // Rows to show in the pinned favourites group. Empty while favourites load.
   const favoriteRows = useMemo<PickerRow[]>(
@@ -863,6 +869,7 @@ export default function ProviderSelectionEmptyState({
                       providerModelCatalog,
                       vendorKeyStatuses,
                       authModes,
+                      { hideUnlinked },
                     );
                     // T-871: only a group that actually lists rows is collapsible
                     // (disabled/locked/loading groups show a CTA — nothing to fold).

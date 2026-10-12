@@ -34,7 +34,7 @@ let presenceEnds = 0;
 const written: any[] = [];
 const named = (url: string, exports: Record<string, unknown>) => mock.module(url, { namedExports: exports });
 named('node:child_process', { execFileSync: rejectUnexpectedProcess, execFile: rejectUnexpectedProcess, spawnSync: rejectUnexpectedProcess, spawn: () => { childGeneration = generation; child = new EventEmitter(); child.stdout = new PassThrough(); child.stderr = new PassThrough(); child.kill = () => true; return child; } });
-named('./modules/database/index.js', { sessionsDb: { createSession() { } }, participantsDb: { recordSpawn() { } }, messageAuthorsDb: { recordUserMessage() { } } });
+named('./modules/database/index.js', { sessionsDb: { insertDiscoveredSession() { } }, participantsDb: { recordSpawn() { } }, messageAuthorsDb: { recordUserMessage() { } } });
 named('./modules/providers/list/qwen/qwen-execution-contract.js', { qwenExecutionContract: { issueGesture: () => '', authorizeSpawn() { } } });
 named('./modules/providers/services/provider-models.service.js', { providerModelsService: { resolveResumeModel: async () => 'fixture', seedSessionModel: async () => { } } });
 named('./modules/providers/services/turn-timing.service.js', { createTurnTimer: () => ({ markModelActivity() { }, startedAt: () => new Date().toISOString() }), settleTurnTiming: (value: any) => { completedAt = value.completedAt; timing++; return {}; } });

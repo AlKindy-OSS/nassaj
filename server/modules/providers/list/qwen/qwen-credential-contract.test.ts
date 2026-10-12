@@ -3,23 +3,14 @@ import test from 'node:test';
 
 import {
   createQwenCredentialProfile,
-  isQwenCodingPlanKey,
   providerSecretsService,
 } from '../../services/provider-secrets.service.js';
 
 import { qwenModelsForPlan } from './qwen.provider.js';
 
-test('performs bounded syntax-only validation for personal Coding Plan keys', () => {
-  assert.equal(isQwenCodingPlanKey('sk-sp-personal_123.ABC'), true);
-  assert.equal(isQwenCodingPlanKey('sk-api-metered'), false);
-  assert.equal(isQwenCodingPlanKey('sk-sp-'), false);
-  assert.equal(isQwenCodingPlanKey('sk-sp-secret with spaces'), false);
-  assert.equal(isQwenCodingPlanKey(`sk-sp-${'a'.repeat(507)}`), false);
-});
-
 test('Qwen credential has no anonymous/operator-wide write or delete path', () => {
   assert.throws(
-    () => providerSecretsService.setKey(null, 'qwen', 'sk-sp-personal-key'),
+    () => providerSecretsService.setKey(null, 'qwen', 'token-plan-personal-key'),
     /authenticated member/,
   );
   assert.throws(
@@ -28,35 +19,22 @@ test('Qwen credential has no anonymous/operator-wide write or delete path', () =
   );
 });
 
-test('stores Coding and Token Plan profiles with explicit region metadata', () => {
-  assert.deepEqual(createQwenCredentialProfile(
-    'sk-sp-personal-key-41', 'coding_plan', 'china',
-  ), {
-    version: 1,
-    plan: 'coding_plan',
-    region: 'china',
-    key: 'sk-sp-personal-key-41',
-  });
-
-  assert.deepEqual(createQwenCredentialProfile(
-    'token-plan-personal-key-42', 'token_plan', 'international',
-  ), {
-    version: 1,
-    plan: 'token_plan',
-    region: 'international',
-    key: 'token-plan-personal-key-42',
-  });
+test('ADR-200 S7: every saved profile is Token Plan, international region, any key prefix', () => {
+  for (const key of ['token-plan-personal-key-42', 'sk-sp-personal-key-41', 'sk-anything-0123456789']) {
+    assert.deepEqual(createQwenCredentialProfile(key), {
+      version: 1,
+      plan: 'token_plan',
+      region: 'international',
+      key,
+    });
+  }
 });
 
-test('rejects ambiguous or malformed Qwen profiles', () => {
-  assert.throws(
-    () => createQwenCredentialProfile('sk-sp-personal-key-43', 'unknown', 'international'),
-    /plan must be/,
-  );
-  assert.throws(
-    () => createQwenCredentialProfile('token plan key with spaces', 'token_plan', 'international'),
-    /without whitespace/,
-  );
+test('rejects malformed Token Plan keys', () => {
+  assert.throws(() => createQwenCredentialProfile('token plan key with spaces'), /without whitespace/);
+  assert.throws(() => createQwenCredentialProfile('short'), /16–512/);
+  assert.throws(() => createQwenCredentialProfile(`k${'a'.repeat(512)}`), /16–512/);
+  assert.throws(() => createQwenCredentialProfile(undefined), /16–512/);
 });
 
 test('each Qwen plan default is present in its own catalog', () => {

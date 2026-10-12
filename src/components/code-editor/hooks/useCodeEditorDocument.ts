@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../../../utils/api';
+import { SECRET_FILE_DECLINED, requestWithSecretConfirmation } from '../../../utils/secretFileConfirmation';
 import type { CodeEditorFile } from '../types/types';
 import { isBinaryFile } from '../utils/binaryFile';
 import { getPreviewKind } from '../utils/previewableFile';
@@ -24,6 +25,9 @@ export const useCodeEditorDocument = ({ file, projectPath }: UseCodeEditorDocume
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [isBinary, setIsBinary] = useState(false);
+  // B-1593: whether this buffer came from a secrets file the user confirmed
+  // opening ('confirmed'), declined to open ('declined'), or neither.
+  const [secretAccess, setSecretAccess] = useState<'none' | 'confirmed' | 'declined'>('none');
   // Some binaries (images, PDFs, audio, video) can be rendered natively, so the
   // editor shows an inline preview instead of the generic binary placeholder.
   const previewKind = getPreviewKind(file.name);
@@ -41,6 +45,7 @@ export const useCodeEditorDocument = ({ file, projectPath }: UseCodeEditorDocume
       try {
         setLoading(true);
         setIsBinary(false);
+        setSecretAccess('none');
 
         // Natively previewable media (image/pdf/audio/video) is rendered by
         // CodeEditorMediaPreview, so there is nothing to read as text here.
@@ -71,12 +76,26 @@ export const useCodeEditorDocument = ({ file, projectPath }: UseCodeEditorDocume
           throw new Error('Missing project identifier');
         }
 
-        const response = await api.readFile(fileProjectId, filePath);
+        // B-1593: a project secrets file asks the user before it is opened.
+        let readWithConfirmation = false;
+        const response = await requestWithSecretConfirmation(
+          (confirmSecret) => {
+            readWithConfirmation = confirmSecret;
+            return api.readFile(fileProjectId, filePath, { confirmSecret });
+          },
+          { fileName },
+        );
+        if (response === SECRET_FILE_DECLINED) {
+          setSecretAccess('declined');
+          setContent('');
+          return;
+        }
         if (!response.ok) {
           throw new Error(`Failed to load file: ${response.status} ${response.statusText}`);
         }
 
         const data = await response.json();
+        setSecretAccess(readWithConfirmation ? 'confirmed' : 'none');
         setContent(data.content);
       } catch (error) {
         const message = getErrorMessage(error);
@@ -93,7 +112,8 @@ export const useCodeEditorDocument = ({ file, projectPath }: UseCodeEditorDocume
   const handleSave = useCallback(async () => {
     // Preview-only and binary files have no editable text buffer; never write
     // them back (e.g. via Cmd/Ctrl+S) or we'd corrupt the file on disk.
-    if (previewKind || isBinaryFile(fileName)) {
+    // A secrets file the user declined to open has no real buffer either.
+    if (previewKind || isBinaryFile(fileName) || secretAccess === 'declined') {
       return;
     }
 
@@ -105,7 +125,15 @@ export const useCodeEditorDocument = ({ file, projectPath }: UseCodeEditorDocume
         throw new Error('Missing project identifier');
       }
 
-      const response = await api.saveFile(fileProjectId, filePath, content);
+      // B-1593: a secrets file opened with confirmation saves with the flag;
+      // any other 428 asks the user before writing.
+      const response = await requestWithSecretConfirmation(
+        (confirmSecret) => api.saveFile(fileProjectId, filePath, content, { confirmSecret }),
+        { fileName, alreadyConfirmed: secretAccess === 'confirmed' },
+      );
+      if (response === SECRET_FILE_DECLINED) {
+        return;
+      }
 
       if (!response.ok) {
         const contentType = response.headers.get('content-type');
@@ -130,7 +158,7 @@ export const useCodeEditorDocument = ({ file, projectPath }: UseCodeEditorDocume
     } finally {
       setSaving(false);
     }
-  }, [content, filePath, fileProjectId, previewKind, fileName]);
+  }, [content, filePath, fileProjectId, previewKind, fileName, secretAccess]);
 
   const handleDownload = useCallback(() => {
     const blob = new Blob([content], { type: 'text/plain' });
@@ -155,6 +183,7 @@ export const useCodeEditorDocument = ({ file, projectPath }: UseCodeEditorDocume
     saveSuccess,
     saveError,
     isBinary,
+    secretDeclined: secretAccess === 'declined',
     previewKind,
     fileProjectId,
     handleSave,

@@ -90,6 +90,7 @@ import {
   materializeGeminiGovernance,
 } from './gemini-governance-material.js';
 import { listGovernanceExemptions } from './governance-exemption.js';
+import { reconcileClaudeSkillsLink } from './claude-skills-link.js';
 // SL-1 neutral primitive (aliased — codex-governance-material re-exports a same-named
 // single-arg Codex facade above). Used directly for the Kimi governance COPY (M-1).
 import { materializeGovernanceCopy as materializeVendorGovernanceCopy } from './vendor-cli-governance-material.js';
@@ -485,7 +486,14 @@ export function provisionUserDirs(userId) {
     // ("Agent type 'X' not found") or skills. settings.json is deliberately
     // NOT linked: each user keeps a personal settings file (theme prefs).
     ensureSymlink(path.join(home, '.claude', 'agents'), path.join(claudeDir, 'agents'));
-    ensureSymlink(path.join(home, '.claude', 'skills'), path.join(claudeDir, 'skills'));
+    // Skills follow the user's shared/private choice (ADR-203): the reconcile
+    // creates the shared link when absent (the old ensureSymlink behaviour) and
+    // repoints between the shared library and the user's private store. When the
+    // per-user lock is busy only the missing-link case is handled here; the lock
+    // holder reconciles itself.
+    if (reconcileClaudeSkillsLink(userId) === 'deferred-locked') {
+      ensureSymlink(path.join(home, '.claude', 'skills'), path.join(claudeDir, 'skills'));
+    }
     ensureSymlink(path.join(home, '.claude', 'plugins'), path.join(claudeDir, 'plugins'));
 
     // NO credential is linked here for anyone (ADR-105). Every user — owner

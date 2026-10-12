@@ -645,6 +645,45 @@ test('providerSkillsService removes an installed global skill', { concurrency: f
   const restoreHomeDir = patchHomeDir(tempRoot);
 
   try {
+    // Codex's ~/.agents/skills is writable; claude's library is read-only (T-2003).
+    await providerSkillsService.addProviderSkills('codex', {
+      entries: [
+        {
+          directoryName: 'removable-skill',
+          content: '---\nname: removable-skill\ndescription: Temp skill\n---\n\nBody.\n',
+          files: [{ relativePath: 'scripts/run.js', content: 'x', encoding: 'utf8' }],
+        },
+      ],
+    });
+    const skillDir = path.join(tempRoot, '.agents', 'skills', 'removable-skill');
+    assert.ok((await fs.stat(skillDir)).isDirectory());
+
+    const removed = await providerSkillsService.removeProviderSkill('codex', 'removable-skill');
+    assert.equal(removed.name, 'removable-skill');
+    assert.equal(removed.command, '$removable-skill');
+    assert.equal(removed.provider, 'codex');
+    await assert.rejects(fs.stat(skillDir), { code: 'ENOENT' });
+
+    // A subsequent list no longer surfaces the skill.
+    const listed = await providerSkillsService.listProviderSkills('codex');
+    assert.equal(listed.some((skill) => skill.name === 'removable-skill'), false);
+
+    // Removing an absent skill is a 404-style not-found error.
+    await assert.rejects(
+      providerSkillsService.removeProviderSkill('codex', 'never-installed'),
+      /is not installed/i,
+    );
+  } finally {
+    restoreHomeDir();
+    await fs.rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test('providerSkillsService removes an app-installed claude library skill', { concurrency: false }, async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'llm-skills-remove-'));
+  const restoreHomeDir = patchHomeDir(tempRoot);
+
+  try {
     await providerSkillsService.addProviderSkills('claude', {
       entries: [
         {

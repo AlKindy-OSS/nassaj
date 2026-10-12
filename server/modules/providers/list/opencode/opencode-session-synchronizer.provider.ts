@@ -4,7 +4,7 @@ import path from 'node:path';
 import Database from 'better-sqlite3';
 
 import { participantsDb, sessionsDb } from '@/modules/database/index.js';
-import { redactQwenPlanSecrets } from '@/services/isolation/opencode-qwen-plan.js';
+import { redactLiteralSecrets } from '@/services/isolation/opencode-qwen-plan.js';
 import type { IProviderSessionSynchronizer } from '@/shared/interfaces.js';
 import {
   normalizeProviderTimestamp,
@@ -18,6 +18,7 @@ import {
   resolveOpenCodeDataHomeOwner,
   resolveOpenCodeDataHomes,
 } from './opencode-home.js';
+import { collectOpenCodeSessionSecrets } from './opencode-redaction-secrets.js';
 
 type OpenCodeSessionRow = {
   id: string;
@@ -174,22 +175,29 @@ export class OpenCodeSessionSynchronizer implements IProviderSessionSynchronizer
     const fallbackTitle = 'Untitled OpenCode Session';
     const existingSession = sessionsDb.getSessionById(sessionId);
     const existingName = existingSession?.custom_name;
-    // T-1906: a title/first prompt read from opencode.db never carries a key.
+    // T-1906 / ADR-200 §8: a title/first prompt read from opencode.db never
+    // carries a key of any sender in the session or of the data dir's owner.
     const nextName = existingName && existingName !== fallbackTitle
       ? existingName
-      : redactQwenPlanSecrets(readOptionalString(row.title) ?? this.readFirstUserText(db, sessionId));
+      : redactLiteralSecrets(
+        readOptionalString(row.title) ?? this.readFirstUserText(db, sessionId),
+        collectOpenCodeSessionSecrets(sessionId, {
+          dataHome: path.dirname(db.name),
+          extraUserIds: [ownerUserId],
+        }),
+      );
 
     // OpenCode stores every session in one shared sqlite database, so jsonl_path
     // must stay null to avoid deleting opencode.db when one app session is removed.
-    sessionsDb.createSession(
+    sessionsDb.recordDiscoveredSession({
       sessionId,
-      this.provider,
+      provider: this.provider,
       projectPath,
-      normalizeSessionName(nextName, fallbackTitle),
-      normalizeProviderTimestamp(row.time_created),
-      normalizeProviderTimestamp(row.time_updated ?? row.time_created),
-      null,
-    );
+      customName: normalizeSessionName(nextName, fallbackTitle),
+      createdAt: normalizeProviderTimestamp(row.time_created),
+      updatedAt: normalizeProviderTimestamp(row.time_updated ?? row.time_created),
+      jsonlPath: null,
+    });
 
     // Data-provenance attribution (T-857, part ب): an opencode session created
     // outside this server (a TUI run, or any spawn that did not flow through the

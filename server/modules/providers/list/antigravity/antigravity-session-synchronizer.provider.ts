@@ -1,5 +1,5 @@
-import { realpathSync } from 'node:fs';
-import { readdir, readFile, stat } from 'node:fs/promises';
+import { realpathSync, type Stats } from 'node:fs';
+import { readdir, type FileHandle } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -10,6 +10,8 @@ import type { AnyRecord } from '@/shared/types.js';
 import { normalizeSessionName, readObjectRecord } from '@/shared/utils.js';
 import { userConfigDir } from '@/services/isolation/provision-user-dirs.js';
 import { isProviderIsolated } from '@/services/provider-sharing.js';
+
+import { isTranscriptHandle, openRunTranscript } from '../../shared/session-transcript-reader.js';
 
 const ANTIGRAVITY_PLACEHOLDER_PROJECT_PATH = '/__antigravity__';
 
@@ -157,15 +159,15 @@ export class AntigravitySessionSynchronizer implements IProviderSessionSynchroni
         continue;
       }
 
-      sessionsDb.createSession(
-        parsed.sessionId,
-        this.provider,
-        this.resolveProjectPath(parsed.sessionId),
-        parsed.title,
-        parsed.createdAt,
-        parsed.updatedAt,
-        parsed.transcriptPath,
-      );
+      sessionsDb.recordDiscoveredSession({
+        sessionId: parsed.sessionId,
+        provider: this.provider,
+        projectPath: this.resolveProjectPath(parsed.sessionId),
+        customName: parsed.title,
+        createdAt: parsed.createdAt,
+        updatedAt: parsed.updatedAt,
+        jsonlPath: parsed.transcriptPath,
+      });
       processed += 1;
     }
 
@@ -179,10 +181,9 @@ export class AntigravitySessionSynchronizer implements IProviderSessionSynchroni
    * `cwd` as soon as it discovers the brain UUID. Two sources can carry that
    * real path, checked in order:
    *
-   * 1. An existing non-placeholder `project_path` already on the DB row. Because
-   *    `createSession` upserts and overwrites `project_path`, re-syncing the same
-   *    UUID with the placeholder would otherwise relocate the session into the
-   *    phantom `/__antigravity__` workspace and hide it from the sidebar.
+   * 1. An existing non-placeholder `project_path` already on the DB row. The
+   *    ADR-201 refresh already refuses real → placeholder moves; reusing the
+   *    stored path keeps that a no-op instead of a logged conflict.
    * 2. The in-process registry populated by the spawn adapter. This closes the
    *    race where a synchronize() (boot/refresh/watcher) reaches a brand-new
    *    brain UUID *before* the close handler has written the real path to the DB:
@@ -235,19 +236,22 @@ export class AntigravitySessionSynchronizer implements IProviderSessionSynchroni
       return null;
     }
 
-    return sessionsDb.createSession(
-      parsed.sessionId,
-      this.provider,
-      this.resolveProjectPath(parsed.sessionId),
-      parsed.title,
-      parsed.createdAt,
-      parsed.updatedAt,
-      parsed.transcriptPath,
-    );
+    return sessionsDb.recordDiscoveredSession({
+      sessionId: parsed.sessionId,
+      provider: this.provider,
+      projectPath: this.resolveProjectPath(parsed.sessionId),
+      customName: parsed.title,
+      createdAt: parsed.createdAt,
+      updatedAt: parsed.updatedAt,
+      jsonlPath: parsed.transcriptPath,
+    });
   }
 
   /** How many leading transcript lines we scan for the first USER_INPUT title. */
   private readonly TITLE_SCAN_LINE_LIMIT = 10;
+
+  /** Byte bound of that leading scan (the old whole-file read had none). */
+  private readonly TITLE_SCAN_BYTE_LIMIT = 4 * 1024 * 1024;
 
   /**
    * Reads the transcript for one brain UUID and produces session metadata.
@@ -276,24 +280,28 @@ export class AntigravitySessionSynchronizer implements IProviderSessionSynchroni
       'transcript.jsonl',
     );
 
-    let fileStat: Awaited<ReturnType<typeof stat>>;
+    // ADR-201 A1, discovery read (no row may exist yet): confined to this brain
+    // dir, pinned single-link, bound to `uuid` by its brain directory.
+    const opened = await openRunTranscript({
+      provider: 'antigravity', sessionId: uuid, candidate: transcriptPath, root: brainDir, purpose: 'sync-discovery',
+    });
+    if (!isTranscriptHandle(opened)) {
+      return null;
+    }
+
+    let fileStat: Stats;
+    let leadingRecords: AnyRecord[];
     try {
-      fileStat = await stat(transcriptPath);
-    } catch {
-      return null;
+      fileStat = await opened.fd.stat();
+      if (since && fileStat.mtime <= since) {
+        return null;
+      }
+      // Parse only the leading transcript lines. Transcripts can be huge, so we
+      // read a bounded prefix and stop at TITLE_SCAN_LINE_LIMIT lines.
+      leadingRecords = await this.readLeadingRecords(opened.fd);
+    } finally {
+      await opened.fd.close().catch(() => undefined);
     }
-
-    if (!fileStat.isFile()) {
-      return null;
-    }
-
-    if (since && fileStat.mtime <= since) {
-      return null;
-    }
-
-    // Parse only the leading transcript lines. Transcripts can be huge, so we
-    // slice off just the first TITLE_SCAN_LINE_LIMIT lines and stop there.
-    const leadingRecords = await this.readLeadingRecords(transcriptPath);
     const firstLine = leadingRecords[0] ?? null;
 
     const title = this.extractTitleFromLeadingRecords(leadingRecords);
@@ -320,10 +328,12 @@ export class AntigravitySessionSynchronizer implements IProviderSessionSynchroni
    * independently; a malformed line is skipped rather than aborting the scan so
    * a single bad record never costs us the session metadata.
    */
-  private async readLeadingRecords(transcriptPath: string): Promise<AnyRecord[]> {
+  private async readLeadingRecords(handle: FileHandle): Promise<AnyRecord[]> {
     let content: string;
     try {
-      content = await readFile(transcriptPath, 'utf8');
+      const buffer = Buffer.alloc(this.TITLE_SCAN_BYTE_LIMIT);
+      const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+      content = buffer.toString('utf8', 0, bytesRead);
     } catch {
       return [];
     }

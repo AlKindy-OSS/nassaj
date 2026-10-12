@@ -7,8 +7,10 @@
  * الأرقام المتوقَّعة أدناه محسوبة من الـfixtures نفسها لا مكتوبة تخميناً.
  */
 
+// FIRST import — HOME becomes a /var/tmp sandbox before any provider root is computed.
+import '@/shared/__tests__/sandbox-home.js';
 import assert from 'node:assert/strict';
-import { appendFile, mkdtemp, mkdir, copyFile, rm, stat, writeFile } from 'node:fs/promises';
+import { appendFile, mkdtemp, mkdir, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -25,14 +27,57 @@ import {
   withTranscriptReadPermit,
 } from '@/modules/providers/list/codex/codex-rollout-links.js';
 
+import {
+  claudeHeaderLine,
+  claudeProjectsRoot,
+  codexHeaderLine,
+  codexSessionsRoot,
+  nextSessionId,
+} from './__tests__/bound-transcripts.js';
+
 const FIXTURES = path.join(path.dirname(fileURLToPath(import.meta.url)), '__fixtures__');
 
-const makeSessionDir = async () => mkdtemp(path.join(os.tmpdir(), 'nassaj-cost-'));
+/**
+ * ADR-201 A-P2c: the extractors read only transcripts bound to their session,
+ * so every fixture lives in a sandbox provider root (a fresh project dir under
+ * `~/.claude/projects`, a fresh dir under `~/.codex/sessions`), named after its
+ * id and headed by an id-bearing record (see __tests__/bound-transcripts.ts).
+ */
+const makeSessionDir = async () => {
+  await mkdir(claudeProjectsRoot(), { recursive: true });
+  return mkdtemp(path.join(claudeProjectsRoot(), 'nassaj-cost-'));
+};
+const makeRolloutDir = async () => {
+  await mkdir(codexSessionsRoot(), { recursive: true });
+  return mkdtemp(path.join(codexSessionsRoot(), 'nassaj-cost-'));
+};
+/** Manifest-only tests (no extraction) need no provider root. */
+const makeScratchDir = async () => mkdtemp(path.join(os.tmpdir(), 'nassaj-cost-'));
+
+type ClaudeFixture = { sessionId: string; transcriptPath: string };
+
+/** `<dir>/<id>.jsonl` = Claude header of a fresh id + `body` (a fixture's text by default). */
+async function claudeTranscript(dir: string, body?: string): Promise<ClaudeFixture> {
+  const sessionId = nextSessionId('c1a0de00');
+  const transcriptPath = path.join(dir, `${sessionId}.jsonl`);
+  const text = body ?? await readFile(path.join(FIXTURES, 'claude-parent.jsonl'), 'utf8');
+  await writeFile(transcriptPath, claudeHeaderLine(sessionId) + text);
+  return { sessionId, transcriptPath };
+}
+
+/** A Codex root rollout of a fresh thread in `dir`, bound as `extractCodexSessionUsage` expects. */
+function codexRollout(dir: string, threadId = nextSessionId('c0de0000')) {
+  return { rolloutPath: path.join(dir, `rollout-2026-07-26T04-12-29-${threadId}.jsonl`), threadId, root: codexSessionsRoot(), rootAlias: true };
+}
+
+/** Writes the root rollout: its `session_meta` header, then `body`. */
+async function writeRollout(rollout: { rolloutPath: string; threadId: string }, body: string): Promise<void> {
+  await writeFile(rollout.rolloutPath, codexHeaderLine(rollout.threadId) + body);
+}
 
 test('كلود: التكرار الحقيقي في السجلّ يُنزع، وسطور <synthetic> تُستبعَد', async () => {
   const dir = await makeSessionDir();
-  const transcript = path.join(dir, 'sess.jsonl');
-  await copyFile(path.join(FIXTURES, 'claude-parent.jsonl'), transcript);
+  const transcript = await claudeTranscript(dir);
 
   const usage = await extractClaudeSessionUsage(transcript);
 
@@ -54,8 +99,7 @@ test('كلود: التكرار الحقيقي في السجلّ يُنزع، و�
 
 test('الجمع الساذج (بلا نزع تكرار) كان يضخّم المخرجات — نُثبت الفارق', async () => {
   const dir = await makeSessionDir();
-  const transcript = path.join(dir, 'sess.jsonl');
-  await copyFile(path.join(FIXTURES, 'claude-parent.jsonl'), transcript);
+  const transcript = await claudeTranscript(dir);
 
   const usage = await extractClaudeSessionUsage(transcript);
   const deduped = usage.perModel[0].totals.output;
@@ -69,13 +113,12 @@ test('الجمع الساذج (بلا نزع تكرار) كان يضخّم ال�
 
 test('كلود: استهلاك الوكلاء الفرعيين يدخل الحساب بنموذجه المستقل', async () => {
   const dir = await makeSessionDir();
-  const transcript = path.join(dir, 'sess.jsonl');
-  await copyFile(path.join(FIXTURES, 'claude-parent.jsonl'), transcript);
+  const transcript = await claudeTranscript(dir);
   // الوكلاء الفرعيون في مجلّد بجانب الملف يحمل اسم الجلسة (بلا اللاحقة).
-  await mkdir(path.join(dir, 'sess', 'subagents'), { recursive: true });
-  await copyFile(
-    path.join(FIXTURES, 'claude-subagent.jsonl'),
-    path.join(dir, 'sess', 'subagents', 'agent-a42e68ee5814334bd.jsonl'),
+  await mkdir(path.join(dir, transcript.sessionId, 'subagents'), { recursive: true });
+  await writeFile(
+    path.join(dir, transcript.sessionId, 'subagents', 'agent-a42e68ee5814334bd.jsonl'),
+    claudeHeaderLine(transcript.sessionId) + await readFile(path.join(FIXTURES, 'claude-subagent.jsonl'), 'utf8'),
   );
 
   const usage = await extractClaudeSessionUsage(transcript);
@@ -98,8 +141,7 @@ test('كلود: استهلاك الوكلاء الفرعيين يدخل الحس
 
 test('غياب مجلّد الوكلاء ليس خطأً — محادثة بلا وكلاء تُقرأ كما هي', async () => {
   const dir = await makeSessionDir();
-  const transcript = path.join(dir, 'sess.jsonl');
-  await copyFile(path.join(FIXTURES, 'claude-parent.jsonl'), transcript);
+  const transcript = await claudeTranscript(dir);
 
   const usage = await extractClaudeSessionUsage(transcript);
   assert.equal(usage.subagentRequests, 0);
@@ -108,15 +150,15 @@ test('غياب مجلّد الوكلاء ليس خطأً — محادثة بلا
 
 test('ملف مفقود بالكامل يُرجع صفراً لا يرمي', async () => {
   const dir = await makeSessionDir();
-  const usage = await extractClaudeSessionUsage(path.join(dir, 'ghost.jsonl'));
+  const sessionId = nextSessionId();
+  const usage = await extractClaudeSessionUsage({ sessionId, transcriptPath: path.join(dir, `${sessionId}.jsonl`) });
   assert.deepEqual(usage.perModel, []);
 });
 
 test('سطر مقطوع في نهاية ملف قيد الكتابة لا يُسقط بقيّة الملف', async () => {
   const dir = await makeSessionDir();
-  const transcript = path.join(dir, 'sess.jsonl');
-  await copyFile(path.join(FIXTURES, 'claude-parent.jsonl'), transcript);
-  await writeFile(transcript, '{"type":"assistant","message":{"id":"m', { flag: 'a' });
+  const transcript = await claudeTranscript(dir);
+  await writeFile(transcript.transcriptPath, '{"type":"assistant","message":{"id":"m', { flag: 'a' });
 
   const usage = await extractClaudeSessionUsage(transcript);
   assert.equal(usage.perModel[0].requests, 2);
@@ -185,9 +227,9 @@ test('غياب تفصيل عمر المخبّأ يُحمَل على 5 دقائق
 });
 
 test('كودكس: يُؤخذ آخر عدّاد تراكمي لا مجموع الأحداث', async () => {
-  const dir = await makeSessionDir();
-  const rollout = path.join(dir, 'rollout.jsonl');
-  await copyFile(path.join(FIXTURES, 'codex-rollout.jsonl'), rollout);
+  const dir = await makeRolloutDir();
+  const rollout = codexRollout(dir);
+  await writeRollout(rollout, await readFile(path.join(FIXTURES, 'codex-rollout.jsonl'), 'utf8'));
 
   const usage = await extractCodexSessionUsage(rollout);
   assert.equal(usage.perModel.length, 1);
@@ -204,8 +246,8 @@ test('كودكس: يُؤخذ آخر عدّاد تراكمي لا مجموع ال
 });
 
 test('كودكس: `last_token_usage` ينتج سجلات أدوار قابلة لمطابقة التذييل', async () => {
-  const dir = await makeSessionDir();
-  const rollout = path.join(dir, 'rollout.jsonl');
+  const dir = await makeRolloutDir();
+  const rollout = codexRollout(dir);
   const row = (timestamp: string, id: string, input: number, cached: number, output: number) => [
     JSON.stringify({ timestamp, type: 'response_item', payload: {
       type: 'message', role: 'assistant', phase: 'final_answer', id, content: [{ type: 'output_text', text: 'تم' }],
@@ -216,7 +258,7 @@ test('كودكس: `last_token_usage` ينتج سجلات أدوار قابلة �
     } } }),
   ].join('\n');
   try {
-    await writeFile(rollout, [
+    await writeRollout(rollout, [
       JSON.stringify({ type: 'turn_context', payload: { model: 'gpt-5.6-sol' } }),
       row('2026-09-01T00:00:01.000Z', 'msg-first', 100, 20, 10),
       row('2026-09-01T00:01:01.000Z', 'msg-second', 300, 70, 35),
@@ -240,10 +282,10 @@ test('كودكس: `last_token_usage` ينتج سجلات أدوار قابلة �
 });
 
 test('كودكس: عدّاد بين جوابين يُربط بالجواب النهائي التالي لا السابق', async () => {
-  const dir = await makeSessionDir();
-  const rollout = path.join(dir, 'rollout.jsonl');
+  const dir = await makeRolloutDir();
+  const rollout = codexRollout(dir);
   try {
-    await writeFile(rollout, [
+    await writeRollout(rollout, [
       JSON.stringify({ type: 'turn_context', payload: { model: 'gpt-5.6-sol' } }),
       JSON.stringify({ timestamp: '2026-09-02T00:00:01.000Z', type: 'response_item', payload: {
         type: 'message', role: 'assistant', phase: 'final_answer', id: 'msg-previous', content: [{ type: 'output_text', text: 'الأول' }],
@@ -266,8 +308,7 @@ test('كودكس: عدّاد بين جوابين يُربط بالجواب ال�
 
 test('النافذة الشهرية ترشّح برسائل المحادثة لا بتاريخ فتحها', async () => {
   const dir = await makeSessionDir();
-  const transcript = path.join(dir, 'sess.jsonl');
-  await copyFile(path.join(FIXTURES, 'claude-parent.jsonl'), transcript);
+  const transcript = await claudeTranscript(dir);
 
   // الـfixture الحقيقي كلّه في 2026-07-28.
   const july = await extractClaudeSessionUsage(transcript, {
@@ -285,8 +326,8 @@ test('النافذة الشهرية ترشّح برسائل المحادثة ل�
 });
 
 test('كودكس: حصّة النافذة طرحٌ من العدّاد التراكمي لا ترشيح', async () => {
-  const dir = await makeSessionDir();
-  const rollout = path.join(dir, 'rollout.jsonl');
+  const dir = await makeRolloutDir();
+  const rollout = codexRollout(dir);
   const line = (timestamp: string, input: number, cached: number, output: number) =>
     `${JSON.stringify({
       timestamp,
@@ -303,7 +344,7 @@ test('كودكس: حصّة النافذة طرحٌ من العدّاد التر�
       },
     })}\n`;
 
-  await writeFile(
+  await writeRollout(
     rollout,
     `${JSON.stringify({ type: 'turn_context', payload: { model: 'gpt-5.6-sol' } })}\n` +
       line('2026-06-20T10:00:00Z', 10_000, 2_000, 500) +
@@ -323,9 +364,9 @@ test('كودكس: حصّة النافذة طرحٌ من العدّاد التر�
 });
 
 test('كودكس بلا أي عدّاد يُرجع فراغاً لا صفراً ملفَّقاً', async () => {
-  const dir = await makeSessionDir();
-  const rollout = path.join(dir, 'empty.jsonl');
-  await writeFile(rollout, '{"type":"turn_context","payload":{"model":"gpt-5.6-sol"}}\n');
+  const dir = await makeRolloutDir();
+  const rollout = codexRollout(dir);
+  await writeRollout(rollout, '{"type":"turn_context","payload":{"model":"gpt-5.6-sol"}}\n');
 
   const usage = await extractCodexSessionUsage(rollout);
   assert.deepEqual(usage.perModel, []);
@@ -335,13 +376,15 @@ test('إلغاء قارئ كودكس يصل إلى بوابة القراءة و�
   const controller = new AbortController();
   controller.abort(new DOMException('test abort', 'AbortError'));
   await assert.rejects(
-    extractCodexSessionUsage('/path/that/must/not/be/opened.jsonl', undefined, undefined, controller.signal),
+    extractCodexSessionUsage(
+      codexRollout('/path/that/must/not/be'), undefined, undefined, controller.signal,
+    ),
     (error: unknown) => error instanceof Error && error.name === 'AbortError',
   );
 });
 
 test('manifest يثبت إحصاء metadata ولا يعلن fresh إذا أضيف spawn قبل التحقق', async () => {
-  const dir = await makeSessionDir();
+  const dir = await makeScratchDir();
   const rootId = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
   const childId = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb';
   const root = path.join(dir, `rollout-${rootId}.jsonl`);
@@ -365,7 +408,7 @@ test('manifest يثبت إحصاء metadata ولا يعلن fresh إذا أضي�
 });
 
 test('root قديم بلا هوية صالحة ومعه روابط لا يمكن اعتباره snapshot مكتملًا', async () => {
-  const dir = await makeSessionDir();
+  const dir = await makeScratchDir();
   const childId = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb';
   const root = path.join(dir, 'legacy.jsonl');
   try {
@@ -382,15 +425,15 @@ test('root قديم بلا هوية صالحة ومعه روابط لا يمكن
 });
 
 test('fstat اللاحق يرصد تعديل rollout أثناء تمريرة الاستخدام', async () => {
-  const dir = await makeSessionDir();
-  const rollout = path.join(dir, 'rollout.jsonl');
+  const dir = await makeRolloutDir();
+  const rollout = codexRollout(dir);
   const observation = { unstable: false };
   try {
-    await writeFile(rollout, `${JSON.stringify({
+    await writeRollout(rollout, `${JSON.stringify({
       type: 'event_msg', payload: { type: 'token_count', info: { total_token_usage: { input_tokens: 1 } } },
     })}\n`);
     await extractCodexSessionUsage(rollout, undefined, undefined, undefined, observation, async () => {
-      await appendFile(rollout, `${JSON.stringify({ type: 'event_msg', payload: { type: 'late' } })}\n`);
+      await appendFile(rollout.rolloutPath, `${JSON.stringify({ type: 'event_msg', payload: { type: 'late' } })}\n`);
     });
     assert.equal(observation.unstable, true);
   } finally {
@@ -399,7 +442,7 @@ test('fstat اللاحق يرصد تعديل rollout أثناء تمريرة ا�
 });
 
 test('singleflight المرجعي يبقي القارئ للعميل الباقي ويبدأ محاولة جديدة بعد إلغاء الجميع', async () => {
-  const dir = await makeSessionDir();
+  const dir = await makeScratchDir();
   const rootId = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
   const root = path.join(dir, `rollout-${rootId}.jsonl`);
   const blockers: Array<{ ready: Promise<void>; release: () => void; done: Promise<void> }> = [];
@@ -462,16 +505,16 @@ test('singleflight المرجعي يبقي القارئ للعميل الباق�
 
 test('سقف القراءة العالمي مشترك بين streams كلود وكودكس', async () => {
   const dir = await makeSessionDir();
-  const codex = path.join(dir, 'codex.jsonl');
-  const claude = path.join(dir, 'claude.jsonl');
+  const codexDir = await makeRolloutDir();
+  const codex = codexRollout(codexDir);
   const blockers: Array<{ ready: Promise<void>; release: () => void; done: Promise<void> }> = [];
   let releaseCodex!: () => void;
   let codexAtPostStat!: () => void;
   try {
-    await writeFile(codex, `${JSON.stringify({
+    await writeRollout(codex, `${JSON.stringify({
       type: 'event_msg', payload: { type: 'token_count', info: { total_token_usage: { input_tokens: 1 } } },
     })}\n`);
-    await writeFile(claude, `${JSON.stringify({
+    const claude = await claudeTranscript(dir, `${JSON.stringify({
       type: 'assistant', timestamp: '2026-08-17T00:00:00.000Z', requestId: 'r1',
       message: { id: 'm1', model: 'claude-opus-5', usage: { input_tokens: 1, output_tokens: 1 } },
     })}\n`);
@@ -503,11 +546,12 @@ test('سقف القراءة العالمي مشترك بين streams كلود و
     releaseCodex?.();
     blockers.forEach((blocker) => blocker.release());
     await rm(dir, { recursive: true, force: true });
+    await rm(codexDir, { recursive: true, force: true });
   }
 });
 
 test('كودكس: لا يسقط الأبناء بعد 128 رابطاً صريحاً', async () => {
-  const dir = await makeSessionDir();
+  const dir = await makeRolloutDir();
   const rootId = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
   const root = path.join(dir, `rollout-root-${rootId}.jsonl`);
   const childId = (index: number) => `00000000-0000-4000-8000-${String(index).padStart(12, '0')}`;
@@ -545,7 +589,7 @@ test('كودكس: لا يسقط الأبناء بعد 128 رابطاً صريح�
     }));
     await writeFile(root, `${rootLines.join('\n')}\n`);
 
-    const usage = await extractCodexConversationUsage(root);
+    const usage = await extractCodexConversationUsage({ sessionId: rootId, transcriptPath: root });
     assert.equal(usage.subagentRequests, 129);
     assert.equal(usage.perModel[0].requests, 130);
     assert.equal(usage.perModel[0].totals.input, 8_386);
@@ -555,7 +599,7 @@ test('كودكس: لا يسقط الأبناء بعد 128 رابطاً صريح�
 });
 
 test('manifest يفشل مغلقاً عند lineage أعمق من ثمانية مستويات', async () => {
-  const dir = await makeSessionDir();
+  const dir = await makeScratchDir();
   const rootId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
   const ids = Array.from({ length: 9 }, (_, index) =>
     `00000000-0000-4000-8000-${String(index + 1).padStart(12, '0')}`);
@@ -591,11 +635,10 @@ test('manifest يفشل مغلقاً عند lineage أعمق من ثمانية �
 
 test('مدة العمل: طوابع محادثة كلود وحدها ليست قياساً لمدة العمل', async () => {
   const dir = await makeSessionDir();
-  const transcript = path.join(dir, 'sess.jsonl');
 
   try {
-    await writeFile(
-      transcript,
+    const transcript = await claudeTranscript(
+      dir,
       `${JSON.stringify({ timestamp: '2026-08-17T08:00:00.000Z', type: 'user' })}\n` +
         `${JSON.stringify({
           timestamp: '2026-08-17T08:02:30.000Z',
@@ -612,7 +655,7 @@ test('مدة العمل: طوابع محادثة كلود وحدها ليست ق
 });
 
 test('مدة العمل: أحداث كودكس المرتبطة بلا مدة صريحة لا تُقدَّر من طوابعها', async () => {
-  const dir = await makeSessionDir();
+  const dir = await makeRolloutDir();
   const rootId = 'cccccccc-cccc-cccc-cccc-cccccccccccc';
   const childId = 'dddddddd-dddd-dddd-dddd-dddddddddddd';
   const root = path.join(dir, `rollout-root-${rootId}.jsonl`);
@@ -629,7 +672,7 @@ test('مدة العمل: أحداث كودكس المرتبطة بلا مدة ص
       `${JSON.stringify({ timestamp: '2026-08-17T08:03:30.000Z', type: 'session_meta', payload: { id: childId, session_id: rootId, parent_thread_id: rootId, thread_source: 'subagent', agent_path: '/root/worker', source: { subagent: true } } })}\n`,
     );
 
-    const usage = await extractCodexConversationUsage(root);
+    const usage = await extractCodexConversationUsage({ sessionId: rootId, transcriptPath: root });
     assert.equal(usage.workDurationMs, null);
   } finally {
     await rm(dir, { recursive: true, force: true });
@@ -637,7 +680,7 @@ test('مدة العمل: أحداث كودكس المرتبطة بلا مدة ص
 });
 
 test('مدة العمل: تجمع نتائج الأدوات والأبناء المرتبطين مرةً واحدة فقط', async () => {
-  const dir = await makeSessionDir();
+  const dir = await makeRolloutDir();
   const rootId = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
   const childId = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb';
   const root = path.join(dir, `rollout-root-${rootId}.jsonl`);
@@ -678,7 +721,7 @@ test('مدة العمل: تجمع نتائج الأدوات والأبناء ا�
         `${result('{"agentId":"worker-b","totalDurationMs":250}')}` + '\n',
     );
 
-    const usage = await extractCodexConversationUsage(root);
+    const usage = await extractCodexConversationUsage({ sessionId: rootId, transcriptPath: root });
     assert.equal(usage.workDurationMs, 400);
   } finally {
     await rm(dir, { recursive: true, force: true });
@@ -741,4 +784,154 @@ test('أوبوس: uuid صف النصّ يفوز أياً كان ترتيب ور�
   const [request] = accumulator.requests();
   assert.equal(request.uuid, 'bb523bd2-text');
   assert.equal(request.firstTimestampMs, Date.parse('2026-09-10T16:05:04.069Z'));
+});
+
+// ---------------------------------------------------------------------------
+// ADR-201 A-P2c — cost is never attributed to a session its file is not bound to
+// ---------------------------------------------------------------------------
+
+/** The fixture's single-session total; any refused read must yield none of it. */
+const parentOutput = async (transcript: { sessionId: string; transcriptPath: string }) =>
+  (await extractClaudeSessionUsage(transcript)).perModel.reduce((sum, row) => sum + row.totals.output, 0);
+
+test('A-P2c كلود: رأس يحمل معرّف جلسة أخرى لا يُنسب استهلاكه', async () => {
+  const dir = await makeSessionDir();
+  try {
+    const victim = nextSessionId('b1c71300');
+    const forged = path.join(dir, `${victim}.jsonl`);
+    await writeFile(forged, claudeHeaderLine(nextSessionId('a77ac400'))
+      + await readFile(path.join(FIXTURES, 'claude-parent.jsonl'), 'utf8'));
+    const usage = await extractClaudeSessionUsage({ sessionId: victim, transcriptPath: forged });
+    assert.deepEqual(usage.perModel, []);
+    assert.equal(usage.snapshotStatus, 'incomplete');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('A-P2c كلود: اسم ملف لا يطابق الجلسة يُرفض حتى برأس صحيح', async () => {
+  const dir = await makeSessionDir();
+  try {
+    const transcript = await claudeTranscript(dir);
+    const renamed = path.join(dir, 'other-name.jsonl');
+    await writeFile(renamed, await readFile(transcript.transcriptPath, 'utf8'));
+    assert.equal(await parentOutput({ sessionId: transcript.sessionId, transcriptPath: renamed }), 0);
+    assert.equal(await parentOutput(transcript), 1061, 'the bound original still counts');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('A-P2c كلود: ملف خارج جذور المزوّد (مسار /var/tmp عشوائي) لا يُقرأ', async () => {
+  const dir = await makeScratchDir();
+  try {
+    const transcript = await claudeTranscript(dir);
+    assert.equal(await parentOutput(transcript), 0);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('A-P2c كلود: ملف عضو /1 مسجَّل بمسار شجرة /10 لا يُقرأ (فخّ البادئة)', async () => {
+  const projectOf = (member: string) => path.join(claudeProjectsRoot(member), 'nassaj-cost-prefix');
+  try {
+    await mkdir(projectOf('1'), { recursive: true });
+    await mkdir(path.dirname(projectOf('10')), { recursive: true });
+    const transcript = await claudeTranscript(projectOf('1'));
+    // /10's project dir is a symlink into /1: the recorded path lies in tree /10,
+    // the file it resolves to in tree /1 — outside the recorded tree.
+    await symlink(projectOf('1'), projectOf('10'));
+    const viaTen = path.join(projectOf('10'), path.basename(transcript.transcriptPath));
+    assert.equal(await parentOutput({ sessionId: transcript.sessionId, transcriptPath: viaTen }), 0);
+    assert.equal(await parentOutput(transcript), 1061, 'the file in its own tree is bound');
+  } finally {
+    await rm(projectOf('1'), { recursive: true, force: true });
+    await rm(projectOf('10'), { force: true });
+  }
+});
+
+test('A-P2c كلود: ملف رمزي باسم الجلسة يُرفض، ووكيل فرعي برأس غريب لا يُحسب', async () => {
+  const dir = await makeSessionDir();
+  try {
+    const real = await claudeTranscript(dir);
+    const linkedId = nextSessionId('5e1f0000');
+    const link = path.join(dir, `${linkedId}.jsonl`);
+    await symlink(real.transcriptPath, link);
+    assert.equal(await parentOutput({ sessionId: linkedId, transcriptPath: link }), 0);
+
+    const subagents = path.join(dir, real.sessionId, 'subagents');
+    await mkdir(subagents, { recursive: true });
+    await writeFile(path.join(subagents, 'agent-forged.jsonl'), claudeHeaderLine(nextSessionId('a77ac400'))
+      + await readFile(path.join(FIXTURES, 'claude-subagent.jsonl'), 'utf8'));
+    await symlink(path.join(subagents, 'agent-forged.jsonl'), path.join(subagents, 'agent-link.jsonl'));
+    const usage = await extractClaudeSessionUsage(real);
+    assert.deepEqual(usage.perModel.map((row) => row.model), ['claude-opus-5'], 'no subagent model counted');
+    assert.equal(usage.snapshotStatus, 'incomplete');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('A-P2c كودكس: session_meta يحمل خيطاً آخر أو اسم بلا المعرّف أو رابط رمزي ⇒ رفض', async () => {
+  const dir = await makeRolloutDir();
+  try {
+    const body = await readFile(path.join(FIXTURES, 'codex-rollout.jsonl'), 'utf8');
+    const forged = codexRollout(dir);
+    await writeFile(forged.rolloutPath, codexHeaderLine(nextSessionId('a77ac400')) + body);
+    await assert.rejects(extractCodexSessionUsage(forged), { name: 'TranscriptRefusedError', reason: 'id_mismatch' });
+    const conversation = await extractCodexConversationUsage({ sessionId: forged.threadId, transcriptPath: forged.rolloutPath });
+    assert.deepEqual(conversation.perModel, []);
+
+    const bound = codexRollout(dir);
+    await writeRollout(bound, body);
+    const misnamed = path.join(dir, 'rollout-2026-07-26T04-12-29-misnamed.jsonl');
+    await writeFile(misnamed, await readFile(bound.rolloutPath, 'utf8'));
+    await assert.rejects(extractCodexSessionUsage({ ...bound, rolloutPath: misnamed }), { reason: 'name_mismatch' });
+
+    const linkId = nextSessionId('5e1f0000');
+    const link = path.join(dir, `rollout-2026-07-26T04-12-29-${linkId}.jsonl`);
+    await symlink(bound.rolloutPath, link);
+    await assert.rejects(extractCodexSessionUsage({ ...bound, rolloutPath: link, threadId: linkId }), { reason: 'symlink' });
+
+    const ok = await extractCodexConversationUsage({ sessionId: bound.threadId, transcriptPath: bound.rolloutPath });
+    assert.equal(ok.perModel[0]?.totals.output, 671, 'the bound rollout still counts');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('A-P2c كودكس: manifest مبني لجذر آخر لا يُنسب إلى هذه الجلسة', async () => {
+  const dir = await makeRolloutDir();
+  try {
+    const body = await readFile(path.join(FIXTURES, 'codex-rollout.jsonl'), 'utf8');
+    const mine = codexRollout(dir);
+    const other = codexRollout(dir);
+    await writeRollout(mine, body);
+    await writeRollout(other, body);
+    const foreign = await resolveCodexLinkedRollouts(other.rolloutPath);
+    const usage = await extractCodexConversationUsage(
+      { sessionId: mine.threadId, transcriptPath: mine.rolloutPath }, undefined, { manifest: foreign },
+    );
+    assert.deepEqual(usage.perModel, []);
+    assert.equal(usage.snapshotStatus, 'incomplete');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('A-P2c manifest: a root rollout whose name carries another thread id is refused like a child', async () => {
+  const dir = await makeScratchDir();
+  const rootId = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+  const otherId = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb';
+  try {
+    const misnamed = path.join(dir, `rollout-2026-07-26T04-12-29-${otherId}.jsonl`);
+    await writeFile(misnamed, codexHeaderLine(rootId));
+    await assert.rejects(resolveCodexLinkedRollouts(misnamed), { name: 'CodexRolloutRefusedError', reason: 'name_mismatch' });
+    const named = path.join(dir, `rollout-2026-07-26T04-12-29-${rootId}.jsonl`);
+    await writeFile(named, codexHeaderLine(rootId));
+    const manifest = await resolveCodexLinkedRollouts(named);
+    assert.equal(manifest.files[0].threadId, rootId, 'the manifest records each file\'s own thread id');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 });

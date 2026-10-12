@@ -14,16 +14,21 @@
  * Run: npm run test:server
  */
 
+// FIRST import — HOME becomes a /var/tmp sandbox before anything reads it.
 import assert from 'node:assert/strict';
 import { mkdtemp, rm, writeFile, appendFile } from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
 
+import { SANDBOX_HOME } from '../shared/__tests__/sandbox-home.js';
 import { closeConnection } from '../modules/database/connection.js';
 import { initializeDatabase } from '../modules/database/init-db.js';
 import { sessionsDb } from '../modules/database/repositories/sessions.db.js';
+import { claudeHeaderLine, claudeProjectsSandbox } from '../shared/__tests__/provider-root-sandbox.js';
 
 import { getSessionAgents } from './transcript-parser.js';
+
+process.env.CLAUDE_CONFIG_DIR = path.join(SANDBOX_HOME, '.claude');
 
 function assistantEntry(model, id) {
   return `${JSON.stringify({
@@ -39,8 +44,10 @@ async function appendTurn(file, model, id) {
 
 test('B-418: الإلحاق المتكرّر لا يُعيد التحليل، والطاقم يبقى مخدوماً', async () => {
   const dir = await mkdtemp('/var/tmp/tp-throttle-');
-  const transcript = path.join(dir, 'session.jsonl');
   const sessionId = `throttle-${process.pid}`;
+  // ADR-201 A1: the roster reads only a confined, id-bound transcript — so the
+  // fixture lives in the (sandbox) Claude root, named and headed for its id.
+  const transcript = path.join(claudeProjectsSandbox('tp-throttle-'), `${sessionId}.jsonl`);
 
   // قاعدة معزولة مُهيّأة: مسارُ DATABASE_PATH وحده يُنتج ملفاً بلا جداول،
   // فتفشل الكتابة بـ«no such table» لا بخطأ المنطق المقصود اختباره.
@@ -50,7 +57,7 @@ test('B-418: الإلحاق المتكرّر لا يُعيد التحليل، و
   await initializeDatabase();
 
   try {
-    await writeFile(transcript, assistantEntry('claude-opus-5', 'msg_1'));
+    await writeFile(transcript, `${claudeHeaderLine(sessionId)}\n${assistantEntry('claude-opus-5', 'msg_1')}`);
     // صفّ الجلسة شرطٌ لا تجميل: session_agents_cache مرتبط بـsessions بمفتاح
     // أجنبي CASCADE، فالكتابة بلا أب تفشل بـSQLITE_ERROR لا برسالة مفهومة.
     sessionsDb.createSession(sessionId, 'claude', dir, 'throttle', undefined, undefined, transcript);

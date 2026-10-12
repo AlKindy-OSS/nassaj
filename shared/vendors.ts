@@ -514,3 +514,249 @@ export function vendorsByCompany(): VendorCompany[] {
   }
   return groups;
 }
+
+// ---------------------------------------------------------------------------
+// ADR-200 S1 — the unified key catalogue: ONE row per vendor.
+//
+// In-flag data (`NASSAJ_UNIFIED_VENDOR_KEYS`, default ON since S10). Nothing renders or
+// spawns from it yet: `VENDORS` above keeps driving the T-1201 UI and write path
+// until the fan-out and UI stages replace it. Each row names the vendor's ONE
+// canonical encrypted record and, in `consumers[]`, every place that reads it —
+// the ADR-200 compatibility table as data. A missing cell means "unsupported".
+//
+// Like `VENDORS`, it is a description, not an authorization oracle: link mode,
+// grants and the flag decide at runtime whether a consumer is actually fed.
+// ---------------------------------------------------------------------------
+
+/**
+ * The harness a consumer runs in. The first three are the active harnesses that
+ * read a vendor key (Antigravity reads none); `kimi`, `deepseek` and `glm` are
+ * the retired hosted-vendor bodies whose reader still exists in
+ * `resolve-provider-env.js` — listed so the reverse drift test stays exhaustive.
+ */
+export type VendorKeyHarness = 'claude' | 'codex' | 'opencode' | 'kimi' | 'deepseek' | 'glm';
+
+/** How the harness reaches the vendor with the key. */
+export type VendorKeyHow =
+  /** The harness's own vendor: subscription or API key (link mode, D1). */
+  | 'native'
+  /** An OpenCode built-in provider fed through its `auth.json`. */
+  | 'builtin_provider'
+  /** OpenCode's governed custom carrier (ADR-062). */
+  | 'carrier'
+  /** The Claude body on the vendor's Anthropic-compatible endpoint (ADR-088). */
+  | 'engine_pin'
+  /** An OpenCode OpenAI-compatible provider whose key is injected per turn. */
+  | 'spawn_provider'
+  /** `delegate_to_vendor`, the in-process MCP tool under Claude. */
+  | 'delegate_tool'
+  /** A retired hosted-vendor body (`resolveProviderEnv` → `<VENDOR>_API_KEY`). */
+  | 'hosted_run';
+
+/** Where the key physically arrives. */
+export type VendorKeyDelivery =
+  /** A file the harness's own CLI owns, written through its credential writer. */
+  | { kind: 'cli_file'; provider: string; target?: string }
+  /** An env variable set on the child at spawn time; nothing on disk. */
+  | { kind: 'spawn'; env: string }
+  /** Read inside the server process and sent as a request header. */
+  | { kind: 'in_process' };
+
+/**
+ * ADR-200 evidence markers. `none` is the table's "—": no writer or reader exists
+ * in code yet, so the cell is planned, not shipped.
+ */
+export type VendorKeyEvidence = 'measured' | 'inferred' | 'unverified' | 'docs' | 'none';
+
+/** Whose key the consumer spends (ADR-200 §4). */
+export type VendorKeyOwner =
+  /** The member whose credential this run resolves to, a grantor under a grant. */
+  | 'credential_principal'
+  /** Always the caller, never a grantor (engine pin, T-1208). */
+  | 'caller'
+  /** The member who sent the turn; not grantable. */
+  | 'sender';
+
+export type VendorKeyConsumer = {
+  harness: VendorKeyHarness;
+  how: VendorKeyHow;
+  delivery: VendorKeyDelivery;
+  status: 'supported' | 'blocked_by_owner' | 'retired';
+  /** W = writer or key path measured in code; T = a real turn on this host. */
+  evidence: { write: VendorKeyEvidence; turn: VendorKeyEvidence };
+  /** Only Claude's native consumer may ever hold a subscription token (B-1252). */
+  acceptsSubscriptionToken: boolean;
+  keyOwner: VendorKeyOwner;
+  /** Falls back to the operator-wide slot when the owner holds no key. */
+  sharedFallback: boolean;
+};
+
+export type VendorKeyRow = {
+  /** The issuing company; one of the `COMPANY_NAME` ids. */
+  id: string;
+  /** The canonical AES record id: a legacy bare slot or a `vendor:*` id. */
+  secretId: string;
+  consumers: readonly VendorKeyConsumer[];
+};
+
+/** Storage prefix of the records ADR-200 adds outside the legacy vendor slots. */
+export const CANONICAL_VENDOR_SECRET_PREFIX = 'vendor:';
+
+/** `delegate_to_vendor`: the credential principal's key, sent in-process. */
+const DELEGATE_TOOL: VendorKeyConsumer = {
+  harness: 'claude',
+  how: 'delegate_tool',
+  delivery: { kind: 'in_process' },
+  status: 'supported',
+  evidence: { write: 'measured', turn: 'unverified' },
+  acceptsSubscriptionToken: false,
+  keyOwner: 'credential_principal',
+  sharedFallback: false,
+};
+
+/** The Claude engine-pin cell: the caller's key as `ANTHROPIC_AUTH_TOKEN`. */
+function enginePin(status: VendorKeyConsumer['status'], turn: VendorKeyEvidence): VendorKeyConsumer {
+  return {
+    harness: 'claude',
+    how: 'engine_pin',
+    delivery: { kind: 'spawn', env: 'ANTHROPIC_AUTH_TOKEN' },
+    status,
+    evidence: { write: 'measured', turn },
+    acceptsSubscriptionToken: false,
+    keyOwner: 'caller',
+    sharedFallback: true,
+  };
+}
+
+/** An OpenCode cell written into its `auth.json` under `target`. */
+function openCodeFile(
+  how: 'builtin_provider' | 'carrier',
+  target: string,
+  turn: VendorKeyEvidence,
+): VendorKeyConsumer {
+  return {
+    harness: 'opencode',
+    how,
+    delivery: { kind: 'cli_file', provider: 'opencode', target },
+    status: 'supported',
+    evidence: { write: 'measured', turn },
+    acceptsSubscriptionToken: false,
+    keyOwner: 'credential_principal',
+    sharedFallback: false,
+  };
+}
+
+/**
+ * An OpenCode cell whose key is injected per turn. `write` is `measured` once the
+ * spawn-time injection exists in code (ADR-200 S8 for Moonshot and DeepSeek).
+ */
+function openCodeSpawn(env: string, write: VendorKeyEvidence = 'none'): VendorKeyConsumer {
+  return {
+    harness: 'opencode',
+    how: 'spawn_provider',
+    delivery: { kind: 'spawn', env },
+    status: 'supported',
+    evidence: { write, turn: 'unverified' },
+    acceptsSubscriptionToken: false,
+    keyOwner: 'sender',
+    sharedFallback: false,
+  };
+}
+
+/** A retired hosted-vendor body; its reader stays until the body code goes. */
+function hostedRun(harness: 'kimi' | 'deepseek' | 'glm', env: string): VendorKeyConsumer {
+  return {
+    harness,
+    how: 'hosted_run',
+    delivery: { kind: 'spawn', env },
+    status: 'retired',
+    evidence: { write: 'measured', turn: 'unverified' },
+    acceptsSubscriptionToken: false,
+    keyOwner: 'credential_principal',
+    sharedFallback: false,
+  };
+}
+
+/** The Claude or Codex native cell; the link mode decides whether it is fed. */
+function nativeFile(provider: 'claude' | 'codex'): VendorKeyConsumer {
+  return {
+    harness: provider,
+    how: 'native',
+    delivery: { kind: 'cli_file', provider },
+    status: 'supported',
+    // T is measured for the subscription path only; key mode is unverified.
+    evidence: { write: 'measured', turn: 'unverified' },
+    acceptsSubscriptionToken: provider === 'claude',
+    keyOwner: 'credential_principal',
+    sharedFallback: false,
+  };
+}
+
+/**
+ * The ADR-200 compatibility table, one row per vendor. Google is absent on
+ * purpose: Antigravity runs on its own subscription and nassaj stores no key.
+ */
+export const VENDOR_KEY_CATALOGUE: readonly VendorKeyRow[] = Object.freeze([
+  {
+    id: 'anthropic',
+    secretId: 'vendor:anthropic',
+    consumers: [nativeFile('claude'), openCodeFile('builtin_provider', 'anthropic', 'unverified')],
+  },
+  {
+    id: 'openai',
+    secretId: 'vendor:openai',
+    consumers: [nativeFile('codex'), openCodeFile('builtin_provider', 'openai', 'unverified')],
+  },
+  {
+    id: 'moonshot',
+    secretId: 'kimi',
+    consumers: [
+      enginePin('supported', 'measured'),
+      openCodeSpawn('NASSAJ_MOONSHOT_API_KEY', 'measured'),
+      DELEGATE_TOOL,
+      hostedRun('kimi', 'KIMI_API_KEY'),
+    ],
+  },
+  {
+    id: 'zai',
+    secretId: 'glm',
+    consumers: [
+      enginePin('supported', 'measured'),
+      openCodeFile('carrier', 'glm', 'measured'),
+      DELEGATE_TOOL,
+      hostedRun('glm', 'GLM_API_KEY'),
+    ],
+  },
+  {
+    // Token Plan, international region only (D3, D4).
+    id: 'alibaba-cloud',
+    secretId: 'qwen',
+    consumers: [openCodeSpawn('NASSAJ_QWEN_PLAN_API_KEY')],
+  },
+  {
+    id: 'deepseek',
+    secretId: 'deepseek',
+    consumers: [
+      // Measured writer; no live turn while the account balance blocks it.
+      enginePin('blocked_by_owner', 'unverified'),
+      openCodeSpawn('NASSAJ_DEEPSEEK_API_KEY', 'measured'),
+      DELEGATE_TOOL,
+      hostedRun('deepseek', 'DEEPSEEK_API_KEY'),
+    ],
+  },
+  {
+    id: 'openrouter',
+    secretId: 'vendor:openrouter',
+    consumers: [openCodeFile('builtin_provider', 'openrouter', 'unverified')],
+  },
+]);
+
+/**
+ * The vendor ids whose canonical record is a new `vendor:*` id. These sit outside
+ * every legacy slot reader (`resolveProviderEnv`, `delegate_to_vendor`).
+ */
+export const CANONICAL_VENDOR_IDS: readonly string[] = Object.freeze(
+  VENDOR_KEY_CATALOGUE
+    .filter((row) => row.secretId.startsWith(CANONICAL_VENDOR_SECRET_PREFIX))
+    .map((row) => row.id),
+);

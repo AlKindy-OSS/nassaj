@@ -28,7 +28,18 @@ import {
   PROVIDER_ANTHROPIC_ENDPOINT,
 } from '../../../../services/isolation/provider-anthropic-endpoints.js';
 import { credentialPrincipalId } from '../../../../services/isolation/credential-principal.js';
+import { isCanonicalVendorSecretId } from '../../../../services/isolation/provider-secrets-store.js';
 import { resolveSlotKey } from '../../../../services/isolation/provider-slot-key.js';
+
+/** The vendor slots `delegate_to_vendor` may spend. */
+export const DELEGATE_PROVIDERS = Object.freeze(['kimi', 'deepseek', 'glm']);
+
+// ADR-200 S1: the canonical `vendor:*` records (Anthropic, OpenAI, OpenRouter)
+// must never become delegable. Fail at load, before any tool is registered.
+const canonicalDelegate = DELEGATE_PROVIDERS.find(isCanonicalVendorSecretId);
+if (canonicalDelegate) {
+  throw new Error(`vendor-delegate-mcp: "${canonicalDelegate}" is a canonical vendor record`);
+}
 
 /** Cap on tokens requested from the vendor for a single delegated answer. */
 const DEFAULT_MAX_TOKENS = 4096;
@@ -65,7 +76,7 @@ export function buildVendorDelegateMcp(userId) {
           'for the chosen provider.',
         {
           provider: z
-            .enum(['kimi', 'deepseek', 'glm'])
+            .enum(DELEGATE_PROVIDERS)
             .describe('Which hosted vendor model to delegate to.'),
           prompt: z.string().min(1).describe('The full prompt to send to the vendor model.'),
           model: z

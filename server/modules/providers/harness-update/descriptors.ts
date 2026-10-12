@@ -93,9 +93,12 @@ export interface HarnessRestoreCompatibleSpec {
   version: string;
 }
 
-/** Facts the update dialog must state for this harness (qa condition 8). */
+/**
+ * Facts the update dialog must state for this harness (qa condition 8). Never
+ * hand-written: always {@link deriveHarnessNotices} of the descriptor's facts.
+ */
 export interface HarnessNotices {
-  /** The harness's own data is not backed up by the snapshot. */
+  /** The harness's own data is not backed up before an update (no store, or no snapshot). */
   dataNotBackedUp: boolean;
   /** The CLI may replace itself outside Nassaj (auto-updater not proven off). */
   selfUpdating: boolean;
@@ -120,8 +123,6 @@ export interface HarnessDescriptor {
   snapshot: HarnessSnapshotSpec | null;
   /** "Restore compatible version" source, or null when not offered. */
   restoreCompatible: HarnessRestoreCompatibleSpec | null;
-  /** Dialog facts; null when there is nothing extra to state. */
-  notices: HarnessNotices | null;
   /** Baseline machine reason (null when a plain updatable harness). */
   reason: string | null;
   /**
@@ -277,7 +278,6 @@ export const HARNESS_UPDATE_DESCRIPTORS: Readonly<Record<string, HarnessDescript
     latestProbe: { kind: 'npm', pkg: '@anthropic-ai/claude-code' },
     snapshot: { layout: 'versioned-file', linkMode: 'hardlink', stores: [], resolveLayout: claudeLayout },
     restoreCompatible: null,
-    notices: null,
   },
   codex: {
     id: 'codex',
@@ -301,7 +301,6 @@ export const HARNESS_UPDATE_DESCRIPTORS: Readonly<Record<string, HarnessDescript
     latestProbe: { kind: 'npm', pkg: '@openai/codex' },
     snapshot: { layout: 'versioned-dir', linkMode: 'hardlink', stores: [CODEX_STORE], resolveLayout: codexLayout },
     restoreCompatible: null,
-    notices: null,
   },
   antigravity: {
     id: 'antigravity',
@@ -321,11 +320,10 @@ export const HARNESS_UPDATE_DESCRIPTORS: Readonly<Record<string, HarnessDescript
     versionArgs: ['--version'],
     updateArgv: () => nativeUpdateArgv('antigravity', ['update']),
     latestProbe: null,
-    // agy data (~/.gemini/antigravity-cli) is out of scope, and its built-in
-    // updater is not proven off until the stage 7 off-switch run.
+    // agy data (~/.gemini/antigravity-cli) is out of scope (no store), and its
+    // built-in updater is not proven off until the stage 7 off-switch run.
     snapshot: { layout: 'single-file', linkMode: 'copy', stores: [], resolveLayout: singleFileLayout },
     restoreCompatible: null,
-    notices: { dataNotBackedUp: true, selfUpdating: true },
   },
   cursor: {
     id: 'cursor',
@@ -346,7 +344,6 @@ export const HARNESS_UPDATE_DESCRIPTORS: Readonly<Record<string, HarnessDescript
     latestProbe: null,
     snapshot: { layout: 'versioned-dir', linkMode: 'hardlink', stores: [], resolveLayout: cursorLayout },
     restoreCompatible: null,
-    notices: null,
   },
   opencode: {
     id: 'opencode',
@@ -372,7 +369,6 @@ export const HARNESS_UPDATE_DESCRIPTORS: Readonly<Record<string, HarnessDescript
     latestProbe: { kind: 'github-release', url: OPENCODE_LATEST_RELEASE_URL },
     snapshot: { layout: 'single-file', linkMode: 'copy', stores: [OPENCODE_STORE], resolveLayout: singleFileLayout },
     restoreCompatible: { version: PINNED_VENDOR_DIGESTS.opencode.version },
-    notices: null,
   },
   qwen: {
     id: 'qwen',
@@ -404,7 +400,6 @@ export const HARNESS_UPDATE_DESCRIPTORS: Readonly<Record<string, HarnessDescript
     manualOnly: false,
     snapshot: null,
     restoreCompatible: null,
-    notices: null,
   },
   kimi: {
     id: 'kimi',
@@ -437,10 +432,8 @@ export const HARNESS_UPDATE_DESCRIPTORS: Readonly<Record<string, HarnessDescript
     manualOnly: true,
     // One native file replaced in place, copied like agy/opencode.
     snapshot: { layout: 'single-file', linkMode: 'copy', stores: [], resolveLayout: singleFileLayout },
+    // kimi data (~/.kimi-code, per-user KIMI_CODE_HOME) is not snapshotted.
     restoreCompatible: null,
-    // kimi data (~/.kimi-code, per-user KIMI_CODE_HOME) is not snapshotted, and a
-    // kimi run outside Nassaj (a login shell) can still update itself.
-    notices: { dataNotBackedUp: true, selfUpdating: true },
   },
   glm: {
     id: 'glm',
@@ -462,7 +455,6 @@ export const HARNESS_UPDATE_DESCRIPTORS: Readonly<Record<string, HarnessDescript
     manualOnly: false,
     snapshot: null,
     restoreCompatible: null,
-    notices: null,
   },
   deepseek: {
     id: 'deepseek',
@@ -483,7 +475,6 @@ export const HARNESS_UPDATE_DESCRIPTORS: Readonly<Record<string, HarnessDescript
     manualOnly: false,
     snapshot: null,
     restoreCompatible: null,
-    notices: null,
   },
 });
 
@@ -514,6 +505,25 @@ export function resolveHarnessId(idOrAlias: unknown): string | null {
 export function getHarnessDescriptor(idOrAlias: unknown): HarnessDescriptor | null {
   const id = resolveHarnessId(idOrAlias);
   return id ? HARNESS_UPDATE_DESCRIPTORS[id] : null;
+}
+
+/**
+ * The update-dialog facts of one harness, derived ONLY from its descriptor so a
+ * notice can never drift from the facts it states. Null when nothing is true.
+ *   - not updatable (no CLI, or a carrier-only row): null — no update, no warning.
+ *   - dataNotBackedUp: the update keeps no copy of the harness's own data — a
+ *     snapshot with no store, or no snapshot at all (npm legacy recovery
+ *     reinstalls the package only).
+ *   - selfUpdating: the built-in auto-updater is not proven off
+ *     (`autoUpdaterDisableVerified`, the same fact the scheduler gates on). A
+ *     verified knob is spawn-env scoped for claude, opencode and kimi alike, so
+ *     a run started outside Nassaj cannot single one of them out.
+ */
+export function deriveHarnessNotices(descriptor: HarnessDescriptor): HarnessNotices | null {
+  if (!descriptor.updatable) return null;
+  const dataNotBackedUp = (descriptor.snapshot?.stores.length ?? 0) === 0;
+  const selfUpdating = !descriptor.autoUpdaterDisableVerified;
+  return dataNotBackedUp || selfUpdating ? { dataNotBackedUp, selfUpdating } : null;
 }
 
 /**

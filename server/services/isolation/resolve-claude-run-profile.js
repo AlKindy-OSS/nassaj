@@ -14,6 +14,8 @@ import { providerModelsService } from '../../modules/providers/index.js';
 
 import { applyClaudeEngineProviderEnvOrThrow } from './apply-claude-engine-provider-env.js';
 import { assertClaudeSpawnEnvAllowed } from './claude-spawn-env-guard.js';
+import { prepareEnginePinConfigDir } from './engine-pin-config-dir.js';
+import { assertLinkModeRunAllowed } from './link-mode-run-gate.js';
 import {
   OFFICIAL_ENGINE,
   PIN_SOURCE,
@@ -151,6 +153,22 @@ export async function resolveClaudeSessionEngineForSpawn({
 }
 
 /**
+ * ADR-200 S2 (C1/D7): a pinned child runs on a derived, credential-free config
+ * dir built from the spawn's own (or, under a grant, the grantor's) tree, so a
+ * user-scope Anthropic key cannot reach the vendor. The B-1541 guard that runs
+ * next still vets that dir, the spawn env and the managed/project/local
+ * settings. A non-pinned env is left untouched.
+ * @param {NodeJS.ProcessEnv} env mutated in place
+ * @param {Set<string>|null} engineHosts the engine verdict
+ * @returns {Promise<void>}
+ */
+async function useEnginePinConfigDir(env, engineHosts) {
+  if (engineHosts instanceof Set && engineHosts.size > 0) {
+    env.CLAUDE_CONFIG_DIR = await prepareEnginePinConfigDir(env);
+  }
+}
+
+/**
  * Build the complete, spawn-ready env and engine verdict for a Claude body.
  * `authoritativeStoredPin` is for non-browser resume paths: they have no valid
  * client engine signal, so a stored/inferred pin is honoured even during the
@@ -160,7 +178,9 @@ export async function resolveClaudeSessionEngineForSpawn({
  *   baseEnv?:NodeJS.ProcessEnv,strictUser?:boolean,envAlreadyIsolated?:boolean,
  *   authoritativeStoredPin?:boolean,skipInferenceWhenUnknown?:boolean,
  *   requireKnownResumePin?:boolean,failOnAmbiguous?:boolean,
- *   cwd?:string|null}} input `cwd` is the child's working directory; the
+ *   honorGrants?:boolean,cwd?:string|null}} input `honorGrants: false` marks an
+ *   env built on the caller's OWN tree (PTY terminals), so the link-mode gate
+ *   (B-1546) reads that tree instead of a grantor's. `cwd` is the child's working directory; the
  *   engine credential check (B-1541) reads project/local settings there and
  *   falls back to this process's cwd, which a spawn without `cwd` inherits.
  */
@@ -176,6 +196,7 @@ export async function resolveClaudeRunProfileOrThrow({
   skipInferenceWhenUnknown = false,
   requireKnownResumePin = false,
   failOnAmbiguous = false,
+  honorGrants = true,
   cwd = null,
 }) {
   const env = envAlreadyIsolated
@@ -205,6 +226,12 @@ export async function resolveClaudeRunProfileOrThrow({
     : pin.effectiveEngine;
 
   const engineHosts = applyClaudeEngineProviderEnvOrThrow(env, userId, effectiveEngine);
+  // B-1546: an official-vendor run in api_key link mode with no key is refused
+  // here, before any spawn, so it never falls back to the subscription. An
+  // engine-pinned run uses the engine's credential on a credential-free config
+  // dir (C1), so the Anthropic link mode does not apply to it.
+  if (!(engineHosts instanceof Set && engineHosts.size > 0)) await assertLinkModeRunAllowed(userId, 'claude', { honorGrants });
+  await useEnginePinConfigDir(env, engineHosts);
   await assertClaudeSpawnEnvAllowed(env, { engineHosts, cwd });
 
   return { env, effectiveEngine, engineHosts, pin };

@@ -1,3 +1,4 @@
+import { lstat } from 'node:fs/promises';
 import path from 'node:path';
 
 import {
@@ -112,6 +113,20 @@ class QwenAuth implements IProviderAuth {
   }
 }
 
+/**
+ * True when a member's `.qwen/skills` (or `.qwen` itself) is a symlink — the
+ * provisioner links it to the operator's shared library (provision-user-dirs.js).
+ * Such a root is tagged `operator-shared` (T-2003): per skill, only app-installed
+ * (marked) folders are deletable and hand-authored ones are read-only.
+ */
+const isLinkedSharedRoot = async (qwenHome: string): Promise<boolean> => {
+  for (const target of [qwenHome, path.join(qwenHome, 'skills')]) {
+    const stats = await lstat(target).catch(() => null);
+    if (stats?.isSymbolicLink()) return true;
+  }
+  return false;
+};
+
 class QwenSkills extends SkillsProvider {
   constructor() {
     super('qwen');
@@ -126,7 +141,7 @@ class QwenSkills extends SkillsProvider {
     userId?: string | number | null,
   ): Promise<ProviderSkillSource[]> {
     return [
-      { scope: 'user', rootDir: path.join(this.homeFor(userId), '.qwen', 'skills'), commandPrefix: '/' },
+      await this.qwenSkillSource(userId),
       { scope: 'user', rootDir: path.join(this.homeFor(userId), '.agents', 'skills'), commandPrefix: '/' },
       { scope: 'project', rootDir: path.join(workspacePath, '.qwen', 'skills'), commandPrefix: '/' },
       { scope: 'project', rootDir: path.join(workspacePath, '.agents', 'skills'), commandPrefix: '/' },
@@ -134,10 +149,18 @@ class QwenSkills extends SkillsProvider {
   }
 
   protected async getGlobalSkillSource(userId?: string | number | null): Promise<ProviderSkillSource> {
+    return this.qwenSkillSource(userId);
+  }
+
+  /** The `.qwen/skills` root, tagged operator-shared when linked into the shared library. */
+  private async qwenSkillSource(userId?: string | number | null): Promise<ProviderSkillSource> {
+    const qwenHome = path.join(this.homeFor(userId), '.qwen');
+    const shared = await isLinkedSharedRoot(qwenHome);
     return {
       scope: 'user',
-      rootDir: path.join(this.homeFor(userId), '.qwen', 'skills'),
+      rootDir: path.join(qwenHome, 'skills'),
       commandPrefix: '/',
+      ...(shared ? { origin: 'operator-shared' as const } : {}),
     };
   }
 }

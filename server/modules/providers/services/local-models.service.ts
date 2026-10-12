@@ -7,6 +7,7 @@ import {
   hasLocalModelSecret,
   setLocalModelSecret,
 } from '@/services/isolation/provider-secrets-store.js';
+import { withProviderSecretsStore } from '@/services/isolation/provider-secrets-store.errors.js';
 import { AppError } from '@/shared/utils.js';
 import { safeFetchLocalModelJson, safeProbeLocalModelAuth, validateLocalModelUrl } from '@/modules/connectors/index.js';
 
@@ -73,8 +74,9 @@ const defaultDependencies = {
   transaction: <T>(work: () => T): T => getConnection().transaction(work)(),
   secrets: {
     get: getLocalModelSecret,
-    set: setLocalModelSecret,
-    remove: deleteLocalModelSecret,
+    set: (userId: number, serverId: string, secret: string) =>
+      withProviderSecretsStore(() => setLocalModelSecret(userId, serverId, secret)),
+    remove: (userId: number, serverId: string) => withProviderSecretsStore(() => deleteLocalModelSecret(userId, serverId)),
     has: hasLocalModelSecret,
   },
 };

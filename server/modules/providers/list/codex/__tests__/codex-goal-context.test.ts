@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { after, it, mock } from 'node:test';
-import { codexSessionsSandbox } from '@/shared/__tests__/provider-root-sandbox.js';
+import { codexSessionsSandbox, withPinnedTranscript } from '@/shared/__tests__/provider-root-sandbox.js';
 
 const sandbox = codexSessionsSandbox('codex-goal-context-');
 const transcript = path.join(sandbox, 'synthetic.jsonl');
@@ -27,7 +27,8 @@ const native = (id: string, content: unknown[], kinds?: unknown) => ({
 });
 async function history(rows: unknown[], limit?: number) {
   fs.writeFileSync(transcript, rows.map(row => JSON.stringify(row)).join('\n') + '\n');
-  return provider.fetchHistory(sessionId, { limit });
+  return withPinnedTranscript(transcript, sessionId, 'codex',
+    (pinned) => provider.fetchHistory(sessionId, { limit, transcript: pinned }));
 }
 
 it('hides provider-attested goal-only messages anywhere in history before pagination', async () => {

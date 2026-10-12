@@ -70,7 +70,13 @@ import { corsAllowedOrigins } from './config/cors-origins.js';
 import { serverPort } from './config/server-port.js';
 import { sanitizeAttachmentName, resolveCollisionFreeDest } from './utils/attachment-helpers.js';
 import { openReadableProjectFile, isResolvedPathInsideRootReal } from './utils/path-guard.js';
-import { isForbiddenProjectRoot, isSecretPath } from '@/shared/secret-path-guard.js';
+import {
+    SECRET_FILE_AUDIT_ACTION,
+    buildSecretFileAuditEntry,
+    isSecretFileConfirmed,
+    sendSecretFileConfirmationRequired,
+} from './utils/secret-file-access.js';
+import { classifySecretPath, isForbiddenProjectRoot, isSecretPath } from '@/shared/secret-path-guard.js';
 import { sanitizeSvg } from './services/svg-sanitizer.js';
 import { createChatImagesRouter } from './routes/chat-images.js';
 import { createDocumentSharesMount, createDocumentSharesRouter } from './routes/document-shares.js';
@@ -214,8 +220,10 @@ import {
 import { startSsoAttestationSweep } from './services/sso-attestation-sweep.js';
 import { ssoAttestationFresh } from './services/sso-attestation.js';
 import { reconcileHarnessSnapshots } from './modules/providers/harness-update/boot-reconcile.js';
+import { startVendorKeyMigrationSweep } from './modules/providers/services/vendor-key-migration.runtime.js';
 import { logUnresolvedHarnessBinaries } from './shared/harness-binaries.js';
 import governancePreferencesRoutes from './modules/providers/governance-preferences.routes.js';
+import { harnessFilesRoutes } from './modules/harness-files/index.js';
 import participantsRoutes from './modules/providers/participants.routes.js';
 import { createSessionPermissionFenceRouter } from './modules/providers/session-permission-fence.routes.js';
 import {
@@ -1713,6 +1721,9 @@ app.use('/api/providers', authenticateToken, providerRoutes);
 // lifting governance is enforced IN-HANDLER (immune to Express's
 // case-insensitive path matching), exactly like the provider skill writes above.
 app.use('/api/governance', authenticateToken, governancePreferencesRoutes);
+// Shared vs private skills (ADR-203, T-2003): self-scoped; the owner/admin
+// workspace switch is checked IN-HANDLER like the governance switch above.
+app.use('/api/harness-files', authenticateToken, harnessFilesRoutes);
 // T-1315 (شرط معلَّق من مراجعة سابقة): كانت `modules/references/` وحدةً ثانية
 // لا تحوي إلا سطرَي إعادة تصدير إلى `modules/reference-materials/` — أحدهما
 // (‏.service) بلا مستورِد أصلاً أي كودٌ ميّت. حُذفت الوحدة، والمسار العام
@@ -2435,12 +2446,22 @@ app.get('/api/projects/:projectId/file', authenticateToken, async (req, res) => 
         // a symlink inside the tree pointing outside it cannot leak an arbitrary
         // file (B-159). Open only the verified real path; SQLite content is
         // refused from the opened descriptor before anything is returned.
-        const guard = await openReadableProjectFile(projectRoot, filePath);
+        // B-1593: a project secret file needs `confirmSecret=1` on the request.
+        const guard = await openReadableProjectFile(projectRoot, filePath, {
+            confirmSecret: isSecretFileConfirmed(req.query.confirmSecret),
+        });
         if (!guard.valid) {
             if (guard.code === 'ENOENT') {
                 return res.status(404).json({ error: 'File not found' });
             }
+            if (guard.code === 'SECRET_CONFIRMATION_REQUIRED') {
+                return sendSecretFileConfirmationRequired(res);
+            }
             return res.status(403).json({ error: 'Path must be under project root' });
+        }
+        if (guard.secretFile) {
+            res.set('Cache-Control', 'no-store');
+            auditSecretFileAccess(req, projectId, projectRoot, guard.resolved, 'read');
         }
 
         // Defense in depth: this route returns JSON (never raw renderable bytes),
@@ -2449,7 +2470,8 @@ app.get('/api/projects/:projectId/file', authenticateToken, async (req, res) => 
         res.setHeader('X-Content-Type-Options', 'nosniff');
         let content;
         try {
-            content = await guard.handle.readFile('utf8');
+            // Serve the inspected bytes when the guard read the file whole.
+            content = guard.content ? guard.content.toString('utf8') : await guard.handle.readFile('utf8');
         } finally {
             await guard.handle.close();
         }
@@ -2495,21 +2517,37 @@ app.get('/api/projects/:projectId/files/content', authenticateToken, async (req,
         // The realpath check runs BEFORE the file is opened; we then stream only
         // the verified real path. A missing file/component surfaces as ENOENT.
         // SQLite content is refused from the opened descriptor (header sniff).
-        const guard = await openReadableProjectFile(projectRoot, filePath);
+        // B-1593: a project secret file needs `confirmSecret=1` on the request.
+        const guard = await openReadableProjectFile(projectRoot, filePath, {
+            confirmSecret: isSecretFileConfirmed(req.query.confirmSecret),
+        });
         if (!guard.valid) {
             if (guard.code === 'ENOENT') {
                 return res.status(404).json({ error: 'File not found' });
             }
+            if (guard.code === 'SECRET_CONFIRMATION_REQUIRED') {
+                return sendSecretFileConfirmationRequired(res);
+            }
             return res.status(403).json({ error: 'Path must be under project root' });
+        }
+        if (guard.secretFile) {
+            auditSecretFileAccess(req, projectId, projectRoot, guard.resolved, 'download');
         }
 
         // Content type from the requested name's extension; nosniff, a
         // sandboxing CSP and a download disposition for active document types
         // keep a direct (cookie-authenticated) navigation inert (B-158, M9).
         applyRawFileResponseHeaders(res, mime.lookup(guard.resolved) || 'application/octet-stream');
+        if (guard.secretFile) res.set('Cache-Control', 'no-store');
 
         // Stream the already-opened, sniffed descriptor (closed on end) so the
-        // checked bytes are the served bytes.
+        // checked bytes are the served bytes. A file the guard read whole (and
+        // inspected for service secrets) is sent from that buffer.
+        if (guard.content) {
+            await guard.handle.close();
+            res.end(guard.content);
+            return;
+        }
         const fileStream = guard.handle.createReadStream();
         fileStream.pipe(res);
 
@@ -2570,6 +2608,11 @@ app.put('/api/projects/:projectId/file', authenticateToken,
             return res.status(403).json({ error: validation.error });
         }
         const resolved = validation.resolved;
+        // B-1593: writing a project secret file needs an explicit confirmation.
+        const secretFile = classifySecretPath(resolved) === 'project';
+        if (secretFile && !isSecretFileConfirmed(req.body.confirmSecret)) {
+            return sendSecretFileConfirmationRequired(res);
+        }
 
         // Write the new content (the guard-approved path, never a raw client one)
         const relativeDocumentPath = path.relative(projectRoot, resolved);
@@ -2578,6 +2621,7 @@ app.put('/api/projects/:projectId/file', authenticateToken,
         } else {
             await fsPromises.writeFile(resolved, content, 'utf8');
         }
+        if (secretFile) auditSecretFileAccess(req, projectId, projectRoot, resolved, 'save');
 
         res.json({
             success: true,
@@ -2732,10 +2776,20 @@ function validatePathInProject(projectRoot, targetPath) {
     // escapes the project root — a symlink planted inside the tree (e.g. shipped
     // in a cloned repo) pointing outside would otherwise let a write/delete land
     // on an arbitrary path.
-    if (!isResolvedPathInsideRootReal(projectRoot, resolved)) {
+    // B-1593: only SERVICE secrets are refused here; the project's own dotenv/
+    // SQLite files may again be created, renamed, deleted and uploaded. Saving
+    // their content additionally needs an explicit confirmation (PUT /file).
+    if (!isResolvedPathInsideRootReal(projectRoot, resolved, { allowProjectSecretFiles: true })) {
         return { valid: false, error: 'Path must be under project root' };
     }
     return { valid: true, resolved };
+}
+
+/** B-1593: audit line (no content) for a confirmed project secret-file access. */
+function auditSecretFileAccess(req, projectId, projectRoot, absolutePath, access) {
+    auditLogDb.record(SECRET_FILE_AUDIT_ACTION, buildSecretFileAuditEntry(req, {
+        userId: coerceUserId(req.user?.id), projectId, projectRoot, absolutePath, access,
+    }));
 }
 
 /**
@@ -3791,8 +3845,9 @@ app.get('/api/projects/:projectId/sessions/:sessionId/token-usage', authenticate
         // under an overlay-encoded directory while its row still names the repo
         // project, so the derived path named a file that never existed and this
         // route answered 404 for every overlay session. `jsonl_path` is what every
-        // other Claude reader uses; resolveClaudeTranscriptPath containment-checks
-        // it because that column is DB-written.
+        // other Claude reader uses; the pinned transcript reader (ADR-201 A1)
+        // confines it to its tree and binds it to the session id, because that
+        // column is DB-written.
         const session = sessionsDb.getSessionById(safeSessionId);
         // The session must belong to the project whose visibility was checked
         // above — otherwise a visible projectId paired with a foreign sessionId
@@ -3803,11 +3858,7 @@ app.get('/api/projects/:projectId/sessions/:sessionId/token-usage', authenticate
             return res.status(404).json({ error: 'Session not found' });
         }
 
-        const fileContent = await readClaudeTranscriptForSession(
-            session,
-            projectPath,
-            coerceUserId(req.user?.id)
-        );
+        const fileContent = await readClaudeTranscriptForSession(session, projectPath);
         if (fileContent === null) {
             // `reason` lets the client tell a failed lookup from a genuine zero;
             // the old response echoed the fabricated path back, which is what made
@@ -4158,6 +4209,11 @@ async function startServer() {
                 rollbackFailed: harnessReconcile.rollbackFailed,
             });
         }
+
+        // ADR-200 S5: with NASSAJ_UNIFIED_VENDOR_KEYS on, migrate every member's
+        // existing vendor keys (idempotent each start, then a daily purge check).
+        // A no-op with the flag off; never throws.
+        startVendorKeyMigrationSweep();
 
         // Crash seam: predecessor durably proved runtime verification and
         // opened the gate, then died before the terminal DB CAS.

@@ -9,6 +9,8 @@ export type { StarterVerdict } from './steer-taint.js';
 export { getMidTurnInjection, registerMidTurnInjection, supportsMidTurnInjection } from './steer-registry.js';
 export { getSteerConsent, getSteerPolicy, isSteeringAllowedFor, setSteerConsent, setSteerPolicy } from './steer-policy.js';
 export { handleSessionSteer } from './steer-service.js';
-export { confirmWithRetry, createTranscriptScanner, lineProvesSteer, transcriptHasSteer } from './steer-delivery.js';
+export {
+  confirmWithRetry, createTranscriptScanner, lineProvesSteer, steerTranscriptOpener,
+} from './steer-delivery.js';
 export { buildSteerWrapper, sanitizeSteerText, unwrapSteerForDisplay } from './steer-text.js';
 export { describeSteerTurnForViewer } from './steer-view.js';

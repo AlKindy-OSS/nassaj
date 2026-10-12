@@ -41,6 +41,8 @@ import { checkCwdExists, buildCwdMissingPayload } from './shared/cwd-check.js';
 import { mapSpawnError } from './shared/spawn-error.js';
 import { auditLogDb, participantsDb } from './modules/database/index.js';
 import { resolveProviderEnv } from './services/isolation/resolve-provider-env.js';
+import { assertLinkModeRunAllowed } from './services/isolation/link-mode-run-gate.js';
+import { isLinkModeRunRefusal } from './modules/providers/services/harness-link-mode.service.js';
 import { beginProviderRun } from './services/provider-run-presence.js';
 import { refuseSpawnIfHarnessUpdating } from './modules/providers/harness-update/spawn-admission.js';
 import { PROCESS_TAG_ENV_VAR } from './services/session-process-monitor.js';
@@ -63,6 +65,7 @@ import {
   GOVERNANCE_MISSING_MESSAGE,
 } from './modules/providers/list/codex/codex-governance.js';
 import { materializeCoordinatorAgents } from './services/isolation/codex-coordinator-agents.js';
+import { materializeCodexSkillsForLaunch } from './services/isolation/codex-skills-launch.js';
 import { materializePersonaCopy } from './services/isolation/codex-governance-material.js';
 import {
   codexHomeForSessionFile,
@@ -733,6 +736,20 @@ async function queryCodexOwned(invocation) {
     });
   }
 
+  // Shared nassaj skills (T-2000, ADR-202, best-effort, non-blocking): an isolated
+  // per-user CODEX_HOME has no nassaj skills unless we copy the manifest-verified
+  // portable skills into <codexHome>/skills/. The operator home is skipped (it stays
+  // with nassaj-core's sync-harness-homes). Failure is logged and never blocks launch.
+  // ADR-203: the home owner's private store replaces the shared set in private mode.
+  const sharedSkills = materializeCodexSkillsForLaunch(governance.codexHome);
+  if (!sharedSkills.ok) {
+    console.warn('[Codex] shared nassaj skills unavailable — launching without them', {
+      userId: ws?.userId ?? null,
+      codexHome: governance.codexHome,
+      reason: sharedSkills.reason,
+    });
+  }
+
   // Persona reference material (T-909, best-effort, non-blocking): re-check/refresh
   // $CODEX_HOME/.agents/agents.md on every launch too — unlike AGENTS.md governance,
   // whose fingerprint match short-circuits ensureCodexGovernance's repair path above
@@ -838,6 +855,9 @@ async function queryCodexOwned(invocation) {
     // executed by exact realpath — never the SDK-bundled copy, never PATH.
     let launchIdentity;
     try {
+      // B-1546: api_key link mode with no key → refused before any spawn, so the
+      // run never falls back to the (possibly a grantor's) ChatGPT subscription.
+      await assertLinkModeRunAllowed(ws?.userId ?? null, 'codex');
       // An admitted launch runs only the identity its decision fingerprinted.
       launchIdentity = permissionExecution
         ? codexIdentityFromExecution(permissionExecution) : acquireCodexLaunchIdentity();
@@ -1280,6 +1300,10 @@ async function queryCodexOwned(invocation) {
       if (isCodexMachineCliMissing(error)) {
         errorCode = 'cli_not_installed';
         errorContent = CODEX_MACHINE_CLI_MISSING_MESSAGE;
+      } else if (isLinkModeRunRefusal(error?.code)) {
+        // B-1546/B-1547: refused before spawn; the message names no credential.
+        errorCode = 'spawn_failed';
+        errorContent = error.message;
       } else if (error?.code === CODEX_RUNTIME_INCOMPATIBLE) {
         errorCode = 'codex_runtime_incompatible';
         errorContent = error.message;

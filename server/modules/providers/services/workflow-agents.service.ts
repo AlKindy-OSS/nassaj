@@ -43,10 +43,15 @@
  *   - the journal itself is parsed on a (path, mtime, size) memo.
  * Read-only and fail-safe throughout: any unreadable file degrades that ONE row
  * (or the workflow's row list to empty), never the enclosing scan.
+ *
+ * PINNED READS (ADR-201 A1): every file is opened through the session's pinned
+ * `subagents/workflows` directory (`SessionArtifactDir.openFile`), never by a
+ * path; a symlinked, hardlinked or missing file reads as absent.
  */
 
-import fsp from 'node:fs/promises';
-import path from 'node:path';
+import type { FileHandle } from 'node:fs/promises';
+
+import type { SessionArtifactDir } from '../shared/session-transcript-reader.js';
 
 /** One delegated workflow agent, as surfaced to the composer strip. */
 export type WorkflowAgentRow = {
@@ -174,32 +179,29 @@ export function parseJournalAgents(text: string): JournalAgents {
   return { order, resulted };
 }
 
-async function readJournalAgentsCached(journalPath: string): Promise<JournalAgents> {
-  let cacheKey = journalPath;
+const NO_JOURNAL_AGENTS: JournalAgents = Object.freeze({ order: [], resulted: new Set<string>() }) as JournalAgents;
+
+/** Journal agents of `wfId`, read through the pinned workflows dir on a (wf, mtime, size) memo. */
+async function readJournalAgentsCached(workflows: SessionArtifactDir, wfId: string): Promise<JournalAgents> {
+  const child = await workflows.openFile(`${wfId}/journal.jsonl`);
+  if (!('handle' in child)) return NO_JOURNAL_AGENTS;
   try {
-    const stat = await fsp.stat(journalPath);
-    cacheKey = `${journalPath}:${stat.mtimeMs}:${stat.size}`;
+    const memoKey = `${workflows.realpath}/${wfId}`;
+    const cacheKey = `${memoKey}:${child.stat.mtimeMs}:${child.stat.size}`;
+    const hit = journalAgentsCache.get(cacheKey);
+    if (hit) return hit;
+    const parsed = parseJournalAgents(await child.handle.readFile({ encoding: 'utf8' }));
+    // Single-entry-per-journal memo: an older key for the same journal is dead weight.
+    for (const key of journalAgentsCache.keys()) {
+      if (key.startsWith(`${memoKey}:`)) journalAgentsCache.delete(key);
+    }
+    journalAgentsCache.set(cacheKey, parsed);
+    return parsed;
   } catch {
-    return { order: [], resulted: new Set<string>() };
+    return NO_JOURNAL_AGENTS;
+  } finally {
+    await workflows.closeFile(child);
   }
-
-  const hit = journalAgentsCache.get(cacheKey);
-  if (hit) return hit;
-
-  let text: string;
-  try {
-    text = await fsp.readFile(journalPath, 'utf8');
-  } catch {
-    return { order: [], resulted: new Set<string>() };
-  }
-
-  const parsed = parseJournalAgents(text);
-  // Single-entry-per-path memo: an older key for the same path is dead weight.
-  for (const key of journalAgentsCache.keys()) {
-    if (key.startsWith(`${journalPath}:`)) journalAgentsCache.delete(key);
-  }
-  journalAgentsCache.set(cacheKey, parsed);
-  return parsed;
 }
 
 /**
@@ -242,10 +244,11 @@ export function deriveAgentLabel(firstLine: string): string | null {
 
 /**
  * Scans the bytes appended to one agent transcript since the last call and folds
- * them into that agent's running totals. Never throws.
+ * them into that agent's running totals. `key` names the file's cursor (its
+ * realpath); `handle` is its pinned descriptor. Never throws.
  */
-async function scanAgentTranscript(agentPath: string): Promise<AgentScanState> {
-  let state = agentScanStates.get(agentPath);
+async function scanAgentTranscript(key: string, handle: FileHandle): Promise<AgentScanState> {
+  let state = agentScanStates.get(key);
   if (!state) {
     state = {
       offset: 0,
@@ -255,12 +258,12 @@ async function scanAgentTranscript(agentPath: string): Promise<AgentScanState> {
       label: null,
       labelResolved: false,
     };
-    agentScanStates.set(agentPath, state);
+    agentScanStates.set(key, state);
   }
 
   let size: number;
   try {
-    size = (await fsp.stat(agentPath)).size;
+    size = (await handle.stat()).size;
   } catch {
     return state;
   }
@@ -283,18 +286,12 @@ async function scanAgentTranscript(agentPath: string): Promise<AgentScanState> {
   const end = Math.min(size, start + MAX_BYTES_PER_AGENT_SCAN);
 
   let chunk: string;
-  let handle: fsp.FileHandle | null = null;
   try {
-    handle = await fsp.open(agentPath, 'r');
     const buffer = Buffer.allocUnsafe(end - start);
     const { bytesRead } = await handle.read(buffer, 0, end - start, start);
     chunk = buffer.subarray(0, bytesRead).toString('utf8');
   } catch {
     return state;
-  } finally {
-    if (handle) {
-      await handle.close().catch(() => {});
-    }
   }
 
   const lastNewline = chunk.lastIndexOf('\n');
@@ -358,18 +355,58 @@ export type WorkflowAgentsResult = {
   lastActivityMs: number;
 };
 
+/** Agent ids are harness tokens; anything else is never joined onto a child name. */
+const AGENT_ID_RE = /^[A-Za-z0-9_-]{1,128}$/;
+
+type AgentFileView = { mtimeMs: number; scan: AgentScanState | null };
+
+/** mtime and folded totals of one agent transcript, opened through the pinned dir. */
+async function viewAgentFile(workflows: SessionArtifactDir, wfId: string, agentId: string): Promise<AgentFileView> {
+  if (!AGENT_ID_RE.test(agentId)) return { mtimeMs: 0, scan: null };
+  const child = await workflows.openFile(`${wfId}/agent-${agentId}.jsonl`);
+  if (!('handle' in child)) return { mtimeMs: 0, scan: null };
+  try {
+    return { mtimeMs: Number(child.stat.mtimeMs), scan: await scanAgentTranscript(child.realpath, child.handle) };
+  } finally {
+    await workflows.closeFile(child);
+  }
+}
+
+/** One composer row from an agent's journal state and its file view. */
+function agentRow(agentId: string, index: number, done: boolean, view: AgentFileView, now: number): WorkflowAgentRow {
+  // An unfinished agent is only "running" while its transcript still moves.
+  // A missing transcript (mtimeMs === 0) cannot prove recency either, so it
+  // is stale rather than running — absence of a file is not a heartbeat.
+  const silentFor = view.mtimeMs > 0 ? now - view.mtimeMs : Number.POSITIVE_INFINITY;
+  const stale = !done && silentFor >= AGENT_STALE_MS;
+  return {
+    agentId,
+    ordinal: index + 1,
+    status: done ? 'done' : stale ? 'stale' : 'running',
+    callCount: view.scan?.callCount ?? 0,
+    // Only a genuinely live agent has a "current" tool. For a finished one it
+    // would read as still-in-flight; for a stale one it is worse — it was the
+    // tool it died on, rendered as though it were happening now.
+    currentTool: done || stale ? null : view.scan?.currentTool ?? null,
+    label: view.scan?.label ?? null,
+    updatedAt: view.mtimeMs > 0 ? new Date(view.mtimeMs).toISOString() : null,
+  };
+}
+
 /**
- * Reads the agent rows for ONE workflow directory.
+ * Reads the agent rows for ONE workflow, through the session's pinned
+ * `subagents/workflows` directory.
  *
- * @param workflowDir Absolute path to `.../subagents/workflows/wf_*`.
+ * @param workflows The pinned `subagents/workflows` directory.
+ * @param wfId      The workflow entry name (`wf_*`).
  */
 export async function readWorkflowAgents(
-  workflowDir: string,
+  workflows: SessionArtifactDir,
+  wfId: string,
   options: { now?: number } = {},
 ): Promise<WorkflowAgentsResult> {
   const now = options.now ?? Date.now();
-  const journalPath = path.join(workflowDir, 'journal.jsonl');
-  const { order, resulted } = await readJournalAgentsCached(journalPath);
+  const { order, resulted } = await readJournalAgentsCached(workflows, wfId);
 
   // A workflow whose journal has no agent records yet (just spawned, or an
   // unreadable journal) legitimately has nothing to show.
@@ -379,48 +416,10 @@ export async function readWorkflowAgents(
 
   const truncated = order.length > MAX_AGENTS_PER_WORKFLOW;
   const visible = truncated ? order.slice(0, MAX_AGENTS_PER_WORKFLOW) : order;
-
-  let lastActivityMs = 0;
-
-  const rows = await Promise.all(
-    visible.map(async (agentId, index): Promise<WorkflowAgentRow> => {
-      const done = resulted.has(agentId);
-      const agentPath = path.join(workflowDir, `agent-${agentId}.jsonl`);
-
-      let updatedAt: string | null = null;
-      let mtimeMs = 0;
-      try {
-        mtimeMs = (await fsp.stat(agentPath)).mtimeMs;
-        updatedAt = new Date(mtimeMs).toISOString();
-        if (mtimeMs > lastActivityMs) lastActivityMs = mtimeMs;
-      } catch {
-        updatedAt = null;
-      }
-
-      const scan = await scanAgentTranscript(agentPath);
-
-      // An unfinished agent is only "running" while its transcript still moves.
-      // A missing transcript (mtimeMs === 0) cannot prove recency either, so it
-      // is stale rather than running — absence of a file is not a heartbeat.
-      const silentFor = mtimeMs > 0 ? now - mtimeMs : Number.POSITIVE_INFINITY;
-      const stale = !done && silentFor >= AGENT_STALE_MS;
-
-      return {
-        agentId,
-        ordinal: index + 1,
-        status: done ? 'done' : stale ? 'stale' : 'running',
-        callCount: scan.callCount,
-        // Only a genuinely live agent has a "current" tool. For a finished one it
-        // would read as still-in-flight; for a stale one it is worse — it was the
-        // tool it died on, rendered as though it were happening now.
-        currentTool: done || stale ? null : scan.currentTool,
-        label: scan.label,
-        updatedAt,
-      };
-    }),
-  );
-
-  return { agents: rows, truncated, lastActivityMs };
+  const views = await Promise.all(visible.map((agentId) => viewAgentFile(workflows, wfId, agentId)));
+  const lastActivityMs = views.reduce((latest, view) => Math.max(latest, view.mtimeMs), 0);
+  const agents = visible.map((agentId, index) => agentRow(agentId, index, resulted.has(agentId), views[index], now));
+  return { agents, truncated, lastActivityMs };
 }
 
 /**

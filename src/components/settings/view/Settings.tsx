@@ -27,6 +27,7 @@ import { canOpenSettingsTab, writeSettingsDestination } from '../settingsUrl';
 
 import ConnectorsSettingsTab from './tabs/ConnectorsSettingsTab';
 import SettingsCloseButton from './SettingsCloseButton';
+import { SettingsNavigationProvider, type SettingsNavigation } from './SettingsNavigationContext';
 import { hasActiveNestedDialog, resolveEscapeTarget } from './settingsDialogHelpers';
 
 function Settings({ isOpen, onClose, projects = [], initialTab = 'agents', deepLink }: SettingsProps) {
@@ -247,6 +248,18 @@ function Settings({ isOpen, onClose, projects = [], initialTab = 'agents', deepL
     writeSettingsDestination({ tab: 'agents', localModels: true }, options);
   };
 
+  const navigation: SettingsNavigation = {
+    openAgentAccount: (agent) => {
+      handleAgentDestinationChange(agent, 'account');
+      handleMainTabChange('agents');
+    },
+    openVendors: (companyId) => {
+      setFocusCompanyId(companyId);
+      setActiveTab('vendors');
+      writeSettingsDestination({ tab: 'vendors', companyId });
+    },
+  };
+
   if (!isOpen) {
     return null;
   }
@@ -256,6 +269,7 @@ function Settings({ isOpen, onClose, projects = [], initialTab = 'agents', deepL
   );
 
   return (
+    <SettingsNavigationProvider value={navigation}>
     <div className="modal-backdrop fixed inset-0 z-[9999] flex items-center justify-center bg-background/80 backdrop-blur-sm md:p-4">
       {/* B-559: role=dialog + aria-modal حبس التركيز الدلالي عن المساعدات؛
           aria-labelledby يربط العنوان المرئي بالمودال لقارئ الشاشة. */}
@@ -389,6 +403,7 @@ function Settings({ isOpen, onClose, projects = [], initialTab = 'agents', deepL
       />
 
     </div>
+    </SettingsNavigationProvider>
   );
 }
 

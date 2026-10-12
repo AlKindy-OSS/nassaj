@@ -26,6 +26,13 @@
  *     siblings). A project rooted at the install directory otherwise served
  *     JWT_SECRET to every member who can see the project (ADR-089).
  *
+ *   - Two classes (B-1593): `classifySecretPath` separates SERVICE secrets
+ *     (credential locations, harness stores, the service database, and any dotenv
+ *     or SQLite file under a service root: the install root, the deploy/
+ *     release/update-control roots and NASSAJ_SERVICE_SECRET_ROOTS), which are
+ *     never served, from PROJECT secret files (dotenv/SQLite files elsewhere),
+ *     which a member may open after an explicit per-request confirmation.
+ *
  * Synchronous on purpose: it is called from both the async read guard and the
  * synchronous mutate guard. Depends only on node built-ins.
  */
@@ -33,6 +40,9 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+import { isDeniedHostSecretEnvKey } from '../services/isolation/sanitize-vendor-agent-env.js';
 
 /**
  * Credential-bearing entries relative to a protected home directory. Anything
@@ -97,6 +107,18 @@ export const HARNESS_HOME_ENTRIES: readonly string[] = Object.freeze([
   '.local/share/opencode',
 ]);
 
+/**
+ * Environment variables naming roots of the running service. A dotenv or SQLite
+ * file under one of them is the service's own secret, never a project file.
+ * NASSAJ_SERVICE_SECRET_ROOTS takes extra roots separated by path.delimiter.
+ */
+const SERVICE_ROOT_ENV_VARS: readonly string[] = Object.freeze([
+  'NASSAJ_DEPLOY_ROOT',
+  'NASSAJ_RELEASE_ROOT',
+  'NASSAJ_UPDATE_CONTROL_ROOT',
+  'NASSAJ_SERVICE_SECRET_ROOTS',
+]);
+
 /** Environment variables that relocate a harness home. */
 const HARNESS_HOME_ENV_VARS: readonly string[] = Object.freeze(['CLAUDE_CONFIG_DIR', 'CODEX_HOME']);
 
@@ -159,6 +181,86 @@ export function hasSqliteHeader(bytes: Uint8Array): boolean {
     && Buffer.from(bytes.buffer, bytes.byteOffset, SQLITE_HEADER.length).equals(SQLITE_HEADER);
 }
 
+/** True when `bytes` starts with an SQLite write-ahead-log magic (0x377f0682 / 0x377f0683). */
+export function hasSqliteWalHeader(bytes: Uint8Array): boolean {
+  return bytes.length >= 4 && bytes[0] === 0x37 && bytes[1] === 0x7f && bytes[2] === 0x06
+    && (bytes[3] === 0x82 || bytes[3] === 0x83);
+}
+
+/**
+ * Tables only the Nassaj application database creates. sqlite_master keeps the
+ * original CREATE TABLE text, so the schema is recognised by a byte scan of the
+ * file, without opening it with SQLite or executing anything it contains.
+ */
+const APP_SCHEMA_TABLE_PATTERN = new RegExp(
+  'CREATE\\s+TABLE\\s+(?:IF\\s+NOT\\s+EXISTS\\s+)?["`\\[]?(app_config|audit_log|pending_server_actions'
+  + '|session_participants|vapid_keys|device_sessions|project_members|api_keys)\\b',
+  'gi',
+);
+
+/** How many distinct application tables identify the application database. */
+const APP_SCHEMA_MIN_TABLES = 2;
+
+/** True when `bytes` (an SQLite file prefix) carries the Nassaj application schema. */
+export function hasAppDatabaseSchema(bytes: Uint8Array): boolean {
+  const text = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.length).toString('latin1');
+  const found = new Set<string>();
+  for (const match of text.matchAll(APP_SCHEMA_TABLE_PATTERN)) {
+    found.add(match[1].toLowerCase());
+    if (found.size >= APP_SCHEMA_MIN_TABLES) return true;
+  }
+  return false;
+}
+
+/** Shortest value treated as a service secret (shorter values collide with ordinary text). */
+const MIN_SECRET_VALUE_LENGTH = 16;
+
+/** Extra env-name suffixes that hold credentials beyond the host-secret deny list. */
+const EXTRA_SECRET_ENV_SUFFIXES: readonly string[] = Object.freeze(['_TOKEN', '_KEY']);
+
+/** Secret values the running service resolved outside the environment (e.g. JWT from app_config). */
+const registeredSecretValues = new Set<string>();
+
+/**
+ * Registers a secret the running service holds but which is not in
+ * process.env (the JWT secret persisted in app_config). Never logged.
+ */
+export function registerServiceSecretValue(value: unknown): void {
+  if (typeof value === 'string' && value.length >= MIN_SECRET_VALUE_LENGTH) registeredSecretValues.add(value);
+}
+
+/** True when an env variable name holds a credential of the running service. */
+function isSecretEnvName(name: string): boolean {
+  const upper = name.toUpperCase();
+  if (upper.includes('PUBLIC')) return false; // e.g. VAPID_PUBLIC_KEY is served to browsers.
+  return isDeniedHostSecretEnvKey(name) || EXTRA_SECRET_ENV_SUFFIXES.some((suffix) => upper.endsWith(suffix));
+}
+
+/** Secret values the running service holds: secret-named env values plus registered ones. */
+function serviceSecretValues(): string[] {
+  const values = new Set<string>(registeredSecretValues);
+  for (const [name, value] of Object.entries(process.env)) {
+    if (typeof value !== 'string' || value.length < MIN_SECRET_VALUE_LENGTH) continue;
+    if (path.isAbsolute(value) || !isSecretEnvName(name)) continue;
+    values.add(value);
+  }
+  return [...values];
+}
+
+/**
+ * True when `content` contains the value of any secret the running service
+ * holds (JWT, encryption keys, OIDC/client/session secrets …). A copy of the
+ * service's .env under any name is then a service secret, never a project file.
+ * Values are only compared, never logged or returned.
+ */
+export function containsServiceSecretValue(content: Uint8Array | string): boolean {
+  if (typeof content !== 'string' && !(content instanceof Uint8Array)) return false;
+  const haystack = typeof content === 'string'
+    ? Buffer.from(content, 'utf8')
+    : Buffer.from(content.buffer, content.byteOffset, content.length);
+  return serviceSecretValues().some((value) => haystack.includes(Buffer.from(value, 'utf8')));
+}
+
 /** True when text returned to a client embeds an SQLite file (header anywhere). */
 export function containsSqliteContent(text: string): boolean {
   return typeof text === 'string' && text.includes(SQLITE_HEADER.toString('latin1'));
@@ -208,6 +310,7 @@ type SecretPolicy = {
   allowed: string[];
   databaseFiles: string[];
   harnessHomes: string[];
+  serviceRoots: string[];
 };
 
 let cachedPolicy: SecretPolicy | null = null;
@@ -277,6 +380,37 @@ function isUnderHarnessSecretEntry(candidate: string, harnessHome: string): bool
     || HARNESS_SECRET_ENTRY_SUFFIX.test(first);
 }
 
+/**
+ * The application root this module runs from: `<app>/server/shared` in source,
+ * `<app>/dist-server/server/shared` when compiled. Null when the layout is not
+ * recognised (the env-configured roots still apply).
+ */
+function moduleAppRoot(): string | null {
+  let dir = path.dirname(fileURLToPath(import.meta.url));
+  while (path.basename(dir) !== 'server') {
+    const parent = path.dirname(dir);
+    if (parent === dir) return null;
+    dir = parent;
+  }
+  const parent = path.dirname(dir);
+  return path.basename(parent) === 'dist-server' ? path.dirname(parent) : parent;
+}
+
+/** Service roots (install root plus SERVICE_ROOT_ENV_VARS), lexical and canonical. */
+function serviceRootForms(): string[] {
+  const roots: string[] = [];
+  const appRoot = moduleAppRoot();
+  if (appRoot) roots.push(appRoot);
+  for (const name of SERVICE_ROOT_ENV_VARS) {
+    for (const entry of (process.env[name] ?? '').split(path.delimiter)) {
+      if (entry.length > 0 && path.isAbsolute(entry)) roots.push(entry);
+    }
+  }
+  const out = new Set<string>();
+  for (const root of roots) for (const form of forms(root)) out.add(form);
+  return [...out];
+}
+
 /** Joins every home with every entry, in lexical and canonical forms. */
 function expandUnderHomes(homes: string[], entries: readonly string[]): string[] {
   const out = new Set<string>();
@@ -298,7 +432,8 @@ function policy(): SecretPolicy {
   const envHome = os.homedir();
   const databasePath = process.env.DATABASE_PATH ?? '';
   const key = [envHome, passwdHome() ?? '', databasePath,
-    ...HARNESS_HOME_ENV_VARS.map((name) => process.env[name] ?? '')].join('\0');
+    ...HARNESS_HOME_ENV_VARS.map((name) => process.env[name] ?? ''),
+    ...SERVICE_ROOT_ENV_VARS.map((name) => process.env[name] ?? '')].join('\0');
   const now = Date.now();
   if (cachedPolicy && cachedPolicy.key === key && cachedPolicy.expiresAt > now) return cachedPolicy;
   const homeSet = new Set<string>();
@@ -316,6 +451,7 @@ function policy(): SecretPolicy {
     allowed: expandUnderHomes(homes, ALLOWED_HIDDEN_HOME_ENTRIES),
     databaseFiles: databaseFileForms(databasePath),
     harnessHomes: harnessHomeForms(homes),
+    serviceRoots: serviceRootForms(),
   };
   return cachedPolicy;
 }
@@ -375,6 +511,80 @@ export function isSecretPath(targetPath: string): boolean {
     || isSecretFileName(path.basename(candidate))
     || current.databaseFiles.includes(candidate)
     || current.harnessHomes.some((home) => isUnderHarnessSecretEntry(candidate, home)));
+}
+
+/** True when `fileName` (a basename) is a dotenv or SQLite file. */
+export function isSecretFileKind(fileName: string): boolean {
+  return isSecretFileName(fileName) || isSqliteFileName(fileName);
+}
+
+/**
+ * True when `targetPath` IS or CONTAINS a service root, so renaming, moving or
+ * deleting it would move or remove the running service's own tree.
+ */
+export function containsServiceRoot(targetPath: string): boolean {
+  if (typeof targetPath !== 'string' || targetPath.length === 0) return false;
+  const current = policy();
+  return forms(targetPath).some((candidate) => current.serviceRoots.some((root) => isAtOrInside(root, candidate)));
+}
+
+/** True when `candidate` lies at or below a service root. */
+function isUnderServiceRoot(candidate: string, current: SecretPolicy): boolean {
+  return current.serviceRoots.some((root) => isAtOrInside(candidate, root));
+}
+
+/** Service-secret test for one already-resolved form of a path. */
+function isServiceSecretForm(candidate: string, current: SecretPolicy): boolean {
+  return isSecretForm(candidate, current)
+    || current.databaseFiles.includes(candidate)
+    || current.harnessHomes.some((home) => isUnderHarnessSecretEntry(candidate, home))
+    || (isSecretFileKind(path.basename(candidate)) && isUnderServiceRoot(candidate, current));
+}
+
+/**
+ * B-1593 secret classes: 'service' is a secret of the running service and is
+ * never served; 'project' is an ordinary project dotenv/SQLite file, served
+ * only after an explicit per-request confirmation; null is not secret.
+ */
+export type SecretPathClass = 'service' | 'project' | null;
+
+/**
+ * Classifies `targetPath` on its lexical and canonical forms; the stricter
+ * class wins. 'service' covers everything isSecretPath refuses except dotenv
+ * files outside the service roots, plus any dotenv/SQLite file under a service
+ * root; 'project' is any other dotenv (templates excepted) or SQLite name.
+ */
+export function classifySecretPath(targetPath: string): SecretPathClass {
+  if (typeof targetPath !== 'string' || targetPath.length === 0) return null;
+  const current = policy();
+  const candidates = forms(targetPath);
+  if (candidates.some((candidate) => isServiceSecretForm(candidate, current))) return 'service';
+  return candidates.some((candidate) => isSecretFileKind(path.basename(candidate))) ? 'project' : null;
+}
+
+/**
+ * Class of a file whose CONTENT is an SQLite database (header sniff) whatever
+ * its name: 'service' when it is a service secret or lies under a service root,
+ * otherwise 'project'.
+ */
+export function classifySqliteContentPath(targetPath: string): 'service' | 'project' {
+  const current = policy();
+  return forms(targetPath).some((candidate) => isServiceSecretForm(candidate, current)
+    || isUnderServiceRoot(candidate, current)) ? 'service' : 'project';
+}
+
+/**
+ * True when a path recorded in repository history must never be rendered
+ * (B-1592): a dotenv or SQLite name at any depth, or a path that is secret on
+ * disk. History is passive exposure, so project secret files are hidden too.
+ *
+ * @param repositoryRoot          Absolute repository top-level directory.
+ * @param repositoryRelativePath  Path as printed by the VCS, relative to that root.
+ */
+export function isSecretRepositoryPath(repositoryRoot: string, repositoryRelativePath: string): boolean {
+  if (typeof repositoryRelativePath !== 'string' || repositoryRelativePath.length === 0) return false;
+  if (isSecretFileKind(path.posix.basename(repositoryRelativePath))) return true;
+  return isSecretPath(path.resolve(repositoryRoot, repositoryRelativePath));
 }
 
 /**

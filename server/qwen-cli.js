@@ -245,7 +245,12 @@ async function spawnQwen(command, options = {}, ws) {
   if (ws?.runFenceRevoked) return;
   if (isNewSession) {
     const transcriptPath = vendorTranscriptPath('qwen', sessionId, workingDir);
-    sessionsDb.createSession(sessionId, 'qwen', workingDir, undefined, undefined, undefined, transcriptPath);
+    sessionsDb.insertDiscoveredSession({
+      sessionId,
+      provider: 'qwen',
+      projectPath: workingDir,
+      jsonlPath: transcriptPath,
+    });
     await writeVendorTranscriptMeta('qwen', sessionId, workingDir, command);
     ws?.setSessionId?.(sessionId);
     ws?.send(createNormalizedMessage({

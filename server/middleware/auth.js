@@ -13,6 +13,7 @@ import {
 import { refuseStaleAttestation, userSsoAttestationFresh } from '../services/sso-attestation.js';
 
 import { recordAuthRejection } from './auth-rejection-audit.js';
+import { registerServiceSecretValue } from '../shared/secret-path-guard.js';
 
 const { userDb, appConfigDb, auditLogDb } = databaseModule;
 const deviceAccountSessionsDb = databaseModule.deviceAccountSessionsDb;
@@ -52,6 +53,9 @@ function resolveJwtSecret() {
 }
 
 const JWT_SECRET = resolveJwtSecret();
+// B-1593: a project file holding this value (a copy of the service .env, or of
+// app_config's persisted secret) is a service secret and is never served.
+registerServiceSecretValue(JWT_SECRET);
 const TOKEN_TTL = '7d';
 
 /** Attaches a current-identity fence and guards late HTTP disclosures. */

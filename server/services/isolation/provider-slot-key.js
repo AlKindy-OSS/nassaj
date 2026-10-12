@@ -28,7 +28,11 @@
  * wave-C disclosure contract will read from.
  */
 
-import { getProviderKey, getSharedVendorKey } from './provider-secrets-store.js';
+import {
+  getProviderKey,
+  getSharedVendorKey,
+  isCanonicalVendorSecretId,
+} from './provider-secrets-store.js';
 
 /**
  * @typedef {'kimi'|'deepseek'|'glm'|'qwen'} SlotProvider
@@ -44,7 +48,8 @@ import { getProviderKey, getSharedVendorKey } from './provider-secrets-store.js'
  *   it is a call-site bug, and the store still throws on it, exactly as today.
  * @param {SlotProvider} slot vendor slot id. An id outside the vendor set
  *   resolves to null at runtime rather than throwing, matching the store's read
- *   contract — but the type keeps that from being the normal way in.
+ *   contract — but the type keeps that from being the normal way in. A
+ *   canonical vendor id (ADR-200) throws instead.
  * @param {{ sharedFallback: boolean }} options `sharedFallback: true` consults
  *   the operator-wide slot when the member holds no key of their own. Required,
  *   never defaulted — see the module note.
@@ -52,6 +57,13 @@ import { getProviderKey, getSharedVendorKey } from './provider-secrets-store.js'
  */
 export function resolveSlotKey(userId, slot, options) {
   const { sharedFallback } = options;
+
+  // ADR-200 S1: a canonical `vendor:*` record (Anthropic, OpenAI, OpenRouter) is
+  // never a slot. It feeds harness files only, so a caller asking for one here
+  // is a call-site bug — refused loudly, never resolved to a key.
+  if (isCanonicalVendorSecretId(slot)) {
+    throw new TypeError(`provider-slot-key: "${slot}" is a canonical vendor record, not a slot`);
+  }
 
   // ADR-101: Coding Plan credentials are personal subscriptions. A Qwen run
   // may never consume the operator/org slot, including when the caller has no

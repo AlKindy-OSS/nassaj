@@ -35,8 +35,12 @@ const url = (spec: string) => pathToFileURL(path.resolve(import.meta.dirname, sp
 
 const KEY = 'sk-company-secret-DO-NOT-LEAK';
 
+// ADR-200 S10: the unified model is ON by default. This suite pins the legacy
+// T-1159/T-1201 fan-out, so it runs with the kill switch.
+process.env.NASSAJ_UNIFIED_VENDOR_KEYS = '0';
+
 /** Every setKey the service dispatched, in order. */
-let setCalls: Array<{ provider: string; target?: string; apiKey: string; auditContext?: { consentVersion?: string | null } }> = [];
+let setCalls: Array<{ provider: string; target?: string; apiKey: string; auditContext?: Record<string, unknown> }> = [];
 /** Providers the stub dispatcher should refuse with a throw. */
 let failingProviders = new Set<string>();
 /** Providers the stub policy marks as shared (elevated role required). */
@@ -53,9 +57,8 @@ mock.module(url('./provider-credentials.service.js'), {
         provider: string,
         apiKey: string,
         target?: string,
-        _qwenOptions?: unknown,
         _principal?: unknown,
-        auditContext?: { consentVersion?: string | null },
+        auditContext?: Record<string, unknown>,
       ) => {
         if (failingProviders.has(provider)) {
           throw new Error(`writer refused ${provider}`);
@@ -279,28 +282,22 @@ test('removal is per slot too — one place, not the whole company', async () =>
   assert.deepEqual(result.slots.map((slot) => slot.vendorId), ['zai-opencode']);
 });
 
-test('T-1906: alibaba-cloud without explicit consent is a 400 and writes nothing', async () => {
-  for (const consent of [undefined, false]) {
-    await assert.rejects(
-      companyCredentialsService.setKey(1, 'alibaba-cloud', 'sk-sp-0123456789abcdef', { isElevated: false, consent }),
-      (error: { statusCode?: number; code?: string }) => error.statusCode === 400 && error.code === 'CONSENT_REQUIRED',
-    );
-  }
-  assert.deepEqual(setCalls, []);
-});
-
-test('T-1906: alibaba-cloud with consent passes the consent version to the audited write', async () => {
-  const result = await companyCredentialsService.setKey(1, 'alibaba-cloud', 'sk-sp-0123456789abcdef', {
-    isElevated: false, consent: true, auditContext: { ipAddress: '127.0.0.1' },
+test('ADR-200 S7: alibaba-cloud saves a Token Plan key with no consent and no sk-sp- prefix', async () => {
+  const result = await companyCredentialsService.setKey(1, 'alibaba-cloud', 'tp-0123456789abcdef', {
+    isElevated: false, auditContext: { ipAddress: '127.0.0.1' },
   });
   assert.equal(result.configured, true);
   assert.equal(setCalls.length, 1);
   assert.equal(setCalls[0].provider, 'qwen');
-  assert.equal(setCalls[0].auditContext?.consentVersion, 'qwen-plan-personal-use/2026-09-28');
+  assert.equal(setCalls[0].apiKey, 'tp-0123456789abcdef');
+  assert.deepEqual(setCalls[0].auditContext, { ipAddress: '127.0.0.1' });
 });
 
-test('T-1906: companies without a personal-use rule need no consent', async () => {
-  const result = await companyCredentialsService.setKey(1, 'anthropic', KEY, { isElevated: true });
-  assert.equal(result.configured, true);
-  assert.ok(setCalls.every((call) => call.auditContext?.consentVersion === null));
+test('ADR-200 S7: no company carries a consent requirement any more', async () => {
+  for (const companyId of ['alibaba-cloud', 'anthropic']) {
+    setCalls = [];
+    const result = await companyCredentialsService.setKey(1, companyId, KEY, { isElevated: true });
+    assert.equal(result.configured, true, companyId);
+    assert.ok(setCalls.every((call) => call.auditContext?.consentVersion === undefined));
+  }
 });

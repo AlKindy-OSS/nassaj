@@ -6,6 +6,8 @@ import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 
 import { initializeDatabase, closeConnection, sessionsDb } from '@/modules/database/index.js';
+// eslint-disable-next-line boundaries/no-unknown -- shared test fixture helper (same seam as sandbox-home)
+import { codexRolloutPath, codexSessionMetaLine, codexSessionsSandbox } from '@/shared/__tests__/provider-root-sandbox.js';
 
 import { captureCodexReceiptWindow, readCodexReceiptWindow, resolveCodexUserProof, codexUserProofFromJsonl, codexReceiptPayloadHash, codexNativePayloadHash } from '../codex-receipt-proof.js';
 import { CODEX_IMAGE_INPUT_MAX_BYTES, validateCodexImageInput } from '../../../../../../shared/codex-image-input.js';
@@ -22,6 +24,13 @@ const encode = (rows: unknown[]) => rows.map(row => JSON.stringify(row)).join('\
 const hash = codexReceiptPayloadHash('same request')!;
 const meta = (id = 'receipt-session') => ({ type: 'session_meta', payload: { id } });
 before(initializeDatabase); after(closeConnection);
+/**
+ * ADR-201 A1: the proof reads a rollout only inside the Codex sessions tree,
+ * named for the session and opening with its real `session_meta` header.
+ */
+const ROLLOUTS = codexSessionsSandbox('receipt-proof-');
+const rolloutFile = (sessionId: string) => codexRolloutPath(ROLLOUTS, sessionId);
+const realMeta = (sessionId: string) => JSON.parse(codexSessionMetaLine(sessionId)) as unknown;
 
 test('shared Codex image boundary is canonical, ordered and exact at four MiB', () => {
   const prefix = 'data:image/png;base64,';
@@ -131,20 +140,20 @@ test('text plus image includes every original byte; absent, changed and unknown 
   assert.equal(codexUserProofFromJsonl(encode([unknown, ...ending()]), 'receipt-session', 'resume', hash), null);
 });
 test('pre-run window excludes old complete turns and rejects replacement, truncation and partial boundary', async () => {
-  const file = path.join((process.env.NASSAJ_TEST_TMP ?? process.env.TMPDIR)!, 'receipt-window.jsonl');
-  await writeFile(file, encode([meta(), human('old'), ...ending()]));
+  const file = rolloutFile('receipt-window');
+  await writeFile(file, encode([realMeta('receipt-window'), human('old'), ...ending()]));
   sessionsDb.createSession('receipt-window', 'codex', '/fixture', undefined, undefined, undefined, file);
   const baseline = await captureCodexReceiptWindow('receipt-window', 'resume'); assert.ok(baseline);
   await appendFile(file, encode([human('new'), ...ending()]));
   assert.equal((await resolveCodexUserProof('receipt-window', baseline, false, hash))?.userMessageId, 'new');
   await writeFile(file, 'x'); assert.equal(await readCodexReceiptWindow(baseline), null);
   assert.equal(await captureCodexReceiptWindow('receipt-window', 'resume'), null);
-  await unlink(file); await writeFile(file, encode([meta(), human(), ...ending()]));
+  await unlink(file); await writeFile(file, encode([realMeta('receipt-window'), human(), ...ending()]));
   assert.equal(await readCodexReceiptWindow(baseline), null);
 });
 test('new-thread delayed index uses zero offset; resumed missing baseline never falls back to whole file', async () => {
-  const file = path.join((process.env.NASSAJ_TEST_TMP ?? process.env.TMPDIR)!, 'late-index.jsonl');
-  await writeFile(file, encode([meta('late-index'), human(), ...ending()]));
+  const file = rolloutFile('late-index');
+  await writeFile(file, encode([realMeta('late-index'), human(), ...ending()]));
   const timer = setTimeout(() => sessionsDb.createSession('late-index', 'codex', '/fixture', undefined, undefined, undefined, file), 20);
   try {
     assert.ok(await resolveCodexUserProof('late-index', null, true, hash));
@@ -155,12 +164,21 @@ test('new-thread delayed index uses zero offset; resumed missing baseline never 
 
 const MiB = 1024 * 1024;
 let snapshotSequence = 0;
+/**
+ * Byte offset of the latest snapshot window. The rollout opens with its
+ * `session_meta` header (ADR-201 A1), so a resumed window starts after it,
+ * not at 0; read accounting below is relative to this offset.
+ */
+let windowOffset = 0;
+/** Bytes one snapshot attempt reads besides its window: the boundary hash, before and after. */
+const boundaryReads = (offset: number) => 2 * Math.min(4096, offset);
 async function snapshot(rows: unknown[] = [], prefix = '') {
   const sessionId = `bounded-receipt-${++snapshotSequence}`;
-  const file = path.join((process.env.NASSAJ_TEST_TMP ?? process.env.TMPDIR)!, `${sessionId}.jsonl`);
-  await writeFile(file, prefix);
+  const file = rolloutFile(sessionId);
+  await writeFile(file, `${codexSessionMetaLine(sessionId)}\n${prefix}`);
   sessionsDb.createSession(sessionId, 'codex', '/fixture', undefined, undefined, undefined, file);
   const window = await captureCodexReceiptWindow(sessionId, 'resume'); assert.ok(window);
+  windowOffset = window.byteOffset;
   if (rows.length) await appendFile(file, encode(rows));
   return { file, sessionId, window, resolve: (expected = hash) => resolveCodexUserProof(sessionId, window, false, expected) };
 }
@@ -178,7 +196,7 @@ async function monitorReads(t: TestContext, change?: (file: any, length: number,
   const report = { bytes: 0, reads: 0, snapshots: 0, handles: new Set<any>() };
   t.mock.method(prototype, 'read', async function (this: any, buffer: Buffer, offset: number, length: number, position: number) {
     report.bytes += length; report.reads++; report.handles.add(this);
-    if (length === 65536 && position === 0) report.snapshots++;
+    if (length === 65536 && position === windowOffset) report.snapshots++;
     const result = await read.call(this, buffer, offset, length, position);
     if (change) await change(this, length, position);
     return result;
@@ -202,7 +220,7 @@ test('multiple tool rows over four MiB preserve proof and read work grows linear
   const reads = await monitorReads(t), sizes: number[] = [], work: number[] = [];
   for (const count of [20, 40]) {
     const f = await snapshot([human()]); await padFile(f.file, count); await appendFile(f.file, encode(ending()));
-    sizes.push((await stat(f.file)).size);
+    sizes.push((await stat(f.file)).size - f.window.byteOffset + boundaryReads(f.window.byteOffset));
     const before = reads.bytes;
     assert.ok(await f.resolve()); work.push(reads.bytes - before);
   }
@@ -306,7 +324,7 @@ for (const count of [8192, 8193]) {
 }
 
 test('oversize snapshot is rejected before allocating or reading its body', async t => {
-  const f = await snapshot(); await truncate(f.file, 64 * MiB + 1);
+  const f = await snapshot(); await truncate(f.file, f.window.byteOffset + 64 * MiB + 1);
   const reads = await monitorReads(t);
   assert.equal(await f.resolve(), null); assert.equal(reads.bytes, 0); assert.equal(reads.reads, 0);
 });
@@ -331,7 +349,8 @@ test('record limit includes LF and an oversized tool record cannot be skipped', 
 test('deadline expiry after IO cannot return a proof and always closes the file', async t => {
   let clock = 0; t.mock.method(performance, 'now', () => clock);
   const f = await snapshot([human(), ...ending()]); await padFile(f.file, 1);
-  const reads = await monitorReads(t, async (_file, length) => { if (length > 0) clock = 1500; });
+  // The first window chunk (the header boundary read before it is not window IO).
+  const reads = await monitorReads(t, async (_file, length) => { if (length === 65536) clock = 1500; });
   assert.equal(await f.resolve(), null); assert.equal(reads.snapshots, 1);
   await assertClosed(reads.handles);
 });
@@ -350,7 +369,9 @@ test('stable incomplete snapshot can gain an ending on retry without duplicate-s
   const probe = await open(f.file, 'r'), prototype = Object.getPrototypeOf(probe), fileStat = prototype.stat;
   await probe.close(); let checks = 0;
   t.mock.method(prototype, 'stat', async function (this: any, ...args: any[]) {
-    if (++checks === 3) await appendFile(f.file, encode(ending()));
+    // Third fstat of attempt 1 is its after-check; the 4th opens attempt 2 (the
+    // pinned re-open adds one fstat per attempt, ADR-201 A1).
+    if (++checks === 4) await appendFile(f.file, encode(ending()));
     return fileStat.apply(this, args);
   });
   assert.ok(await f.resolve());
@@ -468,11 +489,12 @@ if (process.env.B996_MEMORY_WORKER) {
 test('a complete 64-MiB snapshot remains provable while the next byte is rejected', async t => {
   t.mock.method(performance, 'now', () => 0);
   const f = await snapshot([human(), ...ending()]);
+  const full = f.window.byteOffset + 64 * MiB; // a 64-MiB window after the header
   const rowBytes = Buffer.byteLength(encode([padding(256 * 1024)]));
-  await padFile(f.file, Math.floor((64 * MiB - (await stat(f.file)).size) / rowBytes) - 1);
-  const remainder = 64 * MiB - (await stat(f.file)).size;
+  await padFile(f.file, Math.floor((full - (await stat(f.file)).size) / rowBytes) - 1);
+  const remainder = full - (await stat(f.file)).size;
   await appendFile(f.file, encode([padding(remainder - Buffer.byteLength(encode([padding(0)])))]));
-  assert.equal((await stat(f.file)).size, 64 * MiB);
+  assert.equal((await stat(f.file)).size, full);
   assert.ok(await f.resolve());
   await appendFile(f.file, '\n');
   const reads = await monitorReads(t);

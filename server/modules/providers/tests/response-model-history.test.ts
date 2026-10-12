@@ -8,13 +8,27 @@ import type { AnyRecord, LLMProvider, NormalizedMessage } from '@/shared/types.j
 
 const scratch = fs.mkdtempSync(path.join(process.cwd(), '.artifacts/response-model-history-'));
 let transcript = path.join(scratch, 'synthetic.jsonl');
-const sessionsDb = { getSessionById: () => ({ jsonl_path: transcript }) };
+let rowProvider = 'antigravity';
+// ADR-201 A1: history opens only the row's recorded path, confined to the provider
+// root and bound to the session id by name (vendor) or brain directory (agy).
+const sessionsDb = {
+  getSessionById: () => ({ jsonl_path: transcript }),
+  getHistorySource: (sessionId: string) => ({
+    session_id: sessionId, provider: rowProvider, project_path: null, jsonl_path: transcript,
+    updated_at: '', sourceOversized: 0,
+  }),
+};
+const vendorProviderRoot = (provider: string) => path.join(os.homedir(), '.nassaj-vendor-sessions', provider);
 mock.module('@/modules/database/index.js', { namedExports: {
   sessionsDb, providerRunFailuresDb: { getFailure: () => null },
+  // Import-time bindings only: the session providers now reach provider-sharing,
+  // local-model-config, opencode-home and message authors; no test calls them.
+  appConfigDb: { get: () => null, set: () => {} }, localModelServersDb: {},
+  auditLogDb: { record: () => {} }, userDb: {}, messageAuthorsDb: {},
 } });
 mock.module('@/modules/database/repositories/sessions.db.js', { namedExports: { sessionsDb } });
 mock.module('@/modules/providers/shared/vendor/vendor-transcript.js', { namedExports: {
-  resolveVendorTranscriptForRead: async () => transcript,
+  resolveVendorTranscriptForRead: async () => transcript, vendorProviderRoot,
 } });
 const { CursorSessionsProvider } = await import('../list/cursor/cursor-sessions.provider.js');
 const { OpenCodeSessionsProvider } = await import('../list/opencode/opencode-sessions.provider.js');
@@ -68,20 +82,24 @@ it('OpenCode uses each persisted assistant modelID, preserving message/part iden
 
 it('Antigravity preserves model only when the response line itself contains it', async () => {
   // B-1564: agy history reads only a brain transcript under a brain root (sandbox HOME).
-  transcript = path.join(os.homedir(), AGY_BRAIN_UNDER_HOME, '00000000-0000-4000-8000-0000000000a9',
+  const brainId = '00000000-0000-4000-8000-0000000000a9';
+  rowProvider = 'antigravity';
+  transcript = path.join(os.homedir(), AGY_BRAIN_UNDER_HOME, brainId,
     '.system_generated', 'logs', 'transcript.jsonl');
   fs.mkdirSync(path.dirname(transcript), { recursive: true });
   fs.writeFileSync(transcript, models.map((model, index) => JSON.stringify({
     step_index: index, source: 'MODEL', type: 'PLANNER_RESPONSE', status: 'DONE',
     model, content: 'reply', created_at: '2026-09-05T12:00:00Z',
   })).join('\n'));
-  const result = await new AntigravitySessionsProvider().fetchHistory('agy-test');
+  const result = await new AntigravitySessionsProvider().fetchHistory(brainId);
   assert.deepEqual(assistants(result.messages).map((m) => m.model), models);
 });
 
 for (const providerName of ['kimi', 'qwen', 'hermes', 'deepseek', 'glm'] as LLMProvider[]) {
   it(`${providerName} replays message-local models and stable persisted full-message IDs`, async () => {
-    transcript = path.join(scratch, `${providerName}.jsonl`);
+    rowProvider = providerName;
+    transcript = path.join(vendorProviderRoot(providerName), 'project-hash', 'vendor-test.jsonl');
+    fs.mkdirSync(path.dirname(transcript), { recursive: true });
     fs.writeFileSync(transcript, models.map((model, index) => JSON.stringify({
       type: 'message', message: { id: `durable-${index}`, role: 'assistant', model, content: 'reply' },
     })).join('\n'));
@@ -101,7 +119,9 @@ it('vendor message_start metadata stays within its response in history and realt
     { type: 'message_stop' },
   ]);
   rows.push({ type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'after-stop' } });
-  transcript = path.join(scratch, 'vendor-stream.jsonl');
+  rowProvider = 'deepseek';
+  transcript = path.join(vendorProviderRoot('deepseek'), 'project-hash', 'stream-test.jsonl');
+  fs.mkdirSync(path.dirname(transcript), { recursive: true });
   fs.writeFileSync(transcript, rows.map((row) => JSON.stringify(row)).join('\n'));
   const provider = new VendorSessionsProvider({ provider: 'deepseek' });
   const readModel = createVendorResponseModelReader();

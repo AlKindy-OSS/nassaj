@@ -23,8 +23,12 @@ import path from 'node:path';
 
 import { projectsDb, sessionsDb } from '@/modules/database/index.js';
 import type { PermissionExecutionHandle } from '@/modules/execution-permissions/index.js';
+// eslint-disable-next-line boundaries/dependencies -- the read-only run gate leaf, not the providers barrel.
+import { assertLinkModeRunAllowed } from '@/modules/providers/services/harness-link-mode.scope.js';
 import { resolveProviderEnvStrict } from '@/services/isolation/resolve-provider-env-strict.js';
 import { acquireApplicationWriterLease } from '@/services/update-writer-lease.js';
+// eslint-disable-next-line boundaries/dependencies -- ADR-201 A1: the supervisor process proves its target with the one transcript reader without loading the providers barrel (routes/SDK graph).
+import { isTranscriptHandle, openRecordedTranscript } from '@/modules/providers/shared/session-transcript-reader.js';
 
 import {
   isSupervisorEnabled,
@@ -96,16 +100,19 @@ async function releaseTerminalWorkflowWriterLeases(): Promise<void> {
  * OWNED/MEMBERED by the task's userId, and returns the AUTHORITATIVE jsonl path
  * FROM THE DB (never a path built from the web-supplied conversationId). A
  * conversation the user does not own, or one with no transcript path, is refused.
- * Never throws — a DB blip fails CLOSED (refuse delivery).
+ * ADR-201 A1: the recorded path is then proven through the pinned reader (tree
+ * confinement, single link, name + header bound to the conversation id) and the
+ * delivery writes to that realpath only. Never throws — a DB blip or a refused
+ * transcript fails CLOSED (refuse delivery).
  */
-function verifyDeliveryTarget(conversationId: string, userId: number): DeliveryTarget {
+export async function verifyDeliveryTarget(conversationId: string, userId: number): Promise<DeliveryTarget> {
   try {
     const row = sessionsDb.getSessionById(conversationId);
     if (!row) {
       return { ok: false, reason: 'no such conversation' };
     }
-    if (row.provider && row.provider !== 'claude') {
-      return { ok: false, reason: `unsupported provider ${row.provider}` };
+    if (row.provider !== 'claude') {
+      return { ok: false, reason: 'unsupported provider' };
     }
     if (!row.jsonl_path || !row.project_path) {
       return { ok: false, reason: 'conversation missing transcript/project path' };
@@ -113,13 +120,30 @@ function verifyDeliveryTarget(conversationId: string, userId: number): DeliveryT
     if (!projectsDb.isProjectPathOwnedOrMemberedBy(row.project_path, userId)) {
       return { ok: false, reason: 'conversation not owned/membered by requester' };
     }
-    return { ok: true, jsonlPath: row.jsonl_path, projectPath: row.project_path };
+    const realpath = await provenTranscriptPath(conversationId, row.provider, row.jsonl_path);
+    if (typeof realpath !== 'string') return { ok: false, reason: `transcript refused: ${realpath.reason}` };
+    return { ok: true, jsonlPath: realpath, projectPath: row.project_path };
   } catch (error) {
     return {
       ok: false,
       reason: `ownership check failed: ${error instanceof Error ? error.message : String(error)}`,
     };
   }
+}
+
+/**
+ * Realpath of the recorded Claude transcript once the pinned reader admits it,
+ * or the refusal. L5: the row's own provider is compared, never assumed.
+ */
+async function provenTranscriptPath(
+  conversationId: string, provider: string, jsonlPath: string,
+): Promise<string | { reason: string }> {
+  if (provider !== 'claude') return { reason: 'unsupported_provider' };
+  const opened = await openRecordedTranscript(
+    { session_id: conversationId, provider, jsonl_path: jsonlPath }, 'handoff');
+  if (!isTranscriptHandle(opened)) return { reason: opened.reason };
+  await opened.fd.close().catch(() => undefined);
+  return opened.realpath;
 }
 
 /**
@@ -251,8 +275,13 @@ async function handleIntentFile(
       // of falling open to the owner subscription. GATE2 already guarantees an
       // integer id before this runs, so it never throws on the happy path — this
       // is the belt over the fail-open resolveProviderEnv the critic flagged.
-      resolveEnv: (userId, provider, baseEnv) =>
-        resolveProviderEnvStrict(userId, provider, baseEnv),
+      // B-1546: api_key link mode with no key is refused here too, so a
+      // workflow task never falls back to a (grantor's) subscription. A throw
+      // maps to DENY in authorizeLaunch — nothing is launched.
+      resolveEnv: (userId, provider, baseEnv) => {
+        assertLinkModeRunAllowed(userId, provider);
+        return resolveProviderEnvStrict(userId, provider, baseEnv);
+      },
     },
     listActiveScopes: listActiveUserScopes,
     // HOST-WIDE gate source (§ج-5) — bounds total memory across all users.

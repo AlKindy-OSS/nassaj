@@ -230,11 +230,16 @@ export const participantsDb = {
       const message = err instanceof Error ? err.message : String(err);
 
       // FK failure = the parent sessions row does not exist yet (run path beat
-      // the synchronizer). Create it from the spawn context and retry once; the
-      // synchronizer's upsert later replaces the stub fields with real values.
+      // the synchronizer). Insert a stub from the spawn context and retry once;
+      // the synchronizer later fills its NULL jsonl_path under the ADR-201
+      // rules (case g: only from a participant's credential tree or operator root).
       if (context && /FOREIGN KEY/i.test(message)) {
         try {
-          sessionsDb.createSession(sessionId, context.provider, context.projectPath);
+          sessionsDb.insertDiscoveredSession({
+            sessionId,
+            provider: context.provider,
+            projectPath: context.projectPath,
+          });
           write(getConnection());
           return;
         } catch (retryErr) {

@@ -84,6 +84,22 @@ export const messageAuthorsDb = {
   },
 
   /**
+   * ADR-200 §8 / M-5: the distinct member ids that authored at least one
+   * prompt in the session. Read redaction uses every sender's keys.
+   */
+  listAuthorIds(sessionId: string): number[] {
+    if (!sessionId) {
+      return [];
+    }
+    const rows = getConnection().prepare(
+      `SELECT DISTINCT user_id AS userId
+       FROM message_authors
+       WHERE session_id = ?`,
+    ).all(sessionId) as { userId: number }[];
+    return rows.map((row) => row.userId).filter((id) => Number.isInteger(id));
+  },
+
+  /**
    * Lists the recorded author rows of a session, oldest first, for the
    * history-stamping pass.
    */

@@ -1,11 +1,14 @@
 import { getConnection } from '@/modules/database/connection.js';
-import { projectsDb } from '@/modules/database/repositories/projects.db.js';
-import { rotateProjectStructureForPath } from '@/modules/database/repositories/project-access.js';
-import { notifyProjectTransfer } from '@/modules/database/repositories/session-project-transfer-events.js';
-import { isForeignTestRunPath } from '@/modules/database/test-run-root-guard.js';
-import { parseStoredTimestampMs } from '@/modules/database/utils/timestamps.js';
-import { logicalProjectPathForWorkspace } from '@/modules/session-workspaces/index.js';
-import { isForbiddenProjectRoot } from '@/shared/secret-path-guard.js';
+import {
+  type DiscoveredSession,
+  type InsertOutcome,
+  type RefreshOutcome,
+  insertDiscoveredSession,
+  isChildInParentTree,
+  normalizeDiscoveryTimestamp,
+  recordDiscoveredSession,
+  refreshDiscoveredSession,
+} from '@/modules/database/repositories/session-discovery.db.js';
 import { normalizeProjectPath } from '@/shared/utils.js';
 
 type SessionRow = {
@@ -44,32 +47,8 @@ const SESSION_ROW_COLUMNS_SQL =
 const SESSION_ROW_COLUMNS_FROM_SESSIONS_SQL =
   'sessions.session_id AS session_id, sessions.provider AS provider, sessions.project_path AS project_path, sessions.jsonl_path AS jsonl_path, sessions.custom_name AS custom_name, sessions.engine_provider AS engine_provider, sessions.engine_provider_source AS engine_provider_source, sessions.isArchived AS isArchived, sessions.created_at AS created_at, sessions.updated_at AS updated_at';
 
-/**
- * Normalizes any accepted timestamp form to ISO-8601 UTC — the single format
- * this module writes, so stored values stay mutually comparable.
- */
-function normalizeTimestamp(value?: string): string | null {
-  if (!value) return null;
-
-  const epoch = parseStoredTimestampMs(value);
-  if (epoch === null) {
-    return null;
-  }
-
-  return new Date(epoch).toISOString();
-}
-
-/**
- * SQL expression for "now" in the same ISO-8601 UTC format normalizeTimestamp
- * produces. Used instead of CURRENT_TIMESTAMP, which writes the timezone-less
- * form and is what mixed the two formats into one column in the first place.
- */
-const NOW_ISO_SQL = `strftime('%Y-%m-%dT%H:%M:%fZ', 'now')`;
-
-function normalizeProjectPathForProvider(provider: string, projectPath: string): string {
-  void provider;
-  return normalizeProjectPath(logicalProjectPathForWorkspace(projectPath));
-}
+/** ISO-8601 UTC normalizer shared with the discovery writers. */
+const normalizeTimestamp = normalizeDiscoveryTimestamp;
 
 /**
  * "Native" session predicate (B-29): a session is shown in the conversations
@@ -89,12 +68,31 @@ const NATIVE_SESSION_PREDICATE_SQL = `(
   OR EXISTS (SELECT 1 FROM message_authors ma WHERE ma.session_id = sessions.session_id)
 )`;
 
-/** B-1420: warn once per leaked test path instead of on every rescan. */
-const warnedForeignTestRunPaths = new Set<string>();
-/** B-1373: warn once per refused protected root instead of on every rescan. */
-const warnedForbiddenProjectRoots = new Set<string>();
-
 export const sessionsDb = {
+  /**
+   * Atomic insert-or-refresh under the ADR-201 no-rebind rules
+   * ({@link recordDiscoveredSession}). Every synchronizer and launch writer
+   * uses this or the two split functions below.
+   */
+  recordDiscoveredSession(input: DiscoveredSession): string {
+    return recordDiscoveredSession(input);
+  },
+
+  /** Inserts a row for a new id only; an existing row is left untouched. */
+  insertDiscoveredSession(input: DiscoveredSession): InsertOutcome {
+    return insertDiscoveredSession(input);
+  },
+
+  /** Refreshes an existing row without rebinding provider, project or source tree. */
+  refreshDiscoveredSession(input: DiscoveredSession): RefreshOutcome {
+    return refreshDiscoveredSession(input);
+  },
+
+  /**
+   * @deprecated Positional test-fixture alias of {@link recordDiscoveredSession}
+   * (same no-rebind rules). Production code must not call it: a guard test
+   * (session-discovery.guard.test.ts) fails on any non-test caller.
+   */
   createSession(
     sessionId: string,
     provider: string,
@@ -104,91 +102,7 @@ export const sessionsDb = {
     updatedAt?: string,
     jsonlPath?: string | null
   ): string {
-    const db = getConnection();
-    const createdAtValue = normalizeTimestamp(createdAt);
-    const updatedAtValue = normalizeTimestamp(updatedAt);
-    const normalizedProjectPath = normalizeProjectPathForProvider(provider, projectPath);
-    // B-1420: a test that leaked a transcript into a watched root must not
-    // register its throwaway case dir as a project in another (live) database.
-    if (isForeignTestRunPath(normalizedProjectPath)) {
-      if (!warnedForeignTestRunPaths.has(normalizedProjectPath)) {
-        warnedForeignTestRunPaths.add(normalizedProjectPath);
-        console.warn('Skipped session discovered under a foreign test run root', { provider });
-      }
-      return sessionId;
-    }
-    // B-1373: a session whose cwd is the service user's home (or a secret
-    // location) must not auto-register that directory as a project — such a
-    // project would expose every credential under it. An already-registered row
-    // is left alone here; file access to it is refused by the path guard.
-    if (isForbiddenProjectRoot(normalizedProjectPath) && !projectsDb.getProjectPath(normalizedProjectPath)) {
-      if (!warnedForbiddenProjectRoots.has(normalizedProjectPath)) {
-        warnedForbiddenProjectRoots.add(normalizedProjectPath);
-        console.warn('Skipped session discovered under a protected root', { provider });
-      }
-      return sessionId;
-    }
-
-    // Wrap the project-upsert + session-upsert in a single transaction so a
-    // concurrent UNIQUE violation or mid-flight crash never leaves the sessions
-    // table with a dangling project_path reference or a partial row.  (B-38.)
-    let createdProjectId: string | null = null;
-    let transferred = false;
-    const run = db.transaction(() => {
-      // Ensure the project path exists in the projects table before writing the
-      // session row that carries the FK reference.
-      // Discovery must not undo a user's project archival (B-963). Explicit
-      // project creation/restoration retains its separate reactivation path.
-      createdProjectId = projectsDb.ensureProjectPathForSession(normalizedProjectPath, {
-        deferFenceRotation: true,
-      });
-
-      // Archival is a USER decision, never overwritten by an upsert (B-161/T-857):
-      // a new row starts active (isArchived 0 in VALUES), but on conflict the
-      // stored isArchived is PRESERVED — a background rescan (any provider's
-      // synchronizer re-indexing an unchanged/archived session) must not
-      // resurrect a session the user archived. Un-archiving has its own explicit
-      // path (restoreSessionById → updateSessionIsArchived(false)).
-      //
-      // engine_provider / engine_provider_source are deliberately ABSENT from
-      // both the INSERT and the UPDATE below (ADR-088): this operation is
-      // reachable from every background synchronizer, and mentioning the engine
-      // columns here would wipe the pin on the next rescan — the isArchived/B-161
-      // failure all over again. Their sole writer is setSessionEnginePin.
-      // BEFORE INSERT guards deliberately reject existing identities. Update first
-      // so synchronization preserves children and never runs an INSERT conflict path.
-      const previous = db.prepare('SELECT project_path FROM sessions WHERE session_id = ?')
-        .get(sessionId) as { project_path: string | null } | undefined;
-      const updated = db.prepare(
-        `UPDATE sessions SET provider = ?, updated_at = COALESCE(?, ${NOW_ISO_SQL}),
-           project_path = ?, jsonl_path = ?, custom_name = COALESCE(?, custom_name)
-         WHERE session_id = ?`
-      ).run(provider, updatedAtValue, normalizedProjectPath, jsonlPath ?? null, customName ?? null, sessionId);
-      if (updated.changes === 0) {
-        db.prepare(
-          `INSERT INTO sessions (session_id, provider, custom_name, project_path, jsonl_path, isArchived, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, 0, COALESCE(?, ${NOW_ISO_SQL}), COALESCE(?, ${NOW_ISO_SQL}))`
-        ).run(sessionId, provider, customName ?? null, normalizedProjectPath, jsonlPath ?? null, createdAtValue, updatedAtValue);
-      } else if (previous?.project_path !== normalizedProjectPath) {
-        // ADR-187: a cross-project transfer never silently retains human-room grants.
-        // The tables exist only once the feature flag has been enabled.
-        const hasRooms = db.prepare(`SELECT 1 FROM sqlite_master
-          WHERE type='table' AND name='session_internal_rooms'`).get();
-        if (hasRooms) {
-          db.prepare(`UPDATE session_internal_rooms
-            SET membership_state='revalidation_required', version=version+1, updated_at=CURRENT_TIMESTAMP
-            WHERE session_id=?`).run(sessionId);
-        }
-        transferred = true;
-      }
-    });
-
-    run.immediate();
-    if (transferred) notifyProjectTransfer(sessionId);
-    // The new row may be a lexical alias of an already-registered physical root.
-    // Rotate through the committed path so every canonical alias is fenced.
-    if (createdProjectId) rotateProjectStructureForPath(createdProjectId, normalizedProjectPath);
-    return sessionId;
+    return recordDiscoveredSession({ sessionId, provider, projectPath, customName, createdAt, updatedAt, jsonlPath });
   },
 
   updateSessionCustomName(sessionId: string, customName: string): void {
@@ -207,7 +121,7 @@ export const sessionsDb = {
    * updated_at to `updatedAt` ONLY when the parent row already exists AND the new
    * value is strictly newer, so:
    *   - a missing parent is a no-op (no INSERT, no project upsert) — it can never
-   *     create or resurrect a row, unlike createSession;
+   *     create or resurrect a row, unlike recordDiscoveredSession;
    *   - a background rescan of an OLD child never rewinds a parent that has since
    *     moved on.
    * Returns nothing; callers treat it as fire-and-forget.
@@ -224,6 +138,17 @@ export const sessionsDb = {
        WHERE session_id = ?
          AND (updated_at IS NULL OR datetime(updated_at) < datetime(?))`
     ).run(normalized, sessionId, normalized);
+  },
+
+  /**
+   * {@link bumpSessionUpdatedAt} gated on the child transcript's source tree
+   * (ADR-201 A2): a derivative file (Codex child thread, kimi-agent subagent)
+   * advances its parent only when it sits in the parent row's recorded tree, so
+   * a file in another member's tree naming a parent id cannot touch that row.
+   */
+  bumpSessionUpdatedAtFromChild(parentSessionId: string, updatedAt: string | undefined, childPath: string): void {
+    if (!parentSessionId || !isChildInParentTree(parentSessionId, childPath)) return;
+    this.bumpSessionUpdatedAt(parentSessionId, updatedAt);
   },
 
   /**
@@ -683,7 +608,7 @@ export const sessionsDb = {
    */
   getSessionFilePathsByIds(
     sessionIds: string[],
-  ): Array<{ session_id: string; jsonl_path: string; project_path: string | null }> {
+  ): Array<{ session_id: string; provider: string; jsonl_path: string; project_path: string | null }> {
     if (sessionIds.length === 0) {
       return [];
     }
@@ -692,16 +617,18 @@ export const sessionsDb = {
     // project_path (the run's real cwd) is returned alongside jsonl_path so the
     // workflow-status endpoint can match a session to a supervisor scope by its
     // actual project directory (ADR-053 §ج-2). Existing callers read by field
-    // name, so the extra column is additive and non-breaking.
+    // name, so the extra column is additive and non-breaking. `provider` lets the
+    // caller hand each row straight to the pinned transcript reader (ADR-201 A1).
     return db
       .prepare(
-        `SELECT session_id, jsonl_path, project_path
+        `SELECT session_id, provider, jsonl_path, project_path
          FROM sessions
          WHERE session_id IN (${placeholders})
            AND jsonl_path IS NOT NULL`
       )
       .all(...sessionIds) as Array<{
       session_id: string;
+      provider: string;
       jsonl_path: string;
       project_path: string | null;
     }>;

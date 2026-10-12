@@ -1,10 +1,11 @@
 import fsSync from 'node:fs';
+import path from 'node:path';
 
 import Database from 'better-sqlite3';
 
 import { readResponseModel } from '@/modules/providers/shared/response-model.js';
 import { formatToolContent, openCodeToolPart } from '@/modules/providers/list/opencode/opencode-tool-part.js';
-import { redactQwenPlanSecrets } from '@/services/isolation/opencode-qwen-plan.js';
+import { redactLiteralSecrets } from '@/services/isolation/opencode-qwen-plan.js';
 import type { IProviderSessions } from '@/shared/interfaces.js';
 import type { AnyRecord, FetchHistoryOptions, FetchHistoryResult, NormalizedMessage } from '@/shared/types.js';
 import {
@@ -16,6 +17,9 @@ import {
   readJsonRecord,
   readOptionalString,
 } from '@/shared/utils.js';
+
+import { resolveOpenCodeDataHomeOwner } from './opencode-home.js';
+import { collectOpenCodeSessionSecrets } from './opencode-redaction-secrets.js';
 
 const PROVIDER = 'opencode';
 
@@ -437,6 +441,15 @@ export class OpenCodeSessionsProvider implements IProviderSessions {
   private normalizeHistoryRows(rows: OpenCodeHistoryRow[], sessionId: string): NormalizedMessage[] {
     const normalized: NormalizedMessage[] = [];
     const emittedMessageErrors = new Set<string>();
+    // ADR-200 §8 / M-5: under ADR-089 every member reads every session, so the
+    // current vendor keys of EVERY sender in it are redacted, not the reader's.
+    // M-6: the owner of the data dir this history is read from, and the
+    // auth.json in that dir, are covered too (same rule as the synchronizer).
+    const dataHome = path.dirname(getOpenCodeDatabasePath());
+    const secrets = collectOpenCodeSessionSecrets(sessionId, {
+      dataHome,
+      extraUserIds: [resolveOpenCodeDataHomeOwner(dataHome)],
+    });
     // ADR-199 Addendum B §16: each todowrite is a full snapshot, so history
     // stamps only the last one of each turn (a user message opens a turn).
     let turnPlan: { message: NormalizedMessage; plan: NonNullable<NormalizedMessage['plan']> } | null = null;
@@ -446,12 +459,12 @@ export class OpenCodeSessionsProvider implements IProviderSessions {
     };
 
     for (const storedRow of rows) {
-      // T-1906: a Coding Plan key a model echoed into opencode.db is redacted
-      // on read, before any field is parsed or returned.
+      // A key a model echoed into opencode.db is redacted on read, before any
+      // field is parsed or returned.
       const row: OpenCodeHistoryRow = {
         ...storedRow,
-        message_data: redactQwenPlanSecrets(storedRow.message_data),
-        part_data: redactQwenPlanSecrets(storedRow.part_data),
+        message_data: redactLiteralSecrets(storedRow.message_data, secrets),
+        part_data: redactLiteralSecrets(storedRow.part_data, secrets),
       };
       const timestamp = normalizeProviderTimestamp(row.part_time_created ?? row.message_time_created);
       const baseId = `${row.message_id}_${row.part_id ?? normalized.length}`;

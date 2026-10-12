@@ -82,12 +82,17 @@
  *
  * FAIL-SAFE: every path degrades to `'unknown'`/null and never throws, mirroring
  * `readJournalKeySets`' contract.
+ *
+ * PINNED ACCESS (ADR-201 A1): every read goes through a `SessionArtifactDir`
+ * (the session's `subagents` directory, pinned from its pinned transcript);
+ * files are opened through the directory descriptor, never by a stored path.
  */
 
-import fsp from 'node:fs/promises';
-import path from 'node:path';
+import type { FileHandle } from 'node:fs/promises';
 
 import type { AnyRecord } from '@/shared/types.js';
+
+import type { SessionArtifactDir } from '../../shared/session-transcript-reader.js';
 
 /**
  * Bytes read from the END of an agent transcript. 1 MiB reaches the decisive
@@ -316,7 +321,7 @@ function parseRecords(slice: string, dropFirstPartial: boolean): AnyRecord[] {
 
 /** Reads a byte range and decodes it as UTF-8. */
 async function readRange(
-  handle: fsp.FileHandle,
+  handle: FileHandle,
   start: number,
   length: number,
 ): Promise<string> {
@@ -334,24 +339,9 @@ function readTimestamp(record: AnyRecord | null | undefined): string | null {
   return typeof ts === 'string' && ts.length > 0 ? ts : null;
 }
 
-/**
- * Reads one `agent-<id>.jsonl` and returns its verdict.
- *
- * Read-only, bounded, and fail-safe: any anomaly degrades to `'unknown'` with a
- * reason and never throws. Never opens the file for writing and never inspects
- * `stop_reason`.
- *
- * @param agentPath Absolute path to `<sessionDir>/subagents/agent-<id>.jsonl`.
- * @param agentId   The id parsed from the file name (used verbatim in the result).
- */
-export async function readAgentOutcome(
-  agentPath: string,
-  agentId: string,
-  options: { tailBytes?: number } = {},
-): Promise<AgentOutcome> {
-  const tailBytes = options.tailBytes ?? DEFAULT_TAIL_BYTES;
-
-  const unreadable: AgentOutcome = {
+/** The verdict of a transcript that could not be read. */
+function unreadableOutcome(agentId: string): AgentOutcome {
+  return {
     agentId,
     outcome: 'unknown',
     unknownReason: 'unreadable',
@@ -362,10 +352,40 @@ export async function readAgentOutcome(
     finalTextTruncated: false,
     interruptionText: null,
   };
+}
 
-  let handle: fsp.FileHandle | null = null;
+/**
+ * Reads one `agent-<id>.jsonl` through the pinned `subagents` directory and
+ * returns its verdict. Read-only, bounded, and fail-safe: any anomaly (including
+ * a refused pinned open — symlink, hardlink, missing) degrades to `'unknown'`
+ * with reason `'unreadable'` and never throws. Never inspects `stop_reason`.
+ *
+ * @param subagents The session's pinned `subagents` directory.
+ * @param agentId   The id parsed from the file name (used verbatim in the result).
+ */
+export async function readAgentOutcome(
+  subagents: SessionArtifactDir,
+  agentId: string,
+  options: { tailBytes?: number } = {},
+): Promise<AgentOutcome> {
+  const child = await subagents.openFile(`agent-${agentId}.jsonl`);
+  if (!('handle' in child)) return unreadableOutcome(agentId);
   try {
-    handle = await fsp.open(agentPath, 'r');
+    return await readAgentOutcomeFrom(child.handle, agentId, options);
+  } finally {
+    await subagents.closeFile(child);
+  }
+}
+
+/** Verdict of one agent transcript read from an open descriptor (positional reads only). */
+export async function readAgentOutcomeFrom(
+  handle: FileHandle,
+  agentId: string,
+  options: { tailBytes?: number } = {},
+): Promise<AgentOutcome> {
+  const tailBytes = options.tailBytes ?? DEFAULT_TAIL_BYTES;
+  const unreadable = unreadableOutcome(agentId);
+  try {
     const stat = await handle.stat();
     const size = stat.size;
     if (size === 0) {
@@ -442,13 +462,10 @@ export async function readAgentOutcome(
       interruptionText,
     };
   } catch (error) {
-    console.debug(
-      `[agent-reconcile] could not read agent transcript ${agentPath}:`,
-      error instanceof Error ? error.message : String(error),
-    );
+    console.debug('[agent-reconcile] could not read agent transcript', {
+      agentId, error: error instanceof Error ? error.message : String(error),
+    });
     return unreadable;
-  } finally {
-    await handle?.close().catch(() => undefined);
   }
 }
 
@@ -458,15 +475,30 @@ function metaString(record: AnyRecord, key: string): string | null {
   return typeof value === 'string' && value.length > 0 ? value : null;
 }
 
+/** Upper bound on a meta sidecar read; the real ones are a few hundred bytes. */
+const META_MAX_BYTES = 64 * 1024;
+
+/** Text of `agent-<id>.meta.json`, read through the pinned directory; null when absent or oversize. */
+async function readMetaText(subagents: SessionArtifactDir, agentId: string): Promise<string | null> {
+  const child = await subagents.openFile(`agent-${agentId}.meta.json`);
+  if (!('handle' in child)) return null;
+  try {
+    if (child.stat.size > BigInt(META_MAX_BYTES)) return null;
+    return await child.handle.readFile({ encoding: 'utf8' });
+  } finally {
+    await subagents.closeFile(child);
+  }
+}
+
 /**
  * Reads `agent-<id>.meta.json` — the sidecar `claude-sessions.provider.ts` has
  * always skipped ("the sidecar agent-*.meta.json files are ignored"). It is the
  * ONLY place `toolUseId` exists for an agent that never produced a result, which
  * is precisely the population this feature is about.
  *
- * Fail-safe: a missing/malformed sidecar yields an all-null record, never a throw.
+ * Fail-safe: a missing/malformed/refused sidecar yields an all-null record, never a throw.
  */
-export async function readAgentMeta(metaPath: string): Promise<AgentMeta> {
+export async function readAgentMeta(subagents: SessionArtifactDir, agentId: string): Promise<AgentMeta> {
   const empty: AgentMeta = {
     agentType: null,
     description: null,
@@ -477,7 +509,8 @@ export async function readAgentMeta(metaPath: string): Promise<AgentMeta> {
   };
 
   try {
-    const raw = await fsp.readFile(metaPath, 'utf8');
+    const raw = await readMetaText(subagents, agentId);
+    if (raw === null) return empty;
     const parsed = JSON.parse(raw) as unknown;
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
       return empty;
@@ -499,42 +532,22 @@ export async function readAgentMeta(metaPath: string): Promise<AgentMeta> {
 }
 
 /**
- * Lists the direct `Agent` ids under `<sessionDir>/subagents`.
+ * Lists the direct `Agent` ids under the pinned `subagents` directory.
  *
- * Only the FLAT `agent-<id>.jsonl` entries are returned. `workflows/` is a
- * subdirectory and is never descended into, which is what keeps this reader
- * disjoint from `workflow-reconcile`'s tree (T-825).
+ * Only the FLAT `agent-<id>.jsonl` names are returned. `workflows/` does not
+ * match the name filter and is never descended into, which is what keeps this
+ * reader disjoint from `workflow-reconcile`'s tree (T-825). A name that is not
+ * a regular file is refused later by the pinned open (`'unreadable'`).
  */
-export async function listSessionAgentIds(subagentsDir: string): Promise<string[]> {
+export async function listSessionAgentIds(subagents: SessionArtifactDir): Promise<string[]> {
   try {
-    const entries = await fsp.readdir(subagentsDir, { withFileTypes: true });
-    const ids: string[] = [];
-    for (const entry of entries) {
-      if (!entry.isFile()) {
-        continue; // skips `workflows/`
-      }
-      const name = entry.name;
-      if (!name.startsWith('agent-') || !name.endsWith('.jsonl')) {
-        continue;
-      }
-      ids.push(name.slice('agent-'.length, -'.jsonl'.length));
-    }
-    return ids;
+    return (await subagents.list())
+      .filter((name) => name.startsWith('agent-') && name.endsWith('.jsonl') && name.length > 'agent-.jsonl'.length)
+      .map((name) => name.slice('agent-'.length, -'.jsonl'.length));
   } catch (error) {
-    const fileError = error as NodeJS.ErrnoException;
-    if (fileError.code !== 'ENOENT') {
-      console.debug(`[agent-reconcile] could not list ${subagentsDir}:`, fileError.message);
-    }
+    console.debug('[agent-reconcile] could not list a subagents directory', {
+      error: error instanceof Error ? error.message : String(error),
+    });
     return [];
   }
-}
-
-/** Absolute path of an agent transcript inside a session's `subagents` dir. */
-export function agentTranscriptPath(subagentsDir: string, agentId: string): string {
-  return path.join(subagentsDir, `agent-${agentId}.jsonl`);
-}
-
-/** Absolute path of an agent's meta sidecar inside a session's `subagents` dir. */
-export function agentMetaPath(subagentsDir: string, agentId: string): string {
-  return path.join(subagentsDir, `agent-${agentId}.meta.json`);
 }

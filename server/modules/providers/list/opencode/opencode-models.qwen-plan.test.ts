@@ -1,4 +1,4 @@
-/** T-1906 — the qwen-plan model overlay (static list, caller's own key, flag-gated). */
+/** T-1906 / ADR-200 S7 — the Token Plan model overlay (static list, caller's own key, kill switch). */
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
@@ -10,20 +10,20 @@ const base: ProviderModelsDefinition = {
   OPTIONS: [{ value: 'anthropic/claude-sonnet-4-5', label: 'Claude Sonnet 4.5' }],
   DEFAULT: 'anthropic/claude-sonnet-4-5',
 };
-const good = { plan: 'coding_plan', region: 'international', key: 'sk-sp-0123456789abcdef' };
+const good = { plan: 'token_plan', region: 'international', key: 'tp-0123456789abcdef' };
 const on = { NASSAJ_OPENCODE_QWEN_PLAN: 'true' };
 
 describe('withQwenPlanModels (T-1906)', () => {
-  it('offers the static qwen-plan list to a caller with a compatible key while the flag is on', () => {
+  it('offers the static qwen-plan list to a caller with a Token Plan key while the flag is on', () => {
     const merged = withQwenPlanModels(base, good, on);
     assert.equal(merged.DEFAULT, base.DEFAULT);
-    assert.ok(merged.OPTIONS.some((option) => option.value === 'qwen-plan/qwen3-coder-plus'));
+    assert.ok(merged.OPTIONS.some((option) => option.value === 'qwen-plan/qwen3.7-plus'));
     assert.ok(!JSON.stringify(merged).includes(good.key));
   });
 
-  it('offers nothing without a key, with an incompatible profile, or with the flag off', () => {
+  it('offers nothing without a key, with a legacy profile, or with the flag off', () => {
     for (const [profile, env] of [
-      [null, on], [{ ...good, plan: 'token_plan' }, on], [{ ...good, region: 'china' }, on], [good, {}],
+      [null, on], [{ ...good, plan: 'coding_plan' }, on], [{ ...good, region: 'china' }, on], [good, {}],
     ] as const) {
       const merged = withQwenPlanModels(base, profile, env);
       assert.ok(!merged.OPTIONS.some((option) => option.value.startsWith('qwen-plan/')));

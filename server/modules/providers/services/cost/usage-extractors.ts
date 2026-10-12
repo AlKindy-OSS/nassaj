@@ -38,7 +38,7 @@
  *    بينما `input_tokens` لدى Anthropic لا يشمل المخبّأ أصلاً.
  */
 
-import { open, readdir, stat } from 'node:fs/promises';
+import { readdir, type FileHandle } from 'node:fs/promises';
 import path from 'node:path';
 import { createInterface } from 'node:readline';
 
@@ -48,6 +48,17 @@ import {
   withTranscriptReadPermit,
   type CodexRolloutManifest,
 } from '@/modules/providers/list/codex/codex-rollout-links.js';
+import {
+  claudeFileBinder,
+  codexThreadBinder,
+  confiningRootOf,
+  isQuietChildRefusal,
+  isTranscriptHandle,
+  openBoundFile,
+  openRecordedTranscript,
+  requireBoundFile,
+  type SessionTranscriptHandle,
+} from '@/modules/providers/shared/session-transcript-reader.js';
 
 /** عدّادات التوكنز بتصنيف التسعير (لا بتصنيف المزوّد). */
 export type TokenTotals = {
@@ -491,17 +502,19 @@ export class ClaudeUsageAccumulator {
   }
 }
 
-/** يقرأ ملف JSONL سطراً سطراً (لا readFile: بعض الملفات تتجاوز 100MB). */
-async function feedJsonlFile(
-  filePath: string,
+/**
+ * يقرأ ملف JSONL سطراً سطراً (لا readFile: بعض الملفات تتجاوز 100MB) من
+ * واصف مثبَّت (ADR-201 A1) يملكه المستدعي ويغلقه.
+ */
+async function feedJsonlHandle(
+  handle: FileHandle,
   accumulator: ClaudeUsageAccumulator,
   signal?: AbortSignal,
   observation?: { unstable: boolean },
 ): Promise<void> {
   await withTranscriptReadPermit(signal, async () => {
-  const handle = await open(filePath, 'r');
   const before = await handle.stat();
-  const stream = handle.createReadStream({ encoding: 'utf8', signal, autoClose: false });
+  const stream = handle.createReadStream({ encoding: 'utf8', signal, start: 0, autoClose: false });
   const lines = createInterface({ input: stream, crlfDelay: Infinity });
 
   try {
@@ -522,7 +535,6 @@ async function feedJsonlFile(
     }
     lines.close();
     stream.destroy();
-    await handle.close().catch(() => undefined);
   }
   });
 }
@@ -557,13 +569,91 @@ async function collectJsonlFiles(directory: string, signal?: AbortSignal): Promi
 }
 
 /**
+ * A conversation the cost path reads (ADR-201 A-P2c): a transcript the caller
+ * already opened through the session transcript reader, or the server-held
+ * (session id, recorded path) pair the extractor binds itself through the
+ * same core reader — tree-confined, pinned, name- and header-bound.
+ */
+export type UsageTranscript = SessionTranscriptHandle | { sessionId: string; transcriptPath: string };
+
+type BoundUsageTranscript = {
+  sessionId: string;
+  /** Realpath of the provider root of the tree holding the transcript. */
+  root: string;
+  /** Transcript path whose stem names the Claude subagent directory. */
+  transcriptPath: string;
+  /** Pinned transcript, or null for a Claude session whose parent file is gone. */
+  fd: FileHandle | null;
+  release(): Promise<void>;
+};
+
+const keep = async (): Promise<void> => undefined;
+
+/**
+ * Binds a usage transcript, or null when the reader refuses it. Only a Claude
+ * transcript that is simply missing keeps its subagent directory readable
+ * (a swept parent): the directory is then confined to the tree holding the
+ * recorded path and every file in it is bound to the session id by its header.
+ */
+async function bindUsageTranscript(provider: 'claude' | 'codex', transcript: UsageTranscript): Promise<BoundUsageTranscript | null> {
+  if ('fd' in transcript) {
+    if (!transcript.root || transcript.provider !== provider) return null;
+    return {
+      sessionId: transcript.sessionId, root: transcript.root, transcriptPath: transcript.realpath,
+      fd: transcript.fd, release: keep,
+    };
+  }
+  const { sessionId, transcriptPath } = transcript;
+  const opened = await openRecordedTranscript({ session_id: sessionId, provider, jsonl_path: transcriptPath }, 'cost');
+  if (isTranscriptHandle(opened)) {
+    return {
+      sessionId, root: opened.root ?? '', transcriptPath: opened.realpath, fd: opened.fd,
+      release: () => opened.fd.close().catch(() => undefined),
+    };
+  }
+  if (provider !== 'claude' || opened.reason !== 'missing' || path.basename(transcriptPath) !== `${sessionId}.jsonl`) {
+    return null;
+  }
+  const root = await confiningRootOf('claude', transcriptPath);
+  return root ? { sessionId, root, transcriptPath, fd: null, release: keep } : null;
+}
+
+const REFUSED_REASON = 'A transcript file was refused because it is not bound to this conversation.';
+
+/**
+ * Feeds every Claude subagent file of `bound`: each is pinned no-follow,
+ * confined to the transcript's tree and bound to the session id by its
+ * header. Returns how many files were refused (they are never counted).
+ */
+async function feedClaudeSubagents(
+  bound: BoundUsageTranscript, accumulator: ClaudeUsageAccumulator,
+  signal?: AbortSignal, observation?: { unstable: boolean },
+): Promise<number> {
+  let refused = 0;
+  const binder = claudeFileBinder(bound.sessionId, false);
+  for (const file of await collectJsonlFiles(bound.transcriptPath.replace(/\.jsonl$/, ''), signal)) {
+    const opened = await openBoundFile(bound.root, file, binder);
+    if ('reason' in opened) {
+      signal?.throwIfAborted();
+      if (!isQuietChildRefusal(opened.reason)) refused += 1;
+      continue;
+    }
+    try {
+      await feedJsonlHandle(opened.handle, accumulator, signal, observation);
+    } finally {
+      await opened.handle.close().catch(() => undefined);
+    }
+  }
+  return refused;
+}
+
+/**
  * استهلاك محادثة كلود كاملة: ملف الأمّ + كل ملفات الوكلاء الفرعيين تحت
- * مجلّد يحمل اسم الجلسة بجانبه.
- *
- * @param transcriptPath المسار الكامل لملف `<sessionId>.jsonl`.
+ * مجلّد يحمل اسم الجلسة بجانبه. السجلّ مربوط بالجلسة (ADR-201 A-P2c): ملف
+ * أمّ مرفوض لا يُقرأ هو ولا وكلاؤه، ووكيل لا يحمل معرّف الجلسة لا يُحسب.
  */
 export async function extractClaudeSessionUsage(
-  transcriptPath: string,
+  transcript: UsageTranscript,
   window?: UsageWindow,
   attribution?: UsageAttributionFilter,
   signal?: AbortSignal,
@@ -571,24 +661,25 @@ export async function extractClaudeSessionUsage(
 ): Promise<SessionUsage> {
   const accumulator = new ClaudeUsageAccumulator(window, attribution, options.captureRequests === true);
   const observation = { unstable: false };
-
-  try {
-    await stat(transcriptPath);
-    await feedJsonlFile(transcriptPath, accumulator, signal, observation);
-  } catch {
-    if (signal?.aborted) throw signal.reason ?? new DOMException('Aborted', 'AbortError');
-    // لا ملف أمّ: قد تكون الجلسة وكيلاً فرعياً أو حُذف السجلّ — نُكمل للمجلّد.
-  }
-
-  const subagentDirectory = transcriptPath.replace(/\.jsonl$/, '');
-  for (const file of await collectJsonlFiles(subagentDirectory, signal)) {
-    await feedJsonlFile(file, accumulator, signal, observation);
+  const bound = await bindUsageTranscript('claude', transcript);
+  signal?.throwIfAborted();
+  let refused = bound ? 0 : 1;
+  if (bound) {
+    try {
+      if (bound.fd) await feedJsonlHandle(bound.fd, accumulator, signal, observation);
+      refused = await feedClaudeSubagents(bound, accumulator, signal, observation);
+    } finally {
+      await bound.release();
+    }
   }
 
   const usage = accumulator.result('claude');
   if (options.captureRequests) {
     usage.requests = accumulator.requests();
     usage.userBoundariesMs = accumulator.userBoundaries();
+  }
+  if (refused > 0) {
+    return { ...usage, snapshotStatus: 'incomplete', snapshotReason: REFUSED_REASON };
   }
   return observation.unstable
     ? { ...usage, snapshotStatus: 'incomplete', snapshotReason: 'A Claude transcript changed while usage was being read.' }
@@ -609,8 +700,16 @@ export async function extractClaudeSessionUsage(
  * ومخرجات التفكير (`reasoning_output_tokens`) جزء من `output_tokens` لا
  * تُضاف إليها.
  */
+/**
+ * One Codex rollout to read (ADR-201 A-P2c): it is pinned no-follow, must lie
+ * under `root` (the provider root of its tree) and is bound to `threadId` by
+ * its name and its `session_meta`; `rootAlias` also binds `session_id` (a
+ * conversation root). A refused rollout throws TranscriptRefusedError.
+ */
+export type CodexRolloutSource = { rolloutPath: string; threadId: string; root: string; rootAlias?: boolean };
+
 export async function extractCodexSessionUsage(
-  rolloutPath: string,
+  rollout: CodexRolloutSource,
   window?: UsageWindow,
   durationAccumulator?: WorkDurationAccumulator,
   signal?: AbortSignal,
@@ -619,6 +718,7 @@ export async function extractCodexSessionUsage(
   options: { captureRequests?: boolean; isSubagent?: boolean } = {},
 ): Promise<SessionUsage> {
   return withCodexRolloutRead(signal, async () => {
+  const { rolloutPath } = rollout;
   let model = '';
   let latest: { input: number; cached: number; output: number } | null = null;
   let previousSnapshot: { input: number; cached: number; output: number } | null = null;
@@ -628,9 +728,13 @@ export async function extractCodexSessionUsage(
   let baseline: { input: number; cached: number; output: number } | null = null;
   const workDuration = durationAccumulator ?? new WorkDurationAccumulator();
 
-  const handle = await open(rolloutPath, 'r');
+  // ADR-201 A-P2c: pinned single-link, last component never followed,
+  // confined to its tree and bound to its thread id from this descriptor.
+  const { handle } = await requireBoundFile(
+    rollout.root, rolloutPath, codexThreadBinder(rollout.threadId, rollout.rootAlias === true),
+  );
   const before = await handle.stat();
-  const stream = handle.createReadStream({ encoding: 'utf8', signal, autoClose: false });
+  const stream = handle.createReadStream({ encoding: 'utf8', signal, start: 0, autoClose: false });
   const lines = createInterface({ input: stream, crlfDelay: Infinity });
 
   try {
@@ -774,28 +878,56 @@ export async function extractCodexSessionUsage(
   });
 }
 
+const emptyCodexUsage = (reason: string): SessionUsage => ({
+  provider: 'codex', perModel: [], subagentRequests: 0, workDurationMs: null,
+  skipped: { synthetic: 0, duplicates: 0 }, snapshotStatus: 'incomplete', snapshotReason: reason,
+});
+
+/**
+ * The manifest of a bound root: `options.manifest` when it was built for this
+ * very root file, else a fresh one; null when a supplied manifest names
+ * another root (it would attribute another conversation's rollouts).
+ */
+async function boundManifest(
+  bound: BoundUsageTranscript, supplied: CodexRolloutManifest | undefined, signal?: AbortSignal,
+): Promise<CodexRolloutManifest | null> {
+  const tree = supplied ?? await resolveCodexLinkedRollouts(bound.transcriptPath, signal);
+  const root = tree.files[0];
+  return root && root.rolloutPath === bound.transcriptPath && root.threadId === bound.sessionId ? tree : null;
+}
+
 /**
  * Codex conversation usage = coordinator rollout + only the child rollouts
  * explicitly linked by `sub_agent_activity.agent_thread_id` (recursively).
+ * The root is bound to the session (ADR-201 A-P2c); every rollout is re-bound
+ * to its own thread id and tree when it is read.
  */
 export async function extractCodexConversationUsage(
-  rootRolloutPath: string,
+  transcript: UsageTranscript,
   window?: UsageWindow,
   options: { manifest?: CodexRolloutManifest; signal?: AbortSignal; captureRequests?: boolean } = {},
 ): Promise<SessionUsage> {
-  const tree = options.manifest ?? await resolveCodexLinkedRollouts(rootRolloutPath, options.signal);
-  const paths = tree.files.map((file) => file.rolloutPath);
+  const bound = await bindUsageTranscript('codex', transcript);
+  if (!bound) return emptyCodexUsage(REFUSED_REASON);
+  let tree: CodexRolloutManifest | null;
+  try {
+    tree = await boundManifest(bound, options.manifest, options.signal);
+  } finally {
+    await bound.release();
+  }
+  if (!tree) return emptyCodexUsage(REFUSED_REASON);
+  const rootPath = tree.files[0].rolloutPath;
   const workDuration = new WorkDurationAccumulator();
   const observation = { unstable: false };
   const usages = await Promise.all(
-    paths.map((rolloutPath) => extractCodexSessionUsage(
-      rolloutPath,
+    tree.files.map((file) => extractCodexSessionUsage(
+      { rolloutPath: file.rolloutPath, threadId: file.threadId ?? '', root: bound.root, rootAlias: file.rolloutPath === rootPath },
       window,
       workDuration,
       options.signal,
       observation,
       undefined,
-      { captureRequests: options.captureRequests, isSubagent: rolloutPath !== tree.files[0]?.rolloutPath },
+      { captureRequests: options.captureRequests, isSubagent: file.rolloutPath !== rootPath },
     )),
   );
   const byModel = new Map<string, ModelUsage>();

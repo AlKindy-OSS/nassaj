@@ -265,7 +265,7 @@ test('a tree is trusted only at its declared commit and clean, or as a verified 
     assert.throws(() => verifyTreeRoot({ root: archive, sourceRepo: source, commit: candidate }), /differs from/);
 });
 
-test('runUpgradePathLegs runs every leg in order, skips readers of a failed writer and keeps the sandbox', (t) => {
+test('runUpgradePathLegs runs every leg in order, skips readers of a failed writer and keeps the sandbox', async (t) => {
     const dir = mkdtempSync(path.join(TMPBASE, 'upgrade-legs-'));
     t.after(() => rmSync(dir, { recursive: true, force: true }));
     const { source, previous, candidate } = fixtureSource(dir);
@@ -280,10 +280,21 @@ test('runUpgradePathLegs runs every leg in order, skips readers of a failed writ
             : { ok, code: 'release_fetch_failed' }));
         return { status: 0, stdout: '', stderr: '' };
     };
-    const result = runUpgradePathLegs({ sourceRepo: source, previousTag: 'v1.0.0.1', previousRoot, candidateRoot,
-        candidateCommit: candidate, candidateVersion: '1.0.0.2', workParent: path.join(dir, 'work'), spawn });
+    const leaves = [];
+    const candidateLeaves = async (ctx) => {
+        leaves.push(ctx);
+        seen.push('candidate-leaves');
+        return { ok: true };
+    };
+    const result = await runUpgradePathLegs({ sourceRepo: source, previousTag: 'v1.0.0.1', previousRoot, candidateRoot,
+        candidateCommit: candidate, candidateVersion: '1.0.0.2', workParent: path.join(dir, 'work'), spawn,
+        candidateLeaves });
     assert.deepEqual(seen, ['previous-writer', 'candidate-writer', 'candidate-reader-next-update',
-        'candidate-bootstrap-next-update', 'previous-reader-of-candidate-action']);
+        'candidate-bootstrap-next-update', 'previous-reader-of-candidate-action', 'candidate-leaves']);
+    // The leaves leg drives the SAME synthetic next release the in-process legs staged.
+    assert.equal(leaves[0].next.version, '1.0.0.3');
+    assert.equal(git(leaves[0].bare, ['rev-parse', 'refs/tags/v1.0.0.3^{commit}']), leaves[0].next.commit);
+    assert.equal(leaves[0].candidateRoot, candidateRoot);
     assert.equal(result.legs['previous-reader-before-restart'].skipped, true);
     assert.equal(result.legs['candidate-bootstrap-after-restart'].skipped, true);
     assert.equal(result.kept, true);

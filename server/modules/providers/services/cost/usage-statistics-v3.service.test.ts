@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
+import { link, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -157,6 +157,28 @@ test('framing failures and shared pending-fact overflow are quarantined', async 
     const fact = JSON.stringify({ timestamp: '2026-01-01T00:00:00.000Z', payload: { type: 'token_count', model: 'gpt-test',
       info: { total_token_usage: { input_tokens: 1, cached_input_tokens: 0, output_tokens: 1 } } } });
     await assert.rejects(run(`${fact}\n`, true), /source_invalid/);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('L1 (ADR-201): a source is opened pinned single-link; a hardlinked rollout is refused', async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'usage-v3-pinned-'));
+  try {
+    const sourcePath = path.join(directory, 'rollout.jsonl');
+    const fact = JSON.stringify({ timestamp: '2026-01-01T00:00:00.000Z', payload: { type: 'token_count', model: 'gpt-test',
+      info: { total_token_usage: { input_tokens: 1, cached_input_tokens: 0, output_tokens: 1 } } } });
+    await writeFile(sourcePath, `${fact}\n`);
+    const canonical = await realpath(sourcePath);
+    const identity = createHash('sha256').update(canonical).digest('hex');
+    const context: WriterAttemptContext = { rootSessionId: 'root', rootSourceIdentityHash: identity,
+      process: { hostBootId: '00000000-0000-0000-0000-000000000000', pid: 1, procStartTicks: '1' },
+      sources: new Map([[identity, canonical]]) };
+    const scan = () => preflightWriterAttemptSource(context, identity, 0, undefined,
+      { parseFacts: true, modelHint: 'gpt-test', factArena: new FactArena() });
+    assert.equal((await scan()).sourceIdentityHash, identity, 'control: a single-link source is read');
+    await link(sourcePath, path.join(directory, 'second-name.jsonl'));
+    await assert.rejects(scan(), /multiply_linked/);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

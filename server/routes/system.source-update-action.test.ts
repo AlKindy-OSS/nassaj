@@ -59,16 +59,32 @@ test('the builder drops a malformed previousRuntimeOid instead of persisting it'
   }
 });
 
-test('a malformed previousRuntimeOid or an unknown key is still rejected', (t) => {
+test('a malformed previousRuntimeOid is still rejected', (t) => {
   const base = buildSourceUpdateAction({ transactionId: 'tx-contract', originalHead: 'a'.repeat(40),
     targetCommit: 'c'.repeat(40), version: '1', manifestPath: 'x', manifestSha256: 'd'.repeat(64),
     expectedServerBuildId: BUILD });
-  for (const extra of [{ previousRuntimeOid: 'not-a-commit' }, { previousRuntimeOid: null }, { unexpected: true }]) {
+  for (const extra of [{ previousRuntimeOid: 'not-a-commit' }, { previousRuntimeOid: null }]) {
     const fixture = candidate(t, {}, { ...base, ...extra });
     const raw = { ...fixture.action, manifestPath: path.join(fixture.candidateRoot, 'candidate-manifest.json') };
     fs.writeFileSync(fixture.file, `${JSON.stringify(raw)}\n`, { mode: 0o600 });
     assert.throws(() => readCanonicalSourceUpdateAction(fixture.file, fixture.candidateRoot, BUILD),
       /source_update_action_invalid/, JSON.stringify(extra));
+  }
+});
+
+test('T-2004: an unknown key and a newer minor id pass the reader (open world)', (t) => {
+  const { file, candidateRoot, action } = candidate(t);
+  const raw = { ...action, schema: 'nassaj-source-update-activation/v1.3', addedLater: { any: 'shape' } };
+  fs.writeFileSync(file, `${JSON.stringify(raw)}\n`, { mode: 0o600 });
+  const read = readCanonicalSourceUpdateAction(file, candidateRoot, BUILD);
+  assert.equal(read?.targetCommit, 'c'.repeat(40));
+});
+
+test('T-2004: a newer major is refused by name, even for another build', (t) => {
+  const { file, candidateRoot, action } = candidate(t);
+  fs.writeFileSync(file, `${JSON.stringify({ ...action, schema: 'nassaj-source-update-activation/v2' })}\n`, { mode: 0o600 });
+  for (const build of [BUILD, 'f'.repeat(64)]) {
+    assert.throws(() => readCanonicalSourceUpdateAction(file, candidateRoot, build), /source_update_action_schema_unsupported/);
   }
 });
 

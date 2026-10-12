@@ -1,13 +1,46 @@
-import fsp from 'node:fs/promises';
 import path from 'node:path';
 import readline from 'node:readline';
-import { createReadStream } from 'node:fs';
-import type { Stats } from 'node:fs';
+import type { Readable } from 'node:stream';
 
 import type { AnyRecord, NormalizedMessage } from '@/shared/types.js';
 import { createNormalizedMessage } from '@/shared/utils.js';
 
 import type { HistoryReadLease } from '../../services/history-budget.service.js';
+
+/** One workflow journal: its mtime and a fresh stream over its content. */
+export type WorkflowJournal = { mtimeMs: number; open: () => Readable };
+
+/**
+ * Read access to `<sessionDir>/subagents/workflows` (ADR-201 A1): a pinned
+ * source (history reads, workflow status) or the bounded reader's lease. There
+ * is no by-name source; without either nothing is read.
+ */
+export type WorkflowJournalSource = {
+  list(): Promise<string[]>;
+  journal(entry: string): Promise<WorkflowJournal | undefined>;
+};
+
+export type ReconcileReadOptions = {
+  quietMs?: number; now?: number; historyLease?: HistoryReadLease; journals?: WorkflowJournalSource;
+};
+
+function leaseJournals(lease: HistoryReadLease, workflowsDir: string): WorkflowJournalSource {
+  return {
+    list: () => lease.directory(workflowsDir),
+    journal: async (entry) => {
+      const journalPath = path.join(workflowsDir, entry, 'journal.jsonl');
+      const metadata = await lease.stat(journalPath);
+      return metadata ? { mtimeMs: Number(metadata.mtimeMs), open: () => lease.stream(journalPath) } : undefined;
+    },
+  };
+}
+
+/** The journal stream: the caller's pinned input, else the lease; never a by-name open. */
+function openJournalInput(journalPath: string, lease?: HistoryReadLease, input?: () => Readable): Readable {
+  if (input) return input();
+  if (lease) return lease.stream(journalPath);
+  throw new Error('no pinned journal source');
+}
 
 /**
  * ADR-048 — Workflow Completion Reconcile (incident 2026-06-27, wf_synthetic_ef5ba242-b4b).
@@ -156,8 +189,9 @@ export type WorkflowReconcileResult = {
  * considered done.
  *
  * Fail-safe per line: a corrupted JSON line is skipped (concurrent-write safe),
- * not fatal. A missing/unreadable journal yields empty sets so the caller
- * treats the workflow as "not complete" rather than erroring.
+ * not fatal. A missing/unreadable journal, or a call with neither a pinned
+ * `input` nor a lease (ADR-201 A1: no by-name open), yields empty sets so the
+ * caller treats the workflow as "not complete" rather than erroring.
  *
  * EXPORTED (T-53-B1, ADR-053): reused verbatim by the workflow liveness path so
  * both the restart reconcile and the B-103 liveness read the journal through
@@ -167,6 +201,7 @@ export type WorkflowReconcileResult = {
 export async function readJournalKeySets(
   journalPath: string,
   lease?: HistoryReadLease,
+  input?: () => Readable,
 ): Promise<{ startedKeys: Set<string>; resultKeys: Set<string> }> {
   const startedKeys = new Set<string>();
   const resultKeys = new Set<string>();
@@ -174,7 +209,7 @@ export async function readJournalKeySets(
   let rl: readline.Interface | null = null;
   try {
     rl = readline.createInterface({
-      input: lease ? lease.stream(journalPath) : createReadStream(journalPath),
+      input: openJournalInput(journalPath, lease, input),
       crlfDelay: Infinity,
     });
 
@@ -291,15 +326,20 @@ function classifyWorkflowSettlement(
 export async function findReconciledWorkflows(
   sessionDir: string,
   stoppedAtMs: number,
-  options: { quietMs?: number; now?: number; historyLease?: HistoryReadLease } = {},
+  options: ReconcileReadOptions = {},
 ): Promise<WorkflowReconcileResult[]> {
   const quietMs = options.quietMs ?? resolveQuietMs();
   const now = options.now ?? Date.now();
   const workflowsDir = path.join(sessionDir, 'subagents', 'workflows');
+  const journals = options.journals
+    ?? (options.historyLease ? leaseJournals(options.historyLease, workflowsDir) : null);
+  if (!journals) {
+    return [];
+  }
 
   let entries: string[];
   try {
-    entries = options.historyLease ? await options.historyLease.directory(workflowsDir) : await fsp.readdir(workflowsDir);
+    entries = await journals.list();
   } catch (error) {
     const fileError = error as NodeJS.ErrnoException;
     if (fileError.code !== 'ENOENT') {
@@ -318,19 +358,16 @@ export async function findReconciledWorkflows(
 
     const journalPath = path.join(workflowsDir, entry, 'journal.jsonl');
 
-    let journalStat: Stats;
+    let journal: WorkflowJournal | undefined;
     try {
-      if (options.historyLease) {
-        const metadata = await options.historyLease.stat(journalPath);
-        if (!metadata) continue;
-        journalStat = { mtimeMs: Number(metadata.mtimeMs) } as Stats;
-      } else journalStat = await fsp.stat(journalPath);
+      journal = await journals.journal(entry);
     } catch {
       // No journal in this workflow folder yet => no signal for it.
       continue;
     }
+    if (!journal) continue;
 
-    const journalMtimeMs = journalStat.mtimeMs;
+    const journalMtimeMs = journal.mtimeMs;
 
     // Freshness (a): must have been written AFTER the stopped notification.
     if (!(journalMtimeMs > stoppedAtMs)) {
@@ -341,7 +378,7 @@ export async function findReconciledWorkflows(
       continue;
     }
 
-    const { startedKeys, resultKeys } = await readJournalKeySets(journalPath, options.historyLease);
+    const { startedKeys, resultKeys } = await readJournalKeySets(journalPath, options.historyLease, journal.open);
     const status = classifyWorkflowSettlement(startedKeys, resultKeys);
     if (status === null) {
       continue;
@@ -415,7 +452,7 @@ export async function reconcileWorkflowMessages(
   sessionId: string,
   sessionDir: string,
   stoppedAtMs: number | null,
-  options: { quietMs?: number; now?: number; historyLease?: HistoryReadLease } = {},
+  options: ReconcileReadOptions = {},
 ): Promise<NormalizedMessage[]> {
   try {
     if (!workflowReconcileEnabled()) {

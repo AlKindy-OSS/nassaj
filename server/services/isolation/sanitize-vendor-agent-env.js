@@ -136,6 +136,11 @@ export const NASSAJ_HOST_SECRET_EXACT_DENY = Object.freeze([
   // T-1906: the personal Qwen Coding Plan key. The qwen-plan opencode launcher
   // sets it on its own child AFTER sanitizing; no other run may inherit it.
   'NASSAJ_QWEN_PLAN_API_KEY',
+  // ADR-200 S8: the per-turn OpenCode Moonshot / DeepSeek keys. The launcher
+  // sets the selected one on its own child AFTER sanitizing; no other run
+  // inherits either. Mirrors OPENCODE_SPAWN_VENDOR_KEY_ENVS (drift-tested).
+  'NASSAJ_MOONSHOT_API_KEY',
+  'NASSAJ_DEEPSEEK_API_KEY',
 ]);
 
 /**

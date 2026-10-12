@@ -18,6 +18,7 @@ import express, { type Request, type Response } from 'express';
 
 import { createRateLimiter } from '@/middleware/rate-limit.js';
 import { auditLogDb, credentialGrantsDb, getConnection, userDb } from '@/modules/database/index.js';
+import { harnessLinkModeService } from '@/modules/providers/index.js';
 import {
   isGrantableKey,
   GRANTABLE_UNITS,
@@ -110,6 +111,8 @@ function buildOverview(callerId: number) {
     declined: row.declinedAt !== null,
     createdAt: row.createdAt,
     inUse: false,
+    // ADR-200 S9: the grantor's link mode — nothing else about the grantor.
+    grantorLinkMode: grantorLinkMode(row.ownerUserId, row.provider),
   }));
   for (const provider of GRANTABLE_UNITS) {
     const { grantedBy } = resolveCredentialPrincipal(callerId, provider);
@@ -123,7 +126,52 @@ function buildOverview(callerId: number) {
     given,
     received,
     members: listActiveMembers(callerId),
+    ...linkModeOverview(callerId, received),
   };
+}
+
+/** The link-mode harnesses a grant can carry (ADR-200 H6). */
+const LINK_MODE_UNITS = ['claude', 'codex'] as const;
+
+const isLinkModeUnit = (provider: string): provider is typeof LINK_MODE_UNITS[number] =>
+  (LINK_MODE_UNITS as readonly string[]).includes(provider);
+
+/**
+ * ADR-200 S4 / H6 (in-flag): grantees run on the grantor's tree, so the
+ * grantor's mode applies to them. `linkModes` is the caller's own mode and
+ * accepted-grantee count per harness — the N in the switch notice — and each
+ * received grant carries its grantor's mode. Absent while the flag is off.
+ */
+function linkModeOverview(callerId: number, received: Array<{ provider: string; grantorLinkMode: string | null }>) {
+  if (!harnessLinkModeService.isEnabled()) return {};
+  const linkModes: Record<string, { mode: string | null; granteeCount: number }> = {};
+  for (const unit of LINK_MODE_UNITS) {
+    linkModes[unit] = { mode: safePeekMode(callerId, unit), granteeCount: harnessLinkModeService.granteeCount(callerId, unit) };
+  }
+  // `ownerLinkMode` (S4) is kept for older clients; it is the same read as `grantorLinkMode`.
+  for (const row of received as Array<{ provider: string; grantorLinkMode: string | null; ownerLinkMode?: string | null }>) {
+    if (isLinkModeUnit(row.provider)) row.ownerLinkMode = row.grantorLinkMode;
+  }
+  return { linkModes };
+}
+
+/**
+ * ADR-200 S9: the mode a grant runs in, for the badge beside the grantor's
+ * name. Claude/Codex in-flag only; null for any other unit, with the flag off,
+ * or when the grantor's tree cannot be read.
+ */
+function grantorLinkMode(ownerUserId: number, provider: string): 'subscription' | 'api_key' | null {
+  if (!isLinkModeUnit(provider) || !harnessLinkModeService.isEnabled()) return null;
+  return safePeekMode(ownerUserId, provider);
+}
+
+/** A grantor tree that cannot be read reports no mode rather than failing the page. */
+function safePeekMode(userId: number, unit: typeof LINK_MODE_UNITS[number]): 'subscription' | 'api_key' | null {
+  try {
+    return harnessLinkModeService.peekMode(userId, unit);
+  } catch {
+    return null;
+  }
 }
 
 const audit = (req: Request, action: 'credential_grant_created' | 'credential_grant_revoked' | 'credential_grant_declined' | 'credential_grant_accepted', metadata: Record<string, unknown>) => {

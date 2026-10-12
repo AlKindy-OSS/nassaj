@@ -1,5 +1,6 @@
 import type { ReactNode, RefObject } from 'react';
-import { ChevronRight, Folder, FolderOpen } from 'lucide-react';
+import { ChevronRight, Folder, FolderOpen, KeyRound } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { cn } from '../../../lib/utils';
 import type { FileTreeNode as FileTreeNodeType, FileTreeViewMode } from '../types/types';
 import { Input } from '../../../shared/view/ui';
@@ -57,6 +58,24 @@ function TreeItemIcon({ item, isOpen, renderFileIcon }: TreeItemIconProps) {
   }
 
   return <span className="ms-[18px] flex flex-shrink-0 items-center">{renderFileIcon(item.name)}</span>;
+}
+
+/**
+ * The item name, plus a key mark on secrets files (B-1593: the server flags
+ * `.env*` and SQLite files; opening one asks for confirmation).
+ */
+function TreeItemName({ item, className }: { item: FileTreeNodeType; className: string }) {
+  const { t } = useTranslation();
+  return (
+    <>
+      <span className={className}>{item.name}</span>
+      {item.secretFile === true && (
+        <span className="flex flex-shrink-0 items-center" role="img" aria-label={t('secretFile.badge')} title={t('secretFile.badge')}>
+          <KeyRound className="h-3 w-3 text-amber-500" aria-hidden="true" />
+        </span>
+      )}
+    </>
+  );
 }
 
 export default function FileTreeNode({
@@ -152,7 +171,7 @@ export default function FileTreeNode({
         <>
           <div className="col-span-5 flex min-w-0 items-center gap-1.5">
             <TreeItemIcon item={item} isOpen={isOpen} renderFileIcon={renderFileIcon} />
-            <span className={nameClassName}>{item.name}</span>
+            <TreeItemName item={item} className={nameClassName} />
           </div>
           <div className="col-span-2 text-sm tabular-nums text-muted-foreground">
             {item.type === 'file' ? formatFileSize(item.size) : ''}
@@ -164,7 +183,7 @@ export default function FileTreeNode({
         <>
           <div className="flex min-w-0 items-center gap-1.5">
             <TreeItemIcon item={item} isOpen={isOpen} renderFileIcon={renderFileIcon} />
-            <span className={nameClassName}>{item.name}</span>
+            <TreeItemName item={item} className={nameClassName} />
           </div>
           <div className="ms-2 flex flex-shrink-0 items-center gap-3 text-sm text-muted-foreground">
             {item.type === 'file' && (
@@ -178,7 +197,7 @@ export default function FileTreeNode({
       ) : (
         <>
           <TreeItemIcon item={item} isOpen={isOpen} renderFileIcon={renderFileIcon} />
-          <span className={nameClassName}>{item.name}</span>
+          <TreeItemName item={item} className={nameClassName} />
         </>
       )}
     </div>

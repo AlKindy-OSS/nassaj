@@ -81,6 +81,8 @@ export type {
   CreateConnectorInput,
 } from '@/modules/database/repositories/connectors.db.js';
 export { governanceExemptionsDb } from '@/modules/database/repositories/governance-exemptions.db.js';
+export { harnessFilesModeDb, ALLOW_MEMBER_PRIVATE_KEY } from '@/modules/database/repositories/harness-files-mode.db.js';
+export type { HarnessFilesStoredMode } from '@/modules/database/repositories/harness-files-mode.db.js';
 export { credentialGrantsDb } from '@/modules/database/repositories/credential-grants.db.js';
 export type { CredentialGrantRow } from '@/modules/database/repositories/credential-grants.db.js';
 export type { GovernanceExemptionRow } from '@/modules/database/repositories/governance-exemptions.db.js';

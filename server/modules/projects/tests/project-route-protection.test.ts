@@ -32,6 +32,8 @@
  * observed status of every route.
  */
 
+// FIRST import — HOME becomes a /var/tmp sandbox before any provider root is computed.
+import '@/shared/__tests__/sandbox-home.js';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -57,6 +59,7 @@ import {
 } from '@/modules/database/index.js';
 import { isSessionWritableByUser } from '@/modules/websocket/services/chat-websocket.service.js';
 import { AppError } from '@/shared/utils.js';
+import { claudeTranscriptPath } from '@/modules/providers/services/cost/__tests__/bound-transcripts.js';
 
 import { listExpressRoutes } from '../../../services/update-writer-lease.js';
 
@@ -322,7 +325,9 @@ test('qa م3: creator and member (non-participants) read a real session; strange
   getConnection().prepare("INSERT INTO project_members (project_id, user_id, role) VALUES (?, ?, 'member')")
     .run(projectId, member.id);
   const sessionId = 'adr172-real-transcript-0001';
-  const transcript = path.join(projectPath, `${sessionId}.jsonl`);
+  // ADR-201 A1: readers open only an id-named transcript inside the (sandbox) Claude tree.
+  const transcript = claudeTranscriptPath(sessionId, null, '-adr172-fresh');
+  fs.mkdirSync(path.dirname(transcript), { recursive: true });
   const line = (role: string, text: string, uuid: string) => JSON.stringify({
     type: role, uuid, sessionId, cwd: projectPath, timestamp: new Date().toISOString(),
     message: { role, content: [{ type: 'text', text }] },

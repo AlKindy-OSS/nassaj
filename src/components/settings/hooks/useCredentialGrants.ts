@@ -74,6 +74,12 @@ export type ReceivedGrant = {
   createdAt: string;
   /** The one this member's spawns actually run on right now. */
   inUse: boolean;
+  /**
+   * ADR-200 S9: the grantor's link mode. A grant runs on the grantor's account
+   * AND in the grantor's mode, so `api_key` here means the grantee is billed by
+   * usage. `null` or absent (flag OFF, unreadable record): no badge.
+   */
+  grantorLinkMode?: 'subscription' | 'api_key' | null;
 };
 
 export type GrantMember = { id: number; username: string };

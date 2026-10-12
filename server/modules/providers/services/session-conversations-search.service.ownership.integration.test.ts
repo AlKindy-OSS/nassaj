@@ -44,6 +44,8 @@ import {
   searchConversations,
   type SessionConversationSearchProgressUpdate,
 } from '@/modules/providers/services/session-conversations-search.service.js';
+// eslint-disable-next-line boundaries/no-unknown -- shared test fixture helper (same seam as sandbox-home)
+import { claudeProjectsSandbox } from '@/shared/__tests__/provider-root-sandbox.js';
 
 // A unique token so ripgrep matches our planted lines and nothing else on disk.
 const SECRET_TERM = 'zylophascinatoryxqz';
@@ -98,8 +100,11 @@ async function withFixture(runTest: (fixture: Fixture) => Promise<void>): Promis
     const aliceId = userDb.createUser('alice', 'hash-a', 'user').id;
     const bobId = userDb.createUser('bob', 'hash-b', 'user').id;
 
+    // ADR-201 A1: search reads only transcripts inside a provider tree, so the
+    // transcripts live under the (sandbox) Claude projects root.
+    const transcriptDir = claudeProjectsSandbox('b106-search-');
     const addSession = async (spec: SessionSpec): Promise<void> => {
-      const transcriptPath = path.join(tempRoot, `${spec.sessionId}.jsonl`);
+      const transcriptPath = path.join(transcriptDir, `${spec.sessionId}.jsonl`);
       const lines = [
         JSON.stringify({
           type: 'user',

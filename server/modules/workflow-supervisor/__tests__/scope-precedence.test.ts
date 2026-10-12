@@ -43,6 +43,8 @@ import { classifyScopeLiveness } from '@/modules/workflow-supervisor/scope-liven
 import { forgetWorkflowPid, registerWorkflowPid } from '@/services/workflow-liveness.js';
 // eslint-disable-next-line boundaries/no-unknown
 import { INCIDENT_JOURNAL_LINES, toJsonl } from '@/services/__tests__/__fixtures__/wf-liveness.synthetic.js';
+// eslint-disable-next-line boundaries/no-unknown -- shared test fixture helper (same seam as sandbox-home)
+import { claudeHeaderLine, claudeProjectsSandbox } from '@/shared/__tests__/provider-root-sandbox.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -125,6 +127,8 @@ async function withScopeHarness(
   const projectDir = path.join(tempRoot, 'project-encoded');
   const stateDir = path.join(tempRoot, 'supervisor-state');
   await mkdir(projectDir, { recursive: true });
+  // ADR-201 A1: transcripts are read only inside a provider tree, bound to their id.
+  const transcriptDir = claudeProjectsSandbox('wf-scope-');
 
   closeConnection();
   process.env.DATABASE_PATH = databasePath;
@@ -142,13 +146,13 @@ async function withScopeHarness(
     mtimeMs?: number;
   }): Promise<void> => {
     const { userId, sessionId, wfId, mtimeMs = QUIET_MTIME_MS } = args;
-    const jsonlPath = path.join(projectDir, `${sessionId}.jsonl`);
-    await writeFile(jsonlPath, '', 'utf8');
+    const jsonlPath = path.join(transcriptDir, `${sessionId}.jsonl`);
+    await writeFile(jsonlPath, `${claudeHeaderLine(sessionId)}\n`, 'utf8');
     sessionsDb.createSession(sessionId, 'claude', projectDir, undefined, undefined, undefined, jsonlPath);
     getConnection()
       .prepare('INSERT INTO session_participants (session_id, user_id, role) VALUES (?, ?, ?)')
       .run(sessionId, userId, 'owner');
-    const wfDir = path.join(projectDir, sessionId, 'subagents', 'workflows', wfId);
+    const wfDir = path.join(transcriptDir, sessionId, 'subagents', 'workflows', wfId);
     await mkdir(wfDir, { recursive: true });
     const journalPath = path.join(wfDir, 'journal.jsonl');
     await writeFile(journalPath, toJsonl(INCIDENT_JOURNAL_LINES), 'utf8');
@@ -184,6 +188,7 @@ async function withScopeHarness(
     if (prevStateDir === undefined) delete process.env.WORKFLOW_SUPERVISOR_STATE_DIR;
     else process.env.WORKFLOW_SUPERVISOR_STATE_DIR = prevStateDir;
     await rm(tempRoot, { recursive: true, force: true });
+    await rm(transcriptDir, { recursive: true, force: true });
   }
 }
 

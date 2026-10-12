@@ -25,11 +25,36 @@ import { open, realpath } from 'node:fs/promises';
 
 import {
   SQLITE_HEADER,
+  classifySecretPath,
+  classifySqliteContentPath,
+  containsServiceRoot,
+  containsServiceSecretValue,
+  hasAppDatabaseSchema,
   hasSqliteHeader,
+  hasSqliteWalHeader,
   isForbiddenProjectRoot,
   isSecretPath,
-  isSqliteFileName,
 } from '@/shared/secret-path-guard.js';
+
+/** Refusal for a service secret (B-1373): never served, whatever the request says. */
+const SECRET_PATH_REFUSAL = Object.freeze({
+  valid: false,
+  code: 'SECRET_PATH',
+  error: 'Path must be under project root',
+});
+
+/** Refusal for a project secret file opened without explicit confirmation (B-1593). */
+const SECRET_CONFIRMATION_REFUSAL = Object.freeze({
+  valid: false,
+  code: 'SECRET_CONFIRMATION_REQUIRED',
+  error: 'Secret file requires confirmation',
+});
+
+/** The stricter of two secret classes ('service' > 'project' > null). */
+function stricterSecretClass(a, b) {
+  if (a === 'service' || b === 'service') return 'service';
+  return a ?? b ?? null;
+}
 
 /**
  * Canonicalize a client-supplied path against a project root and confirm — after
@@ -51,15 +76,19 @@ import {
  * B-1373: a root that is (or contains) the service user's home or a secret
  * location is refused outright (FORBIDDEN_ROOT), and a target resolving into a
  * secret location is refused even under an allowed root (SECRET_PATH).
- * Reads also refuse any SQLite database or sidecar by name (SECRET_PATH): copies
- * of the configured database carry its secrets under arbitrary backup names.
+ * B-1593: a service secret (classifySecretPath 'service') is always refused
+ * (SECRET_PATH). A project secret file (dotenv or SQLite by name) is refused
+ * with SECRET_CONFIRMATION_REQUIRED unless `options.confirmSecret` is true; when
+ * served, the result carries `secretFile: true` so the caller can audit it.
  *
+ * @param {{ confirmSecret?: boolean }} [options]
  * @returns {Promise<
- *   { valid: true, resolved: string, realResolved: string } |
- *   { valid: false, code: 'OUTSIDE_ROOT' | 'SYMLINK_ESCAPE' | 'ENOENT' | 'FORBIDDEN_ROOT' | 'SECRET_PATH', error: string }
+ *   { valid: true, resolved: string, realResolved: string, secretFile: boolean } |
+ *   { valid: false, code: 'OUTSIDE_ROOT' | 'SYMLINK_ESCAPE' | 'ENOENT' | 'FORBIDDEN_ROOT' | 'SECRET_PATH'
+ *     | 'SECRET_CONFIRMATION_REQUIRED', error: string }
  * >}
  */
-export async function resolveReadPathInProject(projectRoot, requestedPath) {
+export async function resolveReadPathInProject(projectRoot, requestedPath, options = {}) {
   if (isForbiddenProjectRoot(projectRoot)) {
     return { valid: false, code: 'FORBIDDEN_ROOT', error: 'Project root is not allowed' };
   }
@@ -96,47 +125,108 @@ export async function resolveReadPathInProject(projectRoot, requestedPath) {
     return { valid: false, code: 'SYMLINK_ESCAPE', error: 'Path must be under project root' };
   }
 
-  if (isSecretPath(resolved) || isSecretPath(realResolved)
-    || isSqliteFileName(path.basename(resolved)) || isSqliteFileName(path.basename(realResolved))) {
-    return { valid: false, code: 'SECRET_PATH', error: 'Path must be under project root' };
-  }
+  const secretClass = stricterSecretClass(classifySecretPath(resolved), classifySecretPath(realResolved));
+  if (secretClass === 'service') return SECRET_PATH_REFUSAL;
+  if (secretClass === 'project' && options.confirmSecret !== true) return SECRET_CONFIRMATION_REFUSAL;
 
-  return { valid: true, resolved, realResolved };
+  return { valid: true, resolved, realResolved, secretFile: secretClass === 'project' };
+}
+
+/** Files up to this size are read whole, inspected, and served from that buffer. */
+export const MAX_INSPECTED_FILE_BYTES = 4 * 1024 * 1024;
+
+/** How much of a larger SQLite file is scanned for the application schema. */
+const MAX_SCHEMA_SCAN_BYTES = 8 * 1024 * 1024;
+
+/** Reads up to `length` bytes from offset 0 of `handle` (positional; the file offset is untouched). */
+async function readPrefix(handle, length) {
+  const buffer = Buffer.alloc(length);
+  let filled = 0;
+  while (filled < length) {
+    const { bytesRead } = await handle.read(buffer, filled, length - filled, filled);
+    if (bytesRead === 0) break;
+    filled += bytesRead;
+  }
+  return buffer.subarray(0, filled);
 }
 
 /**
- * `resolveReadPathInProject`, then OPEN the verified real path and refuse it
- * when its first bytes are the SQLite header (a database copy under any name).
- * The sniff reads from the same descriptor the caller then reads/streams, so
- * the checked bytes are the served bytes. The caller owns `handle` and must
- * close it (a FileHandle stream closes it on end by default).
+ * Content verdict for an opened regular file (B-1593 review):
+ *   - an SQLite WAL, or an SQLite database carrying the application schema,
+ *     or SQLite content under a service root  -> service secret;
+ *   - any inspected file containing the value of a secret the running service
+ *     holds (a copy of its .env under any name)  -> service secret;
+ *   - other SQLite content -> project secret file;
+ *   - a dotenv-named file too large to inspect -> service (fail closed).
+ * Files above MAX_INSPECTED_FILE_BYTES that are neither are not value-scanned.
+ * Returns the inspected bytes so the caller serves exactly what was checked.
+ */
+async function inspectOpenedFile(handle, size, guard) {
+  const inspectable = size <= MAX_INSPECTED_FILE_BYTES;
+  let bytes = await readPrefix(handle, inspectable ? size : SQLITE_HEADER.length);
+  if (hasSqliteWalHeader(bytes)) return { refusal: SECRET_PATH_REFUSAL };
+  let { secretFile } = guard;
+  const isSqlite = hasSqliteHeader(bytes);
+  if (isSqlite) {
+    if (!inspectable) bytes = await readPrefix(handle, Math.min(size, MAX_SCHEMA_SCAN_BYTES));
+    const contentClass = stricterSecretClass(
+      classifySqliteContentPath(guard.resolved),
+      classifySqliteContentPath(guard.realResolved),
+    );
+    if (contentClass === 'service' || hasAppDatabaseSchema(bytes)) return { refusal: SECRET_PATH_REFUSAL };
+    secretFile = true;
+  }
+  // A dotenv-named file too large to inspect fails closed; a large non-application
+  // SQLite database stays a confirmable project file (streamed, not buffered).
+  if (!inspectable) {
+    return secretFile && !isSqlite ? { refusal: SECRET_PATH_REFUSAL } : { secretFile, content: null };
+  }
+  if (containsServiceSecretValue(bytes)) return { refusal: SECRET_PATH_REFUSAL };
+  return { secretFile, content: bytes };
+}
+
+/**
+ * `resolveReadPathInProject`, then OPEN the verified real path and inspect its
+ * content on that descriptor (inspectOpenedFile). Service secrets are refused
+ * (SECRET_PATH) whatever `options.confirmSecret` says; a project secret file
+ * needs `options.confirmSecret` (SECRET_CONFIRMATION_REQUIRED otherwise).
+ *
+ * For files up to MAX_INSPECTED_FILE_BYTES the result carries `content`: the
+ * exact bytes that were inspected, which the caller must serve instead of
+ * re-reading. Larger files carry `content: null` and are streamed from
+ * `handle`. The caller owns `handle` and must close it.
  *
  * @param {string} projectRoot   Absolute project root directory.
  * @param {string} requestedPath Client-supplied path (absolute or project-relative).
+ * @param {{ confirmSecret?: boolean }} [options]
  * @returns {Promise<
- *   { valid: true, resolved: string, realResolved: string, handle: import('node:fs/promises').FileHandle } |
+ *   { valid: true, resolved: string, realResolved: string, secretFile: boolean,
+ *     content: Buffer | null, handle: import('node:fs/promises').FileHandle } |
  *   { valid: false, code: string, error: string }
  * >}
  */
-export async function openReadableProjectFile(projectRoot, requestedPath) {
-  const guard = await resolveReadPathInProject(projectRoot, requestedPath);
+export async function openReadableProjectFile(projectRoot, requestedPath, options = {}) {
+  // Confirmation is decided after the content check, so a service secret is
+  // always 403 and never 428.
+  const guard = await resolveReadPathInProject(projectRoot, requestedPath, { confirmSecret: true });
   if (!guard.valid) return guard;
   const handle = await open(guard.realResolved, 'r');
   try {
     const stats = await handle.stat();
-    if (stats.isFile()) {
-      const head = Buffer.alloc(SQLITE_HEADER.length);
-      const { bytesRead } = await handle.read(head, 0, head.length, 0);
-      if (hasSqliteHeader(head.subarray(0, bytesRead))) {
-        await handle.close();
-        return { valid: false, code: 'SECRET_PATH', error: 'Path must be under project root' };
-      }
+    const verdict = stats.isFile()
+      ? await inspectOpenedFile(handle, stats.size, guard)
+      : { secretFile: guard.secretFile, content: null };
+    const refusal = verdict.refusal
+      ?? (verdict.secretFile && options.confirmSecret !== true ? SECRET_CONFIRMATION_REFUSAL : null);
+    if (refusal) {
+      await handle.close();
+      return refusal;
     }
+    return { ...guard, secretFile: verdict.secretFile, content: verdict.content, handle };
   } catch (error) {
     await handle.close();
     throw error;
   }
-  return { ...guard, handle };
 }
 
 /**
@@ -168,16 +258,25 @@ export async function openReadableProjectFile(projectRoot, requestedPath) {
  *
  * B-1373: always false for a forbidden root (the service user's home, or one
  * containing a secret location) and for a target resolving into a secret
- * location.
+ * location. B-1593: with `options.allowProjectSecretFiles` only SERVICE
+ * secrets are refused, so a member can again create, rename, delete and (after
+ * a confirmation the caller enforces) save the project's own dotenv/SQLite
+ * files; without it every isSecretPath target stays refused.
  *
  * Returns true only when the path is provably inside the (real) project root.
  *
  * @param {string} projectRoot    Absolute project root directory.
  * @param {string} resolvedTarget Already lexically-resolved absolute target path.
+ * @param {{ allowProjectSecretFiles?: boolean }} [options]
  * @returns {boolean}
  */
-export function isResolvedPathInsideRootReal(projectRoot, resolvedTarget) {
-  if (isForbiddenProjectRoot(projectRoot) || isSecretPath(resolvedTarget)) {
+export function isResolvedPathInsideRootReal(projectRoot, resolvedTarget, options = {}) {
+  const isRefusedTarget = options.allowProjectSecretFiles === true
+    ? (candidate) => classifySecretPath(candidate) === 'service'
+    : isSecretPath;
+  // A target that IS or CONTAINS a service root (install, deploy, release …) is
+  // never renamed, moved or deleted, whatever the secret-file mode.
+  if (isForbiddenProjectRoot(projectRoot) || isRefusedTarget(resolvedTarget) || containsServiceRoot(resolvedTarget)) {
     return false;
   }
   let realRoot;
@@ -192,7 +291,7 @@ export function isResolvedPathInsideRootReal(projectRoot, resolvedTarget) {
   for (;;) {
     try {
       const real = fs.realpathSync(probe);
-      if (isSecretPath(real)) return false;
+      if (isRefusedTarget(real)) return false;
       return real === realRoot || real.startsWith(realRoot + path.sep);
     } catch (err) {
       if (err && err.code === 'ENOENT') {

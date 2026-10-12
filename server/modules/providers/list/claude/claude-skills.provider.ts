@@ -2,6 +2,7 @@ import { readFile, readdir, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
+import { resolvePrivateSkillSource } from '@/modules/providers/shared/skills/private-skill-source.js';
 import { SkillsProvider } from '@/modules/providers/shared/skills/skills.provider.js';
 import { parseFrontMatter } from '@/shared/frontmatter.js';
 import type {
@@ -18,6 +19,27 @@ import {
 } from '@/shared/utils.js';
 
 const getClaudeHomePath = (): string => path.join(os.homedir(), '.claude');
+
+/**
+ * `~/.claude/skills` is the operator-global library every member reads (no
+ * per-user CLAUDE_CONFIG_DIR here, B-26); on nassaj hosts `~/.claude` links into
+ * the tracked nassaj-core repo. `origin` is a display tag (T-2003): per skill,
+ * only app-installed (marked) folders are deletable — by owner/admin, via the
+ * route gate — and hand-authored ones are listed and refused as read-only.
+ */
+const claudeUserSkillSource = (): ProviderSkillSource => ({
+  scope: 'user',
+  rootDir: path.join(getClaudeHomePath(), 'skills'),
+  commandPrefix: '/',
+  origin: 'operator-shared',
+});
+
+/**
+ * The caller's user-scope source (ADR-203): their private store in effective
+ * private mode (the shared library is then hidden), otherwise the shared library.
+ */
+const claudeSkillSourceFor = (userId?: string | number | null): ProviderSkillSource =>
+  resolvePrivateSkillSource(userId, 'claude', '/') ?? claudeUserSkillSource();
 
 /**
  * Server-side TTL cache for the Claude skills scan.
@@ -70,11 +92,14 @@ const buildSkillsCacheKey = (
   provider: string,
   claudeHomePath: string,
   workspacePath: string,
+  userSkillsRoot: string,
 ): string =>
   [
     provider,
     path.resolve(claudeHomePath),
     path.resolve(workspacePath),
+    // ADR-203: the user-scope root differs per user in private mode.
+    path.resolve(userSkillsRoot),
   ].join('::');
 
 const getClaudePluginName = (pluginId: string): string | null => {
@@ -142,6 +167,7 @@ export class ClaudeSkillsProvider extends SkillsProvider {
       this.provider,
       claudeHomePath,
       resolvedWorkspacePath,
+      claudeSkillSourceFor(options?.userId).rootDir,
     );
 
     const now = Date.now();
@@ -163,15 +189,12 @@ export class ClaudeSkillsProvider extends SkillsProvider {
     return skills;
   }
 
-  protected async getSkillSources(workspacePath: string): Promise<ProviderSkillSource[]> {
-    const claudeHomePath = getClaudeHomePath();
-
+  protected async getSkillSources(
+    workspacePath: string,
+    userId?: string | number | null,
+  ): Promise<ProviderSkillSource[]> {
     return [
-      {
-        scope: 'user',
-        rootDir: path.join(claudeHomePath, 'skills'),
-        commandPrefix: '/',
-      },
+      claudeSkillSourceFor(userId),
       {
         scope: 'project',
         rootDir: path.join(workspacePath, '.claude', 'skills'),
@@ -180,12 +203,8 @@ export class ClaudeSkillsProvider extends SkillsProvider {
     ];
   }
 
-  protected async getGlobalSkillSource(): Promise<ProviderSkillSource> {
-    return {
-      scope: 'user',
-      rootDir: path.join(getClaudeHomePath(), 'skills'),
-      commandPrefix: '/',
-    };
+  protected async getGlobalSkillSource(userId?: string | number | null): Promise<ProviderSkillSource> {
+    return claudeSkillSourceFor(userId);
   }
 
   private async listPluginSkills(claudeHomePath: string): Promise<ProviderSkill[]> {

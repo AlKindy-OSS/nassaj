@@ -3,6 +3,7 @@ import { spawn } from 'node:child_process';
 import { ensureCodexGovernance } from '@/modules/providers/index.js';
 // eslint-disable-next-line boundaries/dependencies
 import { isSpawnBlockedForRunProvider } from '@/modules/providers/harness-update/spawn-admission.js';
+import { assertLinkModeRunAllowed } from '@/services/isolation/link-mode-run-gate.js';
 import { resolveProviderEnv } from '@/services/isolation/resolve-provider-env.js';
 import {
   acquireCodexLaunchIdentity,
@@ -14,6 +15,7 @@ import {
 } from '@/shared/codex-executable.js';
 import { assertCodexRuntimeCompatible, isCodexRuntimeIncompatible } from '@/shared/codex-runtime-compat.js';
 
+import { admitLinkModeRun, type LinkModeRunGate } from './link-mode-admission.js';
 import {
   TurnAdapterError,
   type TurnAdapterCapabilities,
@@ -55,6 +57,8 @@ export type CodexCliAdapterOptions = Readonly<{
   assertUnchanged?: (identity: CodexLaunchIdentity) => void;
   /** T-1872 part 2 seam: the cached runtime-compatibility verdict for that identity. */
   assertCompatible?: (identity: CodexLaunchIdentity) => Promise<unknown>;
+  /** B-1546 seam: the link-mode run gate (throws `LINK_MODE_KEY_MISSING`). */
+  assertRunAllowed?: LinkModeRunGate;
   spawnCapture?: (input: {
     binary: string; args: readonly string[]; cwd: string; env: NodeJS.ProcessEnv; signal?: AbortSignal;
   }) => Promise<SpawnResult>;
@@ -167,6 +171,8 @@ export function createCodexCliAdapter(options: CodexCliAdapterOptions = {}): Tur
   const governanceProbe = options.governanceProbe ?? ((userId) => ensureCodexGovernance(userId).ok);
   const executableProbe = options.executableProbe ?? machineCodexAvailable;
   const run = options.spawnCapture ?? spawnCapture;
+  const assertRunAllowed = options.assertRunAllowed
+    ?? ((userId: string | number) => assertLinkModeRunAllowed(userId, 'codex'));
   const registration: TurnAdapterRegistration = {
     id: 'codex-cli-ephemeral',
     capabilities: CODEX_CLI_CAPABILITIES,
@@ -192,6 +198,7 @@ export function createCodexCliAdapter(options: CodexCliAdapterOptions = {}): Tur
       if (isSpawnBlockedForRunProvider('codex')) {
         throw new TurnAdapterError('provider_unavailable', 'The codex runtime is being updated right now');
       }
+      await admitLinkModeRun(assertRunAllowed, request.userId);
       const hidden = [INTERNAL_ROLE_CONTRACT, ...(request.hiddenContext ?? []), request.system ?? '']
         .filter(Boolean).join('\n\n');
       const args = [

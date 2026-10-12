@@ -23,15 +23,17 @@ import { readdir, realpath, stat } from 'node:fs/promises';
 import path from 'node:path';
 
 import { participantsDb, responseTurnMetricsDb, sessionsDb, usageStatisticsV3ReaderMode } from '@/modules/database/index.js';
-import { resolveStoredClaudeTranscript } from '@/modules/providers/list/claude/claude-projects-roots.js';
-import {
-  claudeProjectRoots,
-  encodeClaudeProjectDir,
-} from '@/modules/providers/list/claude/claude-transcript-path.js';
 import {
   resolveCodexLinkedRollouts,
   type CodexRolloutManifest,
 } from '@/modules/providers/list/codex/codex-rollout-links.js';
+import {
+  isTranscriptHandle,
+  openRecordedTranscript,
+  openSessionTranscript,
+  type SessionTranscriptResult,
+  type TranscriptRefusal,
+} from '@/modules/providers/shared/session-transcript.js';
 import { isProviderIsolated } from '@/services/provider-sharing.js';
 import type {
   BillingAnchorSource,
@@ -489,51 +491,47 @@ async function transcriptSignature(
 type SessionRow = {
   session_id: string;
   provider: string;
-  project_path: string | null;
   jsonl_path: string | null;
 };
 
-const fileExists = async (candidate: string): Promise<boolean> => {
-  try {
-    return (await stat(candidate)).isFile();
-  } catch {
-    return false;
-  }
-};
+/** A transcript the cost path reads: the session id it must be bound to and its realpath. */
+type CostTranscript = { sessionId: string; transcriptPath: string };
 
 /**
- * يحلّ مسار سجلّ المحادثة. `jsonl_path` في جدول الجلسات هو مفتاح الوصل وهو
- * مطلق ومحلول أصلاً (يكتبه المُزامِن)، فيُستعمل كما هو متى وُجد الملف.
- *
- * الاحتياط لكلود وحده: ‏`<projects>/<مسار-المشروع-مُرمَّزاً>/<sessionId>.jsonl`
- * — الترميز نفسه المستعمل في بقيّة الخادم (كل ما ليس حرفاً أو رقماً أو شرطة
- * يصير شرطة). كودكس لا احتياط له: اسم ملف الـrollout يحمل طابعاً زمنياً لا
- * يُشتقّ من الصفّ، والبحث عنه يعني مشي شجرة التواريخ كلّها.
+ * Opens a session's transcript through the session transcript reader (ADR-201
+ * A-P2c): only the recorded `jsonl_path` (Claude legacy spellings included),
+ * confined to the one tree holding it, pinned, and bound to the session id by
+ * name and header. A request (`userId` set) is authorised on the session
+ * first; a server-internal read (`userId` null) uses the core reader. There is
+ * no fallback to a path derived from the project: a transcript the row does
+ * not record is not this session's.
  */
-async function resolveTranscriptPath(row: SessionRow, userId: string | number | null): Promise<string | null> {
-  const stored = (row.jsonl_path ?? '').trim();
-  if (stored && (await fileExists(stored))) {
-    return stored;
-  }
+async function openCostTranscript(row: SessionRow, userId: string | number | null): Promise<SessionTranscriptResult> {
+  if (userId === null) return openRecordedTranscript(row, 'cost');
+  return openSessionTranscript(row.session_id, numericUserId(userId), 'cost');
+}
 
-  if (row.provider !== 'claude') {
-    return null;
-  }
-  // T-1880: a pre-separation spelling of the stored path, same relative file.
-  const relocated = stored ? resolveStoredClaudeTranscript(stored) : null;
-  if (relocated || !row.project_path) {
-    return relocated;
-  }
+/**
+ * Binds `row`'s transcript and closes the probe descriptor; the extractors
+ * re-bind on their own descriptor when they read (a shared in-flight read may
+ * outlive this caller). Resolves to the bound realpath or the refusal reason.
+ */
+async function boundCostTranscript(
+  row: SessionRow, userId: string | number | null,
+): Promise<CostTranscript | { reason: TranscriptRefusal }> {
+  const opened = await openCostTranscript(row, userId);
+  if (!isTranscriptHandle(opened)) return opened;
+  await opened.fd.close().catch(() => undefined);
+  return { sessionId: row.session_id, transcriptPath: opened.realpath };
+}
 
-  const encoded = encodeClaudeProjectDir(row.project_path);
-  for (const root of claudeProjectRoots(userId)) {
-    const candidate = path.join(root, encoded, `${row.session_id}.jsonl`);
-    if (await fileExists(candidate)) {
-      return candidate;
-    }
-  }
+const MISSING_TRANSCRIPT = 'The transcript file for this conversation is no longer on disk.';
 
-  return null;
+/** Owner-facing reason for a refused transcript; absence and refusal are told apart, never detailed. */
+function transcriptUnavailableReason(reason: TranscriptRefusal): string {
+  return reason === 'missing' || reason === 'no_transcript' || reason === 'not_found'
+    ? MISSING_TRANSCRIPT
+    : 'The transcript file of this conversation could not be verified as its own, so its cost is not measured.';
 }
 
 // ---------------------------------------------------------------------------
@@ -599,7 +597,7 @@ export function turnsForSession(
 
 async function costForTranscript(
   provider: string,
-  transcriptPath: string,
+  transcript: CostTranscript,
   signature: TranscriptSignature,
   window?: UsageWindow,
   attribution?: { userId: number; filter: UsageAttribution },
@@ -610,6 +608,7 @@ async function costForTranscript(
   // (نطاق مستخدم). غيابه لا يغيّر أي رقم إجمالي. كودكس يسجّل العدّاد
   // تراكميّاً، لكن المستخرج يفكّه إلى `last_token_usage` لكل دور هنا.
   const captureTurns = !window && !attribution && Boolean(options.sessionId);
+  const { transcriptPath } = transcript;
   const canonicalPath = await realpath(transcriptPath).catch(() => transcriptPath);
   const metricsBefore = metricsFingerprint(options.sessionId, captureTurns);
   const key = [
@@ -637,12 +636,12 @@ async function costForTranscript(
   }
   return joinTranscriptFlight(key, options.signal, async (flightSignal) => {
     const usage = provider === 'codex'
-      ? await extractCodexConversationUsage(transcriptPath, window, {
+      ? await extractCodexConversationUsage(transcript, window, {
           manifest: options.manifest,
           signal: flightSignal,
           captureRequests: captureTurns,
         })
-      : await extractClaudeSessionUsage(transcriptPath, window, attribution?.filter, flightSignal, { captureRequests: captureTurns });
+      : await extractClaudeSessionUsage(transcript, window, attribution?.filter, flightSignal, { captureRequests: captureTurns });
     let cost = calculateSessionCost(usage);
     if (captureTurns && options.sessionId && usage.requests && usage.requests.length > 0) {
       const turns = turnsForSession(options.sessionId, usage.requests, usage.userBoundariesMs ?? []);
@@ -1195,13 +1194,20 @@ async function scanTranscriptCycle(
     if (signature.newestMs < cycleStartMs) {
       continue;
     }
+    // ADR-201 A-P2c: only a transcript bound to this row (tree, name, header)
+    // is attributed to it; a refused one lowers «complete» like a missing one.
+    const transcript = await boundCostTranscript({ ...row, provider }, null);
+    if ('reason' in transcript) {
+      missingTranscripts += 1;
+      continue;
+    }
 
     // `buildSessionAttribution` تعود null حين لا نسبة مطلوبة ⇒ تُحسب المحادثة
     // كاملةً، وهو سلوك ما قبل هذه الميزة بالضبط.
     const filter = attributedTo === null ? null : buildSessionAttribution(row.session_id, attributedTo);
     const { cost } = await costForTranscript(
       provider,
-      row.jsonl_path,
+      transcript,
       signature,
       window,
       filter && attributedTo !== null ? { userId: attributedTo, filter } : undefined,
@@ -1466,10 +1472,11 @@ export const sessionCostService = {
       return toSessionCostView(sessionId, provider, dbCost, await isMetered(provider, userId, deps));
     }
 
-    const transcriptPath = await resolveTranscriptPath(row, userId);
-    if (!transcriptPath) {
-      return unavailableSessionCost(sessionId, provider, 'The transcript file for this conversation is no longer on disk.');
+    const transcript = await boundCostTranscript(row, userId);
+    if ('reason' in transcript) {
+      return unavailableSessionCost(sessionId, provider, transcriptUnavailableReason(transcript.reason));
     }
+    const { transcriptPath } = transcript;
 
     const v3ReaderMode = provider === 'codex' ? usageStatisticsV3ReaderMode() : 'off';
     const readsV3 = v3ReaderMode === 'on' || v3ReaderMode === 'compare';
@@ -1536,10 +1543,10 @@ export const sessionCostService = {
       ...(codexManifest ? { codexManifest } : {}),
     });
     if (!signature) {
-      return unavailableSessionCost(sessionId, provider, 'The transcript file for this conversation is no longer on disk.');
+      return unavailableSessionCost(sessionId, provider, MISSING_TRANSCRIPT);
     }
 
-    const outcome = await costForTranscript(provider, transcriptPath, signature, undefined, undefined, {
+    const outcome = await costForTranscript(provider, transcript, signature, undefined, undefined, {
       ...(codexManifest ? { manifest: codexManifest } : {}),
       signal: deps.signal,
       sessionId,

@@ -13,6 +13,7 @@ import {
 import type { IProviderSessionSynchronizer } from '@/shared/interfaces.js';
 
 import type { AgentReviewIngestor } from '../../services/agent-review-ingestor.js';
+import { lexicalMemberOf, physicalMemberOf } from '../../shared/contained-file.js';
 
 import { claudeHomeForSessionFile, resolveClaudeHomes } from './claude-home.js';
 import { locateClaudeTranscript } from './claude-projects-roots.js';
@@ -22,6 +23,42 @@ type ParsedSession = {
   projectPath: string;
   sessionName?: string;
 };
+
+const warnedForeignRoots = new Set<string>();
+
+/**
+ * H1 (ADR-201 qa): true when `projectsRoot` physically lies in a users-root
+ * entry other than the one its spelling names — e.g. member /1 linked its
+ * `projects/` at member /10's. That spelling is skipped (not marked scanned),
+ * so the owner's own spelling indexes the files. A member root linked to the
+ * operator/shared tree (case b) is not foreign.
+ */
+async function isForeignPhysicalRoot(projectsRoot: string): Promise<boolean> {
+  const [lexical, physical] = await Promise.all([
+    lexicalMemberOf(projectsRoot), physicalMemberOf(projectsRoot),
+  ]);
+  if (physical === null || physical === lexical) return false;
+  if (!warnedForeignRoots.has(projectsRoot)) {
+    warnedForeignRoots.add(projectsRoot);
+    console.warn('Skipped a Claude projects root linked into another member tree (ADR-201 H1)', {
+      event: 'claude_projects_root_foreign', member: lexical,
+    });
+  }
+  return true;
+}
+
+const warnedMismatchedNames = new Set<string>();
+const MAX_WARNED_NAMES = 2048;
+
+/** Logs once per content id that a file under another name was not recorded (no path logged). */
+function warnMismatchedName(sessionId: string): void {
+  if (warnedMismatchedNames.has(sessionId)) return;
+  if (warnedMismatchedNames.size >= MAX_WARNED_NAMES) warnedMismatchedNames.clear();
+  warnedMismatchedNames.add(sessionId);
+  console.warn('Skipped a Claude transcript whose name is not its session id (ADR-201 L7)', {
+    event: 'claude_transcript_name_mismatch', sessionId,
+  });
+}
 
 /**
  * Session indexer for Claude transcript artifacts.
@@ -48,7 +85,7 @@ export class ClaudeSessionSynchronizer implements IProviderSessionSynchronizer {
       // retain their logical path so separate homes created later are not
       // accidentally collapsed.
       const physicalProjectsRoot = await realpath(projectsRoot).catch(() => path.resolve(projectsRoot));
-      if (scannedProjectRoots.has(physicalProjectsRoot)) {
+      if (scannedProjectRoots.has(physicalProjectsRoot) || await isForeignPhysicalRoot(projectsRoot)) {
         continue;
       }
       scannedProjectRoots.add(physicalProjectsRoot);
@@ -69,11 +106,7 @@ export class ClaudeSessionSynchronizer implements IProviderSessionSynchronizer {
       const parsed = await this.processSessionFile(filePath, nameMap);
       if (!parsed) continue;
 
-      const timestamps = await readFileTimestamps(filePath);
-      sessionsDb.createSession(
-        parsed.sessionId, this.provider, parsed.projectPath, parsed.sessionName,
-        timestamps.createdAt, timestamps.updatedAt, filePath
-      );
+      if (!(await this.recordSession(parsed, filePath))) continue;
       await this.reviewIngestor?.ingestFile(filePath);
       processed += 1;
     }
@@ -105,18 +138,32 @@ export class ClaudeSessionSynchronizer implements IProviderSessionSynchronizer {
       return null;
     }
 
-    const timestamps = await readFileTimestamps(filePath);
-    const sessionId = sessionsDb.createSession(
-      parsed.sessionId,
-      this.provider,
-      parsed.projectPath,
-      parsed.sessionName,
-      timestamps.createdAt,
-      timestamps.updatedAt,
-      filePath
-    );
-    await this.reviewIngestor?.ingestFile(filePath);
+    const sessionId = await this.recordSession(parsed, filePath);
+    if (sessionId) await this.reviewIngestor?.ingestFile(filePath);
     return sessionId;
+  }
+
+  /**
+   * Records one parsed transcript through the ADR-201 discovery writers. A file
+   * whose name is not `<content sessionId>.jsonl` (fork/resume copy or forgery,
+   * A3) neither refreshes nor inserts a row (L7): it is logged once and null is
+   * returned. Measured on the live host 2026-10-12: no such file exists.
+   */
+  private async recordSession(parsed: ParsedSession, filePath: string): Promise<string | null> {
+    if (path.basename(filePath, '.jsonl') !== parsed.sessionId) {
+      warnMismatchedName(parsed.sessionId);
+      return null;
+    }
+    const timestamps = await readFileTimestamps(filePath);
+    return sessionsDb.recordDiscoveredSession({
+      sessionId: parsed.sessionId,
+      provider: this.provider,
+      projectPath: parsed.projectPath,
+      customName: parsed.sessionName,
+      createdAt: timestamps.createdAt,
+      updatedAt: timestamps.updatedAt,
+      jsonlPath: filePath,
+    });
   }
 
   /**

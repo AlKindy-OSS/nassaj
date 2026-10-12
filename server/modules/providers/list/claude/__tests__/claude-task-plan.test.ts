@@ -224,7 +224,7 @@ test('live resume: seeded from the transcript, a TaskUpdate for a prior-turn ite
   const prior = sequence([...TURN1.map(R), R('agentCompletedUse')]);
   await withSession(prior, async () => {
     const fold = createClaudeProgressFold('live', SID);
-    assert.equal(await seedClaudeProgressFold(fold, SID, { userId: 1 }), true);
+    assert.equal(await seedClaudeProgressFold(fold, SID), true);
     const toSdk = (row: Row): Row => {
       const { toolUseResult, sessionId, ...rest } = row;
       return { ...rest, session_id: sessionId, parent_tool_use_id: null,
@@ -261,19 +261,31 @@ test('history: a subagent\'s own Task* plan rides its last child tool item, with
   }, sid, { [agentId]: capture.subagent });
 });
 
-/** Counts transcript reads opened through fs.createReadStream while `body` runs. */
+/**
+ * Counts transcript reads opened while `body` runs: by name (fs.createReadStream)
+ * and through a pinned descriptor (FileHandle#createReadStream, ADR-201 A1).
+ */
 async function countingReads(body: () => Promise<void>, hang = false): Promise<string[]> {
+  const probe = await fs.promises.open(process.execPath, 'r');
+  const handleProto = Object.getPrototypeOf(probe) as { createReadStream: (...args: unknown[]) => unknown };
+  await probe.close();
   const original = fs.createReadStream;
+  const originalPinned = handleProto.createReadStream;
   const opened: string[] = [];
   (fs as { createReadStream: unknown }).createReadStream = (file: fs.PathLike, ...rest: unknown[]) => {
     opened.push(String(file));
     if (hang) return new PassThrough();
     return (original as (...args: unknown[]) => fs.ReadStream)(file, ...rest);
   };
+  handleProto.createReadStream = function pinned(this: { fd: number }, ...rest: unknown[]) {
+    opened.push(`fd:${this.fd}`);
+    return hang ? new PassThrough() : originalPinned.apply(this, rest);
+  };
   try {
     await body();
   } finally {
     fs.createReadStream = original;
+    handleProto.createReadStream = originalPinned;
   }
   return opened;
 }
@@ -284,7 +296,7 @@ test('seed: a stored path outside every Claude projects root is never read; the 
   await withSession(PRIOR(), async () => {
     const fold = createClaudeProgressFold('live', SID);
     const reads = await countingReads(async () => {
-      assert.equal(await seedClaudeProgressFold(fold, SID, { userId: 1 }), false);
+      assert.equal(await seedClaudeProgressFold(fold, SID), false);
     });
     assert.deepEqual(reads, [], 'no read of an uncontained path');
     assert.equal(fold.taskPlan.snapshot(), null);
@@ -294,12 +306,12 @@ test('seed: a stored path outside every Claude projects root is never read; the 
 test('seed: an unresolved transcript (no row, missing file) leaves the fold empty', async () => {
   await withSession(PRIOR(), async (file) => {
     const unknown = createClaudeProgressFold('live', SID);
-    assert.equal(await seedClaudeProgressFold(unknown, '00000000-0000-4000-8000-0000000000ff', { userId: 1 }), false);
+    assert.equal(await seedClaudeProgressFold(unknown, '00000000-0000-4000-8000-0000000000ff'), false);
     assert.equal(unknown.taskPlan.snapshot(), null);
     await rm(file);
     const missing = createClaudeProgressFold('live', SID);
     const reads = await countingReads(async () => {
-      assert.equal(await seedClaudeProgressFold(missing, SID, { userId: 1 }), false);
+      assert.equal(await seedClaudeProgressFold(missing, SID), false);
     });
     assert.deepEqual(reads, []);
     assert.equal(missing.taskPlan.snapshot(), null);
@@ -310,7 +322,7 @@ test('seed: a transcript above the size cap is skipped without a read', async ()
   await withSession(PRIOR(), async () => {
     const fold = createClaudeProgressFold('live', SID);
     const reads = await countingReads(async () => {
-      assert.equal(await seedClaudeProgressFold(fold, SID, { userId: 1, maxBytes: 64 }), false);
+      assert.equal(await seedClaudeProgressFold(fold, SID, { maxBytes: 64 }), false);
     });
     assert.deepEqual(reads, []);
     assert.equal(fold.taskPlan.snapshot(), null);
@@ -319,13 +331,13 @@ test('seed: a transcript above the size cap is skipped without a read', async ()
 
 test('seeded live fold: within budget it continues the prior list; past budget a fresh fold is returned', async () => {
   await withSession(PRIOR(), async () => {
-    const seeded = await createSeededLiveFold(SID, SID, { userId: 1, budgetMs: 5000 });
+    const seeded = await createSeededLiveFold(SID, SID, { budgetMs: 5000 });
     assert.deepEqual(seeded.taskPlan.snapshot()?.items.map((i) => [i.id, i.status]), [['1', 'in_progress'], ['2', 'pending']]);
 
     let fold: ReturnType<typeof createClaudeProgressFold> | null = null;
     const started = Date.now();
     const reads = await countingReads(async () => {
-      fold = await createSeededLiveFold(SID, SID, { userId: 1, budgetMs: 50 });
+      fold = await createSeededLiveFold(SID, SID, { budgetMs: 50 });
     }, true);
     const waited = Date.now() - started;
     assert.equal(reads.length, 1, 'the seed started reading a stream that never ends');
@@ -343,7 +355,7 @@ test('B-1563 seed: an update buffered in turn N drops before turn N+1 creates it
   assert.deepEqual(history?.items.map((i) => [i.id, i.status]), [['1', 'pending']]);
   await withSession(rows, async () => {
     const fold = createClaudeProgressFold('live', SID);
-    assert.equal(await seedClaudeProgressFold(fold, SID, { userId: 1 }), true);
+    assert.equal(await seedClaudeProgressFold(fold, SID), true);
     assert.deepEqual(fold.taskPlan.snapshot(), history, 'seeded live snapshot equals the history snapshot');
   });
 });
@@ -355,7 +367,7 @@ test('B-1563 seed: a <task-notification> user row does not open a turn; the pend
   assert.deepEqual(history?.items.map((i) => [i.id, i.status]), [['1', 'in_progress']]);
   await withSession(rows, async () => {
     const fold = createClaudeProgressFold('live', SID);
-    assert.equal(await seedClaudeProgressFold(fold, SID, { userId: 1 }), true);
+    assert.equal(await seedClaudeProgressFold(fold, SID), true);
     assert.deepEqual(fold.taskPlan.snapshot(), history);
     const live: NormalizedMessage[] = [];
     for (const raw of sequence(updatePair('1', 'completed', 3))) {
@@ -376,7 +388,7 @@ test('B-1563 seed: a human prompt whose text is "tool_result" still closes its t
     assert.deepEqual(history?.items.map((i) => [i.id, i.status]), [['1', 'pending']]);
     await withSession(rows, async () => {
       const fold = createClaudeProgressFold('live', SID);
-      assert.equal(await seedClaudeProgressFold(fold, SID, { userId: 1 }), true);
+      assert.equal(await seedClaudeProgressFold(fold, SID), true);
       assert.deepEqual(fold.taskPlan.snapshot(), history, 'the prompt is a turn boundary in the seed too');
     });
   }

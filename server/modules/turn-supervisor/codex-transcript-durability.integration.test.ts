@@ -48,3 +48,13 @@ test('supervised ephemeral Codex transcript is registered DB truth and readable 
     'visible user request', 'visible final synthesis',
   ]);
 });
+
+test('a supervised Codex transcript stays bound to its own id (ADR-201 A1)', async () => {
+  // A row of another id recorded at this file is refused by name: nothing is read.
+  const victim = vendorTranscriptPath('codex', 'codex_supervised_durable', sandbox);
+  sessionsDb.createSession('codex_supervised_other', 'codex', sandbox, undefined, undefined, undefined, victim);
+  assert.equal(sessionsDb.getSessionById('codex_supervised_other')?.jsonl_path, victim);
+  const history = await new CodexSessionsProvider().fetchHistory('codex_supervised_other');
+  assert.equal(history.total, 0);
+  assert.deepEqual(history.messages, []);
+});

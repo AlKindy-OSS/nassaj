@@ -18,6 +18,8 @@ export class ProviderSecretsKeyError extends Error {
 }
 
 let cached = null;
+/** B-1575: when THIS process generated the key file (epoch ms), else null. */
+let generatedAtMs = null;
 
 function decodeConfiguredKey(raw) {
   if (typeof raw !== 'string' || raw.length === 0 || raw !== raw.trim()) return null;
@@ -151,6 +153,7 @@ function createKeyFile(filePath, expectedUid) {
     }
     fs.fsyncSync(descriptor);
     validateKeyFileStat(fs.fstatSync(descriptor), expectedUid);
+    generatedAtMs = Date.now();
   } catch (error) {
     throw error instanceof ProviderSecretsKeyError
       ? error
@@ -218,7 +221,17 @@ export function getProviderSecretsKey() {
   return Buffer.from(key);
 }
 
+/**
+ * B-1575: the time this process generated the server key file, or null when
+ * the key was read from an existing file, a descriptor or the environment.
+ * @returns {number|null} epoch milliseconds
+ */
+export function providerSecretsKeyGeneratedAt() {
+  return generatedAtMs;
+}
+
 export function resetProviderSecretsKeyCacheForTests() {
   cached?.key?.fill(0);
   cached = null;
+  generatedAtMs = null;
 }

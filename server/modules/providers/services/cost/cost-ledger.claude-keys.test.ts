@@ -40,7 +40,8 @@ async function withLayout(run: (layout: Layout) => Promise<void>): Promise<void>
   await symlink(core, ch); // legacy layout: ~/.claude -> checkout
   const lines = (await readFile(path.join(FIXTURES, 'claude-parent.jsonl'), 'utf8'))
     .split('\n').filter((line) => line.trim().startsWith('{'))
-    .map((line) => JSON.stringify({ ...JSON.parse(line), timestamp: DAY.toISOString(), cwd: workspace }));
+    // Every real Claude line carries its session id; the ledger binds `s.jsonl` to it (ADR-201 A-P2c).
+    .map((line) => JSON.stringify({ ...JSON.parse(line), timestamp: DAY.toISOString(), cwd: workspace, sessionId: 's' }));
   await writeFile(path.join(core, 'projects', SLUG, 's.jsonl'), `${lines.join('\n')}\n`);
   try {
     await run({

@@ -5,6 +5,9 @@ import test, { after, before } from 'node:test';
 
 import express from 'express';
 
+// B-1544: must stay the first app-side import; it sandboxes HOME, CLAUDE_CONFIG_DIR, DATABASE_PATH.
+import { removeSandbox } from './helpers/hermetic-sandbox.js';
+
 import {
   closeConnection,
   initializeDatabase,
@@ -52,6 +55,7 @@ before(async () => {
 after(async () => {
   await new Promise((resolve) => server.close(resolve));
   closeConnection();
+  removeSandbox();
 });
 
 for (const query of ['payload=small', 'payload=', 'limit=1junk', 'limit=-1', 'limit=501', 'offset=2.5']) {

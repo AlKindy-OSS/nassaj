@@ -52,6 +52,7 @@ import {
 import { prioritizeUserNpmGlobalBin } from '@/modules/websocket/services/shell-websocket.service.js';
 import { resolveCagedLaunch } from '@/services/isolation/provider-cage-wiring.js';
 import { resolveProviderEnv } from '@/services/isolation/resolve-provider-env.js';
+import { reconcileClaudeSkillsForEnv } from '@/services/isolation/claude-skills-link.js';
 import {
   installManagedClaudeTerminalEnv,
   type ManagedClaudeTerminalMode,
@@ -456,6 +457,8 @@ export function createStandaloneTerminal(
   // same resolver and provider key ('claude') as the project shell PTY.
   // T-1675: interactive terminals never run on a delegated credential.
   const isolatedEnv = resolveProviderEnv(userId, 'claude', process.env, 'chat', { honorGrants: false });
+  // ADR-203: the terminal's claude reads <CLAUDE_CONFIG_DIR>/skills; reconcile first.
+  reconcileClaudeSkillsForEnv(isolatedEnv);
 
   // B-90: hoist the user's npm-global binaries to the front of PATH, deriving
   // every candidate from the ISOLATED env so per-user isolation is preserved.

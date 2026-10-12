@@ -2,6 +2,7 @@ import { useCallback, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import JSZip from 'jszip';
 import { api } from '../../../utils/api';
+import { SECRET_FILE_DECLINED, requestWithSecretConfirmation } from '../../../utils/secretFileConfirmation';
 import type { FileTreeNode } from '../types/types';
 import type { Project } from '../../../types/app';
 
@@ -287,7 +288,12 @@ export function useFileTreeOperations({
     if (!selectedProject) return;
 
     // Use the binary streaming endpoint so downloads preserve raw bytes.
-    const response = await api.readFileBlob(selectedProject.projectId, item.path);
+    // B-1593: a secrets file asks for confirmation; declining downloads nothing.
+    const response = await requestWithSecretConfirmation(
+      (confirmSecret) => api.readFileBlob(selectedProject.projectId, item.path, { confirmSecret }),
+      { fileName: item.name },
+    );
+    if (response === SECRET_FILE_DECLINED) return;
 
     if (!response.ok) {
       throw new Error('Failed to download file');
@@ -308,7 +314,12 @@ export function useFileTreeOperations({
       const fullPath = currentPath ? `${currentPath}/${node.name}` : node.name;
 
       if (node.type === 'file') {
-        const response = await api.readFileBlob(selectedProject.projectId, node.path);
+        // B-1593: each secrets file in the folder asks; a declined one is left out.
+        const response = await requestWithSecretConfirmation(
+          (confirmSecret) => api.readFileBlob(selectedProject.projectId, node.path, { confirmSecret }),
+          { fileName: fullPath },
+        );
+        if (response === SECRET_FILE_DECLINED) return;
         if (!response.ok) {
           throw new Error(`Failed to download "${node.name}" for ZIP export`);
         }

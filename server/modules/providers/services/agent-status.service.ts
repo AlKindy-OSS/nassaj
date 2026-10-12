@@ -44,6 +44,12 @@
  * against a strict character class so a caller-supplied id can never traverse
  * out of the session's `subagents` directory.
  *
+ * PINNED READS (ADR-201 A1): each owned session's transcript is opened through
+ * `openRecordedTranscript` (tree confinement, header id check, pinned fd;
+ * the participation gate above is the authorisation) and its `subagents`
+ * directory is pinned from that descriptor; agent files are opened through the
+ * directory descriptor. A transcript that fails any check contributes nothing.
+ *
  * DECLARED CAPS
  * -------------
  * Sessions per call and agent transcripts per call are both capped, and the
@@ -51,19 +57,28 @@
  * confused with "we stopped looking".
  */
 
+import { lstat } from 'node:fs/promises';
 import path from 'node:path';
 
 import { participantsDb, sessionsDb } from '@/modules/database/index.js';
 import { DEFAULT_QUIET_MS } from '@/modules/providers/list/claude/workflow-reconcile.service.js';
 import {
-  agentMetaPath,
-  agentTranscriptPath,
   listSessionAgentIds,
   readAgentMeta,
   readAgentOutcome,
   type AgentOutcome,
   type AgentUnknownReason,
 } from '@/modules/providers/list/claude/agent-transcript.reader.js';
+import {
+  isTranscriptHandle,
+  openRecordedTranscript,
+  openSessionArtifactDir,
+  SessionArtifactDir,
+} from '@/modules/providers/shared/session-transcript.js';
+import { isSessionAccessibleByUser } from '@/modules/providers/services/session-access.js';
+
+/** One owned session's transcript row from the batched lookup. */
+type OwnedSessionRow = ReturnType<typeof sessionsDb.getSessionFilePathsByIds>[number];
 
 /** Upper bound on sessions inspected per call (newest-first by the DB ordering). */
 const MAX_SESSIONS_SCANNED = 200;
@@ -145,52 +160,137 @@ export type AgentReport = {
 };
 
 /**
- * Resolves a session's `subagents` directory from its transcript path, using the
- * exact derivation getSessionMessages uses.
+ * Fast negative filter: true unless the `subagents` directory derived from the
+ * recorded path is certainly absent. Metadata only (one `lstat`, nothing is
+ * read or returned); every session it keeps still goes through the pinned
+ * reader, so a planted name here can only cost a refused open.
  */
-function resolveSubagentsDir(jsonlPath: string | null): string | null {
-  if (!jsonlPath) {
-    return null;
-  }
-  const projectDir = path.dirname(jsonlPath);
-  const transcriptSessionId = path.basename(jsonlPath, '.jsonl');
-  return path.join(projectDir, transcriptSessionId, 'subagents');
+async function mayHaveSubagents(jsonlPath: string): Promise<boolean> {
+  const derived = path.join(path.dirname(jsonlPath), path.basename(jsonlPath, '.jsonl'), 'subagents');
+  return lstat(derived).then(() => true, (error: NodeJS.ErrnoException) => error.code !== 'ENOENT');
 }
 
 /**
- * Maps the caller's owned session ids to their `subagents` directories, honoring
- * the session cap. Returns the ordered pairs plus the eligibility counters.
+ * The caller's owned sessions (participation, newest first), honoring the
+ * session cap, with their transcript rows from ONE batched lookup (no N+1).
  */
-function resolveOwnedSubagentDirs(userId: number): {
-  pairs: Array<{ sessionId: string; subagentsDir: string }>;
+function ownedSessionRows(userId: number): {
+  rows: OwnedSessionRow[];
   eligible: number;
   sessionCapped: boolean;
 } {
   const ownedSessionIds = participantsDb.getSessionIdsForUser(userId);
   const eligible = ownedSessionIds.length;
   if (eligible === 0) {
-    return { pairs: [], eligible: 0, sessionCapped: false };
+    return { rows: [], eligible: 0, sessionCapped: false };
   }
-
   const toScan = ownedSessionIds.slice(0, MAX_SESSIONS_SCANNED);
-  const sessionCapped = eligible > toScan.length;
+  const byId = new Map(sessionsDb.getSessionFilePathsByIds(toScan).map((row) => [row.session_id, row] as const));
+  // M2 (ADR-201, ADR-172): participation is not enough — under project
+  // enforcement a participant who lost access to the session's project no
+  // longer reads it, so its transcript is never opened here either.
+  const rows = toScan.flatMap((sessionId) => byId.get(sessionId) ?? [])
+    .filter((row) => isSessionAccessibleByUser(row.session_id, row.project_path, userId, 'read'));
+  return { rows, eligible, sessionCapped: eligible > toScan.length };
+}
 
-  // Batched transcript-path lookup (no N+1) for exactly the capped id set.
-  const pathRows = sessionsDb.getSessionFilePathsByIds(toScan);
-  const jsonlBySession = new Map<string, string>();
-  for (const row of pathRows) {
-    jsonlBySession.set(row.session_id, row.jsonl_path);
+/**
+ * Pinned `subagents` directory of one owned session (ADR-201 A1), or null when
+ * the transcript or the directory is refused or absent. The caller closes it.
+ */
+async function openOwnedSubagents(row: OwnedSessionRow, userId: number): Promise<SessionArtifactDir | null> {
+  if (row.provider !== 'claude' || !(await mayHaveSubagents(row.jsonl_path ?? ''))) return null;
+  // Authorised by this endpoint's own gate: `row` comes only from the caller's
+  // participation set, filtered by the session read predicate (M2).
+  const transcript = await openRecordedTranscript(row, 'agent-status');
+  if (!isTranscriptHandle(transcript)) return null;
+  try {
+    const dir = await openSessionArtifactDir(transcript, 'subagents');
+    return dir instanceof SessionArtifactDir ? dir : null;
+  } finally {
+    await transcript.fd.close().catch(() => undefined);
   }
+}
 
-  const pairs: Array<{ sessionId: string; subagentsDir: string }> = [];
-  for (const sessionId of toScan) {
-    const subagentsDir = resolveSubagentsDir(jsonlBySession.get(sessionId) ?? null);
-    if (subagentsDir) {
-      pairs.push({ sessionId, subagentsDir });
+/** Runs `visit` on each owned session's pinned `subagents` dir until it returns `'stop'`. */
+async function forEachOwnedSubagents(
+  rows: OwnedSessionRow[],
+  userId: number,
+  visit: (sessionId: string, dir: SessionArtifactDir) => Promise<'next' | 'stop'>,
+): Promise<number> {
+  let visited = 0;
+  for (const row of rows) {
+    visited += 1;
+    const dir = await openOwnedSubagents(row, userId);
+    if (!dir) continue;
+    try {
+      if (await visit(row.session_id, dir) === 'stop') break;
+    } finally {
+      await dir.close();
     }
   }
+  return visited;
+}
 
-  return { pairs, eligible, sessionCapped };
+/** The orphan row for one agent, or null when it is not an orphan this endpoint reports. */
+async function orphanOf(
+  dir: SessionArtifactDir,
+  sessionId: string,
+  agentId: string,
+  options: { now: number; quietMs: number; tailBytes?: number },
+): Promise<OrphanedAgent | null> {
+  const outcome = await readAgentOutcome(dir, agentId, { tailBytes: options.tailBytes });
+  if (outcome.outcome === 'completed') {
+    return null; // Delivered its report on disk — not this endpoint's concern.
+  }
+  // Still-being-written transcript => decline to call it an orphan.
+  if (outcome.outcome === 'unknown') {
+    const mtimeMs = outcome.updatedAt ? new Date(outcome.updatedAt).getTime() : NaN;
+    if (Number.isFinite(mtimeMs) && options.now - mtimeMs < options.quietMs) {
+      return null;
+    }
+  }
+  const meta = await readAgentMeta(dir, agentId);
+  return {
+    sessionId,
+    agentId,
+    outcome: outcome.outcome,
+    unknownReason: outcome.unknownReason,
+    agentType: meta.agentType,
+    description: meta.description,
+    toolUseId: meta.toolUseId,
+    model: meta.model,
+    startedAt: outcome.startedAt,
+    lastActivityAt: outcome.lastActivityAt,
+    updatedAt: outcome.updatedAt,
+    hasReport: outcome.finalText !== null,
+    reportPreview: outcome.finalText !== null ? outcome.finalText.slice(0, REPORT_PREVIEW_CHARS) : null,
+    resumeHint: `SendMessage → ${agentId}`,
+  };
+}
+
+/** Recovered report of `agentId` in one session's pinned `subagents` dir, or null. */
+async function reportOf(
+  dir: SessionArtifactDir, sessionId: string, agentId: string, tailBytes: number | undefined,
+): Promise<AgentReport | null> {
+  if (!(await listSessionAgentIds(dir)).includes(agentId)) return null;
+  const outcome = await readAgentOutcome(dir, agentId, { tailBytes });
+  if (outcome.unknownReason === 'unreadable') return null;
+  const meta = await readAgentMeta(dir, agentId);
+  return {
+    sessionId,
+    agentId,
+    outcome: outcome.outcome,
+    unknownReason: outcome.unknownReason,
+    agentType: meta.agentType,
+    description: meta.description,
+    toolUseId: meta.toolUseId,
+    startedAt: outcome.startedAt,
+    lastActivityAt: outcome.lastActivityAt,
+    report: outcome.finalText,
+    reportTruncated: outcome.finalTextTruncated,
+    interruptionText: outcome.interruptionText,
+  };
 }
 
 export const agentStatusService = {
@@ -231,71 +331,26 @@ export const agentStatusService = {
     const quietMs = options.quietMs ?? DEFAULT_QUIET_MS;
 
     try {
-      const { pairs, eligible, sessionCapped } = resolveOwnedSubagentDirs(userId as number);
-      if (pairs.length === 0) {
+      const { rows, eligible, sessionCapped } = ownedSessionRows(userId as number);
+      if (rows.length === 0) {
         return { ...empty, eligible };
       }
 
       const agents: OrphanedAgent[] = [];
-      let scanned = 0;
       let agentsScanned = 0;
       let agentCapped = false;
-
-      for (const { sessionId, subagentsDir } of pairs) {
-        scanned += 1;
-        const agentIds = await listSessionAgentIds(subagentsDir);
-
-        for (const agentId of agentIds) {
+      const scanned = await forEachOwnedSubagents(rows, userId as number, async (sessionId, dir) => {
+        for (const agentId of await listSessionAgentIds(dir)) {
           if (agentsScanned >= MAX_AGENTS_SCANNED) {
             agentCapped = true;
-            break;
+            return 'stop';
           }
           agentsScanned += 1;
-
-          const outcome = await readAgentOutcome(
-            agentTranscriptPath(subagentsDir, agentId),
-            agentId,
-            { tailBytes: options.tailBytes },
-          );
-
-          if (outcome.outcome === 'completed') {
-            continue; // Delivered its report on disk — not this endpoint's concern.
-          }
-
-          // Still-being-written transcript => decline to call it an orphan.
-          if (outcome.outcome === 'unknown') {
-            const mtimeMs = outcome.updatedAt ? new Date(outcome.updatedAt).getTime() : NaN;
-            if (Number.isFinite(mtimeMs) && now - mtimeMs < quietMs) {
-              continue;
-            }
-          }
-
-          const meta = await readAgentMeta(agentMetaPath(subagentsDir, agentId));
-          agents.push({
-            sessionId,
-            agentId,
-            outcome: outcome.outcome,
-            unknownReason: outcome.unknownReason,
-            agentType: meta.agentType,
-            description: meta.description,
-            toolUseId: meta.toolUseId,
-            model: meta.model,
-            startedAt: outcome.startedAt,
-            lastActivityAt: outcome.lastActivityAt,
-            updatedAt: outcome.updatedAt,
-            hasReport: outcome.finalText !== null,
-            reportPreview:
-              outcome.finalText !== null
-                ? outcome.finalText.slice(0, REPORT_PREVIEW_CHARS)
-                : null,
-            resumeHint: `SendMessage → ${agentId}`,
-          });
+          const orphan = await orphanOf(dir, sessionId, agentId, { now, quietMs, tailBytes: options.tailBytes });
+          if (orphan) agents.push(orphan);
         }
-
-        if (agentCapped) {
-          break;
-        }
-      }
+        return 'next';
+      });
 
       return {
         agents,
@@ -335,41 +390,13 @@ export const agentStatusService = {
     }
 
     try {
-      const { pairs } = resolveOwnedSubagentDirs(userId as number);
-
-      for (const { sessionId, subagentsDir } of pairs) {
-        const agentIds = await listSessionAgentIds(subagentsDir);
-        if (!agentIds.includes(agentId)) {
-          continue;
-        }
-
-        const outcome = await readAgentOutcome(
-          agentTranscriptPath(subagentsDir, agentId),
-          agentId,
-          { tailBytes: options.tailBytes },
-        );
-        if (outcome.unknownReason === 'unreadable') {
-          return null;
-        }
-        const meta = await readAgentMeta(agentMetaPath(subagentsDir, agentId));
-
-        return {
-          sessionId,
-          agentId,
-          outcome: outcome.outcome,
-          unknownReason: outcome.unknownReason,
-          agentType: meta.agentType,
-          description: meta.description,
-          toolUseId: meta.toolUseId,
-          startedAt: outcome.startedAt,
-          lastActivityAt: outcome.lastActivityAt,
-          report: outcome.finalText,
-          reportTruncated: outcome.finalTextTruncated,
-          interruptionText: outcome.interruptionText,
-        };
-      }
-
-      return null;
+      const { rows } = ownedSessionRows(userId as number);
+      let found: AgentReport | null = null;
+      await forEachOwnedSubagents(rows, userId as number, async (sessionId, dir) => {
+        found = await reportOf(dir, sessionId, agentId, options.tailBytes);
+        return found ? 'stop' : 'next';
+      });
+      return found;
     } catch (error) {
       console.debug(
         '[agent-status] report lookup failed, returning null:',

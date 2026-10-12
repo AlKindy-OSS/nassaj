@@ -11,6 +11,7 @@ export { codexReceiptPayloadHash } from './list/codex/codex-receipt-proof.js';
 export { participantsService } from './services/participants.service.js';
 export { providerModelsService } from './services/provider-models.service.js';
 export { providerAuthService } from './services/provider-auth.service.js';
+export { harnessLinkModeService } from './services/harness-link-mode.runtime.js';
 export { providerSecretsService } from './services/provider-secrets.service.js';
 
 // ج1: composition-root seam for the read-only session-activity route. The app
@@ -94,6 +95,12 @@ export { readProjectSkills } from './services/skill-observations.service.js';
 
 // B-894: authenticated complete-payload receipt capability, never raw provider metadata.
 export { createVendorReceiptInvocation, readVendorReceiptInvocation } from './shared/vendor/vendor-receipt-identity.js';
+
+// ADR-200 §8 / M-6: the literal secrets an OpenCode turn or session may carry (redaction only).
+export {
+  collectOpenCodeSessionSecrets,
+  collectOpenCodeTurnSecrets,
+} from './list/opencode/opencode-redaction-secrets.js';
 
 // Live check that Anthropic still accepts a member's stored Claude login (the
 // onboarding route must not trust the credentials file's shape alone).

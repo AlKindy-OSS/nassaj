@@ -30,7 +30,9 @@ import SettingsGroup from '../../settings/view/SettingsGroup';
 import SettingsRow from '../../settings/view/SettingsRow';
 import SettingsSection from '../../settings/view/SettingsSection';
 import StatusBadge from '../../settings/view/StatusBadge';
-import { useProviderSkills } from '../hooks/useProviderSkills';
+import SettingsConfirmDialog from '../../settings/view/SettingsConfirmDialog';
+import { PROVIDER_NAMES } from '../constants';
+import { ProviderSkillsError, useProviderSkills } from '../hooks/useProviderSkills';
 import type {
   ProviderSkill,
   ProviderSkillCreateEntryPayload,
@@ -56,6 +58,8 @@ import type {
 type ProviderSkillsProps = {
   selectedProvider: SkillsProvider;
   currentProjects: SkillsProject[];
+  /** Effective harness-files mode (ADR-203). `private` lists and writes the caller's own store. */
+  filesMode?: 'shared' | 'private';
 };
 
 type QueuedSkillSourceFile = {
@@ -83,21 +87,6 @@ type QueueFailureMessages = {
 const MAX_SKILL_FOLDER_FILES = 500;
 const MAX_SKILL_FOLDER_BYTES = 30 * 1024 * 1024;
 
-// Providers that support skill discovery (GET). Others skip the tab entirely.
-const PROVIDER_NAMES: Record<SkillsProvider, string> = {
-  claude: 'Claude',
-  codex: 'Codex',
-  cursor: 'Cursor',
-  opencode: 'OpenCode',
-  qwen: 'Qwen Code',
-  antigravity: 'Antigravity',
-  kimi: 'Kimi',
-  deepseek: 'DeepSeek',
-  glm: 'GLM',
-  hermes: 'Hermes',
-  sakana: 'Sakana',
-};
-
 // Providers that support skill installation via POST/DELETE.
 const WRITE_SUPPORTED_PROVIDERS: ReadonlySet<SkillsProvider> = new Set([
   'claude',
@@ -111,6 +100,21 @@ const PROVIDER_SKILL_PATHS: Partial<Record<SkillsProvider, string>> = {
   claude: '~/.claude/skills/<skill-name>/SKILL.md',
   codex: '~/.agents/skills/<skill-name>/SKILL.md',
   cursor: '~/.cursor/skills/<skill-name>/SKILL.md',
+};
+
+// Harnesses whose private store a member may write (server PRIVATE_SKILL_PROVIDERS).
+const PRIVATE_STORE_PROVIDERS: ReadonlySet<SkillsProvider> = new Set(['claude', 'codex']);
+
+type Translate = ReturnType<typeof useTranslation>['t'];
+
+/** Server error code → the translated message the user reads; unknown codes keep the fallback. */
+const skillErrorText = (t: Translate, error: unknown, fallbackKey: string): string => {
+  const code = error instanceof ProviderSkillsError ? error.code : null;
+  if (code === 'PROVIDER_SKILL_READ_ONLY') return t('skills.errors.readOnly');
+  if (code === 'HARNESS_FILES_MODE_CHANGED') return t('skills.errors.modeChanged');
+  if (code === 'FORBIDDEN' || code === 'PROVIDER_SKILL_WRITE_FORBIDDEN') return t('skills.errors.forbidden');
+  if (code === 'NOT_FOUND') return t('skills.errors.notFound');
+  return error instanceof Error && error.message ? error.message : t(fallbackKey);
 };
 
 const SCOPE_ORDER: SkillsScope[] = ['user', 'plugin', 'repo', 'project', 'admin', 'system'];
@@ -241,13 +245,19 @@ function TechnicalPath({ children, className }: { children: string; className?: 
   );
 }
 
-export default function ProviderSkills({ selectedProvider, currentProjects }: ProviderSkillsProps) {
+export default function ProviderSkills({
+  selectedProvider,
+  currentProjects,
+  filesMode = 'shared',
+}: ProviderSkillsProps) {
   const { t } = useTranslation('settings');
   const { user } = useAuth();
 
   // Role-based write access: backend guards with 403, UI hides buttons proactively.
+  // ADR-203: a member writes only to their own private store (claude/codex).
   const role = user?.role;
-  const canWrite = (role === 'owner' || role === 'admin')
+  const isPrivateStore = filesMode === 'private' && PRIVATE_STORE_PROVIDERS.has(selectedProvider);
+  const canWrite = ((role === 'owner' || role === 'admin') || isPrivateStore)
     && WRITE_SUPPORTED_PROVIDERS.has(selectedProvider);
 
   const {
@@ -259,7 +269,7 @@ export default function ProviderSkills({ selectedProvider, currentProjects }: Pr
     addSkills,
     deleteSkill,
     refreshSkills,
-  } = useProviderSkills({ selectedProvider, currentProjects });
+  } = useProviderSkills({ selectedProvider, currentProjects, filesMode });
 
   const [queuedFiles, setQueuedFiles] = useState<QueuedSkillFile[]>([]);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -269,11 +279,13 @@ export default function ProviderSkills({ selectedProvider, currentProjects }: Pr
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [deletingSkillName, setDeletingSkillName] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [sharedDeleteSkill, setSharedDeleteSkill] = useState<ProviderSkill | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement | null>(null);
 
   const providerName = PROVIDER_NAMES[selectedProvider];
-  const providerPath = PROVIDER_SKILL_PATHS[selectedProvider] ?? null;
+  // The private store's location is internal: no path is shown for it.
+  const providerPath = isPrivateStore ? null : PROVIDER_SKILL_PATHS[selectedProvider] ?? null;
 
   const queueFailureMessages = useMemo<QueueFailureMessages>(() => ({
     tooManyFiles: t('skills.errors.tooManyFiles', {
@@ -311,6 +323,7 @@ export default function ProviderSkills({ selectedProvider, currentProjects }: Pr
     setJustInstalled(false);
     setDeletingSkillName(null);
     setDeleteError(null);
+    setSharedDeleteSkill(null);
   }, [selectedProvider]);
 
   const filteredSkills = useMemo(() => {
@@ -436,7 +449,7 @@ export default function ProviderSkills({ selectedProvider, currentProjects }: Pr
       setJustInstalled(true);
       setIsAddDialogOpen(false);
     } catch (error) {
-      setSubmitError(error instanceof Error ? error.message : t('skills.errors.saveFailed'));
+      setSubmitError(skillErrorText(t, error, 'skills.errors.saveFailed'));
     } finally {
       setIsSubmitting(false);
     }
@@ -456,23 +469,31 @@ export default function ProviderSkills({ selectedProvider, currentProjects }: Pr
     setIsAddDialogOpen(false);
   }, []);
 
+  const runDelete = useCallback(async (skill: ProviderSkill) => {
+    try {
+      setDeleteError(null);
+      await deleteSkill(skill.name);
+    } catch (error) {
+      setDeleteError(skillErrorText(t, error, 'skills.errors.deleteFailed'));
+    } finally {
+      setDeletingSkillName(null);
+      setSharedDeleteSkill(null);
+    }
+  }, [deleteSkill, t]);
+
   const handleDeleteSkill = useCallback(async (skill: ProviderSkill) => {
-    if (deletingSkillName === skill.name) {
-      // Second click: confirm and execute delete
-      try {
-        setDeleteError(null);
-        await deleteSkill(skill.name);
-        setDeletingSkillName(null);
-      } catch (error) {
-        setDeleteError(error instanceof Error ? error.message : t('skills.errors.deleteFailed'));
-        setDeletingSkillName(null);
-      }
+    setDeleteError(null);
+    // Removing from the shared library affects every member: a dialog says so.
+    if (skill.origin === 'operator-shared') {
+      setSharedDeleteSkill(skill);
       return;
     }
-    // First click: enter confirm state
-    setDeletingSkillName(skill.name);
-    setDeleteError(null);
-  }, [deleteSkill, deletingSkillName, t]);
+    if (deletingSkillName === skill.name) {
+      await runDelete(skill); // second click confirms
+      return;
+    }
+    setDeletingSkillName(skill.name); // first click enters the confirm state
+  }, [deletingSkillName, runDelete]);
 
   const scopeLabel = (scope: SkillsScope): string => {
     const key = `skills.scopes.${scope}` as const;
@@ -743,6 +764,19 @@ export default function ProviderSkills({ selectedProvider, currentProjects }: Pr
         </SettingsCard>
       )}
 
+      {sharedDeleteSkill && (
+        <SettingsConfirmDialog
+          title={t('skills.confirmSharedDeleteTitle', { name: sharedDeleteSkill.name })}
+          confirmLabel={t('skills.confirmYes')}
+          cancelLabel={t('skills.cancel')}
+          destructive
+          onConfirm={() => void runDelete(sharedDeleteSkill)}
+          onCancel={() => setSharedDeleteSkill(null)}
+        >
+          <p>{t('skills.confirmSharedDeleteBody')}</p>
+        </SettingsConfirmDialog>
+      )}
+
       {/* Success banner (only when freshly installed and dialog closed) */}
       {justInstalled && saveStatus === 'success' && !isAddDialogOpen && (
         <StatusBadge tone="success" className="gap-2">
@@ -841,7 +875,8 @@ export default function ProviderSkills({ selectedProvider, currentProjects }: Pr
             <SettingsGroup>
               {group.skills.map((skill) => {
                 const isConfirmingDelete = deletingSkillName === skill.name;
-                const isDeletable = canWrite && skill.scope !== 'plugin' && skill.scope !== 'system';
+                const isDeletable = canWrite && !skill.readOnly
+                  && skill.scope !== 'plugin' && skill.scope !== 'system';
 
                 return (
                   <SettingsRow
@@ -864,8 +899,12 @@ export default function ProviderSkills({ selectedProvider, currentProjects }: Pr
                             defaultValue: 'No description provided in the skill front matter.',
                           })}
                         </span>
-                        {(skill.pluginName || skill.projectDisplayName) && (
+                        {(skill.pluginName || skill.projectDisplayName || skill.origin) && (
                           <span className="flex flex-wrap items-center gap-2 pt-1">
+                            {skill.origin && (
+                              <StatusBadge>{t(`skills.origin.${skill.origin}`)}</StatusBadge>
+                            )}
+                            {skill.readOnly && <StatusBadge>{t('skills.readOnlyHint')}</StatusBadge>}
                             {skill.pluginName && (
                               <StatusBadge>{`${t('skills.plugin')}: ${skill.pluginName}`}</StatusBadge>
                             )}

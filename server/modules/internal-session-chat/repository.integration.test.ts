@@ -148,6 +148,11 @@ test('a project transfer invalidates every prior member until explicit revalidat
     seed();
     const live = recorder();
     assert.equal(internalChatRealtime.subscribe('room', 2, live.socket), true);
+    // ADR-201 A2: discovery may only move a row to the canonical form of its stored
+    // project path, so arrange a stored non-canonical spelling and let it canonicalise.
+    const db = getConnection();
+    db.prepare("INSERT INTO projects(project_id, project_path) VALUES('legacy-spelling', '/project-after-transfer/./')").run();
+    db.prepare("UPDATE sessions SET project_path = '/project-after-transfer/./' WHERE session_id = 'room'").run();
     sessionsDb.createSession('room', 'claude', '/project-after-transfer');
     assert.deepEqual(frameTypes(live.frames), ['internal-chat.membership_revoked'], 'transfer ends live subscriptions');
     internalChatRealtime.unsubscribe(live.socket);

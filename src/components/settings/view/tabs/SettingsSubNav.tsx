@@ -29,6 +29,8 @@ export type SettingsSubNavItem<T extends string> = {
   id?: string;
   /** معرّف اللوح الذي يحكمه (`aria-controls`). */
   panelId?: string;
+  /** نصّ قارئ الشاشة لنقطة تنبيه تُرسم بعد اللصيقة؛ غيابه = لا نقطة. */
+  indicatorLabel?: string;
 };
 
 type SettingsSubNavProps<T extends string> = {
@@ -80,6 +82,16 @@ export default function SettingsSubNav<T extends string>({
               )}
             >
               {item.label}
+              {item.indicatorLabel && (
+                <>
+                  <span
+                    className="ms-1.5 inline-block h-2 w-2 rounded-full bg-primary align-middle"
+                    aria-hidden="true"
+                    data-testid="tab-indicator"
+                  />
+                  <span className="sr-only">{item.indicatorLabel}</span>
+                </>
+              )}
             </button>
           );
         })}

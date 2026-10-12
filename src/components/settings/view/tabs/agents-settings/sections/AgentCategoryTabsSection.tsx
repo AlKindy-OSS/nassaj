@@ -13,6 +13,7 @@ export default function AgentCategoryTabsSection({
   categories,
   selectedCategory,
   onSelectCategory,
+  updateAvailable = false,
 }: AgentCategoryTabsSectionProps) {
   const { t } = useTranslation('settings');
 
@@ -35,8 +36,11 @@ export default function AgentCategoryTabsSection({
       value: category,
       label: LABELS[category],
       panelId: AGENT_CATEGORY_PANEL_ID,
+      indicatorLabel: category === 'update' && updateAvailable
+        ? t('harnessVersion.updateIndicator', { defaultValue: 'Update available' })
+        : undefined,
     }));
-  }, [categories, t]);
+  }, [categories, t, updateAvailable]);
 
   // Coming-soon providers (e.g. deepseek) have no category tabs — the content
   // section renders a coming-soon panel instead, so the tab bar is hidden.

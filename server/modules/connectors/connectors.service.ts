@@ -56,6 +56,7 @@ import {
   setNamespacedSecret,
   SYSTEM_SECRET_SCOPE,
 } from '@/services/isolation/provider-secrets-store.js';
+import { withProviderSecretsStore } from '@/services/isolation/provider-secrets-store.errors.js';
 import type { UpsertProviderMcpServerInput } from '@/shared/types.js';
 import { AppError } from '@/shared/utils.js';
 
@@ -854,7 +855,7 @@ export const connectorsService = {
 
     if (typeof apiKey === 'string' && apiKey.trim() !== '') {
       promoteConnectorSecret(created, () => {
-        setNamespacedSecret(scopeFor(created), 'connector', created.id, apiKey);
+        withProviderSecretsStore(() => setNamespacedSecret(scopeFor(created), 'connector', created.id, apiKey));
       });
       try {
         requireSuccessfulDistribution(await this.distribute(created.id));
@@ -887,7 +888,7 @@ export const connectorsService = {
       });
     }
     promoteConnectorSecret(connector, () => {
-      setNamespacedSecret(scopeFor(connector), 'connector', id, apiKey);
+      withProviderSecretsStore(() => setNamespacedSecret(scopeFor(connector), 'connector', id, apiKey));
     });
     // A previous failed placement is retained as disabled/non-green. Pasting the
     // key again is the pending card's retry action, so arm this explicit retry
@@ -1159,7 +1160,7 @@ export const connectorsService = {
     // Only now is registry/credential loss safe. This removes future-session
     // placements; it does not claim to terminate MCP children already held by a
     // live model session.
-    deleteNamespacedSecret(scopeFor(connector), 'connector', connector.id);
+    withProviderSecretsStore(() => deleteNamespacedSecret(scopeFor(connector), 'connector', connector.id));
     return { removed: connectorsDb.remove(id) };
   },
 

@@ -39,18 +39,43 @@
  */
 
 import assert from 'node:assert/strict';
+import { realpathSync } from 'node:fs';
 import { mkdtemp, mkdir, rm, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
+import { artifactDirJournals } from '@/modules/providers/list/claude/claude-history-source.js';
 import {
   buildReconcileMessage,
   findLatestStoppedNotificationMs,
-  findReconciledWorkflows,
-  reconcileWorkflowMessages,
+  findReconciledWorkflows as findWithSource,
+  reconcileWorkflowMessages as reconcileWithSource,
   workflowReconcileEnabled,
+  type ReconcileReadOptions,
 } from '@/modules/providers/list/claude/workflow-reconcile.service.js';
+import { openArtifactDirAt, SessionArtifactDir } from '@/modules/providers/shared/session-transcript-reader.js';
+
+/**
+ * ADR-201 A1: the reconcile reads journals only through a pinned source. These
+ * tests pin `<sessionDir>/subagents/workflows` the way the history source does.
+ */
+function pinnedJournals(sessionDir: string) {
+  return artifactDirJournals(async () => {
+    try {
+      const dir = await openArtifactDirAt(realpathSync(path.join(sessionDir, 'subagents', 'workflows')));
+      return dir instanceof SessionArtifactDir ? dir : null;
+    } catch {
+      return null;
+    }
+  });
+}
+
+const findReconciledWorkflows = (sessionDir: string, stoppedAtMs: number, options: ReconcileReadOptions = {}) =>
+  findWithSource(sessionDir, stoppedAtMs, { journals: pinnedJournals(sessionDir), ...options });
+const reconcileWorkflowMessages = (
+  sessionId: string, sessionDir: string, stoppedAtMs: number | null, options: ReconcileReadOptions = {},
+) => reconcileWithSource(sessionId, sessionDir, stoppedAtMs, { journals: pinnedJournals(sessionDir), ...options });
 
 const INCIDENT_WF_ID = 'wf_synthetic_ef5ba242-b4b';
 const COMPLETED_WF_ID = 'wf_synthetic_1ea9f41d-bdf';
@@ -612,4 +637,11 @@ test('findLatestStoppedNotificationMs returns null when there is no background s
     },
   ];
   assert.equal(findLatestStoppedNotificationMs(rows), null);
+});
+
+test('ADR-201 A1: without a pinned source or a lease no journal is read by name', async () => {
+  await withWorkflowJournal(INCIDENT_WF_ID, INCIDENT_JOURNAL_LINES, JOURNAL_DONE_MS, async (sessionDir) => {
+    assert.equal((await findReconciledWorkflows(sessionDir, STOPPED_AT_MS, { now: NOW_MS })).length, 1, 'control');
+    assert.deepEqual(await findWithSource(sessionDir, STOPPED_AT_MS, { now: NOW_MS }), []);
+  });
 });

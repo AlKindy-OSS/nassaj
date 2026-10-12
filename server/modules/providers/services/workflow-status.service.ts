@@ -40,11 +40,16 @@
  * dir, unreadable journal, failed stat) degrades that item to "skipped", never
  * throws, and never blocks the rest of the scan. Touches nothing on the
  * critical/query()/drain path.
+ *
+ * PINNED READS (ADR-201 A1): an owned session's transcript is opened through
+ * `openRecordedTranscript` (tree confinement, header id check, pinned fd;
+ * the participation gate above is the authorisation); its `subagents/workflows`
+ * directory is pinned from that descriptor and every journal/agent file is
+ * opened through the directory descriptor. Nothing is read by a stored path.
  */
 
-import fsp from 'node:fs/promises';
+import { lstat } from 'node:fs/promises';
 import path from 'node:path';
-import type { Stats } from 'node:fs';
 
 import { indicatorLookupsDb, participantsDb, projectsDb, sessionsDb } from '@/modules/database/index.js';
 import {
@@ -70,7 +75,18 @@ import {
   readWorkflowAgents,
   type WorkflowAgentRow,
 } from '@/modules/providers/services/workflow-agents.service.js';
+import { isSessionAccessibleByUser } from '@/modules/providers/services/session-access.js';
 import { readTerminalWorkflowIds } from '@/modules/providers/services/workflow-terminal.service.js';
+import {
+  isTranscriptHandle,
+  openRecordedTranscript,
+  openSessionArtifactDir,
+  pinnedReadStream,
+  SessionArtifactDir,
+} from '@/modules/providers/shared/session-transcript.js';
+
+/** One owned session's transcript row from the batched lookup. */
+type OwnedSessionRow = ReturnType<typeof sessionsDb.getSessionFilePathsByIds>[number];
 
 /**
  * Upper bound on how many of the caller's sessions are scanned per request. A
@@ -167,6 +183,7 @@ async function readJournalKeySetsCached(
   journalPath: string,
   mtimeMs: number,
   size: number,
+  input: () => import('node:stream').Readable,
 ): Promise<JournalKeySets> {
   const cacheKey = `${journalPath}:${mtimeMs}:${size}`;
   const hit = journalKeySetCache.get(cacheKey);
@@ -177,7 +194,7 @@ async function readJournalKeySetsCached(
     return hit;
   }
 
-  const fresh = await readJournalKeySets(journalPath);
+  const fresh = await readJournalKeySets(journalPath, undefined, input);
   journalKeySetCache.set(cacheKey, fresh);
   if (journalKeySetCache.size > JOURNAL_KEYSET_CACHE_MAX) {
     const oldest = journalKeySetCache.keys().next().value;
@@ -244,18 +261,66 @@ export type ActiveWorkflowsResult = {
 };
 
 /**
- * Resolves a session's on-disk `subagents/workflows` directory from its
- * transcript path, using the exact derivation getSessionMessages uses:
- * `<projectDir>/<transcriptSessionId>/subagents/workflows`. Returns null when
- * the session has no transcript path on record.
+ * Fast negative filter: true unless the `subagents/workflows` directory derived
+ * from the recorded path is certainly absent (the common case). Metadata only —
+ * one `lstat`, nothing read or returned; every session it keeps still goes
+ * through the pinned reader, so a planted name can only cost a refused open.
  */
-function resolveWorkflowsDir(jsonlPath: string | null): string | null {
-  if (!jsonlPath) {
-    return null;
+async function mayHaveWorkflows(jsonlPath: string): Promise<boolean> {
+  const sessionDir = path.join(path.dirname(jsonlPath), path.basename(jsonlPath, '.jsonl'));
+  return lstat(path.join(sessionDir, 'subagents', 'workflows'))
+    .then(() => true, (error: NodeJS.ErrnoException) => error.code !== 'ENOENT');
+}
+
+/** A session's pinned workflows dir plus the ids its transcript declared terminal. */
+type PinnedWorkflows = { dir: SessionArtifactDir; terminalWorkflowIds: ReadonlySet<string> };
+
+/**
+ * Opens one owned session's transcript (ADR-201 A1), reads its terminal
+ * workflow notifications from the pinned descriptor, and pins its
+ * `subagents/workflows` dir. Null when anything is refused or absent; the
+ * caller closes `dir`.
+ */
+async function openSessionWorkflows(row: OwnedSessionRow, userId: number): Promise<PinnedWorkflows | null> {
+  if (row.provider !== 'claude' || !(await mayHaveWorkflows(row.jsonl_path ?? ''))) return null;
+  // Authorised by this endpoint's own gate: `row` comes only from the caller's
+  // participation set, filtered by the session read predicate (M2).
+  const transcript = await openRecordedTranscript(row, 'workflow-status');
+  if (!isTranscriptHandle(transcript)) return null;
+  try {
+    const dir = await openSessionArtifactDir(transcript, 'workflows');
+    if (!(dir instanceof SessionArtifactDir)) return null;
+    // Workflows this session's transcript has already declared finished. Read
+    // incrementally (byte cursor per transcript), so the 8s poll only ever
+    // parses what was appended since the previous call.
+    const terminalWorkflowIds = await readTerminalWorkflowIds(transcript).catch(() => new Set<string>());
+    return { dir, terminalWorkflowIds };
+  } finally {
+    await transcript.fd.close().catch(() => undefined);
   }
-  const projectDir = path.dirname(jsonlPath);
-  const transcriptSessionId = path.basename(jsonlPath, '.jsonl');
-  return path.join(projectDir, transcriptSessionId, 'subagents', 'workflows');
+}
+
+type JournalView = { mtimeMs: number; keys: JournalKeySets };
+
+/** Journal mtime and key sets of one workflow, read through the pinned dir; mtime 0 when absent. */
+async function readWorkflowJournal(dir: SessionArtifactDir, entry: string): Promise<JournalView> {
+  const child = await dir.openFile(`${entry}/journal.jsonl`);
+  if (!('handle' in child)) {
+    // No journal yet for this workflow folder. mtime 0 => classifier treats it
+    // as "quiet" (nothing being written); with a dead+known pid + no keys =>
+    // ORPHAN, unknown pid => UNKNOWN, live pid => RUNNING. Surfaced, not swallowed.
+    return { mtimeMs: 0, keys: { startedKeys: new Set<string>(), resultKeys: new Set<string>() } };
+  }
+  try {
+    const mtimeMs = Number(child.stat.mtimeMs);
+    // M3: memoize the key-set read on (path, mtime, size).
+    const keys = await readJournalKeySetsCached(
+      child.realpath, mtimeMs, Number(child.stat.size), () => pinnedReadStream(child.handle),
+    );
+    return { mtimeMs, keys };
+  } finally {
+    await dir.closeFile(child);
+  }
 }
 
 /**
@@ -266,7 +331,7 @@ function resolveWorkflowsDir(jsonlPath: string | null): string | null {
  */
 async function scanSessionWorkflows(
   sessionId: string,
-  workflowsDir: string,
+  workflowsDir: SessionArtifactDir,
   now: number,
   quietMs: number,
   projectPath: string | null,
@@ -275,7 +340,7 @@ async function scanSessionWorkflows(
 ): Promise<Array<Omit<ActiveWorkflow, 'projectId'>>> {
   let entries: string[];
   try {
-    entries = await fsp.readdir(workflowsDir);
+    entries = await workflowsDir.list();
   } catch {
     // No workflows dir (the common case) or an unreadable one => nothing active.
     return [];
@@ -318,29 +383,9 @@ async function scanSessionWorkflows(
       continue;
     }
 
-    const journalPath = path.join(workflowsDir, entry, 'journal.jsonl');
-
-    let journalMtimeMs = 0;
-    let journalSize = -1;
-    let statOk = false;
-    try {
-      const journalStat: Stats = await fsp.stat(journalPath);
-      journalMtimeMs = journalStat.mtimeMs;
-      journalSize = journalStat.size; // M3: part of the memo cache key.
-      statOk = true;
-    } catch {
-      // No journal yet for this workflow folder. mtime 0 => classifier treats it
-      // as "quiet" (nothing being written); with a dead+known pid + no keys =>
-      // ORPHAN, unknown pid => UNKNOWN, live pid => RUNNING. Surfaced, not
-      // swallowed. No stat => no memo key => read directly (empty sets, cheap).
-      journalMtimeMs = 0;
-    }
-
-    // M3: memoize the key-set read on (path, mtime, size). Only when stat
-    // succeeded do we have a valid cache key; otherwise fall back to a direct read.
-    const { startedKeys, resultKeys } = statOk
-      ? await readJournalKeySetsCached(journalPath, journalMtimeMs, journalSize)
-      : await readJournalKeySets(journalPath);
+    const journal = await readWorkflowJournal(workflowsDir, entry);
+    const journalMtimeMs = journal.mtimeMs;
+    const { startedKeys, resultKeys } = journal.keys;
     let allStartedResulted = startedKeys.size >= 1;
     for (const key of startedKeys) {
       if (!resultKeys.has(key)) {
@@ -357,7 +402,7 @@ async function scanSessionWorkflows(
     let agentsTruncated = false;
     let agentActivityMs = 0;
     try {
-      const detail = await readWorkflowAgents(path.join(workflowsDir, entry), { now });
+      const detail = await readWorkflowAgents(workflowsDir, entry, { now });
       agents = detail.agents;
       agentsTruncated = detail.truncated;
       agentActivityMs = detail.lastActivityMs;
@@ -506,14 +551,10 @@ export const workflowStatusService = {
       const toScan = ownedSessionIds.slice(0, MAX_SESSIONS_SCANNED);
       const capped = eligible > toScan.length;
 
-      // Batched transcript-path lookup (no N+1) for exactly the capped id set.
-      const pathRows = sessionsDb.getSessionFilePathsByIds(toScan);
-      const jsonlBySession = new Map<string, string>();
-      const projectBySession = new Map<string, string | null>();
-      for (const row of pathRows) {
-        jsonlBySession.set(row.session_id, row.jsonl_path);
-        projectBySession.set(row.session_id, row.project_path);
-      }
+      // Batched transcript-row lookup (no N+1) for exactly the capped id set.
+      const rowBySession = new Map(
+        sessionsDb.getSessionFilePathsByIds(toScan).map((row) => [row.session_id, row] as const),
+      );
 
       // ADR-053 §ج-2: build the optional scope-liveness resolver ONCE per call.
       // Null when WORKFLOW_SUPERVISOR is off => scanner stays pid-only (no-op).
@@ -521,39 +562,31 @@ export const workflowStatusService = {
 
       const resolveProjectId = buildVisibleProjectIdResolver(userId as number);
       const workflows: ActiveWorkflow[] = [];
-      let scanned = 0;
       for (const sessionId of toScan) {
-        scanned += 1;
-        const workflowsDir = resolveWorkflowsDir(jsonlBySession.get(sessionId) ?? null);
-        if (!workflowsDir) {
-          continue; // No transcript path => no workflows dir to inspect.
+        const row = rowBySession.get(sessionId);
+        // M2 (ADR-201, ADR-172): a participant who lost read access to the
+        // session (project enforcement) gets nothing opened or reported.
+        const readable = row && isSessionAccessibleByUser(sessionId, row.project_path, userId as number, 'read');
+        const pinned = readable ? await openSessionWorkflows(row, userId as number) : null;
+        if (!row || !pinned) {
+          continue; // No admissible transcript or no workflows dir to inspect.
         }
         // The session's real project cwd (== the intent's projectPath) is the
         // join key to a supervisor scope; null when unknown => pid path only.
-        const projectPath = projectBySession.get(sessionId) ?? null;
-        // Workflows this session's transcript has already declared finished. Read
-        // incrementally (byte cursor per transcript), so the 8s poll only ever
-        // parses what was appended since the previous call.
-        let terminalWorkflowIds: ReadonlySet<string>;
+        const projectPath = row.project_path ?? null;
         try {
-          terminalWorkflowIds = await readTerminalWorkflowIds(jsonlBySession.get(sessionId) ?? null);
-        } catch {
-          terminalWorkflowIds = new Set<string>(); // Degrade to the pre-existing behaviour.
-        }
-        const sessionWorkflows = await scanSessionWorkflows(
-          sessionId,
-          workflowsDir,
-          now,
-          quietMs,
-          projectPath,
-          scopeResolver,
-          terminalWorkflowIds,
-        );
-        const projectId = sessionWorkflows.length > 0 ? resolveProjectId(projectPath) : null;
-        for (const wf of sessionWorkflows) {
-          workflows.push({ ...wf, projectId });
+          const sessionWorkflows = await scanSessionWorkflows(
+            sessionId, pinned.dir, now, quietMs, projectPath, scopeResolver, pinned.terminalWorkflowIds,
+          );
+          const projectId = sessionWorkflows.length > 0 ? resolveProjectId(projectPath) : null;
+          for (const wf of sessionWorkflows) {
+            workflows.push({ ...wf, projectId });
+          }
+        } finally {
+          await pinned.dir.close();
         }
       }
+      const scanned = toScan.length;
 
       const dormant = workflows.reduce((n, wf) => (wf.dormant ? n + 1 : n), 0);
       return { workflows, eligible, scanned, capped, dormant };

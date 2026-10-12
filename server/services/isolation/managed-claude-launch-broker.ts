@@ -116,6 +116,8 @@ async function authorize(record: Registration, pid: unknown, startTicks: unknown
     userId: record.userId, authenticatedPrincipal: record.actor, sessionId: targetSessionId,
     baseEnv: record.baseEnv, envAlreadyIsolated: true, authoritativeStoredPin: targetSessionId !== null,
     requireKnownResumePin: targetSessionId !== null, failOnAmbiguous: true, cwd: record.cwd,
+    // The terminal env was built on the member's OWN tree (grants off), B-1546.
+    honorGrants: false,
   });
   // B-1541: `--settings` / `--setting-sources` would hand an engine-pinned child
   // settings no file shows. The wrapper re-checks too (cwd may have moved).

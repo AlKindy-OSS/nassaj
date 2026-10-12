@@ -434,6 +434,15 @@ export const userDb = {
       .get() as UserPublicRow | undefined;
   },
 
+  /** Ids of active accounts (is_active=1 AND status='active'), ordered by id. */
+  listActiveUserIds(): number[] {
+    const db = getConnection();
+    const rows = db
+      .prepare("SELECT id FROM users WHERE is_active = 1 AND status = 'active' ORDER BY id ASC")
+      .all() as Array<{ id: number }>;
+    return rows.map((row) => row.id);
+  },
+
   /** Lists all users (public fields) ordered by id. For admin management UI. */
   listUsers(): UserPublicRow[] {
     const db = getConnection();

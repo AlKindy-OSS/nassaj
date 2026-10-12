@@ -43,6 +43,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 
+// eslint-disable-next-line boundaries/dependencies -- ADR-201 A1.5: the pinned-open primitive (pure fs), without loading the providers barrel in the supervisor process.
+import { canonicalFileSync, openPinnedSync, PinnedOpenError } from '../providers/shared/pinned-fd.js';
+
 import { writeFileAtomic } from './result-capture-writer.js';
 import { handoffsDir } from './config.js';
 import type { Classification } from './result-capture.js';
@@ -113,6 +116,68 @@ export function ledgerHasTask(ledger: Ledger | null, taskId: string): boolean {
   );
 }
 
+/**
+ * ADR-201 A1.5 — the conversation transcript is never opened by name: the
+ * directory part is realpath-resolved, the file is pinned single-link with
+ * `O_NOFOLLOW` and its kernel path confirmed. Tree confinement and the id
+ * binding are proven before delivery by the supervisor's target check
+ * (verifyDeliveryTarget → the pinned reader), which hands down the realpath.
+ */
+function pinnedTranscriptSync(jsonlPath: string, flags: number = fs.constants.O_RDONLY) {
+  const real = canonicalFileSync(jsonlPath);
+  if (!real) throw new PinnedOpenError('missing');
+  return openPinnedSync(real, flags);
+}
+
+/** Whole transcript text from a pinned descriptor; null when the file is absent. */
+function readTranscriptSync(jsonlPath: string): string | null {
+  let pinned;
+  try {
+    pinned = pinnedTranscriptSync(jsonlPath);
+  } catch (error) {
+    if (error instanceof PinnedOpenError && error.reason === 'missing') return null;
+    throw error;
+  }
+  try {
+    return fs.readFileSync(pinned.fd, 'utf8');
+  } finally {
+    fs.closeSync(pinned.fd);
+  }
+}
+
+/**
+ * Pinned append descriptor: the existing file opened `O_APPEND`, or a new one
+ * created exclusively (never through a planted name).
+ */
+function openAppendSync(jsonlPath: string): number {
+  const append = fs.constants.O_WRONLY | fs.constants.O_APPEND;
+  try {
+    return pinnedTranscriptSync(jsonlPath, append).fd;
+  } catch (error) {
+    if (!(error instanceof PinnedOpenError) || error.reason !== 'missing') throw error;
+    return pinnedTranscriptSync(jsonlPath, append | fs.constants.O_CREAT | fs.constants.O_EXCL).fd;
+  }
+}
+
+/** True when the transcript's last byte is not a newline (a torn tail). */
+function endsTorn(jsonlPath: string): boolean {
+  let pinned;
+  try {
+    pinned = pinnedTranscriptSync(jsonlPath);
+  } catch {
+    return false; // missing file → no prefix
+  }
+  try {
+    const size = Number(pinned.stat.size);
+    if (size === 0) return false;
+    const last = Buffer.alloc(1);
+    fs.readSync(pinned.fd, last, 0, 1, size - 1);
+    return last[0] !== 0x0a;
+  } finally {
+    fs.closeSync(pinned.fd);
+  }
+}
+
 export type JsonlScan = {
   validMatch: boolean;
   validMatchCount: number;
@@ -146,10 +211,11 @@ export function scanJsonl(
     totalLines: 0,
     lastLineParseable: null,
   };
-  if (!fs.existsSync(jsonlPath)) {
+  const text = readTranscriptSync(jsonlPath);
+  if (text === null) {
     return res;
   }
-  const lines = fs.readFileSync(jsonlPath, 'utf8').split('\n');
+  const lines = text.split('\n');
   const needle = `"handoffId":"${hId}"`;
   for (const line of lines) {
     if (line === '') {
@@ -298,26 +364,9 @@ export function appendCardLine(
   { tearAtOffset = null }: { tearAtOffset?: number | null } = {},
 ): number {
   fs.mkdirSync(path.dirname(jsonlPath), { recursive: true });
-  let prefix = '';
-  try {
-    const st = fs.statSync(jsonlPath);
-    if (st.size > 0) {
-      const rfd = fs.openSync(jsonlPath, 'r');
-      const last = Buffer.alloc(1);
-      try {
-        fs.readSync(rfd, last, 0, 1, st.size - 1);
-      } finally {
-        fs.closeSync(rfd);
-      }
-      if (last[0] !== 0x0a) {
-        prefix = '\n';
-      }
-    }
-  } catch {
-    /* missing file → no prefix */
-  }
+  const prefix = endsTorn(jsonlPath) ? '\n' : '';
   const payload = Buffer.from(prefix + JSON.stringify(lineObj) + '\n');
-  const fd = fs.openSync(jsonlPath, 'a');
+  const fd = openAppendSync(jsonlPath);
   try {
     if (tearAtOffset == null) {
       fs.writeSync(fd, payload);
@@ -423,10 +472,11 @@ export function scanJsonlForInjectedRef(
   ref: string,
 ): { found: boolean; matchCount: number; tornLines: number; totalLines: number } {
   const res = { found: false, matchCount: 0, tornLines: 0, totalLines: 0 };
-  if (!fs.existsSync(jsonlPath)) {
+  const text = readTranscriptSync(jsonlPath);
+  if (text === null) {
     return res;
   }
-  const lines = fs.readFileSync(jsonlPath, 'utf8').split('\n');
+  const lines = text.split('\n');
   for (const line of lines) {
     if (line === '') {
       continue;

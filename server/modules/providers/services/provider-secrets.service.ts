@@ -6,6 +6,7 @@ import {
   setProviderKey,
   setSharedVendorKey,
 } from '@/services/isolation/provider-secrets-store.js';
+import { withProviderSecretsStore } from '@/services/isolation/provider-secrets-store.errors.js';
 import { assertNotClaudeSubscriptionToken } from '@/modules/providers/shared/credentials/subscription-token-guard.js';
 import { resolveSlotKey } from '@/services/isolation/provider-slot-key.js';
 // Namespace import on purpose (same reason as credential-principal.js): many
@@ -36,17 +37,9 @@ import { isQwenPlanEnabled, qwenPlanProfileVerdict } from '@/services/isolation/
 export type VendorSecretProviderId = 'kimi' | 'deepseek' | 'glm' | 'qwen';
 
 /**
- * Syntax-only validation for the documented `sk-sp-` prefix. It does not prove
- * authenticity or entitlement; those are established only by the future
- * measured CLI integration. The 16..512 total-length bound rejects truncation
- * and memory-abuse payloads without inventing an exact vendor key length.
+ * Stored plans. `coding_plan` survives only as a LEGACY value read from records
+ * saved before ADR-200 D3; nothing writes it any more.
  */
-export function isQwenCodingPlanKey(value: unknown): value is string {
-  if (typeof value !== 'string') return false;
-  const key = value.trim();
-  return key.length >= 16 && key.length <= 512 && /^sk-sp-[A-Za-z0-9._-]+$/.test(key);
-}
-
 export type QwenPlan = 'coding_plan' | 'token_plan';
 export type QwenRegion = 'china' | 'international';
 
@@ -76,59 +69,34 @@ function isSafeQwenKey(value: unknown): value is string {
     && !/[\s\u0000-\u001F\u007F]/.test(key);
 }
 
-export function createQwenCredentialProfile(
-  apiKey: unknown,
-  plan: unknown,
-  region: unknown,
-): QwenCredentialProfile {
-  if (!isQwenPlan(plan)) {
-    throw new AppError('Qwen plan must be coding_plan or token_plan.', {
-      code: 'INVALID_QWEN_PLAN', statusCode: 400,
-    });
-  }
-  if (!isQwenRegion(region)) {
-    throw new AppError('Qwen region must be china or international.', {
-      code: 'INVALID_QWEN_REGION', statusCode: 400,
-    });
-  }
+/**
+ * ADR-200 S7: the only profile nassaj writes is a Token Plan key for the
+ * international region (D3, D4). The key carries no vendor prefix rule; only
+ * its length and the absence of whitespace/control characters are checked.
+ */
+export function createQwenCredentialProfile(apiKey: unknown): QwenCredentialProfile {
   const normalizedKey = typeof apiKey === 'string' ? apiKey.trim() : '';
-  const validKey = plan === 'coding_plan'
-    ? isQwenCodingPlanKey(normalizedKey)
-    : isSafeQwenKey(normalizedKey);
-  if (!validKey) {
+  if (!isSafeQwenKey(normalizedKey)) {
     throw new AppError(
-      plan === 'coding_plan'
-        ? 'Qwen Coding Plan keys must be 16–512 characters and begin with "sk-sp-".'
-        : 'Qwen Token Plan keys must be 16–512 characters without whitespace or control characters.',
-      {
-        code: plan === 'coding_plan' ? 'INVALID_QWEN_CODING_PLAN_KEY' : 'INVALID_QWEN_TOKEN_PLAN_KEY',
-        statusCode: 400,
-      },
+      'Alibaba Token Plan keys must be 16–512 characters without whitespace or control characters.',
+      { code: 'INVALID_QWEN_TOKEN_PLAN_KEY', statusCode: 400 },
     );
   }
-  return { version: 1, plan, region, key: normalizedKey };
+  return { version: 1, plan: 'token_plan', region: 'international', key: normalizedKey };
 }
 
 function parseQwenProfile(value: string): QwenCredentialProfile | null {
-  // Compatibility with the first Qwen wave: the encrypted slot contained the
-  // bare Coding Plan key. Preserve its international default without ever
-  // rewriting or surfacing the plaintext during a status read.
-  if (isQwenCodingPlanKey(value)) {
-    return { version: 1, plan: 'coding_plan', region: 'international', key: value.trim() };
-  }
   try {
     const parsed = JSON.parse(value) as Partial<QwenCredentialProfile>;
     if (parsed.version !== 1 || !isQwenPlan(parsed.plan) || !isQwenRegion(parsed.region)) return null;
     if (!isSafeQwenKey(parsed.key)) return null;
-    if (parsed.plan === 'coding_plan' && !isQwenCodingPlanKey(parsed.key)) return null;
-    return {
-      version: 1,
-      plan: parsed.plan,
-      region: parsed.region,
-      key: parsed.key.trim(),
-    };
+    return { version: 1, plan: parsed.plan, region: parsed.region, key: parsed.key.trim() };
   } catch {
-    return null;
+    // The first Qwen wave stored the bare Coding Plan key. It is surfaced as a
+    // legacy profile (never rewritten, never deleted silently).
+    return isSafeQwenKey(value)
+      ? { version: 1, plan: 'coding_plan', region: 'international', key: value.trim() }
+      : null;
   }
 }
 
@@ -140,22 +108,10 @@ function getQwenProfileForUser(
   return resolved?.key ? parseQwenProfile(resolved.key) : null;
 }
 
-/**
- * T-1906: version of the personal-use terms a member must accept before a Qwen
- * Coding Plan key is stored. ONE definition: every write path reaches setKey.
- */
-export const QWEN_CONSENT_VERSION = 'qwen-plan-personal-use/2026-09-28';
-
-/**
- * Request facts the Qwen credential audit row carries (T-1906). Never the key.
- * `consentVersion` is set only by a path that collected the member's explicit
- * `consent: true` (per-provider route or company route); setKey refuses a
- * Qwen write without it.
- */
+/** Request facts the Qwen credential audit row carries (T-1906). Never the key. */
 export type QwenCredentialAuditContext = {
   ipAddress?: string | null;
   userAgent?: string | null;
-  consentVersion?: string | null;
 };
 
 function toAuditUserId(userId: string | number | null | undefined): number | undefined {
@@ -180,6 +136,26 @@ function auditQwenCredential(
     ipAddress: context?.ipAddress ?? undefined,
     userAgent: context?.userAgent ?? undefined,
   });
+}
+
+/**
+ * ADR-200 §8: the literal vendor keys a member currently holds in their OWN
+ * slots (no shared fallback). Used only to redact text; never returned to a
+ * client or logged. A slot that cannot be read contributes nothing.
+ */
+function readVendorRedactionSecrets(userId: string | number | null | undefined): string[] {
+  if (userId === null || userId === undefined || userId === '') return [];
+  const secrets: string[] = [];
+  for (const vendor of VENDOR_SECRET_PROVIDERS as readonly VendorSecretProviderId[]) {
+    try {
+      const raw = resolveSlotKey(userId, vendor, { sharedFallback: false })?.key;
+      if (typeof raw !== 'string' || raw === '') continue;
+      secrets.push(vendor === 'qwen' ? parseQwenProfile(raw)?.key ?? raw : raw);
+    } catch {
+      // An unreadable slot cannot be redacted against; it holds nothing usable.
+    }
+  }
+  return secrets;
 }
 
 export type ProviderSecretStatus = {
@@ -220,7 +196,6 @@ export const providerSecretsService = {
     userId: string | number | null | undefined,
     provider: string,
     apiKey: unknown,
-    qwenOptions?: { plan?: unknown; region?: unknown },
     auditContext?: QwenCredentialAuditContext,
   ): ProviderSecretStatus {
     const vendor = assertVendorProvider(provider);
@@ -246,42 +221,23 @@ export const providerSecretsService = {
     // provider router sits behind authenticateToken, so `userId` is a member id
     // on every reachable path) and gives that gate exactly one line to guard.
     if (vendor === 'qwen' && (userId === null || userId === undefined)) {
-      throw new AppError('Qwen Coding Plan credentials must belong to an authenticated member.', {
+      throw new AppError('Alibaba Token Plan credentials must belong to an authenticated member.', {
         code: 'QWEN_PERSONAL_CREDENTIAL_REQUIRED',
         statusCode: 403,
       });
     }
-    let storedValue = apiKey.trim();
-    let qwenProfile: QwenCredentialProfile | null = null;
-    if (vendor === 'qwen') {
-      qwenProfile = createQwenCredentialProfile(
-        apiKey,
-        qwenOptions?.plan ?? 'coding_plan',
-        qwenOptions?.region ?? 'international',
-      );
-      storedValue = JSON.stringify(qwenProfile);
-      // T-1906: the key is personal and interactive-only (vendor terms); it is
-      // never stored without the member's recorded acknowledgement.
-      if (auditContext?.consentVersion !== QWEN_CONSENT_VERSION) {
-        throw new AppError('This key is personal: confirm the personal-use terms before saving it.', {
-          code: 'CONSENT_REQUIRED',
-          statusCode: 400,
-          details: { consentVersion: QWEN_CONSENT_VERSION },
-        });
-      }
-    }
+    const qwenProfile = vendor === 'qwen' ? createQwenCredentialProfile(apiKey) : null;
+    const storedValue = qwenProfile ? JSON.stringify(qwenProfile) : apiKey.trim();
 
-    if (userId === null || userId === undefined) {
-      setSharedVendorKey(vendor, storedValue);
-    } else {
-      setProviderKey(userId, vendor, storedValue);
-    }
+    withProviderSecretsStore(() => {
+      if (userId === null || userId === undefined) setSharedVendorKey(vendor, storedValue);
+      else setProviderKey(userId, vendor, storedValue);
+    });
     if (qwenProfile) {
       auditQwenCredential('qwen_credential_set', userId, {
         configured: true,
         plan: qwenProfile.plan,
         region: qwenProfile.region,
-        consentVersion: QWEN_CONSENT_VERSION,
       }, auditContext);
     }
     return { provider: vendor, configured: true };
@@ -298,16 +254,15 @@ export const providerSecretsService = {
   ): ProviderSecretStatus {
     const vendor = assertVendorProvider(provider);
     if (vendor === 'qwen' && (userId === null || userId === undefined)) {
-      throw new AppError('Qwen Coding Plan has no operator-wide credential slot.', {
+      throw new AppError('Alibaba Token Plan has no operator-wide credential slot.', {
         code: 'QWEN_SHARED_CREDENTIAL_FORBIDDEN',
         statusCode: 403,
       });
     }
-    if (userId === null || userId === undefined) {
-      deleteSharedVendorKey(vendor);
-    } else {
-      deleteProviderKey(userId, vendor);
-    }
+    withProviderSecretsStore(() => {
+      if (userId === null || userId === undefined) deleteSharedVendorKey(vendor);
+      else deleteProviderKey(userId, vendor);
+    });
     if (vendor === 'qwen') {
       auditQwenCredential('qwen_credential_deleted', userId, { configured: false }, auditContext);
     }
@@ -336,19 +291,40 @@ export const providerSecretsService = {
   },
 
   /**
-   * T-1906: whether this member can run `qwen-plan/*` models through OpenCode.
-   * `status` is 'ok' | 'missing_key' | 'incompatible_profile' (the same codes a
-   * refused launch carries); `enabled` mirrors NASSAJ_OPENCODE_QWEN_PLAN.
-   * Never returns the key.
+   * T-1906 / ADR-200 S7: whether this member can run `qwen-plan/*` models
+   * through OpenCode. `status` is 'ok' | 'missing_key' | 'legacy_profile' (the
+   * same codes a refused launch carries); `enabled` mirrors the
+   * NASSAJ_OPENCODE_QWEN_PLAN kill switch. Never returns the key.
    */
   getQwenPlanStatus(userId: string | number | null | undefined): {
     enabled: boolean;
-    status: 'ok' | 'missing_key' | 'incompatible_profile';
+    status: 'ok' | 'missing_key' | 'legacy_profile';
   } {
     return {
       enabled: isQwenPlanEnabled(),
       status: qwenPlanProfileVerdict(getQwenProfileForUser(userId)),
     };
+  },
+
+  /**
+   * ADR-200 §8: one member's own current vendor slot keys, for redaction only.
+   * opencode-redaction-secrets.ts composes them with auth.json and grants.
+   */
+  getVendorRedactionSecrets(userId: string | number | null | undefined): string[] {
+    return readVendorRedactionSecrets(userId);
+  },
+
+  /**
+   * ADR-200 S8: one member's OWN Moonshot (`kimi`) or DeepSeek key for an
+   * OpenCode spawn-vendor turn — no credential grant, no operator-wide slot.
+   * Server-side runtime use only; never returned to a client or logged.
+   */
+  getOwnVendorKey(
+    userId: string | number | null | undefined,
+    slot: 'kimi' | 'deepseek',
+  ): string | null {
+    if (userId === null || userId === undefined || userId === '') return null;
+    return resolveSlotKey(userId, slot, { sharedFallback: false })?.key ?? null;
   },
 
   /** Returns the parsed personal Qwen profile for server-side runtime use only. */

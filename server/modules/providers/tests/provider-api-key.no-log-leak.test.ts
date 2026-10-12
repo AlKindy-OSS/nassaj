@@ -40,6 +40,8 @@ import { _resetProviderSecretsServerKeyCache } from '@/services/isolation/provid
 import { AppError } from '@/shared/utils.js';
 import { createCodexMachineFixture } from '@/shared/tests/codex-release-fixture.js';
 
+import { emulateCodexCliLogin } from './codex-cli-login.fixture.js';
+
 const KEY = 'sk-lifecycle-secret-DO-NOT-LEAK-9999';
 const TEST_SERVER_KEY = Buffer.alloc(32, 9).toString('base64');
 
@@ -176,10 +178,12 @@ test('every credential writer keeps the key out of logs across a set + delete li
 
   // codex reaches its native store through the CLI; inject a spawn that succeeds
   // (close 0) so setApiKey resolves without a real codex binary.
-  const okSpawn = (_cmd: string, _args: string[]) => {
+  const okSpawn = (_cmd: string, _args: string[], opts: unknown) => {
+    let input = '';
     const child = new EventEmitter() as EventEmitter & { stdin: unknown };
-    child.stdin = { write: () => true, end: () => {} };
-    setImmediate(() => child.emit('close', 0, null));
+    child.stdin = { write: (chunk: string) => { input += chunk; return true; }, end: () => {} };
+    // ADR-200 S3: the writer re-reads auth.json, so leave what the CLI writes.
+    setImmediate(() => { emulateCodexCliLogin(opts, input); child.emit('close', 0, null); });
     return child;
   };
 

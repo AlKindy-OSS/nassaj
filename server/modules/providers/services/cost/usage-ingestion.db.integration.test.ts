@@ -1,5 +1,7 @@
+// FIRST import — HOME becomes a /var/tmp sandbox before any provider root is computed.
+import '@/shared/__tests__/sandbox-home.js';
 import assert from 'node:assert/strict';
-import { appendFile, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { appendFile, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
 
@@ -17,6 +19,8 @@ import {
   resumeUsageIngestionBackfill,
   startUsageIngestionBackfill,
 } from '@/modules/providers/services/cost/usage-ingestion.scheduler.js';
+
+import { claudeHeaderLine, claudeProjectsRoot } from './__tests__/bound-transcripts.js';
 
 async function withDatabase(run: (directory: string) => void | Promise<void>): Promise<void> {
   const previous = process.env.DATABASE_PATH;
@@ -237,12 +241,16 @@ test('resume requested during a partial flight is latched, reruns, and still nev
     try {
       process.env.USAGE_INGEST_WRITER = 'on';
       process.env.USAGE_INGEST_BACKFILL = 'on';
-      const transcript = path.join(directory, 'partial-race.jsonl');
+      // ADR-201 A-P2c: ingestion binds the transcript to its session (provider
+      // root, `<id>.jsonl`, id header), so it lives in the sandbox Claude root.
+      const projectDir = path.join(claudeProjectsRoot(), path.basename(directory));
+      await mkdir(projectDir, { recursive: true });
+      const transcript = path.join(projectDir, 'race-session.jsonl');
       const assistant = JSON.stringify({
         type: 'assistant', timestamp: '2026-08-17T10:00:00.000Z', requestId: 'r1',
         message: { id: 'm1', model: 'claude-opus-5', usage: { input_tokens: 1, output_tokens: 2 } },
       });
-      await writeFile(transcript, `${assistant}\n{"type":`);
+      await writeFile(transcript, `${claudeHeaderLine('race-session')}${assistant}\n{"type":`);
       sessionsDb.createSession('race-session', 'claude', directory, undefined, undefined, undefined, transcript);
 
       const first = startUsageIngestionBackfill();

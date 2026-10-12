@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next';
 import SettingsSection from '../../SettingsSection';
 import { vendorsByCompany } from '../../../../../../shared/vendors';
 
+import BackupRestoreSection from './BackupRestoreSection';
 import CompanyCredentialCard from './CompanyCredentialCard';
 import VoiceTranscriptionSection from './VoiceTranscriptionSection';
 
@@ -99,6 +100,9 @@ export default function VendorsSettingsTab({
         أشياء لا يعرف صفُّ الشركة كيف يعرضها، ونطاقان (تثبيت/عضو) لا يعرفهما.
       */}
       <VoiceTranscriptionSection />
+
+      {/* استرجاع ملفات الأجساد (ADR-200 §3): مطويّ في أسفل التبويب ومرئيّ مع العلم مطفأً. */}
+      <BackupRestoreSection />
     </div>
   );
 }

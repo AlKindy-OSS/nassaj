@@ -31,16 +31,76 @@ export function isStrictlyUnder(target: string, root: string): boolean {
   return rel !== '' && !rel.startsWith('..') && !path.isAbsolute(rel);
 }
 
+/** Literal and real spellings of the users root (`<home>/.nassaj-users`). */
+async function usersRootSpellings(): Promise<string[]> {
+  const usersRoot = path.join(os.homedir(), '.nassaj-users');
+  return [...new Set([usersRoot, ...await realRoots([usersRoot])])];
+}
+
 /**
- * `<~/.nassaj-users>/<id>/<underHome>` for the member tree that holds `resolved`,
- * or null when `resolved` is not inside a numeric member tree. Read-only: it
- * enumerates nothing and provisions nothing.
+ * Users-root entry (`<n>` of `<users>/<n>/…`) named by the spelling of
+ * `target` itself (no link in it is followed), or null outside the users root.
  */
-export async function memberTreeRoot(resolved: string, underHome: string): Promise<string | null> {
-  const [usersRoot] = await realRoots([path.join(os.homedir(), '.nassaj-users')]);
-  if (!usersRoot || !isStrictlyUnder(resolved, usersRoot)) return null;
-  const memberId = path.relative(usersRoot, resolved).split(path.sep)[0];
-  return /^\d+$/.test(memberId) ? path.join(usersRoot, memberId, underHome) : null;
+export async function lexicalMemberOf(target: string): Promise<string | null> {
+  return usersEntryOf(path.resolve(target));
+}
+
+/**
+ * Users-root entry that physically holds `target` (its realpath), or null when
+ * that lies outside the users root (operator/shared). A target that cannot be
+ * resolved is judged by its literal spelling. Never throws.
+ */
+export async function physicalMemberOf(target: string): Promise<string | null> {
+  return usersEntryOf(await realpath(target).catch(() => path.resolve(target)));
+}
+
+async function usersEntryOf(spelling: string): Promise<string | null> {
+  for (const users of await usersRootSpellings()) {
+    if (isStrictlyUnder(spelling, users)) return path.relative(users, spelling).split(path.sep)[0];
+  }
+  return null;
+}
+
+/**
+ * H1 (ADR-201 qa): a provider root may be a link only to its own member tree
+ * or to the operator/shared area (provisioning case b: every live member's
+ * `.claude/projects` links to the operator tree). A root of member `<n>`
+ * whose realpath lies under ANY other users-root entry, or an operator/shared
+ * root whose realpath lies under the users root at all, is not that tree.
+ */
+async function isOwnPhysicalRoot(root: string, memberId: string | null): Promise<boolean> {
+  const owner = await physicalMemberOf(root);
+  return owner === null || owner === memberId;
+}
+
+/**
+ * Roots of the ONE tree that holds `recorded` (ADR-201 A1.3), as literal
+ * spellings: `[<users>/<n>/<underHome>]` when `recorded` lies in member tree
+ * `<n>`, every `sharedRoots` spelling when it lies under one of them, else `[]`.
+ * Member trees are never enumerated: the member id is the first path segment
+ * below the users root (a `path.relative` split, so `/1` never matches `/10`).
+ * A path inside the users root but not in a numeric member tree, or a provider
+ * with no member trees (`underHome` null), yields `[]` for that branch. A root
+ * that physically lies in another member's tree is dropped (H1, see
+ * {@link isOwnPhysicalRoot}).
+ */
+export async function recordedTreeRoots(
+  recorded: string,
+  sharedRoots: readonly string[],
+  underHome: string | null,
+): Promise<string[]> {
+  const literal = path.resolve(recorded);
+  for (const users of await usersRootSpellings()) {
+    if (!isStrictlyUnder(literal, users)) continue;
+    const memberId = path.relative(users, literal).split(path.sep)[0];
+    if (!underHome || !/^\d+$/.test(memberId)) return [];
+    const root = path.join(users, memberId, underHome);
+    return await isOwnPhysicalRoot(root, memberId) ? [root] : [];
+  }
+  const spellings = [...sharedRoots, ...await realRoots(sharedRoots)];
+  if (!spellings.some((root) => isStrictlyUnder(literal, path.resolve(root)))) return [];
+  const own = await Promise.all(sharedRoots.map((root) => isOwnPhysicalRoot(root, null)));
+  return sharedRoots.filter((_, index) => own[index]);
 }
 
 /** Realpath of `candidate` when it is a regular file passing `accept`, else null. Never throws. */
@@ -56,37 +116,4 @@ export async function realFileOf(
   } catch {
     return null;
   }
-}
-
-/**
- * Realpath of `candidate` when it is a regular file under one of `roots` and
- * passes `accept`; otherwise null. Never throws.
- */
-export async function resolveContainedFile(
-  candidate: string | null | undefined,
-  roots: Iterable<string>,
-  accept: (resolved: string) => boolean = () => true,
-): Promise<string | null> {
-  const resolved = await realFileOf(candidate, accept);
-  if (!resolved) return null;
-  const contained = await realRoots(roots);
-  return contained.some((root) => isStrictlyUnder(resolved, root)) ? resolved : null;
-}
-
-/**
- * Realpath of `candidate` when it is a regular file passing `accept` under one of
- * `sharedRoots` or under `<member tree>/<underHome>` of the member tree holding
- * it; otherwise null. Never throws.
- */
-export async function resolveProviderTranscript(
-  candidate: string | null | undefined,
-  sharedRoots: Iterable<string>,
-  underHome: string,
-  accept: (resolved: string) => boolean,
-): Promise<string | null> {
-  const resolved = await realFileOf(candidate, accept);
-  if (!resolved) return null;
-  const memberRoot = await memberTreeRoot(resolved, underHome);
-  const roots = await realRoots(memberRoot ? [...sharedRoots, memberRoot] : sharedRoots);
-  return roots.some((root) => isStrictlyUnder(resolved, root)) ? resolved : null;
 }

@@ -17,11 +17,14 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
 import { readJournalKeySets } from '@/modules/providers/list/claude/workflow-reconcile.service.js';
+import { openPinned } from '@/modules/providers/shared/pinned-fd.js';
+import { pinnedReadStream } from '@/modules/providers/shared/session-transcript-reader.js';
 import {
   classifyWorkflowLiveness,
   forgetWorkflowPid,
@@ -59,7 +62,10 @@ async function keysFromRealJournal(lines: Array<Record<string, unknown>>): Promi
   try {
     const journalPath = path.join(dir, 'journal.jsonl');
     await writeFile(journalPath, toJsonl(lines), 'utf8');
-    const { startedKeys, resultKeys } = await readJournalKeySets(journalPath);
+    // ADR-201 A1: journals are read from a pinned descriptor, never by name.
+    const { handle } = await openPinned(realpathSync(journalPath), 'file');
+    const { startedKeys, resultKeys } = await readJournalKeySets(journalPath, undefined, () => pinnedReadStream(handle))
+      .finally(() => handle.close());
     let allStartedResulted = startedKeys.size >= 1;
     for (const key of startedKeys) {
       if (!resultKeys.has(key)) {

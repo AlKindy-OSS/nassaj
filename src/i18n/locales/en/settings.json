@@ -1,5 +1,6 @@
 {
   "harnessVersion": {
+    "updateIndicator": "Update available",
     "title": "Provider tool version",
     "checking": "Checking the version…",
     "unknown": "The version could not be checked.",
@@ -232,8 +233,19 @@
       "tooLarge": "Selected skill folders must be smaller than 30 MB in total.",
       "tooManyFiles_one": "A skill folder can contain only one file.",
       "tooManyFiles_other": "A skill folder can contain up to {{count}} files.",
-      "unreadableSkillFile": "Could not read SKILL.md from {{name}}."
-    }
+      "unreadableSkillFile": "Could not read SKILL.md from {{name}}.",
+      "readOnly": "This skill is shared and read-only; it cannot be deleted or replaced here.",
+      "forbidden": "You do not have permission to change these skills.",
+      "notFound": "Skill not found — it may have already been removed.",
+      "modeChanged": "Your files mode changed during the request. Refresh the list and try again."
+    },
+    "origin": {
+      "nassaj-shared": "Nassaj — shared",
+      "operator-shared": "Shared library"
+    },
+    "readOnlyHint": "Read only",
+    "confirmSharedDeleteTitle": "Delete «{{name}}» from the shared library?",
+    "confirmSharedDeleteBody": "This skill is in the shared library; deleting it removes it for everyone, not just you."
   },
   "account": {
     "title": "Account",
@@ -1384,11 +1396,12 @@
       "agyClosed": "Antigravity resolves its own model inside its CLI and accepts no external engine.",
       "cursorClosed": "Cursor resolves its own model server-side and accepts no external engine."
     },
-    "managedInVendors": "Managed in Settings → Vendors & credentials",
     "managedInAccount": "Managed in this agent’s Account tab",
     "openVendorAccount": "Open {{agent}}’s Account tab",
     "delegateTool": "The delegate_to_vendor tool hands a subtask to {{vendors}} using their stored keys. Switch it off in the MCP Servers tab.",
-    "readyNote": "Credential stored, nothing blocking — just not run from nassaj yet."
+    "readyNote": "Credential stored, nothing blocking — just not run from nassaj yet.",
+    "needsKeyLine": "Needs a {{company}} key",
+    "openVendorCard": "Open the vendor card"
   },
   "permissions": {
     "title": "Permission Settings",
@@ -1781,20 +1794,10 @@
     "tabDescriptionHome": "Every API key nassaj holds, entered here and only here. Each company takes one key; the places it is written to are the boxes you tick inside its card.",
     "usedBy": "Used by",
     "listSeparator": " · ",
-    "kind": {
-      "apiKey": "API key",
-      "subscription": "Subscription"
-    },
     "subscriptionNote": "Signed in through {{vendor}}'s own CLI; nassaj never holds the token.",
-    "status": {
-      "checking": "Checking…",
-      "stored": "A key is stored",
-      "missing": "No key stored"
-    },
     "getKey": "Get a key",
     "inputLabel": "{{vendor}} API key",
     "placeholder": "Paste API key",
-    "storedInLine": "Stored in: {{places}}",
     "placeholderConfigured": "•••••••• (a key is stored)",
     "save": "Save {{vendor}} key",
     "saveShort": "Save",
@@ -1835,21 +1838,7 @@
     "company": {
       "label": "{{company}} API key",
       "description": "Enter it once; written to all {{count}} places in the form each expects.",
-      "showSlots": "Set each of the {{count}} places separately",
-      "hideSlots": "Hide per-slot setup",
-      "detailToggle": "Per-place setup",
-      "subscriptionNotice": "{{slots}} is signed in by subscription and will keep it — the key goes to the other places only.",
-      "outcome": {
-        "written": "saved",
-        "subscription": "left on its subscription — a key here would switch it to paid API billing",
-        "subscriptionToken": "left on its subscription — it is already signed in",
-        "forbidden": "shared across the team — an owner or admin must set this one",
-        "failed": "could not be saved"
-      },
       "notWritable": "Shared credential — an owner or admin sets it.",
-      "subscriptionOverride": "You ticked {{slots}}, which is signed in by subscription right now. Saving writes an API key there, and that agent reads the key before the subscription — so the plan stops being used and billing moves to metered API usage. Untick it to keep the subscription.",
-      "subscriptionTokenOverride": "The value in the field is a subscription token, not an API key. Saving it to {{slots}} stores the subscription itself — it does not move billing to metered API usage.",
-      "subscriptionTokenIntoKeySlot": "You ticked {{slots}}, which only ever holds an API key. Saving writes the subscription token there as if it were a key — routing a personal subscription through that place is not allowed. Untick it.",
       "incompatibleProfile": "The key saved here is not compatible with the current Coding Plan setup — re-enter a Coding Plan key to use it."
     },
     "consent": {
@@ -1862,24 +1851,93 @@
         "checkbox": "I understand and accept these terms for my personal key."
       }
     },
-    "slots": {
-      "legend": "Where should this key go? Untick a place to leave it untouched.",
-      "legendShort": "Written to",
-      "stored": "Key stored",
-      "missing": "No key",
-      "subscriptionHint": "Signed in by subscription right now. Left unticked it keeps that plan — ticking it writes an API key here and switches this place to metered billing.",
-      "none": "Tick at least one place for the key to be saved into.",
-      "otherAgent": "Another agent’s place",
-      "writtenIn": "Written inside {{place}}",
-      "writtenInNote": "The same {{company}} key, in the file {{place}} reads.",
-      "writtenInNoteAes": "The same {{company}} key, kept in nassaj’s encrypted store that {{place}} reads."
-    },
     "agentSection": {
       "title": "{{company}} credential",
       "description": "One {{company}} key, entered once. It is written to the places you tick below.",
       "descriptionShared": "One {{company}} key, written to the places ticked below — one of which is a file another agent reads."
     },
-    "removeFrom": "Remove the stored key from {{slot}}"
+    "link": {
+      "feeds": "Feeds:",
+      "state": {
+        "linked": "Linked",
+        "stale": "Changed outside nassaj",
+        "failed": "Write failed",
+        "tombstone": "Removal pending",
+        "foreign_credential": "Another key present",
+        "adopted": "Adopted key",
+        "kept_on_subscription": "Kept on subscription",
+        "mode_unset": "Link mode not chosen",
+        "login_present": "Signed in with a login",
+        "shared_scope_refused": "Shared with the team",
+        "forbidden": "Not permitted"
+      },
+      "action": {
+        "stale": "Save to rewrite it.",
+        "failed": "Retried automatically, or save again.",
+        "tombstone": "The removal is retried automatically.",
+        "foreign_credential": "Untouched. Replace?",
+        "adopted": "Found in the file before nassaj; a Save replaces it.",
+        "kept_on_subscription": "To pass the key through, switch the link mode on the account page.",
+        "mode_unset": "Choose the link mode on the account page.",
+        "login_present": "nassaj never overwrites a login.",
+        "shared_scope_refused": "Shared credential; the owner or an admin sets it."
+      },
+      "replace": "Replace",
+      "replacePasteFirst": "Paste the key first, then replace.",
+      "openAccount": "Open the account page",
+      "cancel": "Cancel",
+      "infoLabel": "Information about {{company}}",
+      "terms": "Use of this key is subject to the vendor's terms; compliance is the key holder's responsibility.",
+      "enginePin": {
+        "badge": "Claude engine pin",
+        "tooltip": "Saving also writes the unified key the engine pin uses, even when saved from the OpenCode slot alone."
+      },
+      "error": {
+        "subscriptionToken": "This is a subscription token, not an API key; link it from the Claude account page.",
+        "rateLimited": "Too many attempts; try again in a minute.",
+        "vendorWide": "Deleting removes the key from every harness it feeds.",
+        "sourceNotFound": "The source no longer holds a key; refresh the page."
+      },
+      "delete": {
+        "title": "Delete the {{company}} key?",
+        "removedFrom": "Will be removed from:",
+        "unifiedKey": "The unified key (Claude engine pin)",
+        "fixedLine": "Key-linked harnesses stay unlinked and do not fall back to a subscription. Subscription tokens and logins are not touched.",
+        "foreignTitle": "Keys nassaj did not write:",
+        "foreignToggle": "Remove these too",
+        "confirm": "Delete"
+      },
+      "deleteNote": {
+        "kept": "Kept: removal not confirmed",
+        "retry": "Removal will be retried automatically"
+      },
+      "replaceDialog": {
+        "title": "Replace a key nassaj did not write?",
+        "body": "{{harness}} holds another key that is billed now. It will be replaced with the {{company}} key.",
+        "confirm": "Replace"
+      },
+      "conflict": {
+        "intro": "We found different {{company}} keys. Nothing was written until you choose which one stays.",
+        "groupLabel": "Which {{company}} key stays",
+        "notUsable": "Subscription token, not usable",
+        "useThis": "Use this key"
+      }
+    },
+    "restore": {
+      "title": "Restore harness files",
+      "button": "Restore",
+      "fullLink": "Full restore…",
+      "done": "Restored",
+      "skippedLogin": "{{target}} left as is: signed in with a login",
+      "unavailable": "No intact backup",
+      "sharedScope": "Shared files; no restore",
+      "dialogTitle": "Restore the {{harness}} file?",
+      "confirm": "Restore",
+      "keysBody": "Only API-key fields return to their backed-up values. Logins and other settings are untouched.",
+      "claudeBilling": "If a key comes back, billing moves to it ahead of the subscription.",
+      "fullBody": "Puts the file back byte for byte as backed up, undoing any login made since.",
+      "fullAck": "I understand that logins made since will be undone"
+    }
   },
   "providerLogin": {
     "title": {
@@ -2360,6 +2418,11 @@
       "ownOption": "My own credential",
       "grantOption": "{{owner}}'s credential",
       "inUse": "Running on {{owner}}'s credential: usage and limits are theirs, conversations are stored with theirs, terminals stay on your own."
+    },
+    "grantorMode": {
+      "subscription": "Subscription",
+      "api_key": "API key — usage billing",
+      "tooltip": "Runs on the grantor's account and mode."
     }
   },
   "localModels": {
@@ -2864,6 +2927,111 @@
         "tenant_mode_invalid": "Choose an organisation restriction.",
         "jit_requires_tenant_restriction": "Creating accounts on first sign-in requires an organisation restriction (step 4)."
       }
+    }
+  },
+  "linkMode": {
+    "label": "Link mode",
+    "effective": "Running on now:",
+    "unset": "Choose how {{harness}} runs: on your subscription or with an API key.",
+    "unlinked": "Not linked — no key",
+    "addKey": "Add the key in the Vendors tab",
+    "grantees_one": "Members running on this account: {{count}}",
+    "grantees_other": "Members running on this account: {{count}}",
+    "mode": {
+      "subscription": "Subscription",
+      "api_key": "API key",
+      "none": "Nothing"
+    },
+    "warning": {
+      "mismatch": "You chose {{chosen}}, but {{harness}} now runs on {{effective}}.",
+      "foreignBilling": "Billing is now by the key.",
+      "foreignKey": "A key nassaj did not write is present.",
+      "adoptedKey": "An adopted key is present.",
+      "freshLogin": "You signed in with the subscription after the key was linked; the key still wins.",
+      "alsoPresent": "You also have a subscription, but the key is what runs.",
+      "unreadable": "The link mode could not be read; runs are stopped until you choose it again.",
+      "removeForeign": "Switch to subscription and delete the key"
+    },
+    "outcome": {
+      "awaitingKey": "API key chosen — add the key in the Vendors tab",
+      "linked": "Linked",
+      "removed": "Key removed",
+      "foreignKept": "A key nassaj did not write remains; billing is by it until you delete it"
+    },
+    "confirm": {
+      "title": "Change the link mode of {{harness}}?",
+      "confirm": "Change",
+      "toKey": "{{harness}} will run with an API key and billing will be by usage.",
+      "toSubscription": "Only the key nassaj wrote is removed.",
+      "toSubscriptionForeign": "The key nassaj did not write will be deleted too, and {{harness}} returns to the subscription.",
+      "grantees_one": "{{count}} member will be billed by API usage",
+      "grantees_other": "{{count}} members will be billed by API usage",
+      "removeSetupToken": "Also remove the subscription token from settings"
+    }
+  },
+  "harnessFiles": {
+    "title": "Harness files",
+    "description": "Choose whether your agents use the shared skills or your own private copy.",
+    "loading": "Loading harness files settings…",
+    "loadFailed": "Could not load harness files settings.",
+    "retry": "Try again",
+    "cancel": "Cancel",
+    "featureOff": "This feature is not enabled on this server. Everyone uses the shared files.",
+    "modeShared": "Shared files",
+    "modePrivate": "My private files (skills)",
+    "myChoice": {
+      "label": "My files",
+      "description": "Private covers skills only; agent cards and rules stay shared for everyone."
+    },
+    "blockedReason": "Private files are not available now: the owner has not allowed them for members.",
+    "effective": {
+      "switchOff": "Using shared files because the owner turned private files off. Your choice is saved and returns when they are allowed again.",
+      "generic": "Currently in use: {{mode}}."
+    },
+    "managerPrivateNote": "You are on your private files, so skills you add or delete are yours alone. Switch back to shared files to manage the shared library for everyone.",
+    "claudePending": "The change applies to Claude after your open sessions close.",
+    "claudePendingHint": "Background terminals (such as tmux) opened from your sessions also count as open sessions.",
+    "claudeLegacy": "Your account has an old Claude skills folder; it was left untouched, so Claude stays on its current files.",
+    "workspace": {
+      "label": "Allow members to use their private files",
+      "description": "When off, all members use the shared files and their private files are kept.",
+      "confirmOnTitle": "Allow members their private files?",
+      "confirmOnBody": "Each member can then choose their private files in this section.",
+      "savedMembers_one": "1 member will return to their private files from their next session.",
+      "savedMembers_other": "{{count}} members will return to their private files from their next session.",
+      "savedNone": "No member has chosen private files before, so nothing changes for anyone right away.",
+      "confirmOn": "Allow",
+      "confirmOffTitle": "Turn off private files for members?",
+      "confirmOffBody": "Members return to the shared files from their next session; their private files are kept as they are.",
+      "confirmOff": "Turn off",
+      "affected_one": "Saved. 1 member affected.",
+      "affected_other": "Saved. {{count}} members affected."
+    },
+    "harnesses": {
+      "title": "Private-files support per agent",
+      "full": "Full",
+      "sharedOnly": "Shared only",
+      "reasons": {
+        "full": "Uses your private files when you choose them.",
+        "no_shared_baseline": "It has no shared skills library to copy a private set from.",
+        "shared_not_hideable": "It always reads the shared skills; they cannot be hidden from it.",
+        "no_managed_skills": "Nassaj does not manage this agent's skills.",
+        "unknown": "Stays on the shared files."
+      }
+    },
+    "errors": {
+      "HARNESS_FILES_PLATFORM": "This option is not available in platform mode.",
+      "HARNESS_FILES_PRIVATE_DISABLED": "The owner turned private files off for members, so they cannot be chosen now.",
+      "HARNESS_FILES_FEATURE_DISABLED": "This feature is not enabled on this server.",
+      "HARNESS_FILES_MODE_CHANGED": "This setting just changed elsewhere. The view was refreshed; review it and try again.",
+      "HARNESS_FILES_SEED_TOO_LARGE": "The shared skills are too large to copy into your private files. Contact the owner.",
+      "HARNESS_FILES_PATH_REJECTED": "Your private files could not be prepared safely. Contact the owner.",
+      "HARNESS_FILES_SEED_SOURCE_UNAVAILABLE": "The shared skills are not available to copy right now. Try later or contact the owner.",
+      "HARNESS_FILES_MODE_INVALID": "Invalid request. Refresh the page and try again.",
+      "HARNESS_FILES_WORKSPACE_INVALID": "Invalid request. Refresh the page and try again.",
+      "HARNESS_FILES_WORKSPACE_FORBIDDEN": "This setting is for the owner and admins only.",
+      "HARNESS_FILES_STORE_FAILED": "Your private files could not be prepared. Try again or contact the owner.",
+      "UNKNOWN": "Could not save the change. Please try again."
     }
   }
 }

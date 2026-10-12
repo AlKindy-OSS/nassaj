@@ -5,6 +5,8 @@ import SettingsCard from '../../../../SettingsCard';
 import SettingsGroup from '../../../../SettingsGroup';
 import SettingsSection from '../../../../SettingsSection';
 import StatusBadge from '../../../../StatusBadge';
+import { useSettingsNavigation } from '../../../../SettingsNavigationContext';
+import { isolateBidi } from '../../../../../../quick-settings-panel/subscriptionHelpers';
 import { useProviderApiKey } from '../../../../../../provider-auth/hooks/useProviderApiKey';
 import { COMPANY_NAME, VENDORS, vendorForSlot } from '../../../../../../../../shared/vendors';
 import {
@@ -310,6 +312,7 @@ function EngineRowWithCredential({
       cell={cell}
       credential={loading ? 'loading' : configured ? 'stored' : 'missing'}
       vendorName={vendor?.name ?? slot.provider}
+      companyId={vendor?.companyId ?? null}
       hasSlot
     />
   );
@@ -340,6 +343,7 @@ function EngineRow({ body, cell }: { body: AgentProvider; cell: BodyEngineCell }
       cell={cell}
       credential="none"
       vendorName={null}
+      companyId={null}
       // ‏`hasSlot={false}` هنا حرفياً هو ما يمنع «ينقصه مفتاح» الكهرمانية على زوجٍ
       // لا حقلَ له: هذا الفرع هو فرع «لا موضع» بعينه.
       hasSlot={Boolean(slot)}
@@ -351,16 +355,20 @@ function EngineRowView({
   cell,
   credential,
   vendorName,
+  companyId,
   hasSlot,
 }: {
   body: AgentProvider;
   cell: BodyEngineCell;
   credential: 'none' | 'loading' | 'stored' | 'missing';
   vendorName: string | null;
+  /** The company whose vendor card holds the key; the "needs a key" line links to it. */
+  companyId: string | null;
   /** هل يقرأ هذا الزوج موضعَ مفتاحٍ قابلاً للكتابة (‏`engineKeySlot`)؟ */
   hasSlot: boolean;
 }) {
   const { t } = useTranslation('settings');
+  const navigation = useSettingsNavigation();
   const name = ENGINE_AXIS_LABEL[cell.engine];
   const host = ENGINE_AXIS_HOST[cell.engine];
   const status = resolveRowStatus(cell.status, credential, hasSlot);
@@ -431,28 +439,24 @@ function EngineRowView({
       <p className="text-[13px] leading-relaxed text-muted-foreground">{note}</p>
 
       {/*
-        The pointer appears ONLY when a missing credential is the barrier. When
-        the key is already stored, repeating "stored · managed in Vendors" under
-        a badge that already says so is the duplication the operator noticed —
-        and duplication is how the two indicators contradicted each other in the
-        first place.
+        ADR-200 S9: an unlinked vendor engine is mentioned HERE and nowhere else
+        (the picker hides it). A neutral line names the company; the link goes to
+        that company's vendor card, the one place a key is entered. The pointer
+        appears ONLY when a missing credential is the barrier.
       */}
-      {/* T-1147 — this sentence names a destination, so it must BE one: as plain
-          text it told the user where to go and left them to find it.
-
-          T-1206 pointed it at the OWNING agent's Account tab, because that is
-          where the card was drawn. T-1219 moved every key input into one tab, so
-          the sentence names that tab — and goes back to being plain text, on
-          purpose. The jump is a MAIN-TAB switch, which this panel has no route
-          for; a button that cannot navigate is the broken promise T-1147 was
-          written to remove, and naming the one place there is costs the reader
-          nothing to find. */}
       {status === 'needs_credential' && (
-        <p className="mt-2 flex items-center gap-1.5 text-[13px] leading-relaxed text-muted-foreground">
+        <p className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-[13px] leading-relaxed text-muted-foreground">
           <Lock className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-          {t('engines.managedInVendors', {
-            defaultValue: 'Managed in Settings → Vendors & credentials',
-          })}
+          <span>{t('engines.needsKeyLine', { company: isolateBidi(vendor) })}</span>
+          {navigation && companyId && (
+            <button
+              type="button"
+              onClick={() => navigation.openVendors(companyId)}
+              className="rounded-sm text-primary underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              {t('engines.openVendorCard')}
+            </button>
+          )}
         </p>
       )}
     </div>

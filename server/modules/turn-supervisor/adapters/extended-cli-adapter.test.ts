@@ -4,7 +4,9 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import { TurnAdapterRegistry } from './registry.js';
-import { createExtendedCliAdapter, extendedCliAdapterInternals } from './extended-cli-adapter.js';
+import {
+  createExtendedCliAdapter, extendedCliAdapterInternals, isSpawnOnlyOpenCodeModel,
+} from './extended-cli-adapter.js';
 import type { EphemeralRoleHome, IsolatedCliProcessSpec } from './isolated-cli-cage.js';
 
 const ROLE: EphemeralRoleHome = Object.freeze({
@@ -152,22 +154,83 @@ describe('extended CLI mechanical adapters', () => {
     await assert.rejects(adapter.invoke(base), /no final assistant/u);
   });
 
-  it('T-1906: the opencode cell refuses qwen-plan/* before any role home or spawn', async () => {
-    let spawned = false;
-    let roleCreated = false;
+  /** An opencode cell under `env` that records whether it created a role home or spawned. */
+  async function probedOpencodeCell(env: NodeJS.ProcessEnv, stderr = '', code = 0) {
+    const seen = { spawned: false, roleCreated: false, model: '' };
     const adapter = createExtendedCliAdapter('opencode', {
-      executableProbe: async () => true, versionProbe: async () => '1.18.40',
+      env, executableProbe: async () => true, versionProbe: async () => '1.18.40',
       opencodeCapabilityProbe: async () => true,
-      resolveEnv: () => ({}),
-      createRoleHome: async () => { roleCreated = true; return ROLE; }, cleanupRoleHome: async () => {},
-      spawnCapture: async () => { spawned = true; return { code: 0, stdout: output.opencode, stderr: '' }; },
+      resolveEnv: () => ({}), turnSecrets: () => ['grantor-deepseek-key-0001'],
+      createRoleHome: async () => { seen.roleCreated = true; return ROLE; }, cleanupRoleHome: async () => {},
+      spawnCapture: async (input) => {
+        seen.spawned = true;
+        seen.model = input.args[input.args.indexOf('--model') + 1] ?? '';
+        return { code, stdout: output.opencode, stderr };
+      },
     });
     assert.equal(await adapter.probe({ provider: 'opencode', userId: 1 }), true);
-    await assert.rejects(adapter.invoke({
-      provider: 'opencode', userId: 1, model: 'qwen-plan/qwen3-coder-plus', prompt: 'x', persist: false,
-      writer: { capture() {} },
-    }), (error: { code?: string }) => error.code === 'credential_unavailable');
-    assert.equal(spawned, false);
-    assert.equal(roleCreated, false);
+    const invoke = (model: string) => adapter.invoke({
+      provider: 'opencode', userId: 1, model, prompt: 'x', persist: false, writer: { capture() {} },
+    });
+    return { seen, invoke };
+  }
+
+  const FLAG_ON = { NASSAJ_OPENCODE_SPAWN_VENDORS: '1' };
+  const refused = (error: { code?: string }) => error.code === 'credential_unavailable';
+
+  for (const model of ['qwen-plan/qwen3-coder-plus', 'deepseek/deepseek-v4-pro', 'moonshot/kimi-k2.6']) {
+    it(`B-1550: with the spawn-vendor flag on the cell refuses ${model} before any role home or spawn`, async () => {
+      const { seen, invoke } = await probedOpencodeCell(FLAG_ON);
+      await assert.rejects(invoke(model), refused);
+      assert.equal(seen.spawned, false);
+      assert.equal(seen.roleCreated, false);
+    });
+  }
+
+  it('T-1906: qwen-plan/* is refused with the spawn-vendor flag off too', async () => {
+    const { seen, invoke } = await probedOpencodeCell({});
+    await assert.rejects(invoke('qwen-plan/qwen3-coder-plus'), refused);
+    assert.equal(seen.spawned, false);
+  });
+
+  it('B-1550: flag off keeps moonshot/* and deepseek/* on the legacy cell path', async () => {
+    for (const model of ['deepseek/deepseek-v4-pro', 'moonshot/kimi-k2.6']) {
+      const { seen, invoke } = await probedOpencodeCell({});
+      assert.equal((await invoke(model)).text, 'opencode answer');
+      assert.equal(seen.model, model);
+    }
+  });
+
+  it('B-1550: other models are unchanged with the unified flag on', async () => {
+    for (const model of ['opencode/default', 'glm/glm-5', 'anthropic/claude-x']) {
+      const { seen, invoke } = await probedOpencodeCell(FLAG_ON);
+      assert.equal((await invoke(model)).text, 'opencode answer');
+      assert.equal(seen.model, model);
+    }
+  });
+
+  it('isSpawnOnlyOpenCodeModel follows the flag for vendors and not for qwen-plan', () => {
+    assert.equal(isSpawnOnlyOpenCodeModel('deepseek/deepseek-v4-pro', FLAG_ON), true);
+    assert.equal(isSpawnOnlyOpenCodeModel(' moonshot/kimi-k3', FLAG_ON), true);
+    // B-1551 M2: any case and opencode's models.dev aliases never reach the cell.
+    for (const model of ['Moonshot/kimi-k3', 'moonshotai/kimi-k2.6', 'MoonshotAI-CN/kimi-k3', 'DEEPSEEK/deepseek-v4-pro']) {
+      assert.equal(isSpawnOnlyOpenCodeModel(model, FLAG_ON), true, model);
+      assert.equal(isSpawnOnlyOpenCodeModel(model, {}), false, `${model}: flag off`);
+    }
+    assert.equal(isSpawnOnlyOpenCodeModel('deepseek/deepseek-v4-pro', {}), false);
+    assert.equal(isSpawnOnlyOpenCodeModel('qwen-plan/qwen3-coder-plus', {}), true);
+    assert.equal(isSpawnOnlyOpenCodeModel('opencode/default', FLAG_ON), false);
+    assert.equal(isSpawnOnlyOpenCodeModel(undefined, FLAG_ON), false);
+  });
+
+  it('T4: a failed launch redacts every turn key from stderr before bounding it', async () => {
+    const stderr = `boom grantor-deepseek-key-0001 and sk-sp-abcdefghijklmnop ${'x'.repeat(600)}`;
+    const { invoke } = await probedOpencodeCell({}, stderr, 1);
+    await assert.rejects(invoke('opencode/default'), (error: Error & { code?: string }) => {
+      assert.equal(error.code, 'remote_error');
+      assert.doesNotMatch(error.message, /grantor-deepseek-key-0001|sk-sp-abcdefghijklmnop/u);
+      assert.ok(error.message.length < 600);
+      return true;
+    });
   });
 });

@@ -6,24 +6,22 @@
  * Only lines that can carry Task* calls/results, a delegation or a human
  * prompt (a turn boundary, B-1563) are parsed; every other line is skipped by a
  * substring check, so seeding a long
- * transcript costs one sequential read. The transcript is resolved through the
- * containment-checked resolver (realpath under a Claude projects root); a
- * missing, unreadable or uncontained transcript leaves the fold empty.
+ * transcript costs one sequential read. The transcript is the session row's
+ * recorded one, opened pinned, tree-confined and id-bound (ADR-201 A1); a
+ * missing, refused or unreadable transcript leaves the fold empty.
  *
  * Seeding is bounded (T-1988): a transcript above PROGRESS_SEED_MAX_BYTES is not
  * read, and a fold that does not finish within the time budget is abandoned for
  * a fresh one, so the first live event is never delayed beyond the budget.
  */
 
-import fs from 'node:fs';
-import { stat } from 'node:fs/promises';
+import type { FileHandle } from 'node:fs/promises';
 import readline from 'node:readline';
 
-import { sessionsDb } from '@/modules/database/index.js';
+import { pinnedReadStream, withRecordedTranscript } from '../../shared/session-transcript-reader.js';
 
 import { createClaudeProgressFold, type ClaudeProgressFold } from './claude-progress-fold.js';
 import { ClaudeSessionsProvider } from './claude-sessions.provider.js';
-import { resolveClaudeTranscriptPath } from './claude-transcript-path.js';
 
 const SEED_MARKERS = ['"TaskCreate"', '"TaskUpdate"', '"task":{', '"statusChange"', '"updatedFields"', '"subagent_type"'];
 const USER_ROW_MARKER = '"type":"user"';
@@ -52,29 +50,15 @@ export const PROGRESS_SEED_MAX_BYTES = 32 * 1024 * 1024;
 export const PROGRESS_SEED_BUDGET_MS = 1500;
 
 export type ProgressSeedOptions = {
-  /** User whose Claude projects roots bound the transcript path. */
-  userId?: string | number | null;
-  /** Project cwd, used only when the session row has no stored path. */
-  projectPath?: string | null;
   maxBytes?: number;
   /** Aborts the read; the fold keeps whatever was folded so far. */
   signal?: AbortSignal;
 };
 
-/** Contained transcript path of `sessionId`, or null when none is trusted. */
-async function transcriptPath(sessionId: string, options: ProgressSeedOptions): Promise<string | null> {
-  const row = sessionsDb.getSessionById(sessionId);
-  return resolveClaudeTranscriptPath({
-    session_id: sessionId,
-    jsonl_path: row?.jsonl_path ?? null,
-    project_path: row?.project_path ?? options.projectPath ?? null,
-  }, options.userId ?? null);
-}
-
-/** Folds the matching lines of `file` into `fold` until EOF or abort. */
-async function foldTranscript(fold: ClaudeProgressFold, file: string, sessionId: string, signal?: AbortSignal): Promise<void> {
+/** Folds the matching lines of the pinned transcript `fd` into `fold` until EOF or abort. */
+async function foldTranscript(fold: ClaudeProgressFold, fd: FileHandle, sessionId: string, signal?: AbortSignal): Promise<void> {
   const provider = new ClaudeSessionsProvider();
-  const input = fs.createReadStream(file);
+  const input = pinnedReadStream(fd);
   const lines = readline.createInterface({ input, crlfDelay: Infinity });
   const stop = (): void => { input.destroy(); };
   signal?.addEventListener('abort', stop, { once: true });
@@ -103,17 +87,22 @@ async function foldTranscript(fold: ClaudeProgressFold, file: string, sessionId:
  * boundaries (fold.seed), then closes the last seeded turn so buffered updates
  * from earlier turns are dropped; later live events use fold.observe. Never rejects.
  * @returns true when the whole transcript was folded, false when it was
- *   skipped (no trusted path, over the size cap, aborted, or unreadable).
+ *   skipped (no admissible transcript, over the size cap, aborted, or unreadable).
  */
 export async function seedClaudeProgressFold(
   fold: ClaudeProgressFold, sessionId: string, options: ProgressSeedOptions = {},
 ): Promise<boolean> {
   try {
-    const file = await transcriptPath(sessionId, options);
-    if (!file || options.signal?.aborted) return false;
-    if ((await stat(file)).size > (options.maxBytes ?? PROGRESS_SEED_MAX_BYTES)) return false;
-    await foldTranscript(fold, file, sessionId, options.signal);
-    return !options.signal?.aborted;
+    // ADR-201 A1, authorization-free core: the seed runs inside the resumed run
+    // its requester launched; the transcript is still tree-confined, id-bound
+    // and read only from the pinned descriptor.
+    const folded = await withRecordedTranscript(sessionId, 'claude', 'progress-seed', async (transcript) => {
+      if (options.signal?.aborted) return false;
+      if (transcript.stat.size > BigInt(options.maxBytes ?? PROGRESS_SEED_MAX_BYTES)) return false;
+      await foldTranscript(fold, transcript.fd, sessionId, options.signal);
+      return !options.signal?.aborted;
+    });
+    return folded === true;
   } catch (error) {
     // Same convention as the history loader in claude-sessions.provider.ts.
     console.warn(`[ClaudeProgressSeed] seed skipped for ${sessionId}:`, (error as Error).message);

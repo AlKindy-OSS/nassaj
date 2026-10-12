@@ -35,8 +35,8 @@ async function fixture(t: TestContext, run: (value: Fixture) => Promise<void>, s
   t.mock.method(userDb, 'listUsers', () => []);
   t.mock.method(sessionsDb, 'getSessionById', () => null);
   t.mock.method(sessionsDb, 'getSessionFilePathsByProvider', () => []);
-  t.mock.method(sessionsDb, 'createSession', (sessionId: string, provider: string, _project: string, _name: unknown,
-    _created: unknown, _updated: unknown, file: string) => {
+  t.mock.method(sessionsDb, 'recordDiscoveredSession', ({ sessionId, provider, jsonlPath: file }:
+    { sessionId: string; provider: string; jsonlPath?: string | null }) => {
     db.prepare('INSERT INTO sessions VALUES (?,?,?) ON CONFLICT(session_id) DO UPDATE SET provider=excluded.provider,jsonl_path=excluded.jsonl_path')
       .run(sessionId, provider, file); return sessionId;
   });

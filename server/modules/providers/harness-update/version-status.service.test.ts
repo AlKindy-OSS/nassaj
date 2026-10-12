@@ -13,7 +13,12 @@ import {
   LATEST_TTL_MS,
   type VersionStatusDeps,
 } from './version-status.service.js';
-import { OPENCODE_LATEST_RELEASE_URL } from './descriptors.js';
+import {
+  deriveHarnessNotices,
+  HARNESS_IDS,
+  HARNESS_UPDATE_DESCRIPTORS,
+  OPENCODE_LATEST_RELEASE_URL,
+} from './descriptors.js';
 import { recordJobVersionChange, type SeenMap, type VersionLedger } from './version-drift.js';
 
 /** In-memory drift ledger (the production one is app_config). */
@@ -146,7 +151,8 @@ test('T-1871: a snapshot-backed native self-updater is updatable, manual only', 
   assert.equal(s!.updatable, true);
   assert.equal(s!.manualOnly, true);
   assert.equal(s!.reason, 'no-latest-probe');
-  assert.equal(s!.notices, undefined, 'cursor has no extra dialog facts');
+  // No store in its snapshot and no verified auto-updater off-switch.
+  assert.deepEqual(s!.notices, { dataNotBackedUp: true, selfUpdating: true });
 });
 
 test('T-1871 qa 8: agy rows say its data is not backed up and it may self-update', async () => {
@@ -155,6 +161,15 @@ test('T-1871 qa 8: agy rows say its data is not backed up and it may self-update
   assert.equal(s!.provider, 'antigravity');
   assert.deepEqual(s!.notices, { dataNotBackedUp: true, selfUpdating: true });
   assert.equal(s!.manualOnly, true);
+});
+
+test('every status row carries exactly the derived notices (none when nothing is true)', async () => {
+  for (const id of HARNESS_IDS) {
+    _resetLatestCache();
+    const s = await getHarnessVersionStatus(id, baseDeps({ runVersion: async () => '1.0.0' }));
+    const expected = deriveHarnessNotices(HARNESS_UPDATE_DESCRIPTORS[id]);
+    assert.deepEqual(s!.notices, expected ?? undefined, id);
+  }
 });
 
 test('binary missing → no-cli/not-installed, never a crash', async () => {

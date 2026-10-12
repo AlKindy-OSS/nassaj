@@ -57,6 +57,7 @@ import { useTranslation } from 'react-i18next';
 import { engineProviderLabel } from '../../../../../shared/engineProviders';
 import type { LLMProvider, ProviderModelsDefinition } from '../../../../types/app';
 import { cn } from '../../../../lib/utils';
+import { useUnifiedKeysEnabled } from '../../../provider-auth/hooks/useLinkMode';
 import { useVendorKeyStatuses } from '../../../provider-auth/hooks/useVendorKeyStatuses';
 import type { EngineProvider } from '../../hooks/engineProviderSession';
 
@@ -157,6 +158,8 @@ export default function InlineModelSwitcher({
   const isClaudeBody = provider === 'claude';
   const needsVendorKeyStatuses = isClaudeBody || provider === 'opencode';
   const { statuses: vendorKeyStatuses } = useVendorKeyStatuses(needsVendorKeyStatuses);
+  // ADR-200 S9: unlinked vendor cells are absent from the list in the unified mode.
+  const hideUnlinked = useUnifiedKeysEnabled();
 
   // صفّ locked = محرّك بلا مفتاح مخزَّن: يبقى مخفياً هنا (مساره الإعدادات، لا
   // مبدّل وسط المحادثة). وصفّ بلا model لا يُرسَل أصلاً. وجود تعريف كتالوج لا
@@ -166,6 +169,8 @@ export default function InlineModelSwitcher({
     provider as LLMProvider,
     catalog,
     needsVendorKeyStatuses ? vendorKeyStatuses : {},
+    undefined,
+    { hideUnlinked },
   ).filter((row) => !row.locked && row.model);
 
   // إن وُفِّرت قائمة مفضّلة، تُرتَّب صفوفها أولاً (تعديل غير بنيوي — B-Fav).

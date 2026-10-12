@@ -1,3 +1,22 @@
+## 2.3.1.4 — 2026-10-12
+
+مفاتيح المزوّدين الموحّدة (ADR-200) مفعّلة افتراضياً: مخزن معتمد واحد لكل مستخدم يوزّع على Claude وCodex
+وOpenCode بنمط ربط لكل جسد، والإيقاف بـ NASSAJ_UNIFIED_VENDOR_KEYS=0؛ المفاتيح المحفوظة بعد الترقية لا
+يراها 2.3.1.3 عند الرجوع. أمان: إخفاء ملفات الأسرار في سجلّ الـcommits (B-1592)، وفتح أسرار المشروع خلف
+تأكيد صريح مع رفض قاطع لأسرار الخدمة الحيّة (B-1593)، وقرّاء سجلات مثبّتون (ADR-201). قرّاء تسليم التحديث
+مفتوحون على التوسّع (T-2004)، وقبول ADR-204 مع بوابة «المرشّح يغادر» الحاجبة؛ ومهارات خاصة للأجساد
+(T-2003، ADR-203) ومؤشر تحديث الأجساد. العُقد على 2.3.1.2/2.3.1.3 تتحدّث بالزرّ؛ العُقد على 2.3.1.0 أو
+2.3.1.1 تحتاج تثبيت الجسر لمرة واحدة (B-1583).
+
+Unified vendor keys (ADR-200) are on by default: one canonical per-user store fanned out to Claude, Codex
+and OpenCode with a per-harness link mode, turned off with NASSAJ_UNIFIED_VENDOR_KEYS=0; keys saved after
+the upgrade are not visible to 2.3.1.3 on rollback. Security: commit history hides secret files (B-1592),
+project secret files open behind explicit confirmation while live service secrets are hard-denied
+(B-1593), and pinned transcript readers (ADR-201). Open-world update-handoff readers (T-2004), ADR-204
+accepted with its blocking "candidate leaves" release gate; per-user private harness skills (T-2003,
+ADR-203) and a harness update-available indicator. Nodes on 2.3.1.2/2.3.1.3 update by button; nodes on
+2.3.1.0 or 2.3.1.1 need the one-time bridge install (B-1583).
+
 ## 2.3.1.3 — 2026-10-11
 
 إصلاح عامل التحديث (B-1585): يجدّد العامل عقده حول الخطوات الطويلة فلا تعلق مهمة في التجهيز، ويُسوّي

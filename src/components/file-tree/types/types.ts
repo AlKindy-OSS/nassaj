@@ -11,6 +11,8 @@ export interface FileTreeNode {
   size?: number;
   modified?: string;
   permissionsRwx?: string;
+  /** B-1593: `.env*` or SQLite file; opening it asks for confirmation. */
+  secretFile?: boolean;
   children?: FileTreeNode[];
   [key: string]: unknown;
 }

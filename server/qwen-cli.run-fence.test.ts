@@ -47,7 +47,7 @@ named('node:child_process', {
   },
 });
 named('./modules/database/index.js', {
-  sessionsDb: { createSession() {} }, participantsDb: { recordSpawn() {} }, messageAuthorsDb: { recordUserMessage() {} },
+  sessionsDb: { insertDiscoveredSession() {} }, participantsDb: { recordSpawn() {} }, messageAuthorsDb: { recordUserMessage() {} },
 });
 named('./modules/providers/list/qwen/qwen-execution-contract.js', {
   qwenExecutionContract: { issueGesture: () => '', authorizeSpawn() {} },

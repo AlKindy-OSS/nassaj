@@ -10,7 +10,10 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  CANONICAL_VENDOR_IDS,
+  CANONICAL_VENDOR_SECRET_PREFIX,
   COMPANY_NAME,
+  VENDOR_KEY_CATALOGUE,
   agentsForCompany,
   companiesForAgent,
   vendorsByCompany,
@@ -21,6 +24,7 @@ import {
   vendorForSlot,
 } from '../../../../../../shared/vendors';
 import { bodyEngineCells, engineKeySlot, type EngineAxisId } from '../../../../../../shared/bodyEngineMatrix';
+import { ELIGIBLE_ENGINE_PROVIDERS } from '../../../../../../shared/engineProviders';
 
 import { visibleSettingsAgents } from './visibleAgents';
 
@@ -369,5 +373,94 @@ describe('التصفية بالمحور: الحساب للشركة الأصيل�
     // وموضع `zai` (محرّك GLM تحت Claude، متجرٌ مشفَّر مختلف) يبقى **داخل بطاقة
     // Z.AI نفسها** هناك، موسوماً بمكانه — مكتوبٌ إليه لا مخفيّ.
     expect(vendorForSlot('glm')?.companyId).toBe('zai');
+  });
+});
+
+/**
+ * ADR-200 S1 — the unified key catalogue (one row per vendor), in-flag data.
+ *
+ * The ADR-085 drift guard rewritten for the new shape, in BOTH directions:
+ * every reader the shared declarations know has a catalogue row, and every row
+ * that claims a measured reader names one of them. The server-side readers
+ * (delegate set, OpenCode targets, hosted-run env) are pinned against the same
+ * catalogue in `server/modules/providers/shared/vendor/vendor-key-catalogue.s1.test.ts`.
+ */
+describe('ADR-200 unified key catalogue (S1)', () => {
+  const consumers = VENDOR_KEY_CATALOGUE.flatMap((row) =>
+    row.consumers.map((consumer) => ({ row, consumer })));
+
+  it('holds one row per issuing company, each with a unique canonical record', () => {
+    const ids = VENDOR_KEY_CATALOGUE.map((row) => row.id);
+    const secrets = VENDOR_KEY_CATALOGUE.map((row) => row.secretId);
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(new Set(secrets).size).toBe(secrets.length);
+    for (const row of VENDOR_KEY_CATALOGUE) {
+      expect(COMPANY_NAME[row.id], `no company named "${row.id}"`).toBeTruthy();
+      expect(row.consumers.length, `${row.id} has no consumer`).toBeGreaterThan(0);
+    }
+  });
+
+  it('adds exactly the three new canonical records, outside every legacy slot id', () => {
+    expect([...CANONICAL_VENDOR_IDS].sort()).toEqual(['anthropic', 'openai', 'openrouter']);
+    const legacySlots = new Set(WRITABLE_VENDORS.map((vendor) => vendor.slot!.provider));
+    for (const row of VENDOR_KEY_CATALOGUE) {
+      const canonical = row.secretId.startsWith(CANONICAL_VENDOR_SECRET_PREFIX);
+      expect(canonical, `${row.id}: canonical iff listed`).toBe(CANONICAL_VENDOR_IDS.includes(row.id));
+      expect(legacySlots.has(row.secretId), `${row.secretId}`).toBe(!canonical);
+    }
+  });
+
+  it('reverse: every legacy write slot is read by some catalogue consumer', () => {
+    // A slot with no catalogue reader is a key the unified model would orphan.
+    for (const vendor of WRITABLE_VENDORS) {
+      const { provider, target } = vendor.slot!;
+      const covered = consumers.some(({ row, consumer }) => (
+        consumer.delivery.kind === 'cli_file'
+          ? consumer.delivery.provider === provider && consumer.delivery.target === target
+          : target === undefined && row.secretId === provider
+      ));
+      expect(covered, `slot ${provider}:${target ?? ''} (${vendor.id}) has no catalogue reader`).toBe(true);
+    }
+  });
+
+  it('reader <-> row for the Claude engine pin: the eligible set, no more, no less', () => {
+    const pinned = consumers
+      .filter(({ consumer }) => consumer.how === 'engine_pin')
+      .map(({ row }) => row.secretId);
+    expect(new Set(pinned)).toEqual(new Set(ELIGIBLE_ENGINE_PROVIDERS));
+    for (const { consumer } of consumers.filter(({ consumer: c }) => c.how === 'engine_pin')) {
+      expect(consumer).toMatchObject({ keyOwner: 'caller', sharedFallback: true });
+    }
+  });
+
+  it('only Claude native may hold a subscription token', () => {
+    const holders = consumers.filter(({ consumer }) => consumer.acceptsSubscriptionToken);
+    expect(holders.map(({ row, consumer }) => `${row.id}:${consumer.harness}:${consumer.how}`))
+      .toEqual(['anthropic:claude:native']);
+  });
+
+  it('a planned cell (no writer yet) is never claimed as live', () => {
+    for (const { row, consumer } of consumers) {
+      if (consumer.evidence.write === 'none') {
+        expect(consumer.evidence.turn, `${row.id}:${consumer.harness}`).not.toBe('measured');
+      }
+    }
+  });
+
+  it('keeps the unsupported cells empty (Antigravity, Codex off-vendor, OpenRouter on Claude)', () => {
+    expect(consumers.filter(({ consumer }) => consumer.harness === 'codex').map(({ row }) => row.id))
+      .toEqual(['openai']);
+    const claudeRows = new Set(consumers
+      .filter(({ consumer }) => consumer.harness === 'claude')
+      .map(({ row }) => row.id));
+    expect(claudeRows.has('openrouter'), 'OpenRouter on Claude is blocked by the iron rule').toBe(false);
+    expect(claudeRows.has('openai')).toBe(false);
+    expect(claudeRows.has('alibaba-cloud')).toBe(false);
+  });
+
+  it('spawn-time OpenCode keys are the sender\'s own and never fall back', () => {
+    for (const { consumer } of consumers.filter(({ consumer: c }) => c.how === 'spawn_provider')) {
+      expect(consumer).toMatchObject({ harness: 'opencode', keyOwner: 'sender', sharedFallback: false });
+    }
   });
 });

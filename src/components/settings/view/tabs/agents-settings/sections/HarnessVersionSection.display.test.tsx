@@ -87,4 +87,29 @@ describe('HarnessVersionSection display', () => {
     expect(drift.textContent).toContain('1.1.5');
     expect(drift.textContent).toContain('في 2026-09-20');
   });
+
+  it('renders agy notices as the same warning lines as drift, not a boxed callout', async () => {
+    await renderSection({
+      ...baseWire,
+      drift: { detected: true, from: '1.2.16', to: '1.2.17', at: '2026-10-05T10:00:00.000Z' },
+      notices: { dataNotBackedUp: true, selfUpdating: true },
+    }, 'owner');
+    const drift = screen.getByTestId('harness-drift');
+    for (const id of ['harness-notice-dataNotBackedUp', 'harness-notice-selfUpdating']) {
+      const line = screen.getByTestId(id);
+      expect(line.className).toBe(drift.className);
+      expect(line.querySelector('svg')).toBeTruthy();
+      expect(line.closest('div.border-warning\\/40')).toBeNull();
+    }
+    expect(screen.getByTestId('harness-notice-dataNotBackedUp').textContent).toContain('لا تُنسخ بيانات هذه الأداة');
+    expect(screen.getByTestId('harness-notice-selfUpdating').textContent).toContain('قد تُحدِّث الأداة نفسها');
+  });
+
+  it('shows no notice lines for a harness without notices, nor to non-owners', async () => {
+    await renderSection(baseWire, 'owner');
+    expect(screen.queryByTestId('harness-notice-dataNotBackedUp')).toBeNull();
+    cleanup();
+    await renderSection({ ...baseWire, notices: { dataNotBackedUp: true, selfUpdating: true } }, 'member');
+    expect(screen.queryByTestId('harness-notice-selfUpdating')).toBeNull();
+  });
 });

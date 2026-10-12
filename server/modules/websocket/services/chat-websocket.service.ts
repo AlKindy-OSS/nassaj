@@ -304,7 +304,7 @@ export type ChatWebSocketDependencies = {
   /** Server-owned ephemeral CLI supervisor. Unsupported legacy CLI cells are
    * rejected before dispatch; they never fall back to textual coordination. */
   cliTurnSupervisor?: {
-    enabledCell(input: { provider: string; mode: string }): boolean;
+    enabledCell(input: { provider: string; mode: string; model?: string }): boolean;
     supports(input: {
       provider: string; mode: string; coordinationLevel: CoordinationLevel; model?: string;
     }): boolean;
@@ -1324,34 +1324,6 @@ function withCoordinationMetadata(
  *
  * كائن لا سلسلة: عميلٌ لم يُرسل الحقل يُنتج `{}`، فالحمولة تبقى كما هي حرفياً.
  */
-/**
- * T-1906: authentication kinds that prove a human is sending this turn from a
- * signed-in browser/device. Everything else (platform_unverified,
- * password_change, API keys, internal_service such as scheduled messages, ck)
- * is not interactive and may never launch a Qwen Coding Plan turn.
- */
-const QWEN_INTERACTIVE_AUTH_KINDS: ReadonlySet<string> = new Set(['session', 'device_session']);
-
-/**
- * The server-side interactive marker for a qwen-plan turn. Read only from the
- * authenticated principal; any auto-continue / auto-resume turn is excluded.
- */
-function isQwenInteractiveTurn(authenticatedPrincipal: unknown, data: ChatIncomingMessage): boolean {
-  const kind = authenticatedPrincipal && typeof authenticatedPrincipal === 'object'
-    ? (authenticatedPrincipal as { authenticationKind?: unknown }).authenticationKind
-    : undefined;
-  if (typeof kind !== 'string' || !QWEN_INTERACTIVE_AUTH_KINDS.has(kind)) return false;
-  const options = (data.options ?? {}) as { autoContinue?: unknown; autoResume?: unknown };
-  return options.autoContinue !== true && options.autoResume !== true;
-}
-
-/** Drops a client-sent `qwenInteractiveVerified`: only the server may set it. */
-function withoutClientQwenMarker(data: ChatIncomingMessage): ChatIncomingMessage {
-  if (!data.options || !Object.prototype.hasOwnProperty.call(data.options, 'qwenInteractiveVerified')) return data;
-  const { qwenInteractiveVerified: _forged, ...options } = data.options as Record<string, unknown>;
-  return { ...data, options } as ChatIncomingMessage;
-}
-
 function clientMsgIdEcho(data: ChatIncomingMessage): Record<string, string> {
   const options = (data.options ?? {}) as { clientMsgId?: unknown };
   return typeof options.clientMsgId === 'string' && options.clientMsgId
@@ -1792,7 +1764,6 @@ async function dispatchFencedProviderCommand(
   authenticatedPrincipal: unknown,
   fenceSlot: { fence: RunFence | null },
 ): Promise<void> {
-  data = withoutClientQwenMarker(data);
   const command = typeof data.command === 'string' ? data.command : '';
   const invalidCommand = data.command !== undefined && typeof data.command !== 'string';
   const requestedProvider = COMMAND_TYPE_TO_PROVIDER[messageType]
@@ -1898,7 +1869,7 @@ async function dispatchFencedProviderCommand(
       model: requestedModel,
     }) === true;
   const cliCellEnabled = dependencies.cliTurnSupervisor?.enabledCell({
-    provider: targetProvider, mode: hostedMode,
+    provider: targetProvider, mode: hostedMode, model: requestedModel,
   }) === true;
 
   // An OFF cell is completely inert and preserves the legacy provider path.
@@ -2233,9 +2204,6 @@ async function dispatchFencedProviderCommand(
     coordinationLevel: immutableCoordinationLevel,
     authenticatedPrincipal,
     vendorReceiptInvocation,
-    // T-1906: spawnOpenCode refuses a qwen-plan/* turn (checked on the model
-    // resolved after resume) unless this server-computed marker is true.
-    qwenInteractiveVerified: isQwenInteractiveTurn(authenticatedPrincipal, data),
   });
 
   const permissionOptionsFor = (

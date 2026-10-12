@@ -55,7 +55,7 @@ mock.module('./sessionManager.js', {
   defaultExport: { getSession: () => null, createSession() {}, saveSession() {}, addMessage() {} },
 });
 named('./modules/database/index.js', {
-  sessionsDb: { getSessionById: () => null, createSession() {} },
+  sessionsDb: { getSessionById: () => null, recordDiscoveredSession() {} },
   participantsDb: { recordSpawn() {} },
   messageAuthorsDb: { recordUserMessage() {} },
   providerRunFailuresDb: { getFailure: () => null, clearFailure() {}, recordFailure() {}, setFailure() {} },

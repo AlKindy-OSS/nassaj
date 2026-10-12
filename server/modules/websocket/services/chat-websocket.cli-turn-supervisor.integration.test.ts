@@ -1,12 +1,21 @@
 import assert from 'node:assert/strict';
-import test, { mock } from 'node:test';
+import test, { after, mock } from 'node:test';
+
+// B-1544: must stay the first app-side import — DATABASE_PATH, HOME and the
+// harness roots point into a private sandbox, never the worktree database/.
+// eslint-disable-next-line boundaries/dependencies -- test-only sandbox helper, no barrel by design.
+import { removeSandbox } from '@/modules/providers/tests/helpers/hermetic-sandbox.js';
 
 import { reviewEnvelopeDatabaseLinkStubs } from '../../../../tests/helpers/review-envelope-link-stubs.js';
 
 import { createPermissionTestWorkspaceModule, dispatchAuthorizedProviderCommand } from './chat-websocket.permission-test-helper.js';
 
+// The real exports (sandboxed DATABASE_PATH) back every name this test does not
+// stub, so the real CLI supervisor runtime can load for its routing.
+const realDatabase = await import('@/modules/database/index.js');
 mock.module('@/modules/database/index.js', {
   namedExports: {
+    ...realDatabase,
     ...reviewEnvelopeDatabaseLinkStubs(),
     projectsDb: { getProjectPath: () => ({ project_id: 'test-project' }), isProjectVisibleToUser: () => true },
     sessionsDb: { getSessionById: () => null }, sessionOutcomesDb: {},
@@ -18,10 +27,17 @@ mock.module('@/modules/database/index.js', {
     userDb: { getUserById: () => null, getFirstUser: () => null },
   },
 });
-mock.module('@/modules/session-workspaces/index.js', { namedExports: createPermissionTestWorkspaceModule() });
+const realWorkspaces = await import('@/modules/session-workspaces/index.js');
+mock.module('@/modules/session-workspaces/index.js', {
+  namedExports: { ...realWorkspaces, ...createPermissionTestWorkspaceModule() },
+});
 
 const { abortCliSupervisedTurn, dispatchProviderCommand: rawDispatchProviderCommand } = await import('./chat-websocket.service.js');
 const dispatchProviderCommand = dispatchAuthorizedProviderCommand.bind(null, rawDispatchProviderCommand as never);
+// eslint-disable-next-line boundaries/dependencies -- the real runtime's routing is the subject under test.
+const { CliTurnSupervisorRuntime } = await import('@/modules/turn-supervisor/cli-turn-supervisor.service.js');
+
+after(() => removeSandbox());
 
 function harness(supported: boolean, enabled = supported) {
   const sent: Record<string, unknown>[] = [];
@@ -148,4 +164,68 @@ test('CLI abort bridge is identity scoped to the three supervised providers', ()
   assert.equal(abortCliSupervisedTurn(supervisor as never, 'opencode', 's-3', 41), true);
   assert.equal(abortCliSupervisedTurn(supervisor as never, 'hermes', 's-4', 41), false, 'the hermes cell is deleted');
   assert.equal(abortCliSupervisedTurn(supervisor as never, 'cursor', 's-1', 41), false);
+});
+
+/**
+ * B-1550 / B-1551 (G3 r2): an ARMED opencode cell with the spawn-vendor flag on.
+ * The cell's routing is the REAL CliTurnSupervisorRuntime (enabledCell); only
+ * the installed-binary probe in supports() is replaced by that same routing, so
+ * a cell turn is executable here. Moonshot/DeepSeek (any case, the models.dev
+ * aliases) and qwen-plan go to spawnOpenCode — every coordination level, with
+ * the textual directive — and never to execute(); glm/* stays on the cell.
+ */
+test('armed opencode cell: spawn-vendor models dispatch to spawnOpenCode, glm stays on the cell', async () => {
+  const runtime = new CliTurnSupervisorRuntime({
+    NASSAJ_TURN_SUPERVISOR_OPENCODE_CHAT: 'true', NASSAJ_OPENCODE_SPAWN_VENDORS: 'true',
+  }, []);
+  const spawnOnly = [
+    'moonshot/kimi-k2.6', 'deepseek/deepseek-v4-pro', 'moonshotai/kimi-k2.6',
+    'MoonshotAI-CN/kimi-k3', 'DEEPSEEK/deepseek-v4-flash', 'qwen-plan/qwen3.7-plus',
+  ];
+  for (const model of spawnOnly) {
+    for (const coordinationLevel of ['direct', 'delegate', 'delegate_review'] as const) {
+      const input = { provider: 'opencode', mode: 'chat', coordinationLevel, model };
+      assert.equal(runtime.enabledCell(input), false, model);
+      assert.equal(runtime.supports(input), false, model);
+      const ctx = harness(false, false);
+      const launched: Record<string, unknown>[] = [];
+      Object.assign(ctx.dependencies, {
+        spawnOpenCode: async (_command: string, options: Record<string, unknown>) => { launched.push(options); },
+        cliTurnSupervisor: {
+          ...ctx.dependencies.cliTurnSupervisor,
+          enabledCell: (cell: typeof input) => runtime.enabledCell(cell),
+          supports: (cell: typeof input) => runtime.enabledCell(cell),
+        },
+      });
+      await dispatchProviderCommand('opencode-command', {
+        command: 'user request',
+        options: { clientMsgId: `cmid-s8-${model}-${coordinationLevel}`, coordinationLevel, model },
+      } as never, ctx.writer as never, ctx.dependencies as never, 41);
+      const label = `${model} ${coordinationLevel}`;
+      assert.equal(launched.length, 1, label);
+      assert.equal(launched[0].model, model, label);
+      assert.equal(launched[0].coordinationLevel, coordinationLevel, `${label}: textual directive level`);
+      assert.equal(ctx.calls.execute, 0, label);
+      assert.ok(!ctx.sent.some((frame) => frame.code === 'cli_turn_supervisor_unsupported'), label);
+    }
+  }
+
+  const glm = { provider: 'opencode', mode: 'chat', coordinationLevel: 'delegate' as const, model: 'glm/glm-5.2' };
+  assert.equal(runtime.enabledCell(glm), true);
+  const ctx = harness(true, true);
+  let launched = 0;
+  Object.assign(ctx.dependencies, {
+    spawnOpenCode: async () => { launched += 1; },
+    cliTurnSupervisor: {
+      ...ctx.dependencies.cliTurnSupervisor,
+      enabledCell: (cell: typeof glm) => runtime.enabledCell(cell),
+      supports: (cell: typeof glm) => runtime.enabledCell(cell),
+    },
+  });
+  await dispatchProviderCommand('opencode-command', {
+    command: 'user request', options: { clientMsgId: 'cmid-s8-glm', coordinationLevel: 'delegate', model: 'glm/glm-5.2' },
+  } as never, ctx.writer as never, ctx.dependencies as never, 41);
+  assert.equal(launched, 0, 'glm never reaches spawnOpenCode while the cell is armed');
+  assert.equal(ctx.calls.execute, 1);
+  assert.equal(ctx.calls.input?.model, 'glm/glm-5.2');
 });

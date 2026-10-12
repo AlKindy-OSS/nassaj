@@ -40,6 +40,7 @@ import {
   setNamespacedSecret,
   SYSTEM_SECRET_SCOPE,
 } from '@/services/isolation/provider-secrets-store.js';
+import { withProviderSecretsStore } from '@/services/isolation/provider-secrets-store.errors.js';
 import { AppError } from '@/shared/utils.js';
 
 export const VOICE_ENABLED_KEY = 'voice_transcription.enabled';
@@ -314,7 +315,7 @@ export function setTranscriptionKey(
   if (key.length > 512 || /[\s\u0000-\u001f\u007f]/.test(key)) {
     throw bad('The API key is not in an accepted form.', 'INVALID_KEY');
   }
-  setNamespacedSecret(storeScopeFor(scope, userId), 'speech', SPEECH_SECRET_ID, key);
+  withProviderSecretsStore(() => setNamespacedSecret(storeScopeFor(scope, userId), 'speech', SPEECH_SECRET_ID, key));
 }
 
 /** Removes a key. Idempotent; reports whether a record was actually removed. */
@@ -322,7 +323,9 @@ export function deleteTranscriptionKey(
   scope: TranscriptionKeyScope,
   userId: number | null,
 ): boolean {
-  return deleteNamespacedSecret(storeScopeFor(scope, userId), 'speech', SPEECH_SECRET_ID).removed;
+  return withProviderSecretsStore(
+    () => deleteNamespacedSecret(storeScopeFor(scope, userId), 'speech', SPEECH_SECRET_ID),
+  ).removed;
 }
 
 /**

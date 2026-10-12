@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "reviewedSiteDigest": "sha256:614f04d0fcaa72d981c901a8630942359de22fc46b7a8441a04ee764cf979656",
+  "reviewedSiteDigest": "sha256:dc3fd6759af24ee61b010bbd2b9bb3f0ee843bc17b452274099b4dea19853cfb",
   "exact": {
     "server/services/document-share-preview.js#child_process.spawn#1": {
       "classification": "bounded_local_compute",
@@ -418,6 +418,15 @@
       "gate": "test helper imported only by websocket tests; runs git in a fresh case TMPDIR repo; no production route",
       "adapter": "git",
       "test": "chat websocket codex-receipt, coordination-lifecycle and shadow tests (B-1421)"
+    },
+    "server/services/isolation/engine-pin-header-echo.fixture.mjs#child_process.spawn#1": {
+      "classification": "test_only",
+      "owner": "engine-pin header-echo test fixture",
+      "purpose": "synthetic_header_echo_fixture",
+      "actorSource": "test-only callers; spec file written by the test with dummy credentials",
+      "gate": "script executed only by tests under unshare -rn (loopback-only netns); base URL pinned to a local 401 echo; no production importer or route",
+      "adapter": "header-echo harness",
+      "test": "engine-pin-header-echo.matrix.test.ts and claude-auth.precedence.header-echo.test.ts"
     }
   },
   "rules": [

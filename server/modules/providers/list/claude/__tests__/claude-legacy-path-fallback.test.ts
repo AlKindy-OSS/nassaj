@@ -16,7 +16,6 @@ import { ClaudeSessionsProvider } from '@/modules/providers/list/claude/claude-s
 
 import { listClaudeConfigDirsReadOnly } from '../claude-home.js';
 import { claudeRootLists, resolveStoredClaudeTranscript } from '../claude-projects-roots.js';
-import { resolveClaudeTranscriptPath } from '../claude-transcript-path.js';
 
 const LIVE = 'aaaaaaaa-0000-0000-0000-000000000001';
 const GHOST = 'aaaaaaaa-0000-0000-0000-000000000002';
@@ -56,7 +55,6 @@ test('a legacy-spelled jsonl_path resolves to the file under the current project
   await withFixture(async ({ realFile, legacyPath }) => {
     assert.equal(resolveStoredClaudeTranscript(legacyPath(LIVE)), realFile);
     assert.equal(resolveStoredClaudeTranscript(legacyPath(GHOST)), null);
-    assert.equal(await resolveClaudeTranscriptPath({ session_id: LIVE, jsonl_path: legacyPath(LIVE) }, null), realFile);
   });
 });
 

@@ -1,14 +1,16 @@
 /**
- * T-1906 — spawnOpenCode on a qwen-plan/* RESOLVED model.
+ * T-1906 / ADR-200 S7 — spawnOpenCode on a qwen-plan/* RESOLVED model.
  *
- *  • it is a carrier run: sanitized env, pinned binary digest, loopback guard;
- *  • it refuses without the flag, the server-set interactive marker, or a
- *    compatible personal key of the SENDER (ws.userId);
+ *  • it is a carrier run: sanitized env, loopback guard;
+ *  • it refuses without the kill switch or a Token Plan (international) key of
+ *    the SENDER (ws.userId); a stored Coding Plan record is `legacy_profile`;
+ *  • automation, resume and agent.js / scheduled launches are NOT refused (D9);
  *  • the key reaches the child only as NASSAJ_QWEN_PLAN_API_KEY, and the inline
  *    config references it by {env:…} — never the literal key;
  *  • non-qwen runs never carry the variable (even when inherited);
- *  • child output is redacted, including a key split across two chunks;
- *  • agent.js / scheduled launches (no marker) are refused.
+ *  • child output and the persisted prompt are redacted against the sender's
+ *    literal keys (a Token Plan key has no recognisable prefix), including a
+ *    key split across two chunks.
  */
 import './shared/__tests__/stub-harness-binaries.js';
 import assert from 'node:assert/strict';
@@ -17,12 +19,14 @@ import { PassThrough } from 'node:stream';
 import test, { after, beforeEach, mock } from 'node:test';
 
 const url = (relativePath: string) => new URL(relativePath, import.meta.url).href;
-const KEY = ['sk', 'sp-live-secret-ABCDEFGHIJ0123456789'].join('-');
+// A Token Plan key: no `sk-sp-` prefix, so only the literal layer can catch it.
+const KEY = ['tp', 'live-secret-ABCDEFGHIJ0123456789'].join('-');
+const TOKEN_PLAN_URL = 'https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1';
 
 type FakeChild = EventEmitter & { stdin: PassThrough; stdout: PassThrough; stderr: PassThrough; pid: number; kill: () => boolean };
 let spawned: Array<{ cmd: string; args: string[]; env: Record<string, string | undefined> }> = [];
 let child: FakeChild | null = null;
-let resolvedModel = 'qwen-plan/qwen3-coder-plus';
+let resolvedModel = 'qwen-plan/qwen3.7-plus';
 let profiles: Record<string, { plan: string; region: string; key: string } | null> = {};
 let digestChecks = 0;
 let loopbackChecks = 0;
@@ -74,6 +78,18 @@ mock.module(url('./modules/providers/services/provider-secrets.service.js'), {
     providerSecretsService: { getQwenProfile: (userId: string | number) => profiles[String(userId)] ?? null },
   },
 });
+// The turn secret list: the sender's slot key plus, for a grant holder, the
+// grantor's auth.json key (the composition is pinned in
+// opencode-redaction-secrets.test.ts; here only its use by the launcher).
+let grantorSecrets: string[] = [];
+mock.module(url('./modules/providers/list/opencode/opencode-redaction-secrets.js'), {
+  namedExports: {
+    collectOpenCodeTurnSecrets: (userId: string | number | null) => {
+      const key = userId === null ? undefined : profiles[String(userId)]?.key;
+      return [...(key ? [key] : []), ...grantorSecrets];
+    },
+  },
+});
 mock.module(url('./services/notification-orchestrator.js'), {
   namedExports: { notifyRunFailed: () => undefined, notifyRunStopped: () => undefined },
 });
@@ -116,11 +132,15 @@ mock.module(url('./services/isolation/opencode-baseurl-guard.js'), {
     assertOpenCodeBaseUrlAllowed: () => undefined,
     assertOpenCodeProjectConfigAllowed: () => undefined,
     assertOpenCodeCarrierServerLocal: () => { loopbackChecks += 1; },
+    assertOpenCodeInlineConfigAllowed: () => undefined,
     resolveOpenCodeConfigPath: () => '/fake/opencode.json',
   },
 });
 mock.module(url('./modules/providers/list/opencode/opencode-home.js'), {
-  namedExports: { resolveOpenCodeDatabasePathForUser: () => '/nonexistent/opencode.db' },
+  namedExports: {
+    resolveOpenCodeDatabasePathForUser: () => '/nonexistent/opencode.db',
+    isOpenCodeSessionOnlyOnGrantTree: () => false,
+  },
 });
 mock.module(url('./services/isolation/local-model-config.js'), {
   namedExports: {
@@ -142,9 +162,10 @@ after(() => mock.restoreAll());
 const ORIGINAL_FLAG = process.env.NASSAJ_OPENCODE_QWEN_PLAN;
 beforeEach(() => {
   spawned = []; child = null; audits = []; digestChecks = 0; loopbackChecks = 0; recordedUserMessages = [];
-  resolvedModel = 'qwen-plan/qwen3-coder-plus';
-  profiles = { 7: { plan: 'coding_plan', region: 'international', key: KEY } };
+  resolvedModel = 'qwen-plan/qwen3.7-plus';
+  profiles = { 7: { plan: 'token_plan', region: 'international', key: KEY } };
   inheritedEnv = {};
+  grantorSecrets = [];
   process.env.NASSAJ_OPENCODE_QWEN_PLAN = 'true';
 });
 after(() => {
@@ -182,9 +203,9 @@ async function refusedWith(options: Record<string, unknown>, code: string, userI
   assert.ok(audits.some((row) => row.action === 'qwen_execution_rejected' && row.options.metadata?.code === code));
 }
 
-test('interactive qwen-plan turn: carrier guards run and the key is set only as the env var', async () => {
+test('qwen-plan turn: carrier guards run and the key is set only as the env var', async () => {
   inheritedEnv = { CLAUDE_CODE_OAUTH_TOKEN: 'owner-oauth', BAILIAN_CODING_PLAN_API_KEY: 'x', NASSAJ_QWEN_PLAN_API_KEY: 'stale' };
-  const { run } = await launch({ qwenInteractiveVerified: true });
+  const { run } = await launch({});
   assert.equal(spawned.length, 1);
   const { env, args } = spawned[0];
   assert.equal(env.NASSAJ_QWEN_PLAN_API_KEY, KEY);
@@ -192,29 +213,48 @@ test('interactive qwen-plan turn: carrier guards run and the key is set only as 
   assert.equal(env.BAILIAN_CODING_PLAN_API_KEY, undefined, 'inherited Alibaba vars stripped');
   assert.equal(digestChecks, 0, 'carrier spawn has no mandatory digest pin (owner decision 2026-09-29)');
   assert.equal(loopbackChecks, 1, 'loopback guard ran');
-  assert.deepEqual(args.slice(args.indexOf('--model'), args.indexOf('--model') + 2), ['--model', 'qwen-plan/qwen3-coder-plus']);
+  assert.deepEqual(args.slice(args.indexOf('--model'), args.indexOf('--model') + 2), ['--model', 'qwen-plan/qwen3.7-plus']);
   const config = JSON.parse(String(env.OPENCODE_CONFIG_CONTENT));
   assert.ok(!String(env.OPENCODE_CONFIG_CONTENT).includes(KEY), 'config never holds the literal key');
   assert.equal(config.share, 'disabled');
   assert.equal(config.autoupdate, false);
-  assert.equal(config.provider['qwen-plan'].options.baseURL, 'https://coding-intl.dashscope.aliyuncs.com/v1');
+  assert.equal(config.provider['qwen-plan'].options.baseURL, TOKEN_PLAN_URL);
   assert.equal(config.provider['qwen-plan'].options.apiKey, '{env:NASSAJ_QWEN_PLAN_API_KEY}');
   assert.equal(config.enabled_providers, undefined);
   const allowed = audits.filter((row) => row.action === 'qwen_execution_allowed');
   assert.equal(allowed.length, 1);
   assert.equal(allowed[0].options.userId, 7);
-  assert.deepEqual(
-    { source: allowed[0].options.metadata?.source, model: allowed[0].options.metadata?.model },
-    { source: 'ws-interactive', model: 'qwen-plan/qwen3-coder-plus' },
-  );
+  assert.equal(allowed[0].options.metadata?.model, 'qwen-plan/qwen3.7-plus');
   assert.ok(!JSON.stringify(audits).includes(KEY));
+  await finish(run);
+});
+
+test('automation, resume and agent.js / scheduled launches are no longer refused (D9)', async () => {
+  // agent.js passes { projectPath, cwd, sessionId, model } only; a scheduled
+  // message dispatches as internal_service; autoContinue/autoResume are replays.
+  for (const options of [
+    { model: 'qwen-plan/qwen3.7-plus' }, { autoContinue: true }, { autoResume: true }, {},
+  ]) {
+    spawned = [];
+    const { run } = await launch(options);
+    assert.equal(spawned.length, 1, JSON.stringify(options));
+    assert.equal(spawned[0].env.NASSAJ_QWEN_PLAN_API_KEY, KEY);
+    await finish(run);
+  }
+});
+
+test('a resume that resolves to qwen-plan launches with the sender key', async () => {
+  resolvedModel = 'qwen-plan/qwen3.6-plus';
+  const { run } = await launch({ model: 'anthropic/claude-sonnet' });
+  assert.equal(spawned.length, 1);
+  assert.equal(spawned[0].env.NASSAJ_QWEN_PLAN_API_KEY, KEY);
   await finish(run);
 });
 
 test('non-qwen runs never carry the key variable, even when it is inherited', async () => {
   resolvedModel = 'anthropic/claude-sonnet';
   inheritedEnv = { NASSAJ_QWEN_PLAN_API_KEY: KEY, DASHSCOPE_API_KEY: 'd' };
-  const { run } = await launch({ qwenInteractiveVerified: true });
+  const { run } = await launch({});
   assert.equal(spawned.length, 1);
   // resolveProviderEnv is mocked here; the real host-secret deny list is
   // asserted in opencode-qwen-plan.test.ts. The launcher adds nothing itself:
@@ -223,39 +263,28 @@ test('non-qwen runs never carry the key variable, even when it is inherited', as
   await finish(run);
 });
 
-test('refused without the flag', async () => {
+test('refused when the kill switch is off', async () => {
   delete process.env.NASSAJ_OPENCODE_QWEN_PLAN;
-  await refusedWith({ qwenInteractiveVerified: true }, 'qwen_plan_disabled');
-});
-
-test('refused without the server-set interactive marker (agent.js / scheduled shape)', async () => {
-  // agent.js passes { projectPath, cwd, sessionId, model } only; a scheduled
-  // message dispatches as internal_service, which the WS layer marks false.
-  await refusedWith({ model: 'qwen-plan/qwen3-coder-plus' }, 'qwen_plan_not_interactive');
-  await refusedWith({ qwenInteractiveVerified: false }, 'qwen_plan_not_interactive');
-  await refusedWith({ qwenInteractiveVerified: 'true' }, 'qwen_plan_not_interactive');
-});
-
-test('resume that resolves to qwen-plan is refused when not interactive', async () => {
-  resolvedModel = 'qwen-plan/qwen3.7-plus';
-  await refusedWith({ model: 'anthropic/claude-sonnet' }, 'qwen_plan_not_interactive');
+  await refusedWith({}, 'qwen_plan_disabled');
+  process.env.NASSAJ_OPENCODE_QWEN_PLAN = '0';
+  await refusedWith({}, 'qwen_plan_disabled');
 });
 
 test('refused without a key, and the key is always the SENDER\'s own', async () => {
-  profiles = { 1: { plan: 'coding_plan', region: 'international', key: KEY } };
-  await refusedWith({ qwenInteractiveVerified: true }, 'missing_key', 7);
-  await refusedWith({ qwenInteractiveVerified: true }, 'missing_key', null);
+  profiles = { 1: { plan: 'token_plan', region: 'international', key: KEY } };
+  await refusedWith({}, 'missing_key', 7);
+  await refusedWith({}, 'missing_key', null);
 });
 
-test('token_plan or china profiles are incompatible', async () => {
-  profiles = { 7: { plan: 'token_plan', region: 'international', key: KEY } };
-  await refusedWith({ qwenInteractiveVerified: true }, 'incompatible_profile');
-  profiles = { 7: { plan: 'coding_plan', region: 'china', key: KEY } };
-  await refusedWith({ qwenInteractiveVerified: true }, 'incompatible_profile');
+test('a stored Coding Plan or china profile is a legacy_profile and is never spent', async () => {
+  profiles = { 7: { plan: 'coding_plan', region: 'international', key: KEY } };
+  await refusedWith({}, 'legacy_profile');
+  profiles = { 7: { plan: 'token_plan', region: 'china', key: KEY } };
+  await refusedWith({}, 'legacy_profile');
 });
 
 test('child output is redacted before ws.send, including a key split across chunks', async () => {
-  const { writer, run } = await launch({ qwenInteractiveVerified: true });
+  const { writer, run } = await launch({});
   const half = Math.floor(KEY.length / 2);
   child!.stdout.write(`${JSON.stringify({ text: `leak ${KEY} end` })}\n`);
   child!.stderr.write(`env dump NASSAJ_QWEN_PLAN_API_KEY=${KEY.slice(0, half)}`);
@@ -274,11 +303,43 @@ test('child output is redacted before ws.send, including a key split across chun
 
 test('a key pasted into the prompt is redacted before it is persisted', async () => {
   const writer = makeWriter();
-  const run = spawnOpenCode(`use ${KEY}`, { cwd: process.cwd(), sessionId: 'ses-2', qwenInteractiveVerified: true }, writer.ws as never)
+  const run = spawnOpenCode(`use ${KEY}`, { cwd: process.cwd(), sessionId: 'ses-2' }, writer.ws as never)
     .then(() => null, (error: unknown) => error);
   await new Promise((resolve) => setImmediate(resolve));
   await new Promise((resolve) => setImmediate(resolve));
   await finish(run);
   assert.ok(recordedUserMessages.length > 0);
   assert.ok(recordedUserMessages.every((text) => !text.includes(KEY)));
+});
+
+test('ingest redaction covers a non-qwen turn too: the sender key never reaches DB or ws', async () => {
+  resolvedModel = 'anthropic/claude-sonnet';
+  const writer = makeWriter();
+  const run = spawnOpenCode(`paste ${KEY}`, { cwd: process.cwd(), sessionId: 'ses-3' }, writer.ws as never)
+    .then(() => null, (error: unknown) => error);
+  await new Promise((resolve) => setImmediate(resolve));
+  await new Promise((resolve) => setImmediate(resolve));
+  child!.stdout.write(`${JSON.stringify({ text: `echo ${KEY}` })}\n`);
+  await new Promise((resolve) => setImmediate(resolve));
+  await finish(run);
+  assert.ok(recordedUserMessages.length > 0);
+  assert.ok(recordedUserMessages.every((text) => !text.includes(KEY)));
+  assert.ok(!JSON.stringify(writer.frames).includes(KEY));
+});
+
+test('a grant holder turn also redacts the grantor auth.json key it runs on (M-6)', async () => {
+  resolvedModel = 'openai/gpt-5';
+  const GRANTOR_KEY = ['sk', 'proj-grantor-openai-0123456789'].join('-');
+  grantorSecrets = [GRANTOR_KEY];
+  const writer = makeWriter();
+  const run = spawnOpenCode(`try ${GRANTOR_KEY}`, { cwd: process.cwd(), sessionId: 'ses-4' }, writer.ws as never)
+    .then(() => null, (error: unknown) => error);
+  await new Promise((resolve) => setImmediate(resolve));
+  await new Promise((resolve) => setImmediate(resolve));
+  child!.stdout.write(`${JSON.stringify({ text: `env ${GRANTOR_KEY}` })}\n`);
+  child!.stderr.write(`OPENAI_API_KEY=${GRANTOR_KEY}\n`);
+  await new Promise((resolve) => setImmediate(resolve));
+  await finish(run);
+  assert.ok(recordedUserMessages.every((text) => !text.includes(GRANTOR_KEY)));
+  assert.ok(!JSON.stringify(writer.frames).includes(GRANTOR_KEY));
 });

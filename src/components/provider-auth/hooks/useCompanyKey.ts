@@ -2,30 +2,34 @@ import { useCallback, useEffect, useState } from 'react';
 
 import { authenticatedFetch } from '../../../utils/api';
 
+import { NETWORK_FAILURE, readApiFailure, type ApiFailure } from './vendorKeyApi';
+
 /**
- * Drives the ONE-KEY-PER-COMPANY surface (T-1159):
+ * Drives the ONE-KEY-PER-VENDOR surface (T-1159, ADR-200 S9):
  *
- *   GET    /api/providers/company/:companyId/key -> per-slot state (never the value)
- *   POST   /api/providers/company/:companyId/key -> { apiKey, vendorIds?, includeSubscription? }
- *   DELETE /api/providers/company/:companyId/key?vendorIds=a,b -> remove from those slots
+ *   GET    /api/providers/company/:companyId/key
+ *            -> per-slot state, plus (flag ON) `projections` and `migrationConflict`
+ *   POST   /api/providers/company/:companyId/key -> { apiKey, replaceForeignKey?, consent? }
+ *   DELETE /api/providers/company/:companyId/key[?removeForeignKey=true]
+ *   POST   /api/providers/company/:companyId/key/conflict -> { harness, target }
  *
- * The company routes fan ONE paste out to the credential slots that company
- * owns, each written through its harness's own native surface.
+ * The vendor owns ONE key and nassaj fans it out to the harnesses it feeds, so
+ * the client no longer names slots: Save and Delete carry no `vendorIds`, and a
+ * stale client that still narrows a delete is refused by the server with
+ * 409 `VENDOR_DELETE_IS_VENDOR_WIDE`.
  *
- * T-1201 — `vendorIds` carries the operator's TICKED slots, because the tab now
- * offers one field per company and a checkbox per place instead of one input
- * box per place. Omitting the field keeps the old "every slot" meaning, which
- * is what this hook does whenever the caller expressed no selection. The list
- * only ever narrows the server's own candidate set; it authorizes nothing.
- *
- * The result is deliberately per-slot rather than a boolean. A fan-out can
- * legitimately half-apply — a subscribed harness is skipped so its plan is not
- * downgraded, and a shared slot is refused for a member — and a surface that
- * collapsed that into "Saved" would be lying in exactly the cases that matter.
+ * Results stay per slot rather than a boolean. A fan-out can legitimately
+ * half-apply — a harness on a subscription keeps it, a login is never
+ * overwritten, a foreign key is left untouched until confirmed — and a surface
+ * that collapsed that into "Saved" would lie in exactly the cases that matter.
  */
 
-/** What happened to one slot during the fan-out. Mirrors the server union. */
-export type CompanySlotOutcome = 'written' | 'skipped_subscription' | 'forbidden' | 'failed';
+/** What happened to one slot during a Save or a Delete. Mirrors the server union. */
+export type CompanySlotOutcome =
+  | 'written' | 'skipped_subscription' | 'forbidden' | 'failed'
+  | 'linked' | 'kept_on_subscription' | 'mode_unset' | 'login_present'
+  | 'shared_scope_refused' | 'foreign_credential'
+  | 'removed' | 'absent' | 'adopted_credential';
 
 export type CompanySlotResult = {
   vendorId: string;
@@ -33,6 +37,7 @@ export type CompanySlotResult = {
   target?: string;
   outcome: CompanySlotOutcome;
   error?: string;
+  code?: string;
 };
 
 export type CompanySlotStatus = {
@@ -42,49 +47,59 @@ export type CompanySlotStatus = {
   configured: boolean;
   /** True when that harness is currently signed in by subscription. */
   subscription: boolean;
-  /**
-   * Set by the server when a stored profile is not usable through the
-   * simplified single-key flow (T-1906) — a Qwen key saved as `token_plan` or
-   * region `china` under the old two-field form. `configured` stays true (a
-   * secret IS stored), but the card must ask for a fresh Coding Plan key
-   * rather than claim the slot is ready.
-   */
+  /** A stored profile the simplified single-key flow cannot use (T-1906). */
   status?: 'incompatible_profile';
 };
 
+/** Ledger state of one projection (flag ON, `GET` only). */
+export type ProjectionState =
+  | 'linked' | 'stale' | 'failed' | 'tombstone' | 'adopted' | 'foreign_credential'
+  | 'kept_on_subscription' | 'login_present' | 'shared_scope_refused' | 'mode_unset';
+
+export type CompanyProjection = {
+  vendorId: string;
+  provider: string;
+  target?: string;
+  state: ProjectionState;
+};
+
+/** D9: where the conflicting keys sit. `group` equal = same key; `null` = not usable. */
+export type ConflictSource = { harness: string; target: string | null; group: number | null };
+
+export type MigrationConflict = { sources: ConflictSource[] };
+
 type MutationResult =
   | { success: true; slots: CompanySlotResult[] }
-  | { success: false; error: string };
+  | { success: false; failure: ApiFailure };
 
 type CompanyKeyResponse = {
   data?: {
-    companyId?: string;
     configured?: boolean;
     writable?: boolean;
     slots?: (CompanySlotResult & CompanySlotStatus)[];
+    projections?: CompanyProjection[];
+    migrationConflict?: MigrationConflict;
   };
-  error?: string;
-  message?: string;
 };
 
-async function readError(response: Response, fallback: string): Promise<string> {
-  try {
-    const payload = (await response.json()) as CompanyKeyResponse;
-    return payload?.error ?? payload?.message ?? fallback;
-  } catch {
-    return fallback;
-  }
-}
+export type SaveOptions = {
+  /** Explicit consent for companies whose disclosure must be accepted (Alibaba). */
+  consent?: boolean;
+  /** Confirmed replacement of a key nassaj did not write. */
+  replaceForeignKey?: boolean;
+};
 
 export function useCompanyKey(companyId: string) {
   const [slots, setSlots] = useState<CompanySlotStatus[]>([]);
+  const [projections, setProjections] = useState<CompanyProjection[] | null>(null);
+  const [migrationConflict, setMigrationConflict] = useState<MigrationConflict | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [failure, setFailure] = useState<ApiFailure | null>(null);
   /**
-   * `undefined` = unanswered, or a server that predates these routes. Same
-   * B-367 rule as the per-slot hook: silence must degrade to the old permissive
-   * behaviour and let the server's own 403 speak, never lock the surface.
+   * `undefined` = unanswered, or a server that predates these routes. Silence
+   * degrades to the permissive behaviour and lets the server's own 403 speak,
+   * never locks the surface (B-367).
    */
   const [writable, setWritable] = useState<boolean | undefined>(undefined);
 
@@ -92,20 +107,20 @@ export function useCompanyKey(companyId: string) {
 
   const refresh = useCallback(async () => {
     setLoading(true);
-    setError(null);
     try {
       const response = await authenticatedFetch(endpoint);
       if (!response.ok) {
-        // A server without these routes answers 404: that is "no company
-        // surface here", not an error worth showing over the per-slot boxes.
+        // A server without these routes answers 404: "no company surface here".
         setSlots([]);
         return;
       }
-      const payload = (await response.json()) as CompanyKeyResponse;
-      setSlots((payload.data?.slots ?? []) as CompanySlotStatus[]);
-      setWritable(payload.data?.writable);
+      const data = ((await response.json()) as CompanyKeyResponse).data;
+      setSlots((data?.slots ?? []) as CompanySlotStatus[]);
+      setProjections(Array.isArray(data?.projections) ? data.projections : null);
+      setMigrationConflict(data?.migrationConflict ?? null);
+      setWritable(data?.writable);
     } catch {
-      setError('Network error');
+      setFailure(NETWORK_FAILURE);
     } finally {
       setLoading(false);
     }
@@ -115,99 +130,81 @@ export function useCompanyKey(companyId: string) {
     void refresh();
   }, [refresh]);
 
-  const saveKey = useCallback(
-    async (
-      apiKey: string,
-      options: {
-        includeSubscription?: boolean;
-        vendorIds?: string[];
-        /**
-         * Explicit consent flag for companies whose disclosure the operator must
-         * tick before saving (Alibaba Coding Plan, T-1906). Omitted, not sent
-         * `false`, when the caller has nothing to consent to — a company with no
-         * consent gate must never look like one that was declined.
-         */
-        consent?: boolean;
-      } = {},
-    ): Promise<MutationResult> => {
-      const trimmed = apiKey.trim();
-      if (!trimmed) {
-        const message = 'API key is required';
-        setError(message);
-        return { success: false, error: message };
-      }
-
-      setSaving(true);
-      setError(null);
-      try {
-        const response = await authenticatedFetch(endpoint, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          // `vendorIds` is OMITTED, not sent empty, when the caller expressed no
-          // selection: an absent field is the server's "every slot", while an
-          // empty array is an explicit 400. That distinction is what keeps a
-          // client running against a server whose `GET` answered no slot list
-          // (B-367 skew) from posting a selection it could not have made.
-          body: JSON.stringify({
-            apiKey: trimmed,
-            includeSubscription: options.includeSubscription === true,
-            ...(options.vendorIds ? { vendorIds: options.vendorIds } : {}),
-            ...(options.consent === true ? { consent: true } : {}),
-          }),
-        });
-        if (!response.ok) {
-          const message = await readError(response, 'Failed to save the key');
-          setError(message);
-          return { success: false, error: message };
-        }
-        const payload = (await response.json()) as CompanyKeyResponse;
-        await refresh();
-        return { success: true, slots: (payload.data?.slots ?? []) as CompanySlotResult[] };
-      } catch {
-        const message = 'Network error';
-        setError(message);
-        return { success: false, error: message };
-      } finally {
-        setSaving(false);
-      }
-    },
-    [endpoint, refresh],
-  );
-
-  /**
-   * Removes the key from `vendorIds`, or from every slot when none is named.
-   *
-   * The ids ride on the QUERY STRING rather than a DELETE body: a request body
-   * on DELETE is legal but not carried by every proxy, and a dropped body here
-   * would silently widen a one-slot removal into a whole-company wipe.
-   */
-  const deleteKey = useCallback(async (vendorIds?: string[]): Promise<MutationResult> => {
+  /** One mutation: busy flag, failure capture, refetch on success. */
+  const mutate = useCallback(async (
+    request: () => Promise<Response>,
+    fallback: string,
+  ): Promise<MutationResult> => {
     setSaving(true);
-    setError(null);
+    setFailure(null);
     try {
-      const url = vendorIds?.length
-        ? `${endpoint}?vendorIds=${encodeURIComponent(vendorIds.join(','))}`
-        : endpoint;
-      const response = await authenticatedFetch(url, { method: 'DELETE' });
+      const response = await request();
       if (!response.ok) {
-        const message = await readError(response, 'Failed to remove the key');
-        setError(message);
-        return { success: false, error: message };
+        const next = await readApiFailure(response, fallback);
+        setFailure(next);
+        return { success: false, failure: next };
       }
       const payload = (await response.json()) as CompanyKeyResponse;
       await refresh();
       return { success: true, slots: (payload.data?.slots ?? []) as CompanySlotResult[] };
     } catch {
-      const message = 'Network error';
-      setError(message);
-      return { success: false, error: message };
+      setFailure(NETWORK_FAILURE);
+      return { success: false, failure: NETWORK_FAILURE };
     } finally {
       setSaving(false);
     }
-  }, [endpoint, refresh]);
+  }, [refresh]);
 
-  /** True when any slot of this company currently holds a key. */
+  const saveKey = useCallback((apiKey: string, options: SaveOptions = {}) => {
+    const trimmed = apiKey.trim();
+    if (!trimmed) {
+      const empty: ApiFailure = { status: 400, code: 'API_KEY_REQUIRED', message: 'API key is required', details: {} };
+      setFailure(empty);
+      return Promise.resolve<MutationResult>({ success: false, failure: empty });
+    }
+    // No `vendorIds`: the vendor is the unit, the fan-out decides the places.
+    // Flags are omitted, not sent `false`, when the caller has nothing to say.
+    return mutate(() => authenticatedFetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        apiKey: trimmed,
+        ...(options.consent === true ? { consent: true } : {}),
+        ...(options.replaceForeignKey === true ? { replaceForeignKey: true } : {}),
+      }),
+    }), 'Failed to save the key');
+  }, [endpoint, mutate]);
+
+  /** Vendor-wide delete; `removeForeignKey` is the confirmed removal of keys nassaj did not write. */
+  const deleteKey = useCallback((removeForeignKey = false) => mutate(
+    () => authenticatedFetch(
+      removeForeignKey ? `${endpoint}?removeForeignKey=true` : endpoint,
+      { method: 'DELETE' },
+    ),
+    'Failed to remove the key',
+  ), [endpoint, mutate]);
+
+  /** D9: keeps the key held at `source`; a vanished conflict refetches silently. */
+  const resolveConflict = useCallback(async (source: { harness: string; target: string | null }) => {
+    const result = await mutate(() => authenticatedFetch(`${endpoint}/conflict`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ harness: source.harness, target: source.target }),
+    }), 'Failed to choose the key');
+    if (!result.success && result.failure.code === 'VENDOR_MIGRATION_NO_CONFLICT') {
+      await refresh();
+      setFailure(null);
+    }
+    return result;
+  }, [endpoint, mutate, refresh]);
+
+  const clearFailure = useCallback(() => setFailure(null), []);
+
+  /** True when any slot of this vendor currently holds the key. */
   const configured = slots.some((slot) => slot.configured);
 
-  return { slots, configured, loading, saving, error, writable, refresh, saveKey, deleteKey };
+  return {
+    slots, projections, migrationConflict, configured, loading, saving, failure, writable,
+    refresh, saveKey, deleteKey, resolveConflict, clearFailure,
+  };
 }

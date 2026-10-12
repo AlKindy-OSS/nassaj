@@ -1,61 +1,69 @@
 /**
- * opencode-qwen-plan (T-1906) — the Alibaba Qwen Coding Plan carried by OpenCode.
+ * opencode-qwen-plan (T-1906, ADR-200 S7) — the Alibaba Token Plan carried by OpenCode.
  *
  * A `qwen-plan/<model>` turn runs the pinned opencode binary against the
- * Coding Plan OpenAI-compatible endpoint with the SENDER's personal `sk-sp-*`
- * key. Vendor terms bind the key: personal, interactive use only, no sharing.
- * So every rule below is fail-closed:
- *   • the fleet flag NASSAJ_OPENCODE_QWEN_PLAN must be armed (default OFF);
- *   • the turn must carry the SERVER-set interactive marker (never client-set);
+ * Token Plan OpenAI-compatible endpoint (international region only, D4) with
+ * the SENDER's own key. ADR-200 D3/D9 removed the Coding Plan, its consent,
+ * its `sk-sp-` rule and the interactive-only guard: automation, resume and
+ * API-key turns may spend the key. The rules that stay are fail-closed:
+ *   • the fleet flag NASSAJ_OPENCODE_QWEN_PLAN is the kill switch;
  *   • the key is read from the sender's own slot — never a credential grant;
- *   • only a coding_plan / international profile is compatible;
+ *   • only a token_plan / international profile is usable; a stored legacy
+ *     coding_plan profile reports `legacy_profile` and is never deleted silently;
  *   • the key reaches the child ONLY as NASSAJ_QWEN_PLAN_API_KEY, set after
  *     env sanitization, and the provider block names it by `{env:…}` so the
  *     config text never holds the literal key;
  *   • the base URL is a code constant, never read from env or user config.
  *
  * Residual risk (ADR-062 note): opencode's bash tool inherits the child env,
- * so a prompt-injected model can read and exfiltrate the key. It is mitigated
- * only by disclosure at key entry and by revocation at the vendor console.
+ * so a prompt-injected model can read and exfiltrate the key. Rotation at the
+ * vendor console is the remedy; redaction cannot recall a key already seen.
  */
 
 /** Fleet flag gating qwen-plan turns. Default OFF. */
 export const QWEN_PLAN_FLAG = 'NASSAJ_OPENCODE_QWEN_PLAN';
 
-/** OpenCode provider id the Coding Plan is carried under: models read `qwen-plan/<id>`. */
+/** OpenCode provider id the Token Plan is carried under: models read `qwen-plan/<id>`. */
 export const QWEN_PLAN_PROVIDER_ID = 'qwen-plan';
 export const QWEN_PLAN_MODEL_PREFIX = `${QWEN_PLAN_PROVIDER_ID}/`;
 
-/** Coding Plan international endpoint (OpenAI wire). Constant — never from env. */
-export const QWEN_PLAN_BASE_URL = 'https://coding-intl.dashscope.aliyuncs.com/v1';
+/**
+ * Token Plan international endpoint (OpenAI wire, D4). Constant — never from
+ * env. Same value as the token_plan/international entry of qwen-cli.js.
+ */
+export const QWEN_PLAN_BASE_URL = 'https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1';
 
 /** The ONLY variable that carries the key into the child. */
 export const QWEN_PLAN_KEY_ENV = 'NASSAJ_QWEN_PLAN_API_KEY';
 
 /**
- * Coding Plan models. MIRRORS QWEN_CODING_PLAN_MODELS in
+ * Token Plan models. MIRRORS QWEN_TOKEN_PLAN_MODELS in
  * modules/providers/list/qwen/qwen.provider.ts — a drift test pins the two.
  * @type {ReadonlyArray<{ value: string, label: string }>}
  */
 export const QWEN_PLAN_MODELS = Object.freeze([
-  { value: 'qwen3-coder-plus', label: 'Qwen3 Coder Plus' },
-  { value: 'qwen3-coder-next', label: 'Qwen3 Coder Next' },
   { value: 'qwen3.7-plus', label: 'Qwen3.7 Plus' },
   { value: 'qwen3.6-plus', label: 'Qwen3.6 Plus' },
-  { value: 'qwen3.5-plus', label: 'Qwen3.5 Plus' },
-  { value: 'qwen3-max-2026-01-23', label: 'Qwen3 Max' },
-  { value: 'glm-5', label: 'GLM-5' },
-  { value: 'glm-4.7', label: 'GLM-4.7' },
+  { value: 'qwen3.7-max', label: 'Qwen3.7 Max' },
+  { value: 'qwen3.8-max-preview', label: 'Qwen3.8 Max Preview' },
+  { value: 'qwen3.6-flash', label: 'Qwen3.6 Flash' },
+  { value: 'deepseek-v4-pro', label: 'DeepSeek V4 Pro' },
+  { value: 'deepseek-v4-flash-0731', label: 'DeepSeek V4 Flash' },
+  { value: 'deepseek-v3.2', label: 'DeepSeek V3.2' },
+  { value: 'kimi-k2.7-code', label: 'Kimi K2.7 Code' },
+  { value: 'kimi-k2.6', label: 'Kimi K2.6' },
   { value: 'kimi-k2.5', label: 'Kimi K2.5' },
+  { value: 'glm-5.2', label: 'GLM-5.2' },
+  { value: 'glm-5.1', label: 'GLM-5.1' },
+  { value: 'glm-5', label: 'GLM-5' },
   { value: 'MiniMax-M2.5', label: 'MiniMax M2.5' },
 ].map((model) => Object.freeze(model)));
 
 /** Refusal codes a qwen-plan launch can end with (fixed, non-secret strings). */
 export const QWEN_PLAN_REFUSAL = Object.freeze({
   DISABLED: 'qwen_plan_disabled',
-  NOT_INTERACTIVE: 'qwen_plan_not_interactive',
   MISSING_KEY: 'missing_key',
-  INCOMPATIBLE_PROFILE: 'incompatible_profile',
+  LEGACY_PROFILE: 'legacy_profile',
 });
 
 /**
@@ -78,14 +86,17 @@ export function isQwenPlanModel(model) {
 }
 
 /**
- * Whether a saved Qwen profile can drive the qwen-plan provider block.
+ * Whether a saved Qwen profile can drive the qwen-plan provider block. Any
+ * stored profile other than token_plan / international (a Coding Plan record,
+ * or a Token Plan record saved for the china region before D4) is a legacy
+ * profile: it is reported, never used, and never deleted silently.
  * @param {{ plan?: string, region?: string, key?: string } | null | undefined} profile
- * @returns {'ok'|'missing_key'|'incompatible_profile'}
+ * @returns {'ok'|'missing_key'|'legacy_profile'}
  */
 export function qwenPlanProfileVerdict(profile) {
   if (!profile || typeof profile.key !== 'string' || profile.key === '') return QWEN_PLAN_REFUSAL.MISSING_KEY;
-  if (profile.plan !== 'coding_plan' || profile.region !== 'international') {
-    return QWEN_PLAN_REFUSAL.INCOMPATIBLE_PROFILE;
+  if (profile.plan !== 'token_plan' || profile.region !== 'international') {
+    return QWEN_PLAN_REFUSAL.LEGACY_PROFILE;
   }
   return 'ok';
 }
@@ -102,7 +113,6 @@ function refusal(code, message) {
  *
  * @param {{
  *   userId: string|number|null|undefined,
- *   interactiveVerified: unknown,
  *   env?: NodeJS.ProcessEnv,
  *   getProfile: (userId: string|number) => { plan: string, region: string, key: string } | null,
  * }} input
@@ -110,21 +120,18 @@ function refusal(code, message) {
  */
 export function authorizeQwenPlanLaunch(input) {
   if (!isQwenPlanEnabled(input.env ?? process.env)) {
-    throw refusal(QWEN_PLAN_REFUSAL.DISABLED, 'Qwen Coding Plan through OpenCode is not enabled.');
-  }
-  if (input.interactiveVerified !== true) {
-    throw refusal(QWEN_PLAN_REFUSAL.NOT_INTERACTIVE, 'Qwen Coding Plan turns must be sent interactively by the key owner.');
+    throw refusal(QWEN_PLAN_REFUSAL.DISABLED, 'Alibaba Token Plan through OpenCode is not enabled.');
   }
   const userId = input.userId;
   if (userId === null || userId === undefined || userId === '') {
-    throw refusal(QWEN_PLAN_REFUSAL.MISSING_KEY, 'Qwen Coding Plan requires a signed-in member key.');
+    throw refusal(QWEN_PLAN_REFUSAL.MISSING_KEY, 'Alibaba Token Plan requires a signed-in member key.');
   }
   const profile = input.getProfile(userId);
   const verdict = qwenPlanProfileVerdict(profile);
   if (verdict !== 'ok') {
     throw refusal(verdict, verdict === QWEN_PLAN_REFUSAL.MISSING_KEY
-      ? 'No personal Qwen Coding Plan key is saved.'
-      : 'The saved Qwen key is not an international Coding Plan key.');
+      ? 'No personal Alibaba Token Plan key is saved.'
+      : 'The saved Qwen key is a legacy profile; delete it and save a Token Plan key.');
   }
   return { key: /** @type {{ key: string }} */ (profile).key };
 }
@@ -156,7 +163,7 @@ export function buildQwenPlanConfigContent() {
  * Returns a NEW env with the key and inline config set. Call ONLY after
  * sanitizeVendorAgentEnv — the sanitizer would otherwise be the last word.
  * @param {NodeJS.ProcessEnv} env sanitized child env
- * @param {string} key the sender's Coding Plan key
+ * @param {string} key the sender's Token Plan key
  * @returns {NodeJS.ProcessEnv}
  */
 export function withQwenPlanEnv(env, key) {
@@ -164,24 +171,40 @@ export function withQwenPlanEnv(env, key) {
 }
 
 const REDACTED = '[REDACTED]';
-// Coding Plan keys are `sk-sp-` + [A-Za-z0-9._-] (isQwenCodingPlanKey). The
-// pattern catches ANY member's key in stored history, where the reader does
-// not know whose key it might be; the literal covers the live run's own key.
+/** Shorter literals are not treated as secrets: replacing them would shred text. */
+const MIN_LITERAL_SECRET_LENGTH = 8;
+// Legacy Coding Plan keys are `sk-sp-` + [A-Za-z0-9._-]. Kept as a SECOND layer
+// (ADR-200 §8): it catches such a key in stored history even when no reader
+// knows whose key it was. The literal list is the first layer.
 const CODING_PLAN_KEY_PATTERN = /sk-sp-[A-Za-z0-9._-]{6,}/g;
 
 /**
- * THE redaction function for Coding Plan keys: removes the literal `secret`
- * (when given) and every `sk-sp-…` token. Non-strings pass through unchanged.
+ * Keeps only usable literal secrets, longest first so a key that contains
+ * another key is replaced whole.
+ * @param {ReadonlyArray<unknown>|null|undefined} secrets
+ * @returns {string[]}
+ */
+function usableSecrets(secrets) {
+  if (!Array.isArray(secrets)) return [];
+  const unique = new Set(secrets.filter((secret) => typeof secret === 'string'
+    && secret.length >= MIN_LITERAL_SECRET_LENGTH));
+  return [...unique].sort((left, right) => right.length - left.length);
+}
+
+/**
+ * THE redaction function for vendor keys in OpenCode text (ADR-200 §8):
+ * removes every literal in `secrets` and every `sk-sp-…` token. Non-strings
+ * pass through unchanged.
  * @template T
  * @param {T} text
- * @param {string|null} [secret]
+ * @param {ReadonlyArray<unknown>|null} [secrets]
  * @returns {T}
  */
-export function redactQwenPlanSecrets(text, secret = null) {
+export function redactLiteralSecrets(text, secrets = null) {
   if (typeof text !== 'string' || text === '') return text;
   let out = text;
-  if (typeof secret === 'string' && secret.length > 0 && out.includes(secret)) {
-    out = out.split(secret).join(REDACTED);
+  for (const secret of usableSecrets(secrets)) {
+    if (out.includes(secret)) out = out.split(secret).join(REDACTED);
   }
   return /** @type {T} */ (out.replace(CODING_PLAN_KEY_PATTERN, REDACTED));
 }
@@ -189,22 +212,22 @@ export function redactQwenPlanSecrets(text, secret = null) {
 /**
  * Line assembler for a child stream: buffers partial chunks and hands back only
  * complete, redacted lines, so a key split across two chunks is still caught.
- * @param {string|null} secret
+ * @param {ReadonlyArray<unknown>|null} secrets
  * @returns {{ push(chunk: string): string[], flush(): string[] }}
  */
-export function createRedactingLineAssembler(secret) {
+export function createRedactingLineAssembler(secrets) {
   let buffer = '';
   return {
     push(chunk) {
       buffer += chunk;
       const lines = buffer.split(/\r?\n/);
       buffer = lines.pop() ?? '';
-      return lines.map((line) => redactQwenPlanSecrets(line, secret));
+      return lines.map((line) => redactLiteralSecrets(line, secrets));
     },
     flush() {
       const rest = buffer;
       buffer = '';
-      return rest === '' ? [] : [redactQwenPlanSecrets(rest, secret)];
+      return rest === '' ? [] : [redactLiteralSecrets(rest, secrets)];
     },
   };
 }

@@ -10,10 +10,11 @@
  * into the same parent rollout. Child rollouts are never opened.
  *
  * File rules (M5):
- * - The candidate must not be a symlink and must realpath under the run's
- *   principal `<CODEX_HOME>/sessions` (shared containment resolver); it is then
- *   opened once with `O_RDONLY|O_NOFOLLOW`. Every later read is `fstat` + `read`
- *   on that fd; the path is never re-opened.
+ * - The candidate must realpath under the run's principal
+ *   `<CODEX_HOME>/sessions`, and is opened once by the pinned transcript reader
+ *   (ADR-201 A1: no symlink, single link, `/proc/self/fd` realpath check, name
+ *   and `session_meta` bound to the thread id). Every later read is `fstat` +
+ *   `read` on that fd; the path is never re-opened.
  * - Before each tick `lstat(path)` and `fstat(fd)` must both match the opened
  *   `dev`+`ino`, and the size must not drop below the offset; otherwise the tail
  *   stops (rotation, replacement, symlink swap, truncation).
@@ -30,14 +31,15 @@
  *   busy read gate.
  * All state is per tail and bounded; there is no module-level mutable state.
  */
-import { constants as fsConstants, type Stats } from 'node:fs';
-import { lstat, open, readdir, type FileHandle } from 'node:fs/promises';
+import type { Stats } from 'node:fs';
+import { lstat, readdir, type FileHandle } from 'node:fs/promises';
 import path from 'node:path';
 
 import type { AnyRecord, NormalizedMessage } from '@/shared/types.js';
 import { createNormalizedMessage } from '@/shared/utils.js';
 
-import { resolveContainedFile } from '../../shared/contained-file.js';
+import { isTranscriptHandle, openRunTranscript } from '../../shared/session-transcript-reader.js';
+
 import { codexSpawnSubagent, humanizeCodexToolName, parseCodexSubagentMessage } from './codex-progress.js';
 import { withTranscriptReadPermit } from './codex-rollout-links.js';
 
@@ -344,28 +346,28 @@ class RolloutTail implements CodexRolloutTail {
     return false;
   }
 
+  /**
+   * ADR-201 A1 for a run-named rollout: there is no requester (the run itself
+   * announced the thread) and maybe no row yet, so the DB-free core is used —
+   * confined to this run's sessions root, pinned, and bound to the thread id.
+   */
   private async tryOpen(): Promise<boolean> {
     const { threadId, sessionsRoot, storedPath = null } = this.options;
     const candidate = await locateCodexRollout(threadId, sessionsRoot, storedPath, (this.options.now ?? (() => new Date()))());
-    if (!candidate || !(await lstat(candidate).catch(() => null))?.isFile()) return false;
-    const resolved = await resolveContainedFile(candidate, [sessionsRoot], (file) => file.endsWith('.jsonl'));
-    if (!resolved || this.stopper.signal.aborted) return false;
-    const handle = await open(resolved, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
-    try {
-      const [onFd, onPath] = await Promise.all([handle.stat(), lstat(resolved)]);
-      if (!onFd.isFile() || !sameFile(onPath, onFd)) {
-        await handle.close();
-        return false;
-      }
-      this.handle = handle;
-      this.filePath = resolved;
-      this.identity = { dev: onFd.dev, ino: onFd.ino };
-      this.read.offset = this.options.resumed ? onFd.size : 0;
-      return true;
-    } catch (error) {
-      await handle.close();
-      throw error;
+    if (!candidate || this.stopper.signal.aborted) return false;
+    const opened = await openRunTranscript({
+      provider: 'codex', sessionId: threadId, candidate, root: sessionsRoot, purpose: 'rollout-tail',
+    });
+    if (!isTranscriptHandle(opened)) return false;
+    if (this.stopper.signal.aborted) {
+      await opened.fd.close();
+      return false;
     }
+    this.handle = opened.fd;
+    this.filePath = opened.realpath;
+    this.identity = { dev: Number(opened.stat.dev), ino: Number(opened.stat.ino) };
+    this.read.offset = this.options.resumed ? Number(opened.stat.size) : 0;
+    return true;
   }
 
   private async tick(): Promise<void> {

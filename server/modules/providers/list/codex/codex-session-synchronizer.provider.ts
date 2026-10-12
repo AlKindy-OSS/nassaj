@@ -13,6 +13,9 @@ import type { IProviderSessionSynchronizer } from '@/shared/interfaces.js';
 
 import { codexHomeForSessionFile, resolveCodexHomes } from './codex-home.js';
 
+/** Thread UUID at the end of a rollout filename (`rollout-<ts>-<uuid>.jsonl`). */
+const CODEX_ROLLOUT_ID_RE = /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/i;
+
 type ParsedSession = {
   sessionId: string;
   projectPath: string;
@@ -137,31 +140,13 @@ export class CodexSessionSynchronizer implements IProviderSessionSynchronizer {
       // Child thread (subagent/fork): fold under the parent — never its own row.
       // Best-effort bump keeps the parent conversation surfacing recent activity.
       if (parsed.isDerivative) {
-        if (parsed.parentThreadId) {
-          const childTimestamps = await readFileTimestamps(filePath);
-          sessionsDb.bumpSessionUpdatedAt(parsed.parentThreadId, childTimestamps.updatedAt);
-        }
+        await this.bumpParent(parsed, filePath);
         continue;
       }
 
-      const existingSession = sessionsDb.getSessionById(parsed.sessionId);
-      if (existingSession) {
-        // If session name is untitled and we now have a name, update it
-        if (existingSession.custom_name === 'Untitled Codex Session' && parsed.sessionName && parsed.sessionName !== 'Untitled Codex Session') {
-          sessionsDb.updateSessionCustomName(parsed.sessionId, parsed.sessionName);
-        }
-      }
-
-      const timestamps = await readFileTimestamps(filePath);
-      sessionsDb.createSession(
-        parsed.sessionId,
-        this.provider,
-        parsed.projectPath,
-        parsed.sessionName,
-        timestamps.createdAt,
-        timestamps.updatedAt,
-        filePath
-      );
+      // The name rides on the refresh (custom_name), so a file refused by the
+      // ADR-201 source rules cannot rename the row either.
+      await this.recordSession(parsed, filePath);
       processed += 1;
     }
 
@@ -189,23 +174,45 @@ export class CodexSessionSynchronizer implements IProviderSessionSynchronizer {
     // The watcher fires this per newly-written rollout, so this is the hot path
     // that used to spawn a fresh sidebar row per delegate spawn.
     if (parsed.isDerivative) {
-      if (parsed.parentThreadId) {
-        const childTimestamps = await readFileTimestamps(filePath);
-        sessionsDb.bumpSessionUpdatedAt(parsed.parentThreadId, childTimestamps.updatedAt);
-      }
+      await this.bumpParent(parsed, filePath);
       return null;
     }
 
+    return this.recordSession(parsed, filePath);
+  }
+
+  /**
+   * Best-effort parent freshness bump for a folded child thread, applied only
+   * when the child file sits in the parent row's source tree (ADR-201 A2).
+   */
+  private async bumpParent(parsed: ParsedSession, filePath: string): Promise<void> {
+    if (!parsed.parentThreadId) return;
+    const childTimestamps = await readFileTimestamps(filePath);
+    sessionsDb.bumpSessionUpdatedAtFromChild(parsed.parentThreadId, childTimestamps.updatedAt, filePath);
+  }
+
+  /**
+   * Records one root rollout through the ADR-201 discovery writers. A rollout
+   * whose filename UUID differs from its `session_meta` id may register a new
+   * id but never refreshes an existing row (A3).
+   */
+  private async recordSession(parsed: ParsedSession, filePath: string): Promise<string> {
     const timestamps = await readFileTimestamps(filePath);
-    return sessionsDb.createSession(
-      parsed.sessionId,
-      this.provider,
-      parsed.projectPath,
-      parsed.sessionName,
-      timestamps.createdAt,
-      timestamps.updatedAt,
-      filePath
-    );
+    const input = {
+      sessionId: parsed.sessionId,
+      provider: this.provider,
+      projectPath: parsed.projectPath,
+      customName: parsed.sessionName,
+      createdAt: timestamps.createdAt,
+      updatedAt: timestamps.updatedAt,
+      jsonlPath: filePath,
+    };
+    const fileId = CODEX_ROLLOUT_ID_RE.exec(path.basename(filePath))?.[1];
+    if (fileId?.toLowerCase() !== parsed.sessionId.toLowerCase()) {
+      sessionsDb.insertDiscoveredSession(input);
+      return parsed.sessionId;
+    }
+    return sessionsDb.recordDiscoveredSession(input);
   }
 
   /**
