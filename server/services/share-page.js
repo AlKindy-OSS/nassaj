@@ -41,13 +41,13 @@ export function parsePublicOrigin(value) {
 /** The enforced Content-Security-Policy of the viewer page for one explicit origin. */
 export function buildSharePageCsp(origin) {
     return [
-        'sandbox allow-scripts allow-popups allow-popups-to-escape-sandbox',
+        'sandbox allow-scripts allow-popups allow-popups-to-escape-sandbox allow-downloads',
         "default-src 'none'",
         `script-src ${origin}/assets/`,
         `style-src ${origin}/assets/ 'unsafe-inline'`,
         `font-src ${origin}/assets/`,
-        'img-src data:',
-        `connect-src ${origin}/api/session-shares/`,
+        'img-src data: blob:',
+        `connect-src ${origin}/api/session-shares/ ${origin}/api/share-view/`,
         "base-uri 'none'",
         "form-action 'none'",
         "frame-ancestors 'none'",

@@ -42,6 +42,20 @@ import {
   useSurfacedSessionsDriver,
   useSurfacedSessionsSignature,
 } from '../../../stores/surfacedSessionsStore';
+import {
+  PROJECT_RETRY_FALLBACK,
+  SESSION_FILE_KEPT_FALLBACK,
+  SESSION_RETRY_FALLBACK,
+  TRANSCRIPT_REMOVAL_RETRY,
+  bulkOutcomeNotices,
+  isRecord,
+  isSessionLeftOnDisk,
+  readErrorCode,
+  readJsonSafely,
+  readTranscriptSummary,
+  summarizeBulkResults,
+  transcriptSummaryNotice,
+} from '../utils/transcriptRemoval';
 
 import { useSidebarMessageSearch } from './useSidebarMessageSearch';
 
@@ -1062,18 +1076,29 @@ export function useSidebarController({
     setSessionDeleteConfirmation(null);
 
     try {
-      const response = await api.deleteSession(sessionId, hardDelete);
-
-      if (response.ok) {
-        onSessionDelete?.(sessionId);
-        await fetchArchivedSessions();
-      } else {
-        const errorText = await response.text();
+      // B-1610: a transient file failure (409 TRANSCRIPT_REMOVAL_RETRY) keeps the
+      // row, so the user may retry from the same prompt until it succeeds.
+      for (;;) {
+        const response = await api.deleteSession(sessionId, hardDelete);
+        const body = await readJsonSafely(response);
+        if (response.ok) {
+          onSessionDelete?.(sessionId);
+          await fetchArchivedSessions();
+          if (hardDelete && isRecord(body) && isSessionLeftOnDisk(body.data)) {
+            alert(t('messages.deleteSessionFileKept', SESSION_FILE_KEPT_FALLBACK));
+          }
+          return;
+        }
+        if (response.status === 409 && readErrorCode(body) === TRANSCRIPT_REMOVAL_RETRY) {
+          if (window.confirm(t('messages.deleteSessionRetry', SESSION_RETRY_FALLBACK))) continue;
+          return;
+        }
         console.error('[Sidebar] Failed to delete session:', {
           status: response.status,
-          error: errorText,
+          code: readErrorCode(body),
         });
         alert(t('messages.deleteSessionFailed'));
+        return;
       }
     } catch (error) {
       console.error('[Sidebar] Error deleting session:', error);
@@ -1132,16 +1157,26 @@ export function useSidebarController({
     setDeletingProjects((prev) => new Set([...prev, project.projectId]));
 
     try {
-      const response = await api.deleteProject(project.projectId, deleteData);
-
-      if (response.ok) {
-        onProjectDelete?.(project.projectId);
-      } else {
-        const data = (await response.json()) as { error?: string | { message?: string } };
-        const err = data.error;
+      // B-1610: a 409 TRANSCRIPT_REMOVAL_RETRY means nothing was deleted yet.
+      for (;;) {
+        const response = await api.deleteProject(project.projectId, deleteData);
+        const body = await readJsonSafely(response);
+        if (response.ok) {
+          onProjectDelete?.(project.projectId);
+          const notice = transcriptSummaryNotice(t, readTranscriptSummary(body));
+          if (notice) alert(notice);
+          return;
+        }
+        if (response.status === 409 && readErrorCode(body) === TRANSCRIPT_REMOVAL_RETRY) {
+          if (window.confirm(t('messages.deleteProjectRetry', PROJECT_RETRY_FALLBACK))) continue;
+          return;
+        }
+        const err = isRecord(body) ? body.error : undefined;
         const message =
-          typeof err === 'string' ? err : err && typeof err === 'object' && err.message ? err.message : t('messages.deleteProjectFailed');
+          typeof err === 'string' ? err : isRecord(err) && typeof err.message === 'string' && err.message
+            ? err.message : t('messages.deleteProjectFailed');
         alert(message);
+        return;
       }
     } catch (error) {
       console.error('Error deleting project:', error);
@@ -1365,20 +1400,21 @@ export function useSidebarController({
           : t('bulk.actionFailedStatus', 'Bulk action could not be completed (HTTP {{status}}).', { status: response.status });
         throw new Error(`Bulk action failed (${response.status})`);
       }
-      const payload = (await response.json()) as { data?: { results?: Array<{ id: string; success: boolean }> } };
-      const failedIds = payload.data?.results?.filter((result) => !result.success).map((result) => result.id) ?? [];
-      const failedCount = failedIds.length;
+      const payload = (await response.json()) as { data?: { results?: unknown } };
+      const outcome = summarizeBulkResults(payload.data?.results);
+      const { failedIds } = outcome;
       // A 200 can include idempotent and per-item outcomes. Refresh from the
       // server's source of truth rather than locally guessing which row moved.
       await Promise.all([Promise.resolve(onRefresh()), fetchArchivedSessions()]);
-      if (failedCount > 0) {
+      if (failedIds.length > 0) {
         // Do not silently discard the user's unresolved selection. Retaining
         // only failed IDs lets them retry or inspect precisely what remains.
         setBulkSelectedIds(new Set(failedIds));
-        alert(t('bulk.partialFailure', '{{count}} item(s) could not be updated.', { count: failedCount }));
       } else {
         exitBulkSelection();
       }
+      const notices = bulkOutcomeNotices(t, outcome);
+      if (notices.length > 0) alert(notices.join('\n'));
       return true;
     } catch (error) {
       console.error('[Sidebar] Bulk action failed:', error);

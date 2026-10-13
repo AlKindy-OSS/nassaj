@@ -3,6 +3,7 @@ import fsp from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
+import { sessionsDb } from '@/modules/database/index.js';
 import { resolveOpenCodeDatabasePathForUser } from '@/modules/providers/list/opencode/opencode-home.js';
 import { resolveVendorTranscriptForRead } from '@/modules/providers/shared/vendor/vendor-transcript.js';
 import { boundProgressPlan, boundProgressSubagent } from '@/shared/progress-normalize.js';
@@ -10,8 +11,14 @@ import type { FetchHistoryResult, LLMProvider, NormalizedMessage } from '@/share
 import { AppError, sanitizeLeafDirectoryName } from '@/shared/utils.js';
 
 import { copyVendorHistoryReceipts } from '../shared/vendor/vendor-receipt-identity.js';
+import {
+  isTranscriptHandle, openSessionTranscript, type SessionTranscriptHandle,
+} from '../shared/session-transcript.js';
+import { isVendorTranscriptProvider, transcriptSpecOf } from '../shared/session-transcript-specs.js';
 import { copyClaudeHistoryReceipts } from '../list/claude/claude-receipt-identity.js';
 import { copyCodexHistoryIdentities } from '../list/codex/codex-receipt-identity.js';
+
+import { isSessionAccessibleByUser } from './session-access.js';
 
 export const LIGHT_HISTORY_SCHEMA = 1 as const;
 export const LIGHT_HISTORY_FEATURE_FLAG = 'NASSAJ_LIGHT_HISTORY_ENABLED' as const;
@@ -217,7 +224,11 @@ async function statFingerprint(filePath: string): Promise<string | null> {
     const stat = await fsp.stat(filePath, { bigint: true });
     return `file:${stat.ino}:${stat.size}:${stat.mtimeNs}`;
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT') return null;
+    // N1: a denied name is only a cache key here (the reader refused it as
+    // `unreadable` and reads nothing); it must not fail the history request.
+    if (code === 'EACCES' || code === 'EPERM') return 'denied';
     throw error;
   }
 }
@@ -296,6 +307,8 @@ export async function loadStableHistorySnapshot(input: {
   historyLease?: import('./history-budget.service.js').HistoryReadLease;
   /** Unleased reads: the pinned transcript the provider reads (ADR-201 A1). */
   transcript?: PinnedTranscript;
+  /** ADR-205: 'coalesce-only' joins in-flight reads but never writes the cache. */
+  snapshotCache?: 'default' | 'coalesce-only';
   load: () => Promise<FetchHistoryResult>;
 }): Promise<{ result: FetchHistoryResult; revision: string }> {
   if (input.historyLease) {
@@ -326,13 +339,66 @@ export async function loadStableHistorySnapshot(input: {
     }
     const loaded = await pending;
     if (loaded.fingerprint === before) {
-      putCache(key, loaded.result);
+      // Each awaiter decides for itself: a member that coalesced onto a guest
+      // load still caches; a failed read is never cached (ADR-205).
+      if (input.snapshotCache !== 'coalesce-only' && !loaded.result.readFailed) putCache(key, loaded.result);
       return { result: cloneResult(loaded.result), revision: historyRevision(before) };
     }
   }
   throw new AppError('Session history changed while it was being read.', {
     code: 'HISTORY_REVISION_CHANGED', statusCode: 409,
   });
+}
+
+/**
+ * Pinned transcript for an unleased history read (ADR-201 A1). `undefined` when
+ * the provider's history is not a recorded file (cursor, opencode) or a vendor
+ * row records no path (its legacy-hash lookup then applies); `null` when the
+ * recorded transcript was refused — the provider then reads nothing.
+ */
+export async function openUnleasedTranscript(
+  sessionId: string, requesterUserId: number | null, provider: string,
+): Promise<SessionTranscriptHandle | null | undefined> {
+  if (!transcriptSpecOf(provider)) return undefined;
+  const opened = await openSessionTranscript(sessionId, requesterUserId, 'history');
+  if (isTranscriptHandle(opened)) return opened;
+  return opened.reason === 'no_transcript' && isVendorTranscriptProvider(provider) ? undefined : null;
+}
+
+export type HistoryRevisionPeek =
+  | { readFailed: true }
+  | { readFailed?: undefined; revision: string; kind: 'file' | 'metadata'; bytes: number | null };
+
+/** Size in bytes of the first file named by a fingerprint, when it records one. */
+function fingerprintBytes(fingerprint: string): number | null {
+  const match = /=file:\d+:(\d+):/.exec(fingerprint);
+  return match ? Number(match[1]) : null;
+}
+
+/**
+ * ADR-205 D3: the history revision `fetchHistory` would report right now,
+ * without parsing. It opens the transcript with the same unleased call and
+ * fingerprints the same pinned handle, so peek and fetch hash the same string
+ * by construction. A refused transcript reports `readFailed`.
+ * @throws AppError 404 when the session is missing or unreadable for the requester.
+ */
+export async function peekHistoryRevision(sessionId: string, requesterUserId: number | null): Promise<HistoryRevisionPeek> {
+  const session = sessionsDb.getSessionById(sessionId);
+  if (!session || !isSessionAccessibleByUser(sessionId, session.project_path, requesterUserId, 'read')) {
+    throw new AppError(`Session "${sessionId}" was not found.`, { code: 'SESSION_NOT_FOUND', statusCode: 404 });
+  }
+  const provider = session.provider as LLMProvider;
+  const transcript = await openUnleasedTranscript(sessionId, requesterUserId, provider);
+  if (transcript === null) return { readFailed: true };
+  try {
+    const fingerprint = await sourceFingerprint(sessionId, requesterUserId, {
+      provider, projectPath: session.project_path, jsonlPath: session.jsonl_path, updatedAt: session.updated_at,
+    }, transcript);
+    const kind = fingerprint.startsWith('metadata:') ? 'metadata' : 'file';
+    return { revision: historyRevision(fingerprint), kind, bytes: fingerprintBytes(fingerprint) };
+  } finally {
+    await transcript?.fd.close().catch(() => undefined);
+  }
 }
 
 export function historyRevision(fingerprint: string): string {

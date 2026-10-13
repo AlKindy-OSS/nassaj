@@ -526,6 +526,45 @@ describe('queryCodex live spawn — sandbox ceiling regression (T-884)', () => {
     assert.equal(config?.['features.multi_agent'], false);
   });
 
+  // B-1616, owner decision 2026-10-13: Nassaj applies no sub-agent count cap. Every launch
+  // path keeps features.multi_agent=false and sends NO thread-cap key unless an operator
+  // sets NASSAJ_CODEX_AGENT_CAP, in which case both keys are pinned (the v2 key binds on v2).
+  const CAP_KEYS = ['agents.max_concurrent_threads_per_session', 'features.multi_agent_v2.max_concurrent_threads_per_session'];
+  it('B-1616: the default launch carries no thread-cap key on any launch path', async () => {
+    const paths: Array<Record<string, unknown>> = [
+      {}, { permissionMode: 'bypassPermissions' }, { permissionMode: 'acceptEdits' },
+      { permissionMode: 'plan' }, { sessionId: 'fake-thread-id', permissionMode: 'bypassPermissions' },
+    ];
+    for (const options of paths) {
+      await spawnAndCapture(options);
+      const config = codexStarts.at(-1)?.config ?? {};
+      assert.equal(config['features.multi_agent'], false, JSON.stringify(options));
+      for (const key of CAP_KEYS) assert.equal(Object.hasOwn(config, key), false, `${key} ${JSON.stringify(options)}`);
+    }
+    await withEnv({ CODEX_ALLOW_FULL_ACCESS: 'true' }, async () => {
+      await spawnAndCapture({ permissionMode: 'bypassPermissions' });
+      for (const key of CAP_KEYS) assert.equal(Object.hasOwn(codexStarts.at(-1)?.config ?? {}, key), false);
+    });
+  });
+
+  it('B-1616: an operator NASSAJ_CODEX_AGENT_CAP override still pins both keys; invalid means none', async () => {
+    const cases: Array<[string, number | null]> = [['5', 5], ['1', 1], ['40', 40], ['0', null], ['abc', null], ['2.5', null], ['-1', null], ['', null]];
+    for (const [value, children] of cases) {
+      for (const options of [{}, { sessionId: 'fake-thread-id' }]) {
+        await withEnv({ NASSAJ_CODEX_AGENT_CAP: value }, async () => {
+          await spawnAndCapture(options);
+          const config = codexStarts.at(-1)?.config ?? {};
+          if (children === null) {
+            for (const key of CAP_KEYS) assert.equal(Object.hasOwn(config, key), false, `cap ${JSON.stringify(value)}`);
+          } else {
+            assert.equal(config['agents.max_concurrent_threads_per_session'], children, `cap ${JSON.stringify(value)}`);
+            assert.equal(config['features.multi_agent_v2.max_concurrent_threads_per_session'], children + 1, `cap ${JSON.stringify(value)}`);
+          }
+        });
+      }
+    }
+  });
+
   it('WS default (no permissionMode) → workspace-write, network OFF', async () => {
     const opts = await spawnAndCapture({});
     assert.equal(opts?.sandboxMode, 'workspace-write');

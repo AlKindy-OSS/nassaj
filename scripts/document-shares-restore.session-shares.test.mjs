@@ -34,3 +34,19 @@ test('a restored copy with only session shares is disabled and counted', (t) => 
   db.close();
   assert.equal(disableRestoredShares(file), 1);
 });
+
+test('a restored copy with live shares (ADR-205) also loses every ref_key', (t) => {
+  const directory = mkdtempSync(path.join(process.cwd(), 'session-restore-test-'));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const file = path.join(directory, 'restored.sqlite');
+  const db = new Database(file);
+  db.exec(`CREATE TABLE session_shares (id TEXT, revoked_at TEXT, revoke_reason TEXT, snapshot BLOB,
+    mode TEXT, ref_key BLOB); INSERT INTO session_shares VALUES ('l', NULL, NULL, NULL, 'live', x'07')`);
+  db.close();
+  assert.equal(disableRestoredShares(file), 1);
+  const reopened = new Database(file);
+  const row = reopened.prepare("SELECT ref_key, revoked_at FROM session_shares WHERE id='l'").get();
+  reopened.close();
+  assert.equal(row.ref_key, null);
+  assert.ok(row.revoked_at);
+});

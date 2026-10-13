@@ -12,8 +12,9 @@
    (--session-internal-accent) في كل مشروع أياً كانت هويته. القيمتان مقاستان
    على نص أسود/أبيض بمعيار WCAG 1.4.3 (نص ≥4.5:1) وعلى خلفية اللوح المحيط
    بمعيار 1.4.11 (حدّ ≥3:1)، لا مجرّد اختيار جمالي. */
-:root { --session-steer-accent: #92610C; }
-.dark { --session-steer-accent: #F0B858; }
+:root { --session-steer-accent: #92610C; --session-steer-surface: #F8F0E0; --session-steer-rule: #92610C; }
+.dark { --session-steer-accent: #F0B858; --session-steer-surface: #2A2416; --session-steer-rule: #F0B858; }
+/* Tailwind 3.4 لا يطبّق شفافية /10 على متغيّر HEX، فنستعمل أسطحاً صلبة جاهزة. */
 
 /* ── Ultracode effort mode: terminal glow ring ──────────────────────────────
    ⚠ ميزانية 8px — لا تتجاوزها. المجموع (spread + blur) لكل ظلٍّ هنا يجب أن

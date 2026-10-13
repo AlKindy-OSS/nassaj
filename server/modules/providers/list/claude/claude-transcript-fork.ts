@@ -1,8 +1,10 @@
 import { constants as fsConstants, createReadStream, createWriteStream } from 'node:fs';
 import { randomUUID } from 'node:crypto';
-import { open, realpath, rename, unlink } from 'node:fs/promises';
+import { open, rename, unlink, type FileHandle } from 'node:fs/promises';
 import path from 'node:path';
 import readline from 'node:readline';
+
+import { descriptorNamed, descriptorPath } from '../../shared/pinned-fd.js';
 
 /**
  * Claude transcript FORK — branches a session's `<sid>.jsonl` into a NEW,
@@ -92,6 +94,12 @@ export type ForkExtraMessage = {
 export interface ForkClaudeTranscriptOptions {
   /** Absolute path of the session transcript to branch from. */
   sourceFilePath: string;
+  /**
+   * B-1597: the source already pinned by the transcript reader (the caller
+   * owns and closes it). When set, the source is read from this descriptor and
+   * never reopened by name; `sourceFilePath` must be its realpath.
+   */
+  sourceHandle?: FileHandle;
   /** The source session id — recorded in each entry's `forkedFrom`. */
   sourceSessionId: string;
   /** Branch only up to (and including) this message uuid. */
@@ -434,24 +442,25 @@ export async function forkClaudeTranscript(
   let sourceHandle;
   let directoryHandle;
   try {
-    sourceHandle = await open(sourceFilePath, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
+    sourceHandle = options.sourceHandle ?? await open(sourceFilePath, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
     directoryHandle = await open(
       path.dirname(sourceFilePath),
       fsConstants.O_RDONLY | fsConstants.O_DIRECTORY | fsConstants.O_NOFOLLOW,
     );
-    const [sourceTarget, directoryTarget, sourceStats, directoryStats] = await Promise.all([
-      realpath(`/proc/self/fd/${sourceHandle.fd}`),
-      realpath(`/proc/self/fd/${directoryHandle.fd}`),
+    const [directoryTarget, sourceStats, directoryStats] = await Promise.all([
+      descriptorPath(directoryHandle.fd),
       sourceHandle.stat(),
       directoryHandle.stat(),
     ]);
+    // B-1611: kernel names compared verbatim, the single-link source after its directory settles (B-1609).
     if (!sourceStats.isFile() || sourceStats.nlink !== 1 || !directoryStats.isDirectory()
-      || path.dirname(sourceTarget) !== directoryTarget
-      || path.basename(sourceTarget) !== path.basename(sourceFilePath)) {
+      || !(await descriptorNamed(
+        sourceHandle.fd, path.join(directoryTarget, path.basename(sourceFilePath)), { singleLink: true },
+      ))) {
       throw new TranscriptForkError('source_unreadable', 'Transcript file identity is not trusted.');
     }
   } catch (error) {
-    await sourceHandle?.close().catch(() => {});
+    if (!options.sourceHandle) await sourceHandle?.close().catch(() => {});
     await directoryHandle?.close().catch(() => {});
     if (error instanceof TranscriptForkError) throw error;
     throw new TranscriptForkError('source_unreadable', 'Transcript file could not be opened safely.');
@@ -530,7 +539,7 @@ export async function forkClaudeTranscript(
 
   const forkedSessionId = generateId();
   const forkTimestamp = now();
-  const targetDir = await realpath(pinnedDirectoryPath);
+  const targetDir = await descriptorPath(directoryHandle.fd);
   const filePath = path.join(targetDir, `${forkedSessionId}.jsonl`);
   const pinnedFilePath = path.join(pinnedDirectoryPath, `${forkedSessionId}.jsonl`);
   const pinnedTempPath = path.join(pinnedDirectoryPath, `${forkedSessionId}.jsonl.tmp`);
@@ -688,7 +697,7 @@ export async function forkClaudeTranscript(
 
   return { forkedSessionId, filePath, entryCount, cwd: template.cwd };
   } finally {
-    await sourceHandle.close().catch(() => {});
+    if (!options.sourceHandle) await sourceHandle.close().catch(() => {});
     await directoryHandle.close().catch(() => {});
   }
 }

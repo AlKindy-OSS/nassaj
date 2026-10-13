@@ -25,6 +25,7 @@ import {
   closeConnection,
   getConnection,
   initializeDatabase,
+  participantsDb,
   projectsDb,
   sessionsDb,
   userDb,
@@ -244,6 +245,31 @@ test('a session with no workflows dir is scanned but contributes nothing (no fal
     assert.equal(result.eligible, 1);
     assert.equal(result.scanned, 1, 'the session was scanned');
     assert.deepEqual(result.workflows, [], 'no workflows dir => nothing active, no throw');
+  });
+});
+
+test('R5: a session with no workflows dir is filtered before its access check (no DB authorisation cost)', async () => {
+  await withHarness(async ({ transcriptDir, createUser, addSessionWithWorkflow }) => {
+    const u = createUser('u-r5');
+    for (const sessionId of ['s-r5-a', 's-r5-b']) {
+      await addSessionWithWorkflow({ userId: u, sessionId, wfId: 'wf_synthetic_placeholder', lines: COMPLETED_JOURNAL_LINES });
+      forgetWorkflowPid(sessionId);
+      await rm(path.join(transcriptDir, sessionId, 'subagents', 'workflows'), { recursive: true, force: true });
+    }
+    const isParticipant = participantsDb.isParticipant;
+    let accessChecks = 0;
+    participantsDb.isParticipant = (...args: Parameters<typeof isParticipant>) => {
+      accessChecks += 1;
+      return isParticipant(...args);
+    };
+    try {
+      const result = await workflowStatusService.getActiveWorkflows(u, { now: NOW_MS, quietMs: QUIET_MS });
+      assert.equal(result.scanned, 2);
+      assert.deepEqual(result.workflows, []);
+    } finally {
+      participantsDb.isParticipant = isParticipant;
+    }
+    assert.equal(accessChecks, 0, 'no access check for a session the lstat filter already excluded');
   });
 });
 

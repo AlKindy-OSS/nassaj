@@ -16,7 +16,7 @@ import Database from 'better-sqlite3';
 
 import { AppError, WORKSPACES_ROOT, getOpenCodeDatabasePath, validateWorkspacePath } from '@/shared/utils.js';
 import { buildProjectFileTreeResponse, getFileTree } from './utils/file-tree.js';
-import { closeSessionsWatcher, forkSessionAtMessage, forkSessionFromSideQuery, initializeSessionsWatcher, isSessionAccessibleByUser, setEngineSwitchLivenessProbe, setSessionLivenessProbes, startCostLedgerScheduler, stopCostLedgerScheduler } from '@/modules/providers/index.js';
+import { closeSessionsWatcher, forkSessionAtMessage, forkSessionFromSideQuery, initializeSessionsWatcher, isSessionAccessibleByUser, setEngineSwitchLivenessProbe, setSessionLivenessProbes, startCostLedgerScheduler, startParkedTranscriptSweep, stopCostLedgerScheduler } from '@/modules/providers/index.js';
 import { createWebSocketServer } from '@/modules/websocket/index.js';
 import {
     abortSessionTurn, dispatchProviderCommand, isModelActivityFrame, isSessionWritableByUser,
@@ -1148,6 +1148,9 @@ const sessionShareRuntime = createSessionShareRuntime({
     deviceCookiesEnabled: multiAccountSwitchingEnabled,
 });
 app.use(sessionShareRuntime.publicHandler);
+// ADR-205 (T-2013): live read-link guest routes (/api/share-view/*), same
+// position: after admission/maintenance, before cors() and every auth layer.
+app.use(sessionShareRuntime.shareViewHandler);
 
 app.use(cors({
   origin: (origin, callback) => {
@@ -4393,6 +4396,8 @@ async function startServer() {
         startHarnessAutoUpdateScheduler();
         // T-1939 slice 3: close live access of members whose SSO attestation aged out.
         startSsoAttestationSweep();
+        // B-1608 T2: sweep aged transcript park files (parked_left) off the startup path.
+        startParkedTranscriptSweep();
         // T-1872: seal the machine Codex release once before admitting launches.
         prewarmCodexLaunchIdentity();
         // T-1872 part 2: judge that release off the event loop; a failure never aborts boot.

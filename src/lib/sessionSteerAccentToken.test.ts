@@ -27,12 +27,12 @@ describe('--session-steer-accent token', () => {
   const css = readFileSync(join(__dirname, '../index.css'), 'utf8');
 
   it('is declared as a literal hex, independent of --primary/--project-accent', () => {
-    const rootMatch = css.match(/:root\s*\{\s*--session-steer-accent:\s*(#[0-9A-Fa-f]{6});?\s*\}/);
+    const rootMatch = css.match(/:root\s*\{[^}]*--session-steer-accent:\s*(#[0-9A-Fa-f]{6})/);
     expect(rootMatch).not.toBeNull();
     const lightValue = rootMatch![1];
     expect(lightValue.toLowerCase()).not.toBe('var(--primary)');
 
-    const darkMatch = css.match(/\.dark\s*\{\s*--session-steer-accent:\s*(#[0-9A-Fa-f]{6});?\s*\}/);
+    const darkMatch = css.match(/\.dark\s*\{[^}]*--session-steer-accent:\s*(#[0-9A-Fa-f]{6})/);
     expect(darkMatch).not.toBeNull();
     const darkValue = darkMatch![1];
 
@@ -40,14 +40,14 @@ describe('--session-steer-accent token', () => {
   });
 
   it('meets AA text contrast (>=4.5:1) and border contrast (>=3:1) against white', () => {
-    const rootMatch = css.match(/:root\s*\{\s*--session-steer-accent:\s*(#[0-9A-Fa-f]{6});?\s*\}/)!;
+    const rootMatch = css.match(/:root\s*\{[^}]*--session-steer-accent:\s*(#[0-9A-Fa-f]{6})/)!;
     const lightValue = rootMatch[1];
     const ratio = contrastRatio(lightValue, '#FFFFFF');
     expect(ratio).toBeGreaterThanOrEqual(4.5);
   });
 
   it('the dark-theme variant meets AA text contrast against a near-black surface', () => {
-    const darkMatch = css.match(/\.dark\s*\{\s*--session-steer-accent:\s*(#[0-9A-Fa-f]{6});?\s*\}/)!;
+    const darkMatch = css.match(/\.dark\s*\{[^}]*--session-steer-accent:\s*(#[0-9A-Fa-f]{6})/)!;
     const darkValue = darkMatch[1];
     const ratio = contrastRatio(darkValue, '#0A0A0A');
     expect(ratio).toBeGreaterThanOrEqual(4.5);

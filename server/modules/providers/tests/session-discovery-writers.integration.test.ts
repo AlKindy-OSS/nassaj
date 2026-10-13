@@ -118,6 +118,33 @@ test('Codex: a /10 rollout claiming a Claude id relabels nothing; a cwd forgery 
   });
 });
 
+test('R4: a Codex rollout named for another id neither inserts nor refreshes a row (warn once)', async () => {
+  await withBox(async ({ member }) => {
+    const sync = new CodexSessionSynchronizer();
+    const dayDir = member('1', '.codex', 'sessions', '2026', '10', '13');
+    const otherId = '5d0c1a7e-0000-4000-8000-00000000b599';
+    // session_meta says SID; the file is named for another thread (a copy or a forgery).
+    const misnamed = writeJsonl(path.join(dayDir, `rollout-2026-10-13T00-00-00-${otherId}.jsonl`), [codexMeta(PROJECT_A)]);
+    const warnings: unknown[] = [];
+    const original = console.warn;
+    console.warn = (...args: unknown[]) => { warnings.push(args[1]); };
+    try {
+      assert.equal(await sync.synchronizeFile(misnamed), null);
+      assert.equal(await sync.synchronizeFile(misnamed), null);
+      assert.ok(!sessionsDb.getSessionById(SID), 'no row inserted from a misnamed rollout');
+      const own = writeJsonl(path.join(dayDir, `rollout-2026-10-13T00-00-01-${SID}.jsonl`), [codexMeta(PROJECT_A)]);
+      assert.equal(await sync.synchronizeFile(own), SID);
+      await sync.synchronizeFile(misnamed);
+      assertUnchanged('codex', own);
+    } finally {
+      console.warn = original;
+    }
+    const mismatches = warnings.filter((payload) =>
+      (payload as { event?: string } | undefined)?.event === 'codex_rollout_name_mismatch');
+    assert.deepEqual(mismatches, [{ event: 'codex_rollout_name_mismatch', sessionId: SID }], 'warned once, no path');
+  });
+});
+
 test('Codex: a /10 child thread cannot bump a /1 parent; a /1 child can', async () => {
   await withBox(async ({ member }) => {
     const sync = new CodexSessionSynchronizer();

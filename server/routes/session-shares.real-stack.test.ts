@@ -1,7 +1,9 @@
 /**
- * ADR-196 / T-1970 stage 7: adversarial and end-to-end tests of read-only session shares
- * against the REAL stack (production runtime, repositories, snapshot pipeline, JWT
- * verifier) on a temp database and a real-format Claude JSONL in a temp HOME.
+ * ADR-196 / T-1970 stage 7 and ADR-205 / T-2013 stages 3-4: adversarial and end-to-end
+ * tests of read-only session shares against the REAL stack (production runtime,
+ * repositories, snapshot pipeline, live projection, JWT verifier) on a temp database and
+ * a real-format Claude JSONL in a temp HOME. Legacy snapshot rows are seeded through the
+ * real builder (their creation route is retired); live links go through the real routes.
  * The browser half lives in tests/e2e/session-share-real-stack.browser.test.ts.
  */
 import assert from 'node:assert/strict';
@@ -117,7 +119,7 @@ test('secrets in every transcript context never reach the public JSON', async ()
   // The share record holds a token digest only; the token itself is in no list nor audit entry.
   const mine = await stack.call('GET', '/api/session-shares/mine', { user: member });
   assert.equal(mine.status, 200);
-  assert.ok(!mine.text.includes(created.token!) && !mine.text.includes('token_hash') && !mine.text.includes('snapshot"'));
+  assert.ok(!mine.text.includes(created.token!) && !mine.text.includes('token_hash') && !mine.text.includes('"snapshot":'));
   assert.ok(!JSON.stringify(stack.audits).includes(created.token!));
 });
 
@@ -156,29 +158,25 @@ test('the share is a frozen snapshot: later transcript changes and tampering do 
 // Authorization and enumeration
 // ---------------------------------------------------------------------------
 
-test('management matrix on a real session: owner, platform owner, admin create; member and outsider are refused', async () => {
+test('M9 on a real session: only the strict owner creates a live link; preview is retired', async () => {
   const { sessionId } = sessionOf();
-  assert.equal((await stack.preview(outsider, sessionId)).status, 403);
-  const refusedCreate = await stack.call('POST', `/api/sessions/${sessionId}/shares`, { user: outsider,
-    body: { expiry: '30d', upToMessageId: 'x', previewSha256: 'a'.repeat(64), reviewedRedactions: true } });
-  assert.equal(refusedCreate.status, 403);
-  assert.deepEqual(refusedCreate.json, { error: { code: 'ACCESS_DENIED' } });
-  assert.equal((await stack.create(member, sessionId)).status, 201, 'session owner');
-  assert.equal((await stack.create(platformOwner, sessionId)).status, 201, 'platform owner on another user\'s session');
+  for (const [user, name] of [[outsider, 'outsider'], [platformOwner, 'platform owner'], [admin, 'admin']] as const) {
+    const refused = await stack.createLive(user, sessionId);
+    assert.equal(refused.status, 403, name);
+    assert.deepEqual(refused.json, { error: { code: 'OWNER_ONLY' } }, name);
+  }
   stack.audits.length = 0;
-  const byAdmin = await stack.create(admin, sessionId);
-  assert.equal(byAdmin.status, 201, byAdmin.text);
-  await new Promise((resolve) => setTimeout(resolve, 50));
-  const notified = stack.audits.find((entry) => entry.action === 'session_share_owner_notified');
-  assert.ok(notified, 'the session owner is notified when an admin shares their session');
-  assert.equal(notified.userId, admin.id);
-  assert.equal(notified.metadata.ownerUserId, member.id);
-  assert.ok(stack.audits.some((entry) => entry.action === 'session_share_created' && entry.userId === admin.id));
-  stack.audits.length = 0;
-  await stack.create(member, sessionId);
-  assert.ok(!stack.audits.some((entry) => entry.action === 'session_share_owner_notified'), 'no self-notification');
-  assert.equal((await stack.preview(member, 'does-not-exist-session')).status, 404);
-  assert.equal((await stack.preview(member, 'bad id with spaces')).status, 404);
+  const made = await stack.createLive(member, sessionId);
+  assert.equal(made.status, 201, made.text);
+  assert.equal(made.json.share.mode, 'live');
+  assert.ok(stack.audits.some((entry) => entry.action === 'session_share_created' && entry.userId === member.id
+    && entry.metadata.mode === 'live'));
+  const retired = await stack.call('POST', `/api/sessions/${sessionId}/shares/preview`, { user: member, body: {} });
+  assert.deepEqual([retired.status, retired.json], [410, { error: { code: 'SNAPSHOT_SHARES_RETIRED' } }]);
+  assert.equal((await stack.createLive(member, 'does-not-exist-session')).status, 404);
+  assert.equal((await stack.createLive(member, 'bad id with spaces')).status, 404);
+  const revoked = await stack.call('POST', `/api/session-shares/${made.id}/revoke`, { user: admin });
+  assert.equal(revoked.status, 204, 'revoke stays open to privileged users');
 });
 
 test('authentication edge cases on the real verifier: anonymous, stale generation, cookie-only, cookie plus Bearer', async () => {
@@ -442,33 +440,31 @@ test('real lifecycle hooks: archive and delete through the sessions service revo
 // Abuse: rate limits, caps, oversized sessions
 // ---------------------------------------------------------------------------
 
-test('public read rate limits: per IP, per share, and X-Forwarded-For cannot evade them', async () => {
-  advanceClock(120_000);
+test('D1/D7 on the real stack: failures are charged per IP bucket after verification; a valid token is never refused', async () => {
+  advanceClock(11 * 60_000);
   const { sessionId } = sessionOf();
   const share = await stack.create(member, sessionId);
-  const statuses: number[] = [];
-  for (let index = 0; index < 61; index += 1) statuses.push((await stack.read(share.id!, share.token!, { ip: '203.0.113.7' })).status);
-  assert.equal(statuses.filter((status) => status === 200).length, 60);
-  const limited = await stack.read(share.id!, share.token!, { ip: '203.0.113.7' });
+  const failures: number[] = [];
+  for (let index = 0; index < 21; index += 1) failures.push((await stack.read(share.id!, 'W'.repeat(43), { ip: '203.0.113.7' })).status);
+  assert.equal(failures.filter((status) => status === 404).length, 20);
+  const limited = await stack.read(share.id!, 'W'.repeat(43), { ip: '203.0.113.7' });
   assert.equal(limited.status, 429);
   assert.equal(limited.headers.get('retry-after'), '60');
   assert.deepEqual(limited.json, { error: { code: 'RATE_LIMITED' } });
-  assert.equal((await stack.read(share.id!, share.token!, { ip: '203.0.113.8' })).status, 200, 'another IP is unaffected');
+  assert.equal((await stack.read(share.id!, share.token!, { ip: '203.0.113.7' })).status, 200, 'the attacker IP with the token is served');
+  const live = await stack.createLive(member, sessionId);
+  assert.equal((await stack.view(live.id!, 'W'.repeat(43), 'meta', { ip: '2001:db8:7:7::1' })).status, 404);
+  for (let index = 0; index < 20; index += 1) await stack.view(live.id!, 'W'.repeat(43), 'meta', { ip: `2001:db8:7:7::${index + 2}` });
+  assert.equal((await stack.view(live.id!, 'W'.repeat(43), 'meta', { ip: '2001:db8:7:7:ffff::1' })).status, 429,
+    'IPv6 rotation inside one /64 shares one bucket');
+  assert.equal((await stack.view(live.id!, live.token!, 'meta', { ip: '2001:db8:7:7::99' })).status, 200);
 
-  advanceClock(120_000);
+  advanceClock(11 * 60_000);
   const spoofed: number[] = [];
-  for (let index = 0; index < 62; index += 1) {
-    spoofed.push((await stack.read(share.id!, share.token!, { ip: 'none', headers: { 'X-Forwarded-For': `10.9.${index}.1` } })).status);
+  for (let index = 0; index < 22; index += 1) {
+    spoofed.push((await stack.read(share.id!, 'W'.repeat(43), { ip: 'none', headers: { 'X-Forwarded-For': `10.9.${index}.1` } })).status);
   }
   assert.ok(spoofed.includes(429), 'X-Forwarded-For is not a key');
-
-  advanceClock(120_000);
-  let denied = 0;
-  for (let index = 0; index < 130; index += 1) {
-    const status = (await stack.read(share.id!, share.token!, { ip: `192.0.2.${(index % 8) + 1}`.concat(String(index)) })).status;
-    if (status === 429) denied += 1;
-  }
-  assert.ok(denied >= 1 && denied <= 10, `per-share ceiling (120/min) applied across IPs, denied=${denied}`);
 });
 
 test('concurrent readers: bounded, never a 5xx', async () => {
@@ -483,37 +479,31 @@ test('concurrent readers: bounded, never a 5xx', async () => {
   for (const response of responses.filter((r) => r.status === 200)) assert.equal(response.json.messages.length, 2);
 });
 
-const createPatiently = (user: StackUser, sessionId: string) => stack.create(user, sessionId);
-
-test('per-session cap of 20 holds across creators and parallel waves', async () => {
+test('per-session cap of 20 live links holds across parallel waves; a revoke frees one slot', async () => {
   const { sessionId } = sessionOf();
-  const creators = [platformOwner, admin, admin2, member];
   const outcomes: string[] = [];
   for (let index = 0; index < 26; index += 2) {
-    advanceClock(61_000);
-    const wave = await Promise.all([creators[index % 4], creators[(index + 1) % 4]].map((user) => createPatiently(user, sessionId)));
+    const wave = await Promise.all([0, 1].map(() => stack.createLive(member, sessionId)));
     for (const result of wave) outcomes.push(result.status === 201 ? 'created' : result.json?.error?.code ?? `http-${result.status}`);
   }
   assert.equal(outcomes.filter((outcome) => outcome === 'created').length, 20, outcomes.join());
-  assert.ok(outcomes.filter((outcome) => outcome === 'SHARE_LIMIT_REACHED').length >= 6, outcomes.join());
   assert.ok(outcomes.every((outcome) => outcome === 'created' || outcome === 'SHARE_LIMIT_REACHED'), outcomes.join());
-  const active = (stack.store().listBySession(sessionId) as Array<{ revoked_at: string | null }>).filter((row) => !row.revoked_at);
+  const active = (stack.store().listBySession(sessionId) as Array<{ id: string; revoked_at: string | null }>).filter((row) => !row.revoked_at);
   assert.equal(active.length, 20);
-  // A revoked share frees one slot.
-  await stack.call('POST', `/api/session-shares/${(active[0] as unknown as { id: string }).id}/revoke`, { user: member });
-  advanceClock(61_000);
-  assert.equal((await createPatiently(platformOwner, sessionId)).status, 201);
-  assert.equal((await createPatiently(platformOwner, sessionId)).json.error.code, 'SHARE_LIMIT_REACHED');
+  await stack.call('POST', `/api/session-shares/${active[0].id}/revoke`, { user: member });
+  assert.equal((await stack.createLive(member, sessionId)).status, 201);
+  assert.equal((await stack.createLive(member, sessionId)).json.error.code, 'SHARE_LIMIT_REACHED');
 });
 
-test('per-creator cap of 50 holds across sessions', async () => {
-  const creator = stack.createUser('prolific-admin', 'admin');
-  const sessions = [sessionOf(), sessionOf(), sessionOf()];
+test('per-creator cap of 50 live links holds across sessions', async () => {
+  advanceClock(61_000);
+  const creator = stack.createUser('prolific-owner', 'user');
+  const sessions = [0, 1, 2].map(() => stack.seedSession(creator, hello()));
   let created = 0;
   let refused = 0;
   for (let index = 0; index < 54; index += 1) {
-    if (index % 4 === 0) advanceClock(61_000);
-    const result = await createPatiently(creator, sessions[index % 3].sessionId);
+    if (index % 100 === 99) advanceClock(61_000);
+    const result = await stack.createLive(creator, sessions[index % 3].sessionId, {}, `198.18.${Math.floor(index / 100)}.1`);
     if (result.status === 201) created += 1;
     else if (result.json?.error?.code === 'SHARE_LIMIT_REACHED') refused += 1;
     else assert.fail(`unexpected ${result.status} ${result.text}`);
@@ -522,7 +512,7 @@ test('per-creator cap of 50 holds across sessions', async () => {
   assert.equal(refused, 4);
 });
 
-test('oversized sessions are refused with 413 and store nothing', async () => {
+test('ADR-205: sessions the snapshot builder refused with 413 are readable through a live link', async () => {
   const words = (bytes: number) => {
     let out = '';
     while (out.length < bytes) out += `${Math.random().toString(36).slice(2, 2 + 3 + Math.floor(Math.random() * 6))} `;
@@ -530,45 +520,41 @@ test('oversized sessions are refused with 413 and store nothing', async () => {
   };
   const tooMuchText = sessionOf(Array.from({ length: 5 }, (_, i) =>
     (i % 2 ? claudeRows.assistant([claudeRows.text(words(900_000))]) : claudeRows.user(words(900_000)))));
-  advanceClock(61_000);
-  const text = await stack.preview(member, tooMuchText.sessionId);
-  assert.equal(text.status, 413, text.text.slice(0, 200));
-  assert.equal(text.json.error.code, 'SNAPSHOT_TOO_LARGE');
-
   const tooMany = sessionOf(Array.from({ length: 5001 }, (_, i) => claudeRows.user(`m${i}`)));
-  advanceClock(61_000);
-  assert.equal((await stack.preview(member, tooMany.sessionId)).status, 413, 'more than 5000 messages');
-
-  const hugeHistory = sessionOf([claudeRows.user('x'), claudeRows.assistant([claudeRows.toolUse('toolu_9', { blob: 'z'.repeat(9 * 1024 * 1024) })])]);
-  advanceClock(61_000);
-  assert.equal((await stack.preview(member, hugeHistory.sessionId)).status, 413, 'history beyond the in-memory cap');
-
-  const incompressible = sessionOf(Array.from({ length: 6 }, (_, i) =>
-    (i % 2 ? claudeRows.assistant([claudeRows.text(words(600_000))]) : claudeRows.user(words(600_000)))));
-  advanceClock(61_000);
-  const blob = await stack.preview(member, incompressible.sessionId);
-  assert.equal(blob.status, 413, `a snapshot over 1 MiB compressed: ${blob.text.slice(0, 120)}`);
-  for (const { sessionId } of [tooMuchText, tooMany, hugeHistory, incompressible]) {
-    assert.equal((stack.store().listBySession(sessionId) as unknown[]).length, 0);
+  const hugeHistory = sessionOf([claudeRows.user('x'), claudeRows.assistant([claudeRows.toolUse('toolu_9', { blob: 'z'.repeat(9 * 1024 * 1024) })]),
+    claudeRows.assistant([claudeRows.text('after the big tool call')])]);
+  assert.equal((await stack.preview(member, hugeHistory.sessionId)).status, 413, 'precondition: the snapshot builder refused it');
+  for (const [name, { sessionId }] of [['text', tooMuchText], ['count', tooMany], ['tool payload', hugeHistory]] as const) {
+    advanceClock(61_000);
+    const live = await stack.createLive(member, sessionId);
+    assert.equal(live.status, 201, `${name}: ${live.text}`);
+    const page = await stack.view(live.id!, live.token!, 'messages');
+    assert.equal(page.status, 200, `${name}: ${page.text.slice(0, 200)}`);
+    assert.ok(page.json.messages.length >= 1, name);
+    assert.ok(Buffer.byteLength(page.text) <= 4 * 1024 * 1024 + 4096, `${name}: per-request byte cap`);
   }
+  const many = await stack.createLive(member, tooMany.sessionId);
+  const newest = await stack.view(many.id!, many.token!, 'messages');
+  assert.equal(newest.json.messages.length, 50);
+  assert.equal(newest.json.moreBefore, true);
+  assert.equal(newest.json.messages.at(-1).parts[0].text, 'm5000');
+  const huge = await stack.createLive(member, hugeHistory.sessionId);
+  const texts = (await stack.view(huge.id!, huge.token!, 'messages')).json.messages.map((m: { parts: Array<{ text?: string }> }) => m.parts[0].text);
+  assert.deepEqual(texts, ['x', 'after the big tool call'], 'the 9 MiB tool payload is dropped before anything is measured');
 });
 
-test('create refuses a stale or forged preview and a truncated range stays truncated', async () => {
-  const { sessionId } = sessionOf([claudeRows.user('first'), claudeRows.assistant([claudeRows.text('second')]), claudeRows.user('third')]);
-  const shown = await stack.preview(member, sessionId);
-  const base = { expiry: '7d', upToMessageId: shown.json.upToMessageId, previewSha256: shown.json.previewSha256, reviewedRedactions: true };
+test('live create validates its body strictly and never returns secret fields', async () => {
+  const { sessionId } = sessionOf();
   const post = (body: unknown) => stack.call('POST', `/api/sessions/${sessionId}/shares`, { user: member, body });
-  assert.equal((await post({ ...base, previewSha256: 'b'.repeat(64) })).status, 409);
-  assert.equal((await post({ ...base, upToMessageId: 'no-such-message' })).status, 409);
-  assert.equal((await post({ ...base, upToMessageId: 'x'.repeat(300) })).status, 400);
-  assert.equal((await post({ ...base, expiry: 'forever' })).status, 400);
-  assert.equal((await post({ ...base, __proto__: { admin: true }, extra: 1 })).status, 400);
-  assert.equal((await post({ ...base, reviewedRedactions: 'true' })).status, 400);
-  const good = await post(base);
+  assert.equal((await post({ expiry: 'forever' })).status, 400);
+  assert.equal((await post({ expiry: '7d', __proto__: { admin: true }, extra: 1 })).status, 400);
+  assert.equal((await post({ expiry: '7d', upToMessageId: 'm1', previewSha256: 'a'.repeat(64), reviewedRedactions: true })).status, 400,
+    'the snapshot create body is no longer accepted');
+  const good = await post({});
   assert.equal(good.status, 201, good.text);
-  assert.equal(good.json.share.messageCount, 3);
+  assert.equal(Date.parse(good.json.share.expiresAt) - Date.parse(good.json.share.createdAt), 7 * DAY_MS, 'seven-day default');
   assert.equal(good.json.share.sessionId, sessionId);
-  assert.ok(!('tokenHash' in good.json.share) && !('token_hash' in good.json.share));
+  for (const key of ['tokenHash', 'token_hash', 'refKey', 'ref_key']) assert.ok(!(key in good.json.share), key);
 });
 
 // ---------------------------------------------------------------------------
@@ -606,8 +592,7 @@ test('public path edges: other methods, trailing slash and sub-paths never serve
 
 test('the public origin is configuration: Host and X-Forwarded-Host never reach the share URL', async () => {
   const { sessionId } = sessionOf();
-  const shown = await stack.preview(member, sessionId);
-  const body = JSON.stringify({ expiry: '7d', upToMessageId: shown.json.upToMessageId, previewSha256: shown.json.previewSha256, reviewedRedactions: true });
+  const body = JSON.stringify({ expiry: '7d' });
   const http = await import('node:http');
   const { port } = new URL(stack.origin);
   const created = await new Promise<{ status: number; text: string }>((resolve, reject) => {
@@ -701,3 +686,298 @@ test('D3: project and home paths in the session title are redacted like message 
     assert.ok(!read.json.title.includes(session.projectPath), `title leaks the project path: ${read.json.title}`);
     assert.ok(!read.json.title.includes(SANDBOX_HOME), `title leaks the home path: ${read.json.title}`);
   });
+
+// ---------------------------------------------------------------------------
+// ADR-205 live links end to end
+// ---------------------------------------------------------------------------
+
+test('live link: meta, sanitized public messages only, appends arrive by cursor, revoke and delete end it', async () => {
+  const { liveProjection } = await import('../services/session-share-live-projection.js');
+  const rows = [
+    claudeRows.user(`plan the release\n${secretBlock('live-user')}`),
+    claudeRows.assistant([claudeRows.thinking('LIVE-THINKING-SECRET-77')]),
+    claudeRows.assistant([claudeRows.toolUse('toolu_live', { command: 'cat LIVE-TOOL-INPUT-88' })]),
+    claudeRows.toolResult('toolu_live', 'LIVE-TOOL-RESULT-99'),
+    claudeRows.user('LIVE-SUBAGENT-PROMPT', { isSidechain: true, agentId: 'a9' }),
+    claudeRows.assistant([claudeRows.text(`first answer ${SECRETS.github}`)]),
+  ];
+  const session = stack.seedSession(member, rows, { title: `Release ${SECRETS.anthropic} ${SANDBOX_HOME}/x` });
+  const live = await stack.createLive(member, session.sessionId);
+  assert.equal(live.status, 201, live.text);
+  const meta = await stack.view(live.id!, live.token!, 'meta');
+  assert.equal(meta.status, 200, meta.text);
+  assert.deepEqual([meta.json.v, meta.json.mode, meta.json.providerLabel], [2, 'live', 'Claude']);
+  for (const leaked of [SECRETS.anthropic, SANDBOX_HOME]) assert.ok(!meta.text.includes(leaked), `meta leaks ${leaked}`);
+  const page = await stack.view(live.id!, live.token!, 'messages');
+  assert.equal(page.status, 200, page.text);
+  // No author was recorded for the seeded prompt: unattributed rows read «member», never «owner» (M6).
+  assert.deepEqual(page.json.messages.map((m: { role: string; author: string }) => [m.role, m.author]),
+    [['user', 'member'], ['assistant', 'assistant']]);
+  for (const forbidden of [...Object.values(SECRETS), 'LIVE-THINKING', 'LIVE-TOOL-INPUT', 'LIVE-TOOL-RESULT', 'LIVE-SUBAGENT',
+    session.sessionId, session.projectPath, 'toolu_live']) {
+    assert.ok(!page.text.includes(forbidden), `messages leak ${forbidden}`);
+  }
+  const { appendFileSync } = await import('node:fs');
+  appendFileSync(session.file, `${[claudeRows.user('second question'),
+    claudeRows.assistant([claudeRows.toolUse('toolu_live2', { command: 'ls' })]), claudeRows.toolResult('toolu_live2', 'out'),
+    claudeRows.assistant([claudeRows.text('second answer')])].map((row) => JSON.stringify({ sessionId: session.sessionId, cwd: session.projectPath, ...row })).join('\n')}\n`);
+  advanceClock(4_000);
+  const after = await stack.view(live.id!, live.token!, `messages?after=${page.json.messages.at(-1).c}`);
+  assert.equal(after.status, 200, after.text);
+  assert.deepEqual(after.json.messages.map((m: { parts: Array<{ text: string }> }) => m.parts[0].text), ['second question', 'second answer']);
+  assert.notEqual(after.json.revision, page.json.revision);
+  const replay = await stack.view(live.id!, live.token!, `messages?before=${after.json.messages[0].c}`);
+  assert.deepEqual(replay.json.messages.map((m: { k: string }) => m.k), page.json.messages.map((m: { k: string }) => m.k),
+    'gap-free and duplicate-free in both directions');
+  assert.ok(liveProjection.inspect(session.sessionId), 'one shared projection entry');
+  assert.equal((await stack.call('POST', `/api/session-shares/${live.id}/revoke`, { user: member })).status, 204);
+  assert.equal(liveProjection.inspect(session.sessionId), undefined, 'the last live revoke drops the projection');
+  assert.equal((await stack.view(live.id!, live.token!, 'messages')).status, 404, 'revocation takes effect on the next request');
+
+  const deleted = sessionOf();
+  const second = await stack.createLive(member, deleted.sessionId);
+  assert.equal((await stack.view(second.id!, second.token!, 'messages')).status, 200);
+  assert.ok(liveProjection.inspect(deleted.sessionId));
+  await stack.sessionsService.deleteOrArchiveSessionById(deleted.sessionId, member.id, { force: true });
+  assert.equal(liveProjection.inspect(deleted.sessionId), undefined, 'session delete drops the projection');
+  assert.equal((await stack.view(second.id!, second.token!, 'meta')).status, 404);
+});
+
+test('live link attachments: chat images, ADR-157 fences, redacted text files; SVG, binary and secret files withheld', async () => {
+  const fs = await import('node:fs');
+  const path = await import('node:path');
+  const { getChatImageRoot } = await import('../services/chat-image-store.js');
+  const root = fs.realpathSync(fs.mkdtempSync(path.join('/var/tmp', 'share-live-att-')));
+  const projectPath = path.join(root, 'project');
+  const inbox = path.join(projectPath, '.nassaj-uploads', 'inbox');
+  fs.mkdirSync(inbox, { recursive: true });
+  fs.mkdirSync(path.join(projectPath, 'out'), { recursive: true });
+  stack.projectsDb.createProjectPath(projectPath, null, null);
+  const png = Buffer.concat([Buffer.from('89504e470d0a1a0a', 'hex'), Buffer.from('live-png')]);
+  const bucket = 'feedc0de'.repeat(4);
+  const chatDir = path.join(getChatImageRoot(), bucket);
+  fs.mkdirSync(chatDir, { recursive: true });
+  fs.writeFileSync(path.join(chatDir, 'image_0.png'), png);
+  fs.writeFileSync(path.join(chatDir, 'image_1.svg'), '<svg xmlns="http://www.w3.org/2000/svg"/>');
+  fs.writeFileSync(path.join(inbox, 'notes.txt'), `release notes\ntoken ${SECRETS.github}\n`);
+  fs.writeFileSync(path.join(inbox, 'report.pdf'), Buffer.from([0x25, 0x50, 0x44, 0x46, 0x00, 0xff]));
+  fs.writeFileSync(path.join(inbox, '.env'), `API_TOKEN=${SECRETS.envToken}`);
+  fs.writeFileSync(path.join(projectPath, 'out', 'chart.png'), png);
+  try {
+    const prompt = ['please review', '', '[Images provided at the following paths:]', `1. ${chatDir}/image_0.png`, `2. ${chatDir}/image_1.svg`,
+      '', '[Files provided at the following paths:]', '1. .nassaj-uploads/inbox/notes.txt', '2. .nassaj-uploads/inbox/report.pdf',
+      '3. .nassaj-uploads/inbox/.env'].join('\n');
+    const session = stack.seedSession(member, [claudeRows.user(prompt),
+      claudeRows.assistant([claudeRows.text(`here is the chart\n\`\`\`image\n${projectPath}/out/chart.png\n\`\`\``)])], { projectPath });
+    const live = await stack.createLive(member, session.sessionId);
+    const page = await stack.view(live.id!, live.token!, 'messages');
+    assert.equal(page.status, 200, page.text);
+    const [user, assistant] = page.json.messages;
+    assert.deepEqual(user.parts.map((part: { t: string; cat?: string; kind?: string; name?: string }) =>
+      [part.t, part.cat ?? part.kind ?? part.name ?? null]), [['text', null], ['image', null], ['image', null], ['file', 'notes.txt'],
+      ['attachment-unavailable', 'file'], ['redacted', 'secret']]);
+    for (const forbidden of [chatDir, projectPath, root, bucket, 'inbox', '.env']) assert.ok(!page.text.includes(forbidden), forbidden);
+    const fetchRef = (ref: string) => stack.view(live.id!, live.token!, `attachments/${ref}`);
+    const image = await fetchRef(user.parts[1].ref);
+    assert.equal(image.status, 200);
+    assert.equal(image.headers.get('content-type'), 'image/png');
+    assert.equal(image.headers.get('content-security-policy'), "default-src 'none'; sandbox");
+    const svg = await fetchRef(user.parts[2].ref);
+    assert.deepEqual([svg.status, svg.json], [404, { error: { code: 'ATTACHMENT_GONE' } }], 'SVG is never served');
+    const notes = await fetchRef(user.parts[3].ref);
+    assert.equal(notes.status, 200);
+    assert.equal(notes.headers.get('content-disposition'), "attachment; filename*=UTF-8''notes.txt");
+    assert.ok(notes.text.includes('release notes') && !notes.text.includes(SECRETS.github), 'served redacted');
+    const chart = await fetchRef(assistant.parts.find((part: { t: string }) => part.t === 'image').ref);
+    assert.equal(chart.status, 200, chart.text);
+    fs.rmSync(path.join(chatDir, 'image_0.png'));
+    assert.equal((await fetchRef(user.parts[1].ref)).status, 404, 'a removed file is ATTACHMENT_GONE');
+    const forged = `${user.parts[1].ref.slice(0, -1)}${user.parts[1].ref.endsWith('A') ? 'B' : 'A'}`;
+    assert.equal((await fetchRef(forged)).status, 404);
+    assert.equal((await stack.view(live.id!, 'W'.repeat(43), `attachments/${user.parts[3].ref}`)).status, 404, 'a ref is no credential');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(chatDir, { recursive: true, force: true });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// ADR-205 stage 7: lifecycle, tool-heavy sessions, attachment escapes, floods
+// ---------------------------------------------------------------------------
+
+const UNAVAILABLE = { error: { code: 'SHARE_UNAVAILABLE' } };
+
+test('end to end: create, read, a new completed message arrives by cursor, revoke answers the uniform 404', async () => {
+  const session = sessionOf([claudeRows.user('first question'), claudeRows.assistant([claudeRows.text('first answer')])]);
+  const live = await stack.createLive(member, session.sessionId);
+  assert.equal(live.status, 201, live.text);
+  assert.match(live.url!, /^http:\/\/127\.0\.0\.1:\d+\/s\/[A-Za-z0-9_-]+#token=[A-Za-z0-9_-]{43}$/);
+
+  const meta = await stack.view(live.id!, live.token!, 'meta');
+  assert.deepEqual([meta.status, meta.json.mode], [200, 'live']);
+  const first = await stack.view(live.id!, live.token!, 'messages');
+  assert.deepEqual(first.json.messages.map((m: { parts: Array<{ text: string }> }) => m.parts[0].text), ['first question', 'first answer']);
+  const idle = await stack.view(live.id!, live.token!, `messages?after=${first.json.messages.at(-1).c}`);
+  assert.deepEqual([idle.status, idle.json.messages.length], [200, 0], 'nothing new yet');
+
+  const { appendFileSync } = await import('node:fs');
+  const append = (...rows: Array<Record<string, unknown>>) => appendFileSync(session.file,
+    `${rows.map((row) => JSON.stringify({ sessionId: session.sessionId, cwd: session.projectPath, ...row })).join('\n')}\n`);
+  append(claudeRows.user('follow-up'), claudeRows.assistant([claudeRows.text('completed reply')]));
+  advanceClock(4_000);
+  const poll = await stack.view(live.id!, live.token!, `messages?after=${first.json.messages.at(-1).c}`);
+  assert.equal(poll.status, 200, poll.text);
+  assert.deepEqual(poll.json.messages.map((m: { parts: Array<{ text: string }> }) => m.parts[0].text), ['follow-up', 'completed reply']);
+  assert.ok(!poll.json.messages.some((m: { k: string }) => first.json.messages.some((old: { k: string }) => old.k === m.k)), 'no duplicates');
+
+  assert.equal((await stack.call('POST', `/api/session-shares/${live.id}/revoke`, { user: member })).status, 204);
+  for (const endpoint of ['meta', 'messages', `messages?after=${poll.json.messages.at(-1).c}`]) {
+    const refused = await stack.view(live.id!, live.token!, endpoint);
+    assert.equal(refused.status, 404, endpoint);
+    assert.deepEqual(refused.json, UNAVAILABLE, `${endpoint}: the uniform code, no reason`);
+  }
+  const unknown = await stack.view(`${live.id!.slice(0, -1)}${live.id!.endsWith('a') ? 'b' : 'a'}`, live.token!, 'meta');
+  assert.equal(unknown.text, (await stack.view(live.id!, live.token!, 'meta')).text, 'revoked looks like unknown');
+});
+
+test('end to end: archive and expiry end a live link on the next request', async () => {
+  const archived = sessionOf();
+  const a = await stack.createLive(member, archived.sessionId);
+  assert.equal((await stack.view(a.id!, a.token!, 'messages')).status, 200);
+  await stack.sessionsService.deleteOrArchiveSessionById(archived.sessionId, member.id, { force: false });
+  assert.deepEqual((await stack.view(a.id!, a.token!, 'messages')).json, UNAVAILABLE);
+
+  const expiring = sessionOf();
+  const e = await stack.createLive(member, expiring.sessionId, { expiry: '24h' });
+  assert.equal((await stack.view(e.id!, e.token!, 'meta')).status, 200);
+  advanceClock(DAY_MS + 1_000);
+  assert.deepEqual((await stack.view(e.id!, e.token!, 'meta')).json, UNAVAILABLE);
+});
+
+test('tool-heavy session (about 10 MiB of tool traffic, little text): the snapshot refuses it, the live link serves text only', async () => {
+  const chunk = (seed: number) => Array.from({ length: 4096 }, (_, i) => `${((seed * 7919 + i * 104729) >>> 0).toString(16)}`).join(' ');
+  const payload = (seed: number) => chunk(seed).repeat(Math.ceil(850_000 / chunk(seed).length)).slice(0, 850_000);
+  const rows: Array<Record<string, unknown>> = [claudeRows.user('please run the whole build and summarise')];
+  for (let step = 0; step < 12; step += 1) {
+    rows.push(claudeRows.assistant([claudeRows.toolUse(`toolu_heavy_${step}`, { command: `make target-${step}`, note: payload(step).slice(0, 1_000) })]));
+    rows.push(claudeRows.toolResult(`toolu_heavy_${step}`, `HEAVY-RESULT-${step} ${payload(step)}`));
+    if (step % 4 === 3) rows.push(claudeRows.assistant([claudeRows.text(`progress after step ${step}`)]));
+  }
+  rows.push(claudeRows.user('sub agent prompt', { isSidechain: true, agentId: 'h1' }));
+  rows.push(claudeRows.toolResult('toolu_heavy_side', `SIDE-RESULT ${payload(99)}`, { isSidechain: true, agentId: 'h1' }));
+  rows.push(claudeRows.assistant([claudeRows.text('the build is green')]));
+  const { sessionId, file } = sessionOf(rows);
+  const { statSync } = await import('node:fs');
+  assert.ok(statSync(file).size > 10 * 1024 * 1024, 'the fixture really is above 10 MiB');
+  assert.equal((await stack.preview(member, sessionId)).status, 413, 'precondition: the old path refused it');
+
+  advanceClock(61_000);
+  const live = await stack.createLive(member, sessionId);
+  assert.equal(live.status, 201, live.text);
+  const started = Date.now();
+  const page = await stack.view(live.id!, live.token!, 'messages');
+  assert.equal(page.status, 200, page.text.slice(0, 200));
+  assert.ok(Date.now() - started < 8_000, 'inside the 10 s guest deadline');
+  assert.deepEqual(page.json.messages.map((m: { parts: Array<{ text: string }> }) => m.parts[0].text),
+    ['please run the whole build and summarise', 'progress after step 3', 'progress after step 7', 'progress after step 11', 'the build is green']);
+  assert.ok(Buffer.byteLength(page.text) < 16 * 1024, 'only text travels, not tool payloads');
+  for (const forbidden of ['HEAVY-RESULT', 'SIDE-RESULT', 'make target', 'toolu_heavy', 'sub agent prompt']) {
+    assert.ok(!page.text.includes(forbidden), forbidden);
+  }
+  const again = await stack.view(live.id!, live.token!, `messages?after=${page.json.messages.at(-1).c}`);
+  assert.deepEqual([again.status, again.json.messages.length], [200, 0]);
+});
+
+test('attachment escapes through the real routes: traversal, symlinks, special files and oversize never get a ref or bytes', async () => {
+  const fs = await import('node:fs');
+  const path = await import('node:path');
+  const { execFileSync } = await import('node:child_process');
+  const root = fs.realpathSync(fs.mkdtempSync(path.join('/var/tmp', 'share-live-esc-')));
+  const outside = fs.realpathSync(fs.mkdtempSync(path.join('/var/tmp', 'share-live-out-')));
+  const projectPath = path.join(root, 'project');
+  const inbox = path.join(projectPath, '.nassaj-uploads', 'inbox');
+  fs.mkdirSync(inbox, { recursive: true });
+  stack.projectsDb.createProjectPath(projectPath, null, null);
+  fs.writeFileSync(path.join(outside, 'private.txt'), 'OUTSIDE-FILE-CONTENT');
+  fs.writeFileSync(path.join(inbox, 'ok.txt'), 'plain inbox note');
+  fs.writeFileSync(path.join(inbox, 'big.txt'), Buffer.alloc(10 * 1024 * 1024 + 1, 0x61));
+  fs.symlinkSync(path.join(outside, 'private.txt'), path.join(inbox, 'leaf-link.txt'));
+  fs.symlinkSync(outside, path.join(inbox, 'dir-link'));
+  fs.mkdirSync(path.join(inbox, 'folder.txt'));
+  execFileSync('mkfifo', [path.join(inbox, 'pipe.txt')]);
+  try {
+    const names = ['ok.txt', 'big.txt', 'leaf-link.txt', 'dir-link/private.txt', 'folder.txt', 'pipe.txt',
+      '../../../../outside.txt', `${outside}/private.txt`, '..%2f..%2fprivate.txt'];
+    const prompt = ['review these', '', '[Files provided at the following paths:]',
+      ...names.map((name, index) => `${index + 1}. ${name.startsWith('/') || name.startsWith('..') ? name : `.nassaj-uploads/inbox/${name}`}`)].join('\n');
+    const session = stack.seedSession(member, [claudeRows.user(prompt), claudeRows.assistant([claudeRows.text('done')])], { projectPath });
+    const live = await stack.createLive(member, session.sessionId);
+    const page = await stack.view(live.id!, live.token!, 'messages');
+    assert.equal(page.status, 200, page.text);
+    const parts = page.json.messages[0].parts as Array<{ t: string; ref?: string; name?: string }>;
+    const refs = parts.filter((part) => part.ref);
+    assert.deepEqual(refs.map((part) => part.name), ['ok.txt'], 'only the plain inbox file mints a ref');
+    for (const forbidden of [outside, root, 'OUTSIDE-FILE-CONTENT', 'private.txt', 'leaf-link', 'dir-link', 'pipe.txt']) {
+      assert.ok(!page.text.includes(forbidden), `messages leak ${forbidden}`);
+    }
+    const served = await stack.view(live.id!, live.token!, `attachments/${refs[0].ref}`);
+    assert.equal(served.status, 200);
+    assert.equal(served.text, 'plain inbox note');
+
+    // After a ref was minted, swapping the file for a symlink or a different target must not follow it.
+    fs.rmSync(path.join(inbox, 'ok.txt'));
+    fs.symlinkSync(path.join(outside, 'private.txt'), path.join(inbox, 'ok.txt'));
+    const swapped = await stack.view(live.id!, live.token!, `attachments/${refs[0].ref}`);
+    assert.deepEqual([swapped.status, swapped.json.error.code], [404, 'ATTACHMENT_GONE']);
+    assert.ok(!swapped.text.includes('OUTSIDE-FILE-CONTENT'));
+    // Refs are not paths: traversal spellings in the ref position are refused uniformly.
+    for (const ref of ['..%2f..%2f..%2fetc%2fpasswd', encodeURIComponent(path.join(outside, 'private.txt')), '.', '%00']) {
+      const refused = await stack.view(live.id!, live.token!, `attachments/${ref}`);
+      assert.ok([400, 404].includes(refused.status), `${ref}: ${refused.status}`);
+      assert.ok(!refused.text.includes('OUTSIDE-FILE-CONTENT'));
+    }
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(outside, { recursive: true, force: true });
+  }
+});
+
+test('D7: an unauthenticated flood, from one address and from many, never blocks a valid viewer', async () => {
+  advanceClock(11 * 60_000);
+  const session = sessionOf();
+  const live = await stack.createLive(member, session.sessionId);
+  const bad = 'F'.repeat(43);
+  const flood: Array<Promise<{ status: number }>> = [];
+  for (let index = 0; index < 300; index += 1) {
+    const ip = index % 3 === 0 ? '203.0.113.200' : `198.51.100.${(index % 200) + 20}`;
+    flood.push(stack.view(live.id!, bad, index % 2 ? 'messages' : 'meta', { ip }));
+  }
+  // The viewer shares an address with the flooder and also comes from a quiet one, while the flood is in flight.
+  const viewers = await Promise.all([
+    stack.view(live.id!, live.token!, 'messages', { ip: '203.0.113.200' }),
+    stack.view(live.id!, live.token!, 'meta', { ip: '203.0.113.200' }),
+    stack.view(live.id!, live.token!, 'messages', { ip: '192.0.2.77' }),
+  ]);
+  const flooded = await Promise.all(flood);
+  assert.deepEqual(viewers.map((v) => v.status), [200, 200, 200]);
+  assert.ok(flooded.every((r) => r.status === 404 || r.status === 429), 'the flood only ever sees 404 or 429');
+  assert.ok(flooded.some((r) => r.status === 429), 'the abusive address was limited');
+  for (const ip of ['203.0.113.200', '192.0.2.77']) {
+    assert.equal((await stack.view(live.id!, live.token!, 'messages', { ip })).status, 200, `${ip} still served after the flood`);
+  }
+  // Failed verification never took the share's concurrency or request budget.
+  const parallel = await Promise.all(Array.from({ length: 4 }, (_, i) => stack.view(live.id!, live.token!, 'meta', { ip: `192.0.2.${100 + i}` })));
+  assert.deepEqual(parallel.map((r) => r.status), [200, 200, 200, 200]);
+});
+
+test('D1 point 6: guest requests hold no writer lease; only the batched view counter writes, in the background', async () => {
+  const session = sessionOf();
+  const live = await stack.createLive(member, session.sessionId);
+  const before = stack.writerCalls.count;
+  for (const endpoint of ['meta', 'messages', 'messages?before=AAAAAAAAAAAAAAAAAAAAAA.AAAAAAAAAAAAAAAAAAAAAA']) {
+    await stack.view(live.id!, live.token!, endpoint);
+  }
+  await stack.view(live.id!, 'W'.repeat(43), 'meta');
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.ok(stack.writerCalls.count - before <= 1, 'four requests cost at most one batched counter flush, never a lease each');
+});

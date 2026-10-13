@@ -43,6 +43,7 @@ import path from 'node:path';
 import { createInterface } from 'node:readline';
 
 import {
+  createCodexOwnHistoryFilter,
   resolveCodexLinkedRollouts,
   withCodexRolloutRead,
   withTranscriptReadPermit,
@@ -727,6 +728,9 @@ export async function extractCodexSessionUsage(
   const userBoundariesMs: number[] = [];
   let baseline: { input: number; cached: number; output: number } | null = null;
   const workDuration = durationAccumulator ?? new WorkDurationAccumulator();
+  // B-1616: a 0.160 child replays its parent's history before its own; only the
+  // child's own records (from subagent_history_start_ordinal) are its cost.
+  const own = createCodexOwnHistoryFilter();
 
   // ADR-201 A-P2c: pinned single-link, last component never followed,
   // confined to its tree and bound to its thread id from this descriptor.
@@ -749,7 +753,7 @@ export async function extractCodexSessionUsage(
       } catch {
         continue;
       }
-      if (!isRecord(entry)) {
+      if (!isRecord(entry) || !own.accept(entry)) {
         continue;
       }
       workDuration.addEntry(entry, rolloutPath);

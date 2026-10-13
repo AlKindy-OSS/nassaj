@@ -65,6 +65,11 @@ describe('Codex CLI Turn Supervisor adapter', () => {
     assert.ok(args.includes('--strict-config'));
     assert.deepEqual(args.slice(args.indexOf('--sandbox'), args.indexOf('--sandbox') + 2), ['--sandbox', 'read-only']);
     assert.ok(args.includes('features.multi_agent=false'));
+    // B-1616: single-agent by contract; v2-engine models ignore features.multi_agent,
+    // so the v2 thread cap is pinned to the root slot (and the v1 key to its minimum).
+    const configs = args.flatMap((value, index) => (args[index - 1] === '--config' ? [value] : []));
+    assert.ok(configs.includes('features.multi_agent_v2.max_concurrent_threads_per_session=1'));
+    assert.ok(configs.includes('agents.max_concurrent_threads_per_session=1'));
     assert.ok(args.includes('approval_policy="never"'));
     assert.ok(args.some((value) => value.startsWith('developer_instructions=') && value.includes('Do not use tools')));
     assert.deepEqual(events, [

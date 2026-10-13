@@ -226,6 +226,12 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, o
   // steer-queued حيّ) — لا تحليل نصّ إطلاقاً. تُقدَّم على isSystemOriginMessage
   // لأنها إنسانٌ حقيقي (userId قائم)، لا رسالة آلية.
   const isInjectedSteerMessage = message.type === 'user' && message.injected === true;
+  // توجيه تالٍ لتوجيه سابق من المرسل نفسه: يشاركه الخطّ الرأسي والترويسة.
+  const isSteerContinuation =
+    isInjectedSteerMessage &&
+    prevMessage?.type === 'user' &&
+    prevMessage.injected === true &&
+    prevMessage.userId === message.userId;
   const isSystemOriginMessage =
     message.type === 'user' &&
     messageOriginKind !== undefined &&
@@ -419,7 +425,7 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, o
         message.type === 'user' && !isCoordinatorPrompt && !isSystemOriginMessage && !isInjectedSteerMessage
           ? 'flex justify-end px-3 sm:px-0'
           : 'px-3 sm:px-0'
-      }`}
+      } ${isSteerContinuation ? '!mt-0' : ''}`}
     >
       {message.isSkillLoad ? (
         /* Skill body injected by Claude after a Skill tool call: one compact,
@@ -486,7 +492,6 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, o
         </div>
       ) : isInjectedSteerMessage ? (
         <SteerBubble
-          senderUserId={messageUserId ?? null}
           senderName={
             message.steerSenderDisplayName
             || authorParticipant?.username
@@ -496,6 +501,7 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, o
           deliveryStatus={(message.deliveryStatus as 'queued' | 'delivered' | 'unconfirmed' | 'rejected' | undefined) ?? 'delivered'}
           contentDir={contentDir}
           formattedTime={formattedTime}
+          isContinuation={isSteerContinuation}
         />
       ) : isSystemOriginMessage ? (
         /* ── System / automated message (peer / channel / task-notification) ─

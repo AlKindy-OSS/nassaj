@@ -25,6 +25,7 @@ import { sessionsService, stampMessageAuthorsStrict } from '@/modules/providers/
 import type { NormalizedMessage } from '@/shared/types.js';
 import { AppError } from '@/shared/utils.js';
 
+import { isPublicRow } from './session-share-public-row.js';
 import {
   normalizeParts, sanitizeShareText, type SharePart, type ShareTextContext, type ShareTextCounts,
 } from './session-share-sanitize.js';
@@ -91,13 +92,6 @@ const PROVIDER_LABELS: Readonly<Record<string, string>> = Object.freeze({
 });
 const DEFAULT_TITLE = 'Shared conversation';
 const MAX_TITLE_CHARS = 200;
-const SUBAGENT_MARKERS = [
-  'originKind', 'parentToolUseId', 'parent_tool_use_id', 'isSidechain', 'agentId', 'subagentId',
-  'isSubagent', 'isMeta', 'isSynthetic', 'isReplay', 'isCompactSummary', 'isLocalCommand',
-  'isLocalCommandStdout', 'isTaskNotification', 'isSkillLoad',
-  // ADR-199: any row carrying subagent lifecycle is machine routing, never shared prose.
-  'subagent',
-] as const;
 
 /** Typed 409 helper. */
 function conflict(code: string, message: string): AppError {
@@ -107,12 +101,6 @@ function conflict(code: string, message: string): AppError {
 /** Generic provider label; never a model id. */
 export function providerLabelFor(provider: string): string {
   return PROVIDER_LABELS[provider] ?? 'Assistant';
-}
-
-/** True for a human/assistant text row with no machine-routing marker. */
-function isShareableText(message: NormalizedMessage): boolean {
-  if (message.kind !== 'text' || (message.role !== 'user' && message.role !== 'assistant')) return false;
-  return SUBAGENT_MARKERS.every((key) => !message[key]);
 }
 
 /** Counts a dropped row in its category. */
@@ -213,7 +201,7 @@ function selectMessages(messages: NormalizedMessage[], options: AssembleOptions,
   let rawBytes = 0;
   const ctx = { projectRoot: options.projectRoot, home: options.home };
   for (const message of messages) {
-    if (!isShareableText(message)) { countDropped(message, counts); continue; }
+    if (!isPublicRow(message)) { countDropped(message, counts); continue; }
     const raw = typeof message.content === 'string' ? message.content : '';
     rawBytes += assertRawWithinLimits(raw, rawBytes);
     const parts = sanitizeShareText(raw, ctx, counts);

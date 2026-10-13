@@ -9,6 +9,8 @@ import type { Dir, Stats } from 'node:fs';
 import type { FileHandle } from 'node:fs/promises';
 import path from 'node:path';
 
+import { descriptorNamed } from '@/modules/providers/index.js';
+
 /**
  * One fail-closed policy boundary for paths that must never become statistics.
  * Keep generated/tool state and credential-bearing paths here rather than
@@ -283,18 +285,23 @@ async function canonicalDirectory(
   }
 }
 
-async function openedPathIsContained(
-  root: string,
+/**
+ * True when the kernel names the opened descriptor exactly `resolved` (the
+ * contained realpath checked before the open). The `/proc/self/fd` link text is
+ * compared verbatim, never re-resolved by name (B-1609/B-1611): a descriptor
+ * whose name was replaced after the open reads `<name> (deleted)` and is refused.
+ */
+async function openedPathIs(
+  resolved: string,
   handle: FileHandle,
   state: Walker,
 ): Promise<boolean> {
   if (process.platform !== 'linux') return true;
   try {
-    const openedPath = await fs.realpath(`/proc/self/fd/${handle.fd}`);
-    if (!checkDeadline(state)) return false;
-    return isContained(root, openedPath);
+    const named = await descriptorNamed(handle.fd, resolved);
+    return checkDeadline(state) && named;
   } catch {
-    // Linux gives us an authoritative descriptor target. Failure is unsafe.
+    // Linux gives us an authoritative descriptor name. Failure is unsafe.
     checkDeadline(state);
     return false;
   }
@@ -332,7 +339,7 @@ async function openContainedFile(
     const after = await handle.stat();
     if (!checkDeadline(state)) return null;
     if (!after.isFile() || !sameInode(before, after)) return null;
-    if (!(await openedPathIsContained(root, handle, state))) return null;
+    if (!(await openedPathIs(resolved, handle, state))) return null;
     if (!checkDeadline(state)) return null;
     keepHandle = true;
     return { handle, stat: after };

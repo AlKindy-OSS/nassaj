@@ -143,6 +143,7 @@ type CodexHistoryResult =
       offset?: number;
       limit?: number | null;
       tokenUsage?: unknown;
+      readFailed?: true;
     };
 
 function isVisibleCodexUserMessage(payload: AnyRecord | null | undefined): boolean {
@@ -500,7 +501,7 @@ async function getCodexSessionMessages(
       : acquired ? () => pinnedReadStream(acquired.transcript.fd) : null;
     if (!openRollout) {
       console.warn(`Codex session file not found for session ${sessionId}`);
-      return { messages: [], total: 0, hasMore: false };
+      return { messages: [], total: 0, hasMore: false, readFailed: true };
     }
 
     const messages: AnyRecord[] = [];
@@ -1008,7 +1009,7 @@ async function getCodexSessionMessages(
   } catch (error) {
     lease?.check();
     console.error(`Error reading Codex session messages for ${sessionId}:`, error);
-    return { messages: [], total: 0, hasMore: false };
+    return { messages: [], total: 0, hasMore: false, readFailed: true };
   } finally {
     await releaseHistoryTranscript(pinned);
   }
@@ -1393,10 +1394,11 @@ export class CodexSessionsProvider implements IProviderSessions {
       options.historyLease?.check();
       const message = error instanceof Error ? error.message : String(error);
       console.warn(`[CodexProvider] Failed to load session ${sessionId}:`, message);
-      return { messages: [], total: 0, hasMore: false, offset: 0, limit: null };
+      return { messages: [], total: 0, hasMore: false, offset: 0, limit: null, readFailed: true };
     }
 
     options.historyLease?.check();
+    if (!Array.isArray(result) && result.readFailed) return { messages: [], total: 0, hasMore: false, offset: 0, limit: null, readFailed: true };
     const rawMessages = Array.isArray(result) ? result : (result.messages || []);
     const tokenUsage = Array.isArray(result) ? undefined : result.tokenUsage;
 

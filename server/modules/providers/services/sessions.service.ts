@@ -1,4 +1,3 @@
-import fsp from 'node:fs/promises';
 import path from 'node:path';
 
 import {
@@ -21,6 +20,7 @@ import {
   isLightHistoryEnabled,
   LIGHT_HISTORY_SCHEMA,
   loadStableHistorySnapshot,
+  openUnleasedTranscript,
   projectLightHistory,
   type HistoryPayloadMode,
   type HistoryResponse,
@@ -33,10 +33,8 @@ import type {
 import { AppError } from '@/shared/utils.js';
 
 import { projectVendorHistoryReceipts } from '../shared/vendor/vendor-receipt-identity.js';
-import {
-  isTranscriptHandle, openSessionTranscript, type SessionTranscriptHandle,
-} from '../shared/session-transcript.js';
-import { isVendorTranscriptProvider, transcriptSpecOf } from '../shared/session-transcript-specs.js';
+import { isTranscriptHandle, openSessionTranscript } from '../shared/session-transcript.js';
+import { isRetryableRefusal, removeSessionTranscript } from '../shared/session-transcript-removal.js';
 import { applyClaudeSteerInjections, projectClaudeHistoryReceipts } from '../list/claude/claude-receipt-identity.js';
 import { projectCodexHistoryIdentities, copyCodexHistoryIdentities } from '../list/codex/codex-receipt-identity.js';
 import { withCoordinationDirective } from '../../../../shared/coordinationDirectives.js';
@@ -99,21 +97,6 @@ export function assertHistorySourceAccessible(sessionId: string, requesterUserId
   return session;
 }
 
-/**
- * Pinned transcript for an unleased history read (ADR-201 A1). `undefined` when
- * the provider's history is not a recorded file (cursor, opencode) or a vendor
- * row records no path (its legacy-hash lookup then applies); `null` when the
- * recorded transcript was refused — the provider then reads nothing.
- */
-async function openUnleasedTranscript(
-  sessionId: string, requesterUserId: number | null, provider: string,
-): Promise<SessionTranscriptHandle | null | undefined> {
-  if (!transcriptSpecOf(provider)) return undefined;
-  const opened = await openSessionTranscript(sessionId, requesterUserId, 'history');
-  if (isTranscriptHandle(opened)) return opened;
-  return opened.reason === 'no_transcript' && isVendorTranscriptProvider(provider) ? undefined : null;
-}
-
 /** Resolves delivery evidence without inferring completion or matching prompt text. */
 export function readMessageDelivery(
   sessionId: string, userId: number | null, clientMsgId: string, provider: string,
@@ -142,20 +125,11 @@ export function readMessageDelivery(
   } };
 }
 
-/**
- * Removes one file if it exists.
- */
-async function removeFileIfExists(filePath: string): Promise<boolean> {
-  try {
-    await fsp.unlink(filePath);
-    return true;
-  } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code;
-    if (code === 'ENOENT') {
-      return false;
-    }
-    throw error;
-  }
+/** 409 for a transcript removal that may succeed on retry; the row is kept (B-1596). */
+function transcriptRetryError(): AppError {
+  return new AppError('The conversation file could not be removed safely right now. Please try again.', {
+    code: 'TRANSCRIPT_REMOVAL_RETRY', statusCode: 409,
+  });
 }
 
 /**
@@ -600,7 +574,7 @@ export const sessionsService = {
   async fetchHistory(
     sessionId: string,
     requesterUserId: number | null,
-    options: Pick<FetchHistoryOptions, 'limit' | 'offset' | 'cursor'> & {
+    options: Pick<FetchHistoryOptions, 'limit' | 'offset' | 'cursor' | 'snapshotCache'> & {
       payloadMode?: HistoryPayloadMode;
       revision?: string;
       historyLease?: HistoryReadLease;
@@ -657,6 +631,7 @@ export const sessionsService = {
         pageKey: JSON.stringify([limit, offset, options.cursor ?? null]),
         historyLease: options.historyLease,
         transcript: transcript ?? undefined,
+        snapshotCache: options.snapshotCache,
         load: async () => {
           const loaded = await providerRegistry.resolveHistorySessions(provider).fetchHistory(sessionId, {
             limit,
@@ -667,6 +642,8 @@ export const sessionsService = {
             projectPath: session.project_path ?? '',
           });
   
+          // ADR-205: a refused transcript is a failed read, never an empty conversation.
+          if (transcript === null) loaded.readFailed = true;
           // Cache only the final normalized/stamped snapshot. Permission was
           // checked above before either cache or inflight state was touched.
           options.historyLease?.charge('normalizedRows', loaded.messages.length, HISTORY_LIMITS.records);
@@ -703,6 +680,7 @@ export const sessionsService = {
     options.assertCurrent?.(true);
     return {
       ...payload,
+      ...(result.readFailed ? { readFailed: true as const } : {}),
       historySchema: LIGHT_HISTORY_SCHEMA,
       payloadMode,
       revision,
@@ -787,7 +765,8 @@ export const sessionsService = {
    *
    * Soft-delete mirrors the project behavior by toggling `isArchived` so the
    * row disappears from active lists but remains restorable. Force-delete
-   * optionally removes the transcript file before deleting the database row.
+   * optionally removes the transcript file before deleting the database row,
+   * only through the confined primitive (B-1596): a refused file stays.
    *
    * Authorization (B-IDOR-SESSION): this is the most destructive session
    * operation — it unlinks `jsonl_path` from disk and drops the row — and it ran
@@ -824,7 +803,11 @@ export const sessionsService = {
     let removedFromDisk = false;
     if (options.deletedFromDisk && session.jsonl_path) {
       options.assertCurrent?.(true);
-      removedFromDisk = await removeFileIfExists(session.jsonl_path);
+      // B-1596: confined, pinned, id-bound removal. A security refusal keeps the
+      // file and still settles the row; a retryable one keeps the row (409).
+      const removal = await removeSessionTranscript(session, 'session-delete');
+      if (!removal.removed && isRetryableRefusal(removal.reason)) throw transcriptRetryError();
+      removedFromDisk = removal.removed;
       if (removedFromDisk) {
         try {
           options.markEffectStarted?.();

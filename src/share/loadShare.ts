@@ -19,17 +19,14 @@ export type LoadResult =
   | { kind: 'network' };
 
 /**
- * Reads id (path) and bearer token (fragment) and removes the token from the address
- * bar and history immediately. Returns null when either is missing.
+ * Reads id (path) and bearer token (fragment). The fragment is kept so a reload keeps
+ * working; it is never sent to a server by the browser and never placed in a query,
+ * cookie or storage. Returns null when either is missing.
  */
-export function readCredentials(
-  location: Pick<Location, 'pathname' | 'hash'>,
-  history: Pick<History, 'replaceState'>,
-): ShareCredentials | null {
+export function readCredentials(location: Pick<Location, 'pathname' | 'hash'>): ShareCredentials | null {
   const match = ID_PATTERN.exec(location.pathname);
   const token = new URLSearchParams(location.hash.slice(1)).get('token');
   if (!match) return null;
-  if (token) history.replaceState(null, '', `/s/${match[1]}`);
   return token ? { id: match[1], token } : null;
 }
 

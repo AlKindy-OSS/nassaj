@@ -374,11 +374,11 @@ export class VendorSessionsProvider implements IProviderSessions {
     try {
       const content = await this.readTranscript(sessionId, projectPath, storedJsonlPath, options.transcript);
       if (content === null) {
-        return { messages: [], total: 0, hasMore: false, offset: 0, limit: null };
+        return { messages: [], total: 0, hasMore: false, offset: 0, limit: null, readFailed: true };
       }
       lines = content.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
     } catch {
-      return { messages: [], total: 0, hasMore: false, offset: 0, limit: null };
+      return { messages: [], total: 0, hasMore: false, offset: 0, limit: null, readFailed: true };
     }
 
     const all: NormalizedMessage[] = [];

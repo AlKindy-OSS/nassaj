@@ -11,8 +11,18 @@ import path from 'node:path';
  * `fstat`s the descriptor, and accepts the descriptor only when:
  *   - `lstat` and `fstat` describe the same object of the expected kind
  *     (same device and inode at this instant), and
- *   - the kernel's own name for the descriptor (`/proc/self/fd/<n>`) is the
- *     expected realpath.
+ *   - the kernel's own name for the descriptor (the text of the
+ *     `/proc/self/fd/<n>` link, compared verbatim, never re-resolved by name)
+ *     is the expected realpath (B-1609/B-1614: a planted `<name> (deleted)`
+ *     symlink must never vouch for an unlinked victim), and
+ *   - after the last name read, `lstat(expected)` still names the
+ *     descriptor's dev/ino (B-1614; fail closed on a miss or a mismatch).
+ * A single-link open also settles the parent directory (B-1609): ext4 drops a
+ * replaced inode's link count inside rename(2)/unlink(2) and removes the name
+ * only afterwards, both under the directory lock, so an fstat and a /proc read
+ * that fall in between see `nlink 1` AND the live name for a hard link that is
+ * being replaced. Reading the directory takes that lock; once it is released
+ * the replaced name reads `(deleted)` and the second /proc check refuses it.
  * dev/ino are compared only between the two calls of this one open; they are
  * never compared with a value recorded earlier (files are legitimately
  * rewritten and rotated), so callers may keep them as diagnostics only.
@@ -23,7 +33,15 @@ import path from 'node:path';
 
 export type PinnedRefusal =
   | 'not_absolute' | 'missing' | 'symlink' | 'wrong_kind' | 'changed_during_open'
-  | 'path_mismatch' | 'multiply_linked' | 'proc_unavailable' | 'io_error';
+  | 'path_mismatch' | 'multiply_linked' | 'proc_unavailable' | 'unreadable' | 'io_error';
+
+/** Permission errnos: the name exists but this process may not reach it (N1, never retryable). */
+const DENIED = new Set(['EACCES', 'EPERM']);
+
+/** Refusal for a failed lstat/open/readdir: `unreadable` when denied, else `fallback`. */
+function deniedOr(error: unknown, fallback: PinnedRefusal): PinnedRefusal {
+  return DENIED.has((error as NodeJS.ErrnoException).code ?? '') ? 'unreadable' : fallback;
+}
 
 /** A refused pinned open; `reason` is safe to log (it carries no path or content). */
 export class PinnedOpenError extends Error {
@@ -52,6 +70,14 @@ export type PinnedOpenOptions = {
   procFdDir?: string;
 };
 
+/**
+ * Test-only option key: a function replacing the parent-directory barrier
+ * ({@link settleDirectory}). Deliberately not part of {@link PinnedOpenOptions}.
+ */
+export const SETTLE_FOR_TESTS: unique symbol = Symbol('pinned-fd.settle-for-tests');
+
+type InternalOptions = PinnedOpenOptions & { [SETTLE_FOR_TESTS]?: (directory: string) => Promise<void> };
+
 const PROC_FD_DIR = '/proc/self/fd';
 const FILE_FLAGS = fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK;
 const DIRECTORY_FLAGS = fs.constants.O_RDONLY | fs.constants.O_DIRECTORY | fs.constants.O_NOFOLLOW;
@@ -69,16 +95,92 @@ function isKind(stat: fs.BigIntStats, kind: PinnedKind): boolean {
 }
 
 /**
- * Realpath the kernel reports for descriptor `fd`. Throws `proc_unavailable`
- * when `/proc/self/fd` itself is missing, `io_error` for any other failure.
+ * Name the kernel reports for descriptor `fd`: the `/proc/self/fd/<fd>` link
+ * text, NOT its realpath. Resolving the text by name would follow whatever is
+ * at that name now — e.g. a symlink planted at `<name> (deleted)` vouching for
+ * an unlinked descriptor (B-1609). Throws `proc_unavailable` when the /proc fd
+ * directory itself is missing, `io_error` for any other failure.
  */
-export async function descriptorRealpath(fd: number, procFdDir: string = PROC_FD_DIR): Promise<string> {
+export async function descriptorPath(fd: number, procFdDir: string = PROC_FD_DIR): Promise<string> {
   try {
-    return await fsp.realpath(path.join(procFdDir, String(fd)));
+    return await fsp.readlink(path.join(procFdDir, String(fd)));
   } catch {
     const procPresent = await fsp.stat(procFdDir).then((stat) => stat.isDirectory(), () => false);
     throw new PinnedOpenError(procPresent ? 'io_error' : 'proc_unavailable');
   }
+}
+
+/**
+ * Gate on the descriptor's kernel name: `changed_during_open` when the name it
+ * was opened by has since been removed or replaced (a concurrent change, like
+ * an inode mismatch), `path_mismatch` for any other name.
+ */
+function assertDescriptorName(name: string, expected: string): void {
+  if (name === expected) return;
+  throw new PinnedOpenError(name === `${expected} (deleted)` ? 'changed_during_open' : 'path_mismatch');
+}
+
+/**
+ * Waits out any rename/unlink in flight in `directory`: reading a directory
+ * takes its inode lock (shared), which rename(2) and unlink(2) hold exclusively
+ * until the replaced name is gone. A failure is `changed_during_open` when the
+ * directory is gone (B-1614), `unreadable` when denied, else `io_error`.
+ */
+export async function settleDirectory(directory: string): Promise<void> {
+  try {
+    const dir = await fsp.opendir(directory, { bufferSize: 1 });
+    try {
+      await dir.read();
+    } finally {
+      await dir.close().catch(() => undefined);
+    }
+  } catch (error) {
+    throw new PinnedOpenError(settleRefusal(error));
+  }
+}
+
+/** Refusal for a failed directory barrier: a vanished directory is a concurrent change. */
+function settleRefusal(error: unknown): PinnedRefusal {
+  return (error as NodeJS.ErrnoException).code === 'ENOENT' ? 'changed_during_open' : deniedOr(error, 'io_error');
+}
+
+/** True when `named` (an lstat of the name, or null when missing) is the descriptor's object. */
+function sameObject(named: fs.BigIntStats | null, stat: fs.BigIntStats): boolean {
+  return named !== null && !named.isSymbolicLink() && named.dev === stat.dev && named.ino === stat.ino;
+}
+
+/** Final B-1614 recheck: `expected` must still name the descriptor's dev/ino. */
+async function requireNameStillPinned(expected: string, stat: fs.BigIntStats): Promise<void> {
+  const named = await fsp.lstat(expected, { bigint: true }).catch(() => null);
+  if (!sameObject(named, stat)) throw new PinnedOpenError('changed_during_open');
+}
+
+/** Synchronous {@link requireNameStillPinned}. */
+function requireNameStillPinnedSync(expected: string, stat: fs.BigIntStats): void {
+  let named: fs.BigIntStats | null;
+  try {
+    named = fs.lstatSync(expected, { bigint: true });
+  } catch {
+    named = null;
+  }
+  if (!sameObject(named, stat)) throw new PinnedOpenError('changed_during_open');
+}
+
+/**
+ * The B-1609 name gate for code that opens a descriptor by its own means
+ * (B-1611): true when the kernel names `fd` exactly `expected` (link text,
+ * never re-resolved). With `singleLink` (the caller refuses nlink > 1) the
+ * parent directory is settled first and the name read again, so a hard link
+ * that a rename in flight is replacing is not admitted. Throws a
+ * PinnedOpenError when /proc or the directory cannot be read.
+ */
+export async function descriptorNamed(
+  fd: number, expected: string, options: { singleLink?: boolean; procFdDir?: string } = {},
+): Promise<boolean> {
+  if (await descriptorPath(fd, options.procFdDir) !== expected) return false;
+  if (options.singleLink !== true) return true;
+  await settleDirectory(path.dirname(expected));
+  return await descriptorPath(fd, options.procFdDir) === expected;
 }
 
 async function lstatExpected(target: string, kind: PinnedKind): Promise<fs.BigIntStats> {
@@ -87,7 +189,7 @@ async function lstatExpected(target: string, kind: PinnedKind): Promise<fs.BigIn
     stat = await fsp.lstat(target, { bigint: true });
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
-    throw new PinnedOpenError(code === 'ENOENT' ? 'missing' : 'io_error');
+    throw new PinnedOpenError(code === 'ENOENT' ? 'missing' : deniedOr(error, 'io_error'));
   }
   if (stat.isSymbolicLink()) throw new PinnedOpenError('symlink');
   if (!isKind(stat, kind)) throw new PinnedOpenError('wrong_kind');
@@ -101,21 +203,29 @@ async function openNoFollow(target: string, kind: PinnedKind): Promise<FileHandl
     const code = (error as NodeJS.ErrnoException).code;
     if (code === 'ELOOP') throw new PinnedOpenError('symlink');
     if (code === 'ENOENT') throw new PinnedOpenError('changed_during_open');
-    throw new PinnedOpenError(code === 'ENOTDIR' ? 'wrong_kind' : 'io_error');
+    throw new PinnedOpenError(code === 'ENOTDIR' ? 'wrong_kind' : deniedOr(error, 'io_error'));
   }
 }
 
 /** Gate on an open descriptor; throws a PinnedOpenError on any mismatch. */
 async function admitDescriptor(
-  handle: FileHandle, expected: string, named: fs.BigIntStats, kind: PinnedKind, options: PinnedOpenOptions,
+  handle: FileHandle, expected: string, named: fs.BigIntStats, kind: PinnedKind, options: InternalOptions,
 ): Promise<BigIntStats> {
   const stat = await handle.stat({ bigint: true });
   options.checkpoint?.();
   if (!isKind(stat, kind) || stat.dev !== named.dev || stat.ino !== named.ino) {
     throw new PinnedOpenError('changed_during_open');
   }
-  if (kind === 'file' && options.singleLink && stat.nlink !== 1n) throw new PinnedOpenError('multiply_linked');
-  if (await descriptorRealpath(handle.fd, options.procFdDir) !== expected) throw new PinnedOpenError('path_mismatch');
+  const singleLink = kind === 'file' && options.singleLink === true;
+  if (singleLink && stat.nlink !== 1n) throw new PinnedOpenError('multiply_linked');
+  assertDescriptorName(await descriptorPath(handle.fd, options.procFdDir), expected);
+  if (singleLink) {
+    options.checkpoint?.();
+    // B-1609/B-1614: the nlink read above may predate the removal of a replaced name.
+    await (options[SETTLE_FOR_TESTS] ?? settleDirectory)(path.dirname(expected));
+    assertDescriptorName(await descriptorPath(handle.fd, options.procFdDir), expected);
+  }
+  await requireNameStillPinned(expected, stat);
   options.checkpoint?.();
   return stat;
 }
@@ -191,7 +301,7 @@ function openNoFollowSync(target: string, flags: number, mode: number): number {
     const code = (error as NodeJS.ErrnoException).code;
     if (code === 'ELOOP') throw new PinnedOpenError('symlink');
     if (code === 'ENOENT') throw new PinnedOpenError('missing');
-    throw new PinnedOpenError(code === 'EEXIST' ? 'changed_during_open' : 'io_error');
+    throw new PinnedOpenError(code === 'EEXIST' ? 'changed_during_open' : deniedOr(error, 'io_error'));
   }
 }
 
@@ -202,14 +312,37 @@ function admitSync(fd: number, expected: string, named: fs.BigIntStats | null): 
     throw new PinnedOpenError('changed_during_open');
   }
   if (stat.nlink !== 1n) throw new PinnedOpenError('multiply_linked');
-  let real: string;
+  assertDescriptorName(descriptorPathSync(fd), expected);
+  settleDirectorySync(path.dirname(expected)); // B-1609, see settleDirectory
+  assertDescriptorName(descriptorPathSync(fd), expected);
+  requireNameStillPinnedSync(expected, stat);
+  return stat;
+}
+
+/** Synchronous {@link descriptorPath} on `/proc/self/fd`. */
+function descriptorPathSync(fd: number): string {
   try {
-    real = fs.realpathSync.native(path.join(PROC_FD_DIR, String(fd)));
+    return fs.readlinkSync(path.join(PROC_FD_DIR, String(fd)));
   } catch {
     throw new PinnedOpenError(fs.existsSync(PROC_FD_DIR) ? 'io_error' : 'proc_unavailable');
   }
-  if (real !== expected) throw new PinnedOpenError('path_mismatch');
-  return stat;
+}
+
+/** Synchronous {@link settleDirectory}. */
+function settleDirectorySync(directory: string): void {
+  let dir: fs.Dir;
+  try {
+    dir = fs.opendirSync(directory, { bufferSize: 1 });
+  } catch (error) {
+    throw new PinnedOpenError(settleRefusal(error));
+  }
+  try {
+    dir.readSync();
+  } catch (error) {
+    throw new PinnedOpenError(deniedOr(error, 'io_error'));
+  } finally {
+    try { dir.closeSync(); } catch { /* already closed */ }
+  }
 }
 
 /**
@@ -228,7 +361,7 @@ export function openPinnedSync(expected: string, flags: number = fs.constants.O_
     try {
       named = fs.lstatSync(expected, { bigint: true });
     } catch (error) {
-      throw new PinnedOpenError((error as NodeJS.ErrnoException).code === 'ENOENT' ? 'missing' : 'io_error');
+      throw new PinnedOpenError((error as NodeJS.ErrnoException).code === 'ENOENT' ? 'missing' : deniedOr(error, 'io_error'));
     }
     if (named.isSymbolicLink()) throw new PinnedOpenError('symlink');
     if (!named.isFile()) throw new PinnedOpenError('wrong_kind');

@@ -12,10 +12,12 @@ import type { FileHandle } from 'node:fs/promises';
  *
  * L4 (ADR-201 qa): the scanner must never see another value than JSON.parse
  * does. JSON.parse keeps the LAST of duplicate keys and decodes escaped keys and
- * values, which this scanner does not; so a target path that occurs twice in
- * one record, whose value is escaped (or too long to capture), or that an
- * escaped key could spell, reports {@link AMBIGUOUS_HEADER_VALUE}. That value
- * equals no id, so every binder refuses the file.
+ * values, which this scanner does not; so a target path whose key (or a parent
+ * key) occurs twice in one record whatever the value types (R3), whose value is
+ * escaped (or too long to capture), or that an escaped key could spell, reports
+ * {@link AMBIGUOUS_HEADER_VALUE}. That value equals no id, so every binder
+ * refuses the file. Paths are matched key by key: a dotted key such as
+ * `"payload.id"` is not the path `payload` → `id`.
  */
 
 /** Value reported for a target path the scanner cannot read unambiguously (never a valid id). */
@@ -39,9 +41,13 @@ export type HeaderScanEnd = 'stopped' | 'eof' | 'oversize';
 
 /** Character-level state of one JSONL record. */
 class RecordScanner {
-  private readonly targets: Set<string>;
-  private readonly targetPaths: readonly (readonly string[])[];
+  /** Target paths by identity (`JSON.stringify(path)`, so a dotted key never aliases a path). */
+  private readonly targets: Map<string, readonly string[]>;
+  /** Identities of every target path and of each of its parents. */
+  private readonly targetPrefixes: Set<string>;
   private values: Record<string, string> = {};
+  /** Target (or target parent) key paths already met in this record. */
+  private seenKeys = new Set<string>();
   private containers: string[] = [];
   private keys: Array<string | null> = [];
   private expectKey = false;
@@ -52,14 +58,16 @@ class RecordScanner {
   private capture: string | null = null;
 
   constructor(paths: readonly (readonly string[])[]) {
-    this.targets = new Set(paths.map((keyPath) => keyPath.join('.')));
-    this.targetPaths = paths;
+    this.targets = new Map(paths.map((keyPath) => [JSON.stringify(keyPath), keyPath] as const));
+    this.targetPrefixes = new Set(paths.flatMap((keyPath) =>
+      keyPath.map((_key, index) => JSON.stringify(keyPath.slice(0, index + 1)))));
   }
 
   /** Values collected so far for the current record; resets the record state. */
   take(): HeaderRecord {
     const record = this.values;
     this.values = {};
+    this.seenKeys = new Set();
     this.containers = [];
     this.keys = [];
     this.expectKey = false;
@@ -135,23 +143,44 @@ class RecordScanner {
     if (this.expectKey && this.containers[depth - 1] === '{') {
       // An escaped key may decode to a target name (or to a target's parent).
       this.keys[depth] = escaped ? null : text;
-      if (escaped) this.poisonBelow(depth);
+      // An escaped key may decode to any target under the known parent keys.
+      if (escaped) this.poison(this.keys.slice(1, depth), depth);
+      else this.noteKey(depth);
       return;
     }
-    if (!this.containers.every((container) => container === '{')) return;
-    const keyPath = this.keys.slice(1, depth + 1);
-    if (keyPath.some((key) => key === null)) return;
-    const joined = keyPath.join('.');
-    if (!this.targets.has(joined)) return;
+    const keyPath = this.objectKeyPath(depth);
+    const target = keyPath && this.targets.get(JSON.stringify(keyPath));
+    if (!target) return;
+    const joined = target.join('.');
     // Duplicate key (JSON.parse keeps the last), or a value this scan did not read verbatim.
     this.values[joined] = text === null || escaped || joined in this.values ? AMBIGUOUS_HEADER_VALUE : text;
   }
 
-  /** Marks every target an escaped key at `depth` could spell, given the known parent keys. */
-  private poisonBelow(depth: number): void {
-    const parents = this.keys.slice(1, depth);
-    for (const target of this.targetPaths) {
-      if (target.length >= depth && parents.every((key, index) => key === target[index])) {
+  /** Key path of the value at `depth` when every container is an object and every key is known, else null. */
+  private objectKeyPath(depth: number): string[] | null {
+    if (!this.containers.every((container) => container === '{')) return null;
+    const keyPath = this.keys.slice(1, depth + 1);
+    return keyPath.some((key) => key === null) ? null : keyPath as string[];
+  }
+
+  /**
+   * R3: a second key at a target path, or at a target's parent, makes every
+   * target under it ambiguous whatever the value types (JSON.parse keeps the
+   * last value, which may be a number, null, an object or an array).
+   */
+  private noteKey(depth: number): void {
+    const keyPath = this.objectKeyPath(depth);
+    if (!keyPath) return;
+    const identity = JSON.stringify(keyPath);
+    if (!this.targetPrefixes.has(identity)) return;
+    if (this.seenKeys.has(identity)) this.poison(keyPath, keyPath.length);
+    else this.seenKeys.add(identity);
+  }
+
+  /** Marks every target of at least `minLength` keys that starts with `prefix` (an unknown key matches none). */
+  private poison(prefix: readonly (string | null)[], minLength: number): void {
+    for (const target of this.targets.values()) {
+      if (target.length >= minLength && prefix.every((key, index) => key === target[index])) {
         this.values[target.join('.')] = AMBIGUOUS_HEADER_VALUE;
       }
     }

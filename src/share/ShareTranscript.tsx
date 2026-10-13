@@ -3,9 +3,13 @@ import type { ReactNode } from 'react';
 import { detectDirection } from './direction';
 import { displayTitle, formatDate, type ViewerStrings } from './i18n';
 import { SafeMarkdown } from './safeMarkdown';
-import type { ShareMessage, SharePart, ShareTranscriptData } from './types';
+import type { LivePart, ShareMessage, SharePart, ShareTranscriptData } from './types';
 
-type RedactedPart = Extract<SharePart, { t: 'redacted' }>;
+type RedactedPart = { t: 'redacted'; cat?: keyof ViewerStrings['redaction']; text?: string };
+export type AnyPart = SharePart | LivePart;
+
+/** Renders attachment parts (live viewer only); v1 snapshots carry none. */
+export type AttachmentRenderer = (part: Exclude<AnyPart, { t: 'text' | 'redacted' }>) => ReactNode;
 
 /** Inline marker for removed content. A path keeps its server-provided label text. */
 export function RedactionChip({ part, strings }: { part: RedactedPart; strings: ViewerStrings }) {
@@ -26,7 +30,7 @@ export function RedactionChip({ part, strings }: { part: RedactedPart; strings: 
 }
 
 /** Consecutive chips share one line; text parts render as markdown blocks. */
-function PartsView({ parts, strings }: { parts: SharePart[]; strings: ViewerStrings }) {
+export function PartsView({ parts, strings, renderAttachment }: { parts: AnyPart[]; strings: ViewerStrings; renderAttachment?: AttachmentRenderer }) {
   const blocks: Array<{ key: number; node: ReactNode }> = [];
   let chips: RedactedPart[] = [];
   const flush = (key: number) => {
@@ -41,7 +45,8 @@ function PartsView({ parts, strings }: { parts: SharePart[]; strings: ViewerStri
   parts.forEach((part, index) => {
     if (part.t === 'redacted') { chips.push(part); return; }
     flush(index);
-    blocks.push({ key: index, node: <SafeMarkdown text={part.text} /> });
+    if (part.t === 'text') blocks.push({ key: index, node: <SafeMarkdown text={part.text} /> });
+    else if (renderAttachment) blocks.push({ key: index, node: renderAttachment(part) });
   });
   flush(parts.length);
   return <>{blocks.map((block) => <div key={block.key} className="share-block">{block.node}</div>)}</>;
@@ -69,7 +74,6 @@ function HeaderMeta({ transcript, strings }: { transcript: ShareTranscriptData; 
   const items = [
     transcript.providerLabel,
     created ? strings.createdOn(created) : null,
-    transcript.toolCount > 0 ? strings.toolsUsed(transcript.toolCount) : null,
     expires ? strings.expiresOn(expires) : null,
   ].filter(Boolean);
   return items.length ? <p className="share-meta">{items.join(' · ')}</p> : null;

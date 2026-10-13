@@ -2,6 +2,8 @@ import { spawn } from 'node:child_process';
 
 import { ensureCodexGovernance } from '@/modules/providers/index.js';
 // eslint-disable-next-line boundaries/dependencies
+import { CODEX_SINGLE_AGENT_CONFIG, codexConfigArgv } from '@/modules/providers/list/codex/codex-multi-agent.js';
+// eslint-disable-next-line boundaries/dependencies
 import { isSpawnBlockedForRunProvider } from '@/modules/providers/harness-update/spawn-admission.js';
 import { assertLinkModeRunAllowed } from '@/services/isolation/link-mode-run-gate.js';
 import { resolveProviderEnv } from '@/services/isolation/resolve-provider-env.js';
@@ -205,7 +207,10 @@ export function createCodexCliAdapter(options: CodexCliAdapterOptions = {}): Tur
         'exec', '--ephemeral', '--json', '--strict-config', '--ignore-user-config', '--ignore-rules',
         '--skip-git-repo-check', '--sandbox', 'read-only', '--model', request.model,
         '--config', 'project_doc_max_bytes=0',
-        '--config', 'features.multi_agent=false',
+        // B-1616: capture-only roles are single-agent by contract (nativeDelegation
+        // disabled). `features.multi_agent=false` alone does not stop v2-engine
+        // models, so the v2 thread cap is pinned to the root slot as well.
+        ...codexConfigArgv(CODEX_SINGLE_AGENT_CONFIG),
         '--config', 'approval_policy="never"',
         '--config', 'web_search="disabled"',
         '--config', `developer_instructions=${JSON.stringify(hidden)}`,

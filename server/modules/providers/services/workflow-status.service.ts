@@ -261,12 +261,16 @@ export type ActiveWorkflowsResult = {
 };
 
 /**
- * Fast negative filter: true unless the `subagents/workflows` directory derived
- * from the recorded path is certainly absent (the common case). Metadata only —
- * one `lstat`, nothing read or returned; every session it keeps still goes
- * through the pinned reader, so a planted name can only cost a refused open.
+ * Fast negative filter: true for a Claude row unless the `subagents/workflows`
+ * directory derived from the recorded path is certainly absent (the common
+ * case). Metadata only — one `lstat`, nothing read or returned; every session it
+ * keeps still goes through the access check and the pinned reader, so a planted
+ * name can only cost a refused open. Runs before the access check (R5), which
+ * costs several DB queries per session.
  */
-async function mayHaveWorkflows(jsonlPath: string): Promise<boolean> {
+async function mayHaveWorkflows(row: OwnedSessionRow): Promise<boolean> {
+  if (row.provider !== 'claude') return false;
+  const jsonlPath = row.jsonl_path ?? '';
   const sessionDir = path.join(path.dirname(jsonlPath), path.basename(jsonlPath, '.jsonl'));
   return lstat(path.join(sessionDir, 'subagents', 'workflows'))
     .then(() => true, (error: NodeJS.ErrnoException) => error.code !== 'ENOENT');
@@ -282,7 +286,6 @@ type PinnedWorkflows = { dir: SessionArtifactDir; terminalWorkflowIds: ReadonlyS
  * caller closes `dir`.
  */
 async function openSessionWorkflows(row: OwnedSessionRow, userId: number): Promise<PinnedWorkflows | null> {
-  if (row.provider !== 'claude' || !(await mayHaveWorkflows(row.jsonl_path ?? ''))) return null;
   // Authorised by this endpoint's own gate: `row` comes only from the caller's
   // participation set, filtered by the session read predicate (M2).
   const transcript = await openRecordedTranscript(row, 'workflow-status');
@@ -564,12 +567,15 @@ export const workflowStatusService = {
       const workflows: ActiveWorkflow[] = [];
       for (const sessionId of toScan) {
         const row = rowBySession.get(sessionId);
+        if (!row || !(await mayHaveWorkflows(row))) {
+          continue; // No workflows dir to inspect (the common case): skip before any DB check.
+        }
         // M2 (ADR-201, ADR-172): a participant who lost read access to the
         // session (project enforcement) gets nothing opened or reported.
-        const readable = row && isSessionAccessibleByUser(sessionId, row.project_path, userId as number, 'read');
+        const readable = isSessionAccessibleByUser(sessionId, row.project_path, userId as number, 'read');
         const pinned = readable ? await openSessionWorkflows(row, userId as number) : null;
-        if (!row || !pinned) {
-          continue; // No admissible transcript or no workflows dir to inspect.
+        if (!pinned) {
+          continue; // No admissible transcript or workflows dir.
         }
         // The session's real project cwd (== the intent's projectPath) is the
         // join key to a supervisor scope; null when unknown => pid path only.

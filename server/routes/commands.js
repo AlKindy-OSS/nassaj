@@ -11,6 +11,7 @@ import { parseFrontMatter } from "../shared/frontmatter.js";
 import { findAppRoot, getModuleDir } from "../utils/runtime-paths.js";
 import { projectsDb, sessionsDb } from "../modules/database/index.js";
 import { isSessionAccessibleByUser } from "../modules/providers/services/session-access.js";
+import { descriptorNamed, descriptorPath } from "../modules/providers/shared/pinned-fd.js";
 import {
   callCodexAppServer,
   startCodexCompaction,
@@ -32,8 +33,9 @@ function commandFileError(code, message) {
   return Object.assign(new Error(message), { code });
 }
 
+/** Kernel name of the descriptor, compared verbatim — never re-resolved by name (B-1609/B-1611). */
 async function openedFdTarget(handle) {
-  return fs.realpath(`/proc/self/fd/${handle.fd}`);
+  return descriptorPath(handle.fd);
 }
 
 async function openPinnedCommandRoot(rootPath) {
@@ -99,6 +101,11 @@ async function readContainedCommandFile(commandPath, allowedRoots) {
     }
     if (!stats.isFile() || stats.nlink !== 1) {
       throw commandFileError("COMMAND_ACCESS_DENIED", "Command path is not a regular file");
+    }
+    // B-1611: a hard link being replaced by an in-flight rename reads nlink 1 and
+    // its live name; once the directory settles its name reads "(deleted)".
+    if (!(await descriptorNamed(commandHandle.fd, openedTarget, { singleLink: true }).catch(() => false))) {
+      throw commandFileError("COMMAND_ACCESS_DENIED", "Command file changed while opening");
     }
     if (stats.size > MAX_COMMAND_FILE_BYTES) {
       throw commandFileError("COMMAND_FILE_TOO_LARGE", "Command file is too large");

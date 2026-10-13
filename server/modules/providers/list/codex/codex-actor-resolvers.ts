@@ -2,14 +2,14 @@ import { assertEvidenceManifest, evidenceContractHash, R3_RESOLVER_MANIFEST, R3_
   validEvidenceModel, validEvidenceRole } from '../../../../shared/r3-evidence-lexical.js';
 
 export const R3_PARSER_CONTRACT = Object.freeze({
-  schema: 'nassaj-r3-parser-contract/v3', nativeRecordShapeRevision: 'nassaj-r3-native-record-shape/v1',
+  schema: 'nassaj-r3-parser-contract/v4', nativeRecordShapeRevision: 'nassaj-r3-native-record-shape/v2',
   resolverManifest: R3_RESOLVER_MANIFEST, resolverManifestCanonicalSha256: R3_RESOLVER_MANIFEST_SHA256,
   modelForbiddenScalars: R3_RESOLVER_MANIFEST.modelForbiddenScalars, nativePayloadCaps: R3_RESOLVER_MANIFEST.nativePayloadCaps,
   limits: Object.freeze({ roleUtf8Bytes: 128, modelUtf8Bytes: 128, effortUtf8Bytes: 32, sessionUtf8Bytes: 256,
     actors: 256, observationsPerActor: 256, launchEdges: 512, sources: 256, depth: 8, readSemaphore: 4, sourcePrefixBytes: 67108864 }),
   actorEvidencePriority: Object.freeze(['requested_invalid','role_mismatch','model_mismatch','observed_role_missing','turn_evidence_conflict','model_missing','complete']),
   collectionEvidencePriority: Object.freeze(['authorization_revoked','source_drift','evidence_cap_exceeded','child_lineage_invalid','child_binding_invalid','child_binding_absent']),
-  traversalVersion: 'breadth-first-call-output-child-bytewise/v1', canonicalizationRevision: 'utf8-json-recursive-bytewise-keys/v1',
+  traversalVersion: 'breadth-first-call-output-child-bytewise/v2', canonicalizationRevision: 'utf8-json-recursive-bytewise-keys/v1',
 });
 export const R3_PARSER_CONTRACT_SHA256 = evidenceContractHash(R3_PARSER_CONTRACT);
 type JsonObject = Record<string, unknown>;
@@ -102,6 +102,6 @@ export function resolveContextModel(raw: string): string | null {
 /** Reject a compiled parser constant that drifted from its reviewed canonical payload. */
 export function assertParserContract(): void {
   assertEvidenceManifest();
-  if (R3_PARSER_CONTRACT_SHA256 !== '5b4114b10a8d9e070a97be193edec12857af13d7c23976011be7e01ede220516'
+  if (R3_PARSER_CONTRACT_SHA256 !== '4247d2b30921813ed1c8e07f1f13f06d97ff059e9a9a695f6030710182b535ce'
     || evidenceContractHash(R3_PARSER_CONTRACT) !== R3_PARSER_CONTRACT_SHA256) throw new Error('actor_contract_invalid');
 }

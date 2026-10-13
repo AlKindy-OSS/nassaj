@@ -22,6 +22,7 @@ import { api, authenticatedFetch } from '../../../../utils/api';
 import { SESSION_BUCKET_KEYS } from '../../../../../shared/sessionBuckets';
 import type { Project, ProjectSession } from '../../../../types/app';
 import { cn } from '../../../../lib/utils';
+import { summarizeBulkResults } from '../../../sidebar/utils/transcriptRemoval';
 import SettingsCard from '../SettingsCard';
 import SettingsGroup from '../SettingsGroup';
 import SettingsRow from '../SettingsRow';
@@ -76,7 +77,9 @@ async function purgeExpiredSessions(retentionDays: number): Promise<{ deleted: n
     const chunk = expired.slice(i, i + BULK_CHUNK);
     const res = await api.bulkSessions(chunk, 'delete_permanently');
     if (!res.ok) throw new Error(String(res.status));
-    deleted += chunk.length;
+    // B-1610: a 200 can carry per-item failures (e.g. a retryable file error); count successes only.
+    const body = (await res.json().catch(() => null)) as { data?: { results?: unknown } } | null;
+    deleted += chunk.length - summarizeBulkResults(body?.data?.results).failedIds.length;
   }
   return { deleted, skippedStarred };
 }

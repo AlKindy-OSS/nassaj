@@ -251,6 +251,37 @@ const aggregateOpenCodeSessionTokenUsage = (
   });
 };
 
+/**
+ * ADR-205 D9: OpenCode keeps a user's attached images and files as separate
+ * `file` parts whose bytes live in a temp dir or are passed by path, so the
+ * history cannot serve them. Each is counted onto the user text row of the
+ * same message as `attachmentsUnavailable`, in whichever order the parts come.
+ */
+class UserAttachmentTally {
+  private readonly texts = new Map<string, NormalizedMessage>();
+  private readonly pending = new Map<string, { image: number; file: number }>();
+
+  /** Records the user text row of `messageId` and applies counts seen before it. */
+  text(messageId: string, message: NormalizedMessage): void {
+    this.texts.set(messageId, message);
+    const early = this.pending.get(messageId);
+    if (!early) return;
+    this.pending.delete(messageId);
+    message.attachmentsUnavailable = early;
+  }
+
+  /** Counts one user `file` part by its MIME type. */
+  file(messageId: string, partData: Record<string, unknown>): void {
+    const kind = (readOptionalString(partData.mime) ?? '').startsWith('image/') ? 'image' : 'file';
+    const target = this.texts.get(messageId);
+    const counts = target?.attachmentsUnavailable ?? this.pending.get(messageId) ?? {};
+    const next = { image: counts.image ?? 0, file: counts.file ?? 0 };
+    next[kind] += 1;
+    if (target) target.attachmentsUnavailable = next;
+    else this.pending.set(messageId, next);
+  }
+}
+
 export class OpenCodeSessionsProvider implements IProviderSessions {
   /**
    * Normalizes live `opencode run --format json` events into frontend messages.
@@ -382,7 +413,7 @@ export class OpenCodeSessionsProvider implements IProviderSessions {
     const { limit = null, offset = 0 } = options;
     const db = openOpenCodeDatabase();
     if (!db) {
-      return { messages: [], total: 0, hasMore: false, offset: 0, limit: null };
+      return { messages: [], total: 0, hasMore: false, offset: 0, limit: null, readFailed: true };
     }
 
     try {
@@ -432,7 +463,7 @@ export class OpenCodeSessionsProvider implements IProviderSessions {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       console.warn(`[OpenCodeProvider] Failed to load session ${sessionId}:`, message);
-      return { messages: [], total: 0, hasMore: false, offset: 0, limit: null };
+      return { messages: [], total: 0, hasMore: false, offset: 0, limit: null, readFailed: true };
     } finally {
       db.close();
     }
@@ -453,6 +484,7 @@ export class OpenCodeSessionsProvider implements IProviderSessions {
     // ADR-199 Addendum B §16: each todowrite is a full snapshot, so history
     // stamps only the last one of each turn (a user message opens a turn).
     let turnPlan: { message: NormalizedMessage; plan: NonNullable<NormalizedMessage['plan']> } | null = null;
+    const attachments = new UserAttachmentTally();
     const closeTurn = (): void => {
       if (turnPlan) turnPlan.message.plan = turnPlan.plan;
       turnPlan = null;
@@ -504,7 +536,7 @@ export class OpenCodeSessionsProvider implements IProviderSessions {
       if (partType === 'text') {
         const content = extractText(partData);
         if (content.trim()) {
-          normalized.push(createNormalizedMessage({
+          const message = createNormalizedMessage({
             id: baseId,
             sessionId,
             timestamp,
@@ -513,8 +545,15 @@ export class OpenCodeSessionsProvider implements IProviderSessions {
             role: messageRole === 'user' ? 'user' : 'assistant',
             model: messageRole === 'assistant' ? readResponseModel(messageInfo?.modelID) : undefined,
             content,
-          }));
+          });
+          if (messageRole === 'user') attachments.text(row.message_id, message);
+          normalized.push(message);
         }
+        continue;
+      }
+
+      if (partType === 'file' && messageRole === 'user') {
+        attachments.file(row.message_id, partData);
         continue;
       }
 

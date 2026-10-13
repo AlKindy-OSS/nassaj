@@ -353,7 +353,7 @@ test('fetchHistory ignores unknown event types instead of throwing', async () =>
   );
 });
 
-test('fetchHistory returns an empty page when the DB has no session row', async () => {
+test('fetchHistory returns an empty page flagged readFailed when the DB has no session row', async () => {
   const previousDatabasePath = process.env.DATABASE_PATH;
   const tempRoot = await mkdtemp(path.join(tmpdir(), 'agy-empty-'));
   const databasePath = path.join(tempRoot, 'auth.db');
@@ -365,7 +365,8 @@ test('fetchHistory returns an empty page when the DB has no session row', async 
   try {
     const provider = new AntigravitySessionsProvider();
     const result = await provider.fetchHistory('does-not-exist');
-    assert.deepEqual(result, { messages: [], total: 0, hasMore: false, offset: 0, limit: null });
+    // ADR-205: no transcript is a failed read, not an empty conversation.
+    assert.deepEqual(result, { messages: [], total: 0, hasMore: false, offset: 0, limit: null, readFailed: true });
   } finally {
     closeConnection();
     if (previousDatabasePath === undefined) {

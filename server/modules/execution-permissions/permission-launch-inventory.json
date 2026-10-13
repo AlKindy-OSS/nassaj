@@ -1229,7 +1229,7 @@
     {
       "id": "server/modules/turn-supervisor/adapters/codex-cli-adapter.ts#child_process.spawn#1",
       "file": "server/modules/turn-supervisor/adapters/codex-cli-adapter.ts",
-      "line": 84,
+      "line": 86,
       "primitive": "child_process.spawn",
       "expression": "spawn",
       "classification": "provider_effect_enclosed",
@@ -1397,7 +1397,7 @@
     {
       "id": "server/openai-codex.js#codex_sdk.runStreamed#1",
       "file": "server/openai-codex.js",
-      "line": 998,
+      "line": 1021,
       "primitive": "codex_sdk.runStreamed",
       "expression": "thread.runStreamed",
       "classification": "provider_effect_enclosed",
@@ -1411,7 +1411,7 @@
     {
       "id": "server/openai-codex.js#codex_sdk.startThread#1",
       "file": "server/openai-codex.js",
-      "line": 930,
+      "line": 953,
       "primitive": "codex_sdk.startThread",
       "expression": "codex.startThread",
       "classification": "provider_effect_enclosed",
@@ -2013,7 +2013,7 @@
     {
       "id": "server/shared/codex-runtime-compat.js#child_process.spawn#1",
       "file": "server/shared/codex-runtime-compat.js",
-      "line": 113,
+      "line": 119,
       "primitive": "child_process.spawn",
       "expression": "spawn",
       "classification": "infrastructure_effect",

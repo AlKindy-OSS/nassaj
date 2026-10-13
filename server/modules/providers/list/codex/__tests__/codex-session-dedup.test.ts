@@ -323,3 +323,34 @@ describe('Codex session synchronizer — fold subagent/fork threads (B-CODEX-DED
     );
   });
 });
+
+// B-1616: a codex-cli 0.160 child rollout carries its PARENT's session_meta
+// (thread_source "user") as line 1. Identity is line 0 only: an unusable line 0
+// must leave the file unindexed, never classify it as the parent conversation.
+describe('Codex session synchronizer — 0.160 child identity is line 0 only (B-1616)', () => {
+  const FIXTURE = path.join(import.meta.dirname, '..', '..', '..', 'services', 'cost', '__fixtures__',
+    'codex-0160-v2', 'child.jsonl');
+  const CHILD = '00000002-0000-7000-8000-00000000c001';
+  const PARENT = '00000001-0000-7000-8000-00000000a001';
+
+  it('a child whose line 0 lacks cwd is not re-identified as its parent from line 1', async () => {
+    const lines = fs.readFileSync(FIXTURE, 'utf8').split('\n').filter(Boolean).map((line) => JSON.parse(line));
+    delete lines[0].payload.cwd;
+    const dir = path.join(operatorCodexHome(), 'sessions', '2026', '10', '05');
+    fs.mkdirSync(dir, { recursive: true });
+    const childPath = path.join(dir, `rollout-2026-10-05T13-24-15-${CHILD}.jsonl`);
+    fs.writeFileSync(childPath, `${lines.map((line) => JSON.stringify(line)).join('\n')}\n`);
+    const warnings: unknown[][] = [];
+    const warn = console.warn;
+    console.warn = (...args: unknown[]) => { warnings.push(args); };
+    try {
+      assert.equal(await new CodexSessionSynchronizer().synchronizeFile(childPath), null);
+    } finally {
+      console.warn = warn;
+    }
+    assert.deepEqual(warnings.filter(([message]) => String(message).includes('session_meta id')), [],
+      'the parent session_meta on line 1 must never be read as this file\'s identity');
+    assert.equal(sessionsDb.getSessionById(CHILD), null);
+    assert.equal(sessionsDb.getSessionById(PARENT), null);
+  });
+});

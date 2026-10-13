@@ -22,7 +22,7 @@ import { AGY_BRAIN_UNDER_HOME } from '@/modules/providers/list/antigravity/agy-b
 
 import { recordedTreeRoots } from './contained-file.js';
 import { openPinned, PinnedOpenError, type PinnedRefusal } from './pinned-fd.js';
-import { HEADER_SCAN_LIMIT_BYTES, scanHeaderRecords } from './transcript-header-scan.js';
+import { AMBIGUOUS_HEADER_VALUE, HEADER_SCAN_LIMIT_BYTES, scanHeaderRecords } from './transcript-header-scan.js';
 import {
   isTranscriptHandle, openRecordedTranscript, openSessionArtifactDir, openSessionTranscript,
   SessionArtifactDir, type SessionTranscriptResult,
@@ -147,6 +147,36 @@ test('header scan: only a key at the exact path counts, never text or a nested k
     });
     assert.equal(end, 'eof');
     assert.deepEqual(seen, [{}, {}, { sessionId: 'own', 'payload.id': 'p' }]);
+  } finally {
+    await handle.close();
+  }
+});
+
+test('R3: a duplicate target key of any value type, or of a target\'s parent, is ambiguous', async () => {
+  const dir = fs.mkdtempSync(path.join(SANDBOX_HOME, 'scan-r3-'));
+  const lines = [
+    '{"sessionId":"own","sessionId":123}', // JSON.parse reads 123
+    '{"sessionId":"own","sessionId":null}',
+    '{"sessionId":{"x":"own"},"sessionId":"own"}',
+    '{"sessionId":["own"],"sessionId":true}',
+    '{"payload":{"id":"p"},"payload":7}', // payload.id is gone for JSON.parse
+    '{"payload":{"id":"p"},"payload":{"other":1}}',
+    '{"payload.id":"alias","sessionId":5}', // a dotted key is not the path payload.id
+    '{"list":[{"sessionId":"a"},{"sessionId":"b"}],"payload":{"id":"p"}}',
+  ].join('\n');
+  const file = write(path.join(dir, 'r3.jsonl'), `${lines}\n`);
+  const { handle } = await openPinned(file, 'file');
+  try {
+    const seen: Array<Record<string, string>> = [];
+    await scanHeaderRecords(handle, [['sessionId'], ['payload', 'id']], (record) => {
+      seen.push({ ...record });
+      return 'next';
+    });
+    const ambiguous = AMBIGUOUS_HEADER_VALUE;
+    assert.deepEqual(seen, [
+      { sessionId: ambiguous }, { sessionId: ambiguous }, { sessionId: ambiguous }, { sessionId: ambiguous },
+      { 'payload.id': ambiguous }, { 'payload.id': ambiguous }, {}, { 'payload.id': 'p' },
+    ]);
   } finally {
     await handle.close();
   }
@@ -385,4 +415,31 @@ test('history service: both paths read the bound transcript and refuse a forged 
     leasedMessages = payload.messages.length;
   });
   assert.ok(leasedMessages > 0, 'leased: valid reads through the adopted descriptor');
+});
+
+test('N1: a transcript or directory denied by chmod is refused as unreadable, and history reads nothing', async () => {
+  const { sessionsService } = await import('../services/sessions.service.js');
+  const { HistoryBudgetError } = await import('../services/history-budget.service.js');
+  const { resetHistorySnapshotCacheForTests } = await import('../services/session-history-light.service.js');
+  for (const deny of ['file', 'directory'] as const) {
+    const id = nextId('00000000-0000-4000-a000-');
+    const file = write(path.join(USERS, '1', '.claude', 'projects', `-n1-${deny}`, `${id}.jsonl`), claudeText(id));
+    recordSession(id, 'claude', file);
+    const target = deny === 'file' ? file : path.dirname(file);
+    fs.chmodSync(target, 0o000);
+    try {
+      assert.equal(await outcome(id), 'unreadable', deny);
+      resetHistorySnapshotCacheForTests();
+      assert.equal((await sessionsService.fetchHistory(id, ownerId, {})).messages.length, 0, `${deny}: unleased reads empty`);
+      await assert.rejects(
+        sessionsService.withHistoryLeaseCallback(id, ownerId, {}, new AbortController().signal, () => {
+          throw new Error('consumer must not run');
+        }),
+        (error: unknown) => error instanceof HistoryBudgetError && error.code === 'HISTORY_SOURCE_UNAVAILABLE',
+      );
+    } finally {
+      fs.chmodSync(target, deny === 'file' ? 0o600 : 0o700);
+    }
+    assert.equal(await outcome(id), 'ok', `${deny}: readable again once access is restored`);
+  }
 });

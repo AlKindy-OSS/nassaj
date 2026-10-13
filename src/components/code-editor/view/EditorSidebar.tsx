@@ -12,7 +12,13 @@ type EditorSidebarProps = {
   hasManualWidth: boolean;
   resizeHandleRef: MutableRefObject<HTMLDivElement | null>;
   onResizeStart: (event: MouseEvent<HTMLDivElement>) => void;
+  /** Close request (X / Esc / session switch); may open the unsaved prompt. */
+  onRequestClose: () => void;
+  /** Close unconditionally. */
   onCloseEditor: () => void;
+  closePromptOpen: boolean;
+  onDirtyChange: (dirty: boolean) => void;
+  onDismissClosePrompt: () => void;
   onToggleEditorExpand: () => void;
   projectPath?: string;
   fillSpace?: boolean;
@@ -31,7 +37,11 @@ export default function EditorSidebar({
   hasManualWidth,
   resizeHandleRef,
   onResizeStart,
+  onRequestClose,
   onCloseEditor,
+  closePromptOpen,
+  onDirtyChange,
+  onDismissClosePrompt,
   onToggleEditorExpand,
   projectPath,
   fillSpace,
@@ -90,10 +100,14 @@ export default function EditorSidebar({
     return (
       <CodeEditor
         file={editingFile}
-        onClose={() => {
+        onClose={onRequestClose}
+        onForceClose={() => {
           setPoppedOut(false);
           onCloseEditor();
         }}
+        onDirtyChange={onDirtyChange}
+        closePromptOpen={closePromptOpen}
+        onCloseDismiss={onDismissClosePrompt}
         projectPath={projectPath}
         isSidebar={false}
       />
@@ -122,7 +136,11 @@ export default function EditorSidebar({
       >
         <CodeEditor
           file={editingFile}
-          onClose={onCloseEditor}
+          onClose={onRequestClose}
+          onForceClose={onCloseEditor}
+          onDirtyChange={onDirtyChange}
+          closePromptOpen={closePromptOpen}
+          onCloseDismiss={onDismissClosePrompt}
           projectPath={projectPath}
           isSidebar
           isExpanded={editorExpanded}

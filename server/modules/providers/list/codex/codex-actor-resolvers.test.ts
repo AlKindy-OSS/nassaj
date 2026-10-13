@@ -6,14 +6,25 @@ import { canonicalEvidenceJson, evidenceContractHash, R3_RESOLVER_MANIFEST, R3_R
 
 import { assertParserContract, resolveContextModel, resolveObservedRole, resolveRequestEvidence, strictEvidenceObject, R3_PARSER_CONTRACT, R3_PARSER_CONTRACT_SHA256 } from './codex-actor-resolvers.js';
 
-test('exact accepted manifest digest and v3 payload binding',()=>{
+test('exact accepted manifest digest and v4 payload binding',()=>{
   assert.equal(evidenceContractHash(R3_RESOLVER_MANIFEST),R3_RESOLVER_MANIFEST_SHA256);
-  assert.equal(R3_RESOLVER_MANIFEST_SHA256,'4938b4cc9cbb984e039470e29b0a9bac46d43091a91d97d06219b4df09f9874b');
-  assert.doesNotThrow(assertParserContract);assert.equal(R3_PARSER_CONTRACT.schema,'nassaj-r3-parser-contract/v3');
+  // B-1616: revised for codex 0.160 multi_agent v2 (collaboration) evidence.
+  assert.equal(R3_RESOLVER_MANIFEST_SHA256,'4897f99698fabd97950917981cc3ed98613fdf7259266e2a1c3676b2d746340b');
+  assert.doesNotThrow(assertParserContract);assert.equal(R3_PARSER_CONTRACT.schema,'nassaj-r3-parser-contract/v4');
   const changed=JSON.parse(JSON.stringify(R3_PARSER_CONTRACT));changed.nativePayloadCaps.spawnArgumentsUtf8Bytes=65536;
   assert.notEqual(evidenceContractHash(changed),R3_PARSER_CONTRACT_SHA256);
   assert.equal(canonicalEvidenceJson({b:2,a:1}),canonicalEvidenceJson({a:1,b:2}));
   for(const value of [undefined,NaN,Infinity,1.1])assert.throws(()=>canonicalEvidenceJson(value));
+});
+test('B-1616: the manifest names both native spawn namespaces and the v2 activity binding',()=>{
+  const m=R3_RESOLVER_MANIFEST;
+  for(const source of [m.roleResolver.requestedSource,m.modelResolver.requestedSource,m.reasoningResolver.requestedSource]){
+    assert.match(source,/multi_agent_v1/);assert.match(source,/collaboration/);
+  }
+  assert.deepEqual([m.schema,m.roleResolver.id,m.modelResolver.id,m.reasoningResolver.id],
+    ['nassaj-r3-resolver-manifest/v3','native-role-evidence/v3','native-model-evidence/v3','native-request-effort/v2']);
+  assert.match(m.nativePayloadCaps.outputShape,/SubAgentActivity/);
+  assert.equal(R3_PARSER_CONTRACT.nativeRecordShapeRevision,'nassaj-r3-native-record-shape/v2');
 });
 test('ASCII role grammar exact bounds no trim or catalog',()=>{
   for(const v of ['A','a','BrandNew_Unlisted-9','A'.repeat(128)])assert.equal(validEvidenceRole(v),true);

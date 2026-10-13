@@ -10,6 +10,5 @@ import { ShareApp } from './ShareApp';
  * the app by construction: it reads no storage, registers no service worker, opens
  * no socket and imports nothing from src/components (ESLint-enforced).
  */
-// Read once at load: the fragment token is consumed (and erased) by this call.
-const credentials = readCredentials(window.location, window.history);
+const credentials = readCredentials(window.location);
 createRoot(document.getElementById('root')!).render(<ShareApp credentials={credentials} />);

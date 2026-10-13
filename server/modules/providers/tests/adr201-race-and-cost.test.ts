@@ -3,11 +3,14 @@
  *
  * Race harness, two layers:
  *   1. deterministic: `openPinned` with a checkpoint that swaps the name at
- *      each step of lstat → open → fstat → /proc realpath, for each swap kind
- *      (foreign regular file, symlink, hardlink, unlink);
+ *      each step of lstat → open → fstat → /proc name → settle → /proc name →
+ *      lstat recheck, for each swap kind (foreign regular file, symlink,
+ *      hardlink, unlink);
  *   2. stochastic: a worker thread renames genuine / forged / symlinked /
  *      hardlinked files over the recorded path in a tight loop while the main
- *      thread opens it through `openSessionTranscript` and the history fetch.
+ *      thread opens it through `openSessionTranscript` and the history fetch;
+ *   3. opt-in stress (NASSAJ_TEST_PINNED_FD_STRESS=1): the B-1614 `(deleted)`
+ *      symlink attack in a tight loop, zero admissions required.
  * Invariant in both: a successful open never yields foreign bytes (a link
  * target, another session's header, member /10's file).
  *
@@ -31,7 +34,9 @@ import { Worker } from 'node:worker_threads';
 import { getConnection, initializeDatabase, participantsDb } from '@/modules/database/index.js';
 import { resetHistorySnapshotCacheForTests } from '@/modules/providers/services/session-history-light.service.js';
 import { sessionsService } from '@/modules/providers/services/sessions.service.js';
-import { openPinned, PinnedOpenError } from '@/modules/providers/shared/pinned-fd.js';
+import {
+  openPinned, PinnedOpenError, SETTLE_FOR_TESTS, settleDirectory,
+} from '@/modules/providers/shared/pinned-fd.js';
 import { isTranscriptHandle, openSessionTranscript } from '@/modules/providers/shared/session-transcript.js';
 
 import { claudeTranscript } from './helpers/adr201-real-headers.js';
@@ -103,7 +108,7 @@ test('race (deterministic): a swap at every step of the pinned open never yields
   const target = path.join(dir, 'transcript.jsonl');
   const table: Record<string, string> = {};
   for (const kind of ['regular', 'symlink', 'hardlink', 'unlink'] as const) {
-    for (let swapAt = 1; swapAt <= 5; swapAt += 1) {
+    for (let swapAt = 1; swapAt <= 6; swapAt += 1) {
       fs.rmSync(target, { force: true }); // never write through a link left by the previous case
       write(target, GENUINE_TEXT);
       let step = 0;
@@ -128,10 +133,12 @@ test('race (deterministic): a swap at every step of the pinned open never yields
   // Step 1 = before lstat (a plain replacement: the reader's id check owns it),
   // 2 = between lstat and open (the TOCTOU window), 3 = after open (fstat sees
   // the pinned inode unlinked, nlink 0), 4 = after fstat (/proc names a deleted
-  // file), 5 = after the /proc check (the descriptor already holds the genuine inode).
+  // file), 5 = after the first /proc check (the re-check after the directory
+  // settles names a deleted file, B-1609), 6 = after that re-check (the
+  // descriptor already holds the genuine inode).
   const row = (kind: string, at1: string, at2: string) => ({
-    [`${kind}@1`]: at1, [`${kind}@2`]: at2, [`${kind}@3`]: 'multiply_linked', [`${kind}@4`]: 'io_error',
-    [`${kind}@5`]: 'ok:genuine',
+    [`${kind}@1`]: at1, [`${kind}@2`]: at2, [`${kind}@3`]: 'multiply_linked', [`${kind}@4`]: 'changed_during_open',
+    [`${kind}@5`]: 'changed_during_open', [`${kind}@6`]: 'ok:genuine',
   });
   assert.deepEqual(table, {
     ...row('regular', 'ok:replaced', 'changed_during_open'),
@@ -139,6 +146,198 @@ test('race (deterministic): a swap at every step of the pinned open never yields
     ...row('hardlink', 'multiply_linked', 'changed_during_open'),
     ...row('unlink', 'missing', 'changed_during_open'),
   });
+});
+
+// B-1614: a rename over the name drops the victim's nlink before it unhashes the
+// victim's dentry, so fstat (nlink 1) and the /proc name (still `expected`) can
+// both land inside that kernel window for member /10's hardlinked file. The gate
+// reads nlink, then settles the parent directory (waits out the rename), and
+// only then reads the name — here the rename completes at the barrier.
+test('race (deterministic): a rename completing at the directory barrier is refused (B-1614)', async () => {
+  const dir = fs.mkdtempSync(path.join(SANDBOX_HOME, 'pinned-settle-'));
+  const target = write(path.join(dir, 'transcript.jsonl'), GENUINE_TEXT);
+  const events: string[] = [];
+  const settle = async (directory: string) => {
+    events.push(`settle:${directory === dir}`);
+    swapName(target, 'regular');
+    await settleDirectory(directory);
+  };
+  await assert.rejects(
+    openPinned(target, 'file', {
+      singleLink: true, [SETTLE_FOR_TESTS]: settle, checkpoint: () => void events.push('step'),
+    } as Parameters<typeof openPinned>[2]),
+    (error: unknown) => error instanceof PinnedOpenError && error.reason === 'changed_during_open',
+  );
+  // lstat, open, fstat (nlink read), first /proc name, barrier; the /proc name
+  // read after it reports the victim `(deleted)` and refuses it.
+  assert.deepEqual(events, ['step', 'step', 'step', 'step', 'step', 'settle:true']);
+  await assert.rejects(settleDirectory(path.join(dir, 'gone')),
+    (error: unknown) => error instanceof PinnedOpenError && error.reason === 'changed_during_open');
+});
+
+/**
+ * B-1614 round 2: `target` is a hardlink of a foreign file (nlink 2) and the
+ * attacker owns the parent directory, so it plants `<name> (deleted)` -> `<name>`.
+ * A rename over the name between open and fstat drops the victim to nlink 1 and
+ * makes the kernel name its descriptor `<target> (deleted)`. Following that
+ * text (realpath) resolved the planted link back to `target` and admitted the
+ * foreign bytes; reading it (readlink) refuses.
+ */
+function plantDeletedSuffixAttack(dir: string): { target: string; foreign: string } {
+  const foreign = write(path.join(dir, 'foreign-member.jsonl'), claudeTranscript(SID, PROJECT, 'zqforeignmember'));
+  const target = path.join(dir, 'transcript.jsonl');
+  fs.rmSync(target, { force: true });
+  fs.linkSync(foreign, target);
+  fs.rmSync(`${target} (deleted)`, { force: true });
+  fs.symlinkSync('transcript.jsonl', `${target} (deleted)`);
+  return { target, foreign };
+}
+
+test('race (deterministic): a planted "<name> (deleted)" symlink never admits the victim (B-1614)', async () => {
+  const dir = fs.mkdtempSync(path.join(SANDBOX_HOME, 'pinned-deleted-'));
+  const { target } = plantDeletedSuffixAttack(dir);
+  let step = 0;
+  const checkpoint = () => {
+    step += 1;
+    if (step === 3) swapName(target, 'regular'); // after open, before fstat
+  };
+  await assert.rejects(
+    openPinned(target, 'file', { singleLink: true, checkpoint }),
+    (error: unknown) => error instanceof PinnedOpenError && error.reason === 'changed_during_open',
+  );
+  assert.equal(step, 4, 'refused at the name read, before the final checkpoint');
+});
+
+const STRESS = process.env.NASSAJ_TEST_PINNED_FD_STRESS === '1';
+const STRESS_SWAPPER = `
+const fs = require('node:fs');
+const { workerData, parentPort } = require('node:worker_threads');
+const { target, foreign, genuine, flag } = workerData;
+const stop = new Int32Array(flag);
+const linkStaging = target + '.link';
+const fileStaging = target + '.file';
+let swaps = 0;
+while (Atomics.load(stop, 0) === 0) {
+  try {
+    // Fresh names each step: never write through a hardlink of the foreign file.
+    fs.rmSync(linkStaging, { force: true });
+    fs.linkSync(foreign, linkStaging);
+    fs.renameSync(linkStaging, target); // the name is the foreign hardlink (nlink 2)
+    fs.rmSync(fileStaging, { force: true });
+    fs.writeFileSync(fileStaging, genuine);
+    fs.renameSync(fileStaging, target); // rename over it: the victim drops to nlink 1
+    swaps += 1;
+  } catch {}
+}
+parentPort.postMessage(swaps);
+`;
+
+test('race (stress, opt-in): the "(deleted)" symlink attack in a tight loop admits nothing', { skip: !STRESS }, async (t) => {
+  const dir = fs.mkdtempSync(path.join(SANDBOX_HOME, 'pinned-stress-'));
+  const { target, foreign } = plantDeletedSuffixAttack(dir);
+  const flag = new SharedArrayBuffer(4);
+  const worker = new Worker(STRESS_SWAPPER, { eval: true, workerData: { target, foreign, genuine: GENUINE_TEXT, flag } });
+  const swapped = new Promise<number>((resolve, reject) => {
+    worker.once('message', resolve);
+    worker.once('error', reject);
+  });
+  const iterations = Number(process.env.NASSAJ_TEST_PINNED_FD_STRESS_ITERATIONS ?? 20_000);
+  const counts = new Map<string, number>();
+  try {
+    for (let index = 0; index < iterations; index += 1) {
+      try {
+        const pinned = await openPinned(target, 'file', { singleLink: true });
+        const text = await readAll(pinned.handle);
+        await pinned.handle.close();
+        tally(counts, FOREIGN.test(text) ? 'admitted_foreign' : 'ok');
+      } catch (error) {
+        assert.ok(error instanceof PinnedOpenError, String(error));
+        tally(counts, error.reason);
+      }
+    }
+  } finally {
+    Atomics.store(new Int32Array(flag), 0, 1);
+  }
+  const swaps = await swapped;
+  await worker.terminate();
+  t.diagnostic(`swaps=${swaps} outcomes=${JSON.stringify(Object.fromEntries(counts))}`);
+  assert.ok(swaps > 0, 'the swapper ran');
+  assert.equal(counts.get('admitted_foreign') ?? 0, 0, 'zero foreign admissions');
+});
+
+/**
+ * B-1609 fixture: `target` starts as a second name of member /10's file; right
+ * after the open, a genuine file is renamed over it, so the descriptor holds the
+ * member inode, single-linked again and unlinked from `target`.
+ */
+function hardlinkThenReplace(dir: string): { target: string; replace: () => void } {
+  const target = path.join(dir, 'transcript.jsonl');
+  fs.linkSync(FOREIGN_FILES.memberTree, target);
+  return {
+    target,
+    replace: () => {
+      write(`${target}.genuine`, GENUINE_TEXT);
+      fs.renameSync(`${target}.genuine`, target);
+    },
+  };
+}
+
+async function admittedText(open: Promise<{ handle: fsp.FileHandle }>): Promise<string> {
+  try {
+    const { handle } = await open;
+    try {
+      return await readAll(handle);
+    } finally {
+      await handle.close();
+    }
+  } catch (error) {
+    assert.ok(error instanceof PinnedOpenError, String(error));
+    return `refused:${error.reason}`;
+  }
+}
+
+test('B-1609 (deterministic): a planted "<name> (deleted)" symlink cannot vouch for an unlinked descriptor', async () => {
+  const dir = fs.mkdtempSync(path.join(SANDBOX_HOME, 'pinned-deleted-'));
+  const { target, replace } = hardlinkThenReplace(dir);
+  let step = 0;
+  const checkpoint = () => {
+    step += 1;
+    if (step !== 3) return; // after open, before fstat
+    replace();
+    // The kernel names the descriptor `<target> (deleted)`; resolving that text by name follows this link.
+    fs.symlinkSync(target, `${target} (deleted)`);
+  };
+  const text = await admittedText(openPinned(target, 'file', { singleLink: true, checkpoint }));
+  assert.doesNotMatch(text, FOREIGN, 'member bytes admitted through a planted "(deleted)" name');
+  assert.equal(text, 'refused:changed_during_open');
+});
+
+test('B-1609 (deterministic): a descriptor named during an in-flight rename is re-checked after the directory settles', async () => {
+  // ext4 drops the replaced inode's link count inside rename(2) and moves the
+  // dentry only afterwards, both under the directory lock. A reader whose fstat
+  // and /proc read fall in between sees nlink 1 AND the live name. The procFdDir
+  // seam models that kernel view: the live name until the first /proc check,
+  // `(deleted)` once the rename has finished.
+  const dir = fs.mkdtempSync(path.join(SANDBOX_HOME, 'pinned-window-'));
+  const proc = fs.mkdtempSync(path.join(SANDBOX_HOME, 'fake-proc-'));
+  const { target, replace } = hardlinkThenReplace(dir);
+  let fdLink = '';
+  let step = 0;
+  const checkpoint = () => {
+    step += 1;
+    if (step === 3) replace(); // the in-flight rename has already dropped the member inode to nlink 1
+    if (step === 5) { // after the first /proc check: the rename completes and the dentry is gone
+      fs.rmSync(fdLink);
+      fs.symlinkSync(`${target} (deleted)`, fdLink);
+    }
+  };
+  const track = (handle: fsp.FileHandle) => {
+    fdLink = path.join(proc, String(handle.fd));
+    fs.symlinkSync(target, fdLink);
+  };
+  const text = await admittedText(openPinned(target, 'file', { singleLink: true, checkpoint, track, procFdDir: proc }));
+  assert.doesNotMatch(text, FOREIGN, 'member bytes admitted inside the rename window');
+  assert.equal(text, 'refused:changed_during_open');
 });
 
 const SWAPPER = `

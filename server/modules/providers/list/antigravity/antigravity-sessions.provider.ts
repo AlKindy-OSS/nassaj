@@ -345,7 +345,7 @@ export class AntigravitySessionsProvider implements IProviderSessions {
     const pinned = await historyTranscript(sessionId, 'antigravity', options.transcript);
     if (!pinned) {
       const only = failure ? [buildFailureMessage(sessionId, failure)] : [];
-      return { messages: only, total: only.length, hasMore: false, offset: 0, limit: null };
+      return { messages: only, total: only.length, hasMore: false, offset: 0, limit: null, readFailed: true };
     }
 
     let normalized: NormalizedMessage[];
@@ -358,7 +358,7 @@ export class AntigravitySessionsProvider implements IProviderSessions {
       const message = error instanceof Error ? error.message : String(error);
       console.warn(`[AntigravityProvider] Failed to load session ${sessionId}:`, message);
       const only = failure ? [buildFailureMessage(sessionId, failure)] : [];
-      return { messages: only, total: only.length, hasMore: false, offset: 0, limit: null };
+      return { messages: only, total: only.length, hasMore: false, offset: 0, limit: null, readFailed: true };
     } finally {
       await releaseHistoryTranscript(pinned);
     }

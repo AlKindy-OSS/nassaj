@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 
 import { Button } from '../../shared/view/ui';
 
-import { revokeShare, shareErrorKey, type ShareSummary } from './sessionShareApi';
+import { announceSharesChanged, revokeShare, shareErrorKey, type ShareSummary } from './sessionShareApi';
 
 type ShareListProps = {
   shares: ShareSummary[];
@@ -33,6 +33,7 @@ function ShareRow({ share, onRevoked }: Omit<ShareListProps, 'shares'> & { share
     try {
       await revokeShare(share.id);
       onRevoked(share.id);
+      announceSharesChanged();
     } catch (caught) {
       setError(shareErrorKey(caught));
       setBusy(false);
@@ -47,6 +48,13 @@ function ShareRow({ share, onRevoked }: Omit<ShareListProps, 'shares'> & { share
             <>{t('sessionShare.list.session')} <bdi dir="ltr" className="font-mono text-xs">{share.sessionId.split('-', 1)[0]}</bdi></>
           )}
         </span>
+        <span className="flex items-center gap-1.5">
+        <span
+          data-mode={share.mode}
+          className="rounded-full border border-border px-2 py-0.5 text-xs text-muted-foreground"
+        >
+          {t(`sessionShare.list.mode.${share.mode}`)}
+        </span>
         <span
           data-status={status}
           className={status === 'active'
@@ -55,12 +63,15 @@ function ShareRow({ share, onRevoked }: Omit<ShareListProps, 'shares'> & { share
         >
           {t(`sessionShare.list.status.${status}`)}
         </span>
+        </span>
       </div>
       <dl className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs text-muted-foreground sm:grid-cols-4">
         <div><dt>{t('sessionShare.list.created')}</dt><dd className="text-foreground">{formatDate(share.createdAt, i18n.language)}</dd></div>
         <div><dt>{t('sessionShare.list.expires')}</dt><dd className="text-foreground">{formatDate(share.expiresAt, i18n.language)}</dd></div>
         <div><dt>{t('sessionShare.list.views')}</dt><dd className="text-foreground">{share.viewCount.toLocaleString(i18n.language)}</dd></div>
-        <div><dt>{t('sessionShare.list.messages')}</dt><dd className="text-foreground">{share.messageCount.toLocaleString(i18n.language)}</dd></div>
+        {share.messageCount !== null && (
+          <div><dt>{t('sessionShare.list.messages')}</dt><dd className="text-foreground">{share.messageCount.toLocaleString(i18n.language)}</dd></div>
+        )}
       </dl>
       {!share.createdBySelf && (
         <p className="text-xs text-muted-foreground">{t('sessionShare.list.createdBy', { name: share.createdByName })}</p>
