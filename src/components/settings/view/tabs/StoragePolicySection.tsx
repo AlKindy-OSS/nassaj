@@ -28,6 +28,7 @@ import SettingsGroup from '../SettingsGroup';
 import SettingsRow from '../SettingsRow';
 import SettingsSection from '../SettingsSection';
 import StatusBadge from '../StatusBadge';
+import { confirmDialog } from '../../../../shared/dialogs/dialogService';
 
 type StoragePolicy = {
   retentionDays: number;
@@ -159,7 +160,7 @@ export default function StoragePolicySection() {
   /** يحفظ مسودّة الأيام ثم يطبّق السياسة السارية فوراً بعد تأكيد صريح. */
   const saveAndPurge = async () => {
     commitRetention();
-    if (!window.confirm(t('storagePolicy.purgeConfirm'))) return;
+    if (!(await confirmDialog({ message: t('storagePolicy.purgeConfirm'), tone: 'danger' }))) return;
     setPurging(true);
     setPurgeResult(null);
     try {

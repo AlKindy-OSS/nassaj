@@ -5,13 +5,16 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
 import {hashDependencyTreeV2} from '../lib/dependency-tree-identity-v2.mjs';
-import {prepareBridgeWorkspace,runBridgeIsolated} from './bridge-rehearsal.mjs';
+import {prepareBridgeWorkspace,publicRuntimeTooling,runBridgeIsolated} from './bridge-rehearsal.mjs';
+// The pinned public Node 24.17/npm 12 runtime is downloaded host material, never fetched by a test.
+const publicRoot=publicRuntimeTooling();
+const noPublicRuntime=publicRoot?false:'public Node 24.17/npm 12 runtime absent on this host; set NASSAJ_TEST_NPM12_TOOLING';
 
-test('public fleet runtime profile preserves private paths and read-only interpreter mounts',()=>{
+test('public fleet runtime profile preserves private paths and read-only interpreter mounts',{skip:noPublicRuntime},()=>{
     const lab=prepareBridgeWorkspace(),entry=path.join(lab,'harness/release-profile.mjs');
     const sha=p=>createHash('sha256').update(fs.readFileSync(p)).digest('hex');
     const hostNode=sha('/usr/bin/node'),hostMounts=fs.readFileSync('/proc/self/mountinfo','utf8');
-    const publicRoot=path.join(lab,'../run-Mx3eDp/tooling/usr'),expectedNode=sha(path.join(publicRoot,'bin/node')),expectedNpm=hashDependencyTreeV2(path.join(publicRoot,'lib/node_modules/npm'));
+    const expectedNode=sha(path.join(publicRoot,'bin/node')),expectedNpm=hashDependencyTreeV2(path.join(publicRoot,'lib/node_modules/npm'));
     fs.copyFileSync(new URL('../lib/dependency-tree-identity-v2.mjs',import.meta.url),path.join(lab,'harness/dependency-tree-identity-v2.mjs'));
     fs.writeFileSync(entry,`import assert from 'node:assert/strict';import fs from 'node:fs';import {spawnSync} from 'node:child_process';import {createHash} from 'node:crypto';import {hashDependencyTreeV2} from './dependency-tree-identity-v2.mjs';
 const lab=${JSON.stringify(lab)};

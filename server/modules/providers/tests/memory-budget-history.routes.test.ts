@@ -34,10 +34,14 @@ function actualHandler(service: Record<string, unknown>) {
     assert.ok(ts.isCallExpression(call.arguments[1])); handler = call.arguments[1].arguments[0];
   }
   assert.ok(handler, 'actual history route callback is extracted, never reimplemented');
+  // T-2034: the route validates ids with the shared grammar (server/shared/session-id.ts);
+  // its actual declarations are extracted too, so the 400 contract is the real one.
+  const sessionIdGrammar = parsed('server/shared/session-id.ts');
   const source = [declaration(parsed('server/shared/utils.ts'), 'AppError'),
     declaration(parsed('server/modules/projects/services/project-visibility-guard.service.ts'), 'coerceUserId'),
+    ...['SESSION_ID_GRAMMAR', 'isSessionId', 'parseSessionIdParam'].map(name => declaration(sessionIdGrammar, name)),
     ...[
-      'readPathParam', 'SESSION_ID_PATTERN', 'parseSessionId', 'readOptionalQueryString', 'readRequesterUserId',
+      'readPathParam', 'parseSessionId', 'readOptionalQueryString', 'readRequesterUserId',
       'readErrorStatus', 'readErrorCode', 'serveSessionMessages',
       'accessFenceError', 'captureSessionRequestFence', 'assertSessionRequestFence',
     ].map(name => declaration(route, name)),
@@ -53,7 +57,7 @@ function actualHandler(service: Record<string, unknown>) {
   return context.historyHandler as (req: express.Request, res: express.Response) => Promise<void>;
 }
 
-async function routeCall(query: string, service: Record<string, unknown>, allowLegacy = false) {
+async function routeCall(query: string, service: Record<string, unknown>, allowLegacy = false, sessionId = 'synthetic-session') {
   const handler = actualHandler({ usesBoundedHistory: () => true, ...service }), app = express(), sockets = new Set<Socket>();
   app.use((req, res, next) => { (req as any).user = { id: 7 }; (req as any).assertCurrentIdentity = () => true; if (!allowLegacy) res.json = (() => { throw new Error('history escaped to unleased res.json'); }) as typeof res.json; next(); });
   app.get('/sessions/:sessionId/messages', (req, res, next) => { void handler(req, res).catch(next); });
@@ -65,7 +69,7 @@ async function routeCall(query: string, service: Record<string, unknown>, allowL
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
   try {
     return await new Promise<{ status: number; body: any }>((resolve, reject) => {
-      const request = http.get({ host: '127.0.0.1', port: (server.address() as AddressInfo).port, path: `/sessions/synthetic-session/messages${query}`, agent: false }, response => {
+      const request = http.get({ host: '127.0.0.1', port: (server.address() as AddressInfo).port, path: `/sessions/${sessionId}/messages${query}`, agent: false }, response => {
         const chunks: Buffer[] = []; response.on('data', chunk => chunks.push(chunk));
         response.once('end', () => resolve({ status: response.statusCode!, body: JSON.parse(Buffer.concat(chunks).toString()) })); response.once('error', reject);
       });
@@ -82,6 +86,14 @@ for (const query of ['?payload=small', '?limit=501', '?limit=1junk', '?offset=-1
   });
 }
 
+for (const sessionId of ['.hidden', 'a..b', 'x'.repeat(129)]) {
+  test(`memory actual history route refuses session id ${sessionId.slice(0, 12)} before lease/provider access`, async () => {
+    let calls = 0;
+    const result = await routeCall('', { withHistoryLease: async () => { calls++; }, fetchHistory: async () => { calls++; } }, false, sessionId);
+    assert.equal(result.status, 400); assert.equal(result.body.error.code, 'INVALID_SESSION_ID'); assert.equal(calls, 0);
+  });
+}
+
 test('memory actual history route transfers query and requester to a concrete owned transport', async () => {
   let calls = 0;
   const expected = { messages: [{ id: 'owned', content: 'العربية 🧵' }], total: 1 };
@@ -90,6 +102,7 @@ test('memory actual history route transfers query and requester to a concrete ow
     async withHistoryLease(sessionId: string, userId: number, options: any, sink: HistoryHttpSink) {
       calls++; assert.equal(sessionId, 'synthetic-session'); assert.equal(userId, 7);
       assert.equal(options.limit, 1); assert.equal(options.offset, 2); assert.equal(options.payloadMode, 'full');
+      assert.equal(options.displayMask, true, 'ADR-210: the viewer history is masked');
       assert.ok(HistoryHttpSink.isConcrete(sink));
       await sink.write(Buffer.from(JSON.stringify(expected)), new AbortController().signal); await sink.complete();
     },

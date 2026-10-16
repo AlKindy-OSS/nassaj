@@ -19,6 +19,7 @@ import express, { type Request, type Response } from 'express';
 
 import { assertSessionAccessible } from '@/modules/providers/services/sessions.service.js';
 import { getSessionResourcesCached } from '@/modules/providers/services/session-resources.service.js';
+import { parseSessionIdParam } from '@/shared/session-id.js';
 import { AppError, asyncHandler } from '@/shared/utils.js';
 
 const router = express.Router();
@@ -28,15 +29,6 @@ const router = express.Router();
 // الذي تُركَّب فيه بقيّة حدود المعدّل. والكاش في الخدمة يمتصّ التكرار أصلاً،
 // فالحدّ دفاعٌ ثانٍ لا أوّل.
 
-const SESSION_ID_PATTERN = /^[a-zA-Z0-9._-]{1,120}$/;
-
-function parseSessionId(value: unknown): string {
-  const raw = typeof value === 'string' ? value.trim() : '';
-  if (!SESSION_ID_PATTERN.test(raw)) {
-    throw new AppError('Invalid sessionId.', { code: 'INVALID_SESSION_ID', statusCode: 400 });
-  }
-  return raw;
-}
 
 /**
  * هوية المتصل من `req.user` وحده (يملؤها authenticateToken عند نقطة التركيب) —
@@ -60,7 +52,7 @@ function readAuthenticatedUserId(req: Request): number {
 router.get(
   '/session/:sessionId',
   asyncHandler(async (req: Request, res: Response) => {
-    const sessionId = parseSessionId(req.params.sessionId);
+    const sessionId = parseSessionIdParam(req.params.sessionId);
     const userId = readAuthenticatedUserId(req);
 
     assertSessionAccessible(sessionId, userId, 'read');

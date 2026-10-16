@@ -1,0 +1,121 @@
+{
+  "provenance": "Scrubbed from the real Claude child transcript and its meta.json on 2026-10-13. Three Bash calls retained with original transcript UUIDs and tool IDs. Commands, output, local paths, session IDs and personal content removed.",
+  "meta": {
+    "toolUseId": "toolu_01A6qm7UeHmC6FjR2gsBSkHG",
+    "agentType": "qa-critic",
+    "description": "[scrubbed]"
+  },
+  "events": [
+    {
+      "type": "assistant",
+      "uuid": "97ff5227-8918-4665-bfe9-5c33a56f5072",
+      "parentUuid": "6807a1b1-e0d8-4615-88c8-488755a7d6ae",
+      "timestamp": "2026-10-13T21:10:05.360Z",
+      "message": {
+        "role": "assistant",
+        "content": [
+          {
+            "type": "tool_use",
+            "id": "toolu_01FF5Bd3T5FmkDXYXbTaVCnF",
+            "name": "Bash",
+            "input": {
+              "command": "[scrubbed command]",
+              "description": "[scrubbed description]"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "type": "user",
+      "uuid": "056fa1e1-13d0-47b6-954e-8f78bd3a278b",
+      "parentUuid": "97ff5227-8918-4665-bfe9-5c33a56f5072",
+      "timestamp": "2026-10-13T21:10:05.452Z",
+      "message": {
+        "role": "user",
+        "content": [
+          {
+            "type": "tool_result",
+            "tool_use_id": "toolu_01FF5Bd3T5FmkDXYXbTaVCnF",
+            "content": "[scrubbed tool output]",
+            "is_error": false
+          }
+        ]
+      }
+    },
+    {
+      "type": "assistant",
+      "uuid": "b875cee5-c6b8-4a46-b5b0-5495ab902638",
+      "parentUuid": "d6ffc0f2-5412-4139-9aec-7db80ce191dd",
+      "timestamp": "2026-10-13T21:10:24.746Z",
+      "message": {
+        "role": "assistant",
+        "content": [
+          {
+            "type": "tool_use",
+            "id": "toolu_01475v5a4JbZz2HmPhkTNoah",
+            "name": "Bash",
+            "input": {
+              "command": "[scrubbed command]",
+              "description": "[scrubbed description]"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "type": "user",
+      "uuid": "8a27a1f4-9bd0-4090-9c97-c355a1f4ea12",
+      "parentUuid": "b875cee5-c6b8-4a46-b5b0-5495ab902638",
+      "timestamp": "2026-10-13T21:10:24.828Z",
+      "message": {
+        "role": "user",
+        "content": [
+          {
+            "type": "tool_result",
+            "tool_use_id": "toolu_01475v5a4JbZz2HmPhkTNoah",
+            "content": "[scrubbed tool output]",
+            "is_error": false
+          }
+        ]
+      }
+    },
+    {
+      "type": "assistant",
+      "uuid": "2a6463ef-cb15-4cfc-8c29-7a5034a0d7d4",
+      "parentUuid": "b71713e2-95eb-43e9-a40b-b2c64cd46b70",
+      "timestamp": "2026-10-13T21:10:40.853Z",
+      "message": {
+        "role": "assistant",
+        "content": [
+          {
+            "type": "tool_use",
+            "id": "toolu_0116DytPf22gZNU2pgcXF1rB",
+            "name": "Bash",
+            "input": {
+              "command": "[scrubbed command]",
+              "description": "[scrubbed description]"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "type": "user",
+      "uuid": "d4726b32-6415-4a6d-ad51-60ddad551402",
+      "parentUuid": "2a6463ef-cb15-4cfc-8c29-7a5034a0d7d4",
+      "timestamp": "2026-10-13T21:10:40.928Z",
+      "message": {
+        "role": "user",
+        "content": [
+          {
+            "type": "tool_result",
+            "tool_use_id": "toolu_0116DytPf22gZNU2pgcXF1rB",
+            "content": "[scrubbed tool output]",
+            "is_error": false
+          }
+        ]
+      }
+    }
+  ]
+}

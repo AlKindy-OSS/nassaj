@@ -52,7 +52,7 @@ async function http(method: string, route: string, init: { token?: string; body?
   const text = await res.text();
   let json: Json = {};
   try { json = JSON.parse(text) as Json; } catch { json = {}; }
-  return { status: res.status, json, headers: res.headers };
+  return { status: res.status, json, headers: res.headers, text };
 }
 
 const tokenFor = (userId: number) => generateToken(userDb.getUserById(userId));
@@ -60,12 +60,18 @@ const login = (username: string, password: string) => http('POST', '/api/auth/lo
 const cookieOf = (headers: Headers, name: string) => (headers.getSetCookie?.() ?? [headers.get('set-cookie') ?? ''])
   .map((value) => value.split(';', 1)[0]).find((value) => value.startsWith(`${name}=`)) ?? '';
 
-/** GET /login → mock IdP → /callback → /exchange; returns the exchange answer or the refusal code. */
-async function ssoLogin(claims: Json) {
+/** GET /login → mock IdP → /callback; returns the raw callback answer and the transaction cookie. */
+async function ssoCallback(claims: Json) {
   const start = await http('GET', '/api/auth/oidc/login');
   const cookie = cookieOf(start.headers, BROWSER_TRANSACTION_COOKIE);
   const { code, state } = op.authorize(String(start.headers.get('location')), claims);
   const back = await http('GET', `/api/auth/oidc/callback?${new URLSearchParams({ state, code })}`, { cookie });
+  return { back, cookie };
+}
+
+/** GET /login → mock IdP → /callback → /exchange; returns the exchange answer or the refusal code. */
+async function ssoLogin(claims: Json) {
+  const { back, cookie } = await ssoCallback(claims);
   const target = new URL(String(back.headers.get('location')), 'https://app.example');
   const oneTime = target.searchParams.get('oidc_code');
   if (!oneTime) return { refusal: target.searchParams.get('error') };
@@ -179,7 +185,10 @@ test('test plan 8: an env-configured node upgrades paused → import → test �
   assert.equal(userDb.getUserById(Number(jit.userId))?.role, 'user', 'JIT under role_grant_scope');
   const outOfScope = await ssoLogin({ sub: 'sub-outsider', ...NESTED('admin', 'org-9') });
   assert.ok(outOfScope.refusal, 'a grant outside the allowed scopes grants nothing');
-  assert.equal((await ssoLogin({ sub: 'sub-owner', ...NESTED('admin', 'org-1') })).refusal, 'owner_must_sign_in_locally');
+  const { back: ownerTry } = await ssoCallback({ sub: 'sub-owner', ...NESTED('admin', 'org-1') });
+  assert.equal(ownerTry.status, 200, 'an owner without a passkey gets the step-up page, not a code');
+  assert.match(ownerTry.text, /Nassaj requires your passkey/);
+  assert.equal(ownerTry.headers.get('location'), null);
   assert.equal((await login(owner.username, OWNER_PASSWORD)).status, 200, 'owner password after apply');
 });
 

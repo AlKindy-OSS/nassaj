@@ -5,6 +5,7 @@ import path from 'node:path';
 import Database from 'better-sqlite3';
 
 import { userDb } from '@/modules/database/index.js';
+import { userConfigDir } from '@/services/isolation/provision-user-dirs.js';
 import { resolveProviderEnv } from '@/services/isolation/resolve-provider-env.js';
 import { readOptionalString } from '@/shared/utils.js';
 
@@ -100,6 +101,29 @@ export function resolveOpenCodeDatabasePathForUser(
   options: { honorGrants?: boolean } = {},
 ): string {
   return path.join(resolveOpenCodeDataHomeForUser(userId, options), OPENCODE_DB_FILENAME);
+}
+
+/**
+ * Every opencode.db a session row may name, computed WITHOUT side effects (no
+ * provisioning, no grant-home sweep): the operator DB, then each registered
+ * member's own `<userTree>/.local/share/opencode/opencode.db`. A grant home only
+ * links to its owner's tree, so the owner's entry covers it. Isolation policy is
+ * not consulted: a DB written before a policy change still holds its sessions.
+ * Readers must have authorised the session row (bound to a visible project)
+ * before looking it up here by exact id.
+ */
+export function knownOpenCodeDatabasePaths(): string[] {
+  const paths = new Set<string>([path.join(operatorOpenCodeDataHome(), OPENCODE_DB_FILENAME)]);
+  try {
+    for (const user of userDb.listUsers()) {
+      paths.add(userConfigDir(user.id, path.join('.local', 'share', OPENCODE_DATA_SUBDIR, OPENCODE_DB_FILENAME)));
+    }
+  } catch (error) {
+    console.error('Failed to enumerate per-user opencode databases; using operator DB only', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+  return [...paths];
 }
 
 /** Whether `sessionId` is a row of `dbPath`: false when the file is absent, null when unreadable. */

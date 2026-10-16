@@ -36,6 +36,8 @@ type UserRow = {
   password_changed_at: number | null;
   must_change_password: number;
   authorization_generation: number;
+  /** T-2035: bearer epoch carried as the JWT `tok_ep` claim; logout bumps it. */
+  token_epoch: number;
 };
 
 type UserPublicRow = Pick<
@@ -51,6 +53,9 @@ type UserPublicRow = Pick<
   | 'must_change_password'
   | 'authorization_generation'
 >;
+
+/** The authenticated identity row: public fields plus the bearer epoch (T-2035). */
+type UserAuthRow = UserPublicRow & Pick<UserRow, 'token_epoch'>;
 
 type UserGitConfig = {
   git_name: string | null;
@@ -89,6 +94,9 @@ type CreateSsoUserResult =
 
 const PUBLIC_COLUMNS =
   'id, username, created_at, last_login, role, status, avatar_url, password_changed_at, must_change_password, authorization_generation';
+
+/** getUserById feeds every token verifier, so it also reads the epoch (T-2035). */
+const AUTH_COLUMNS = `${PUBLIC_COLUMNS}, token_epoch`;
 
 // ---------------------------------------------------------------------------
 // Queries
@@ -250,6 +258,20 @@ export const userDb = {
     `).get(normalized, normalized, normalized) as UserRow | undefined;
   },
 
+  /**
+   * Every identifier this account can sign in with (username and accepted
+   * invite emails, normalized like getUserByLoginIdentifier). Used by the
+   * owner unlock to find the account's login-throttle rows (T-2035).
+   */
+  listLoginIdentifiers(userId: number): string[] {
+    const db = getConnection();
+    const user = db.prepare('SELECT username FROM users WHERE id = ?').get(userId) as { username: string } | undefined;
+    if (!user) return [];
+    const emails = db.prepare(`SELECT DISTINCT lower(trim(email)) AS email FROM invites
+      WHERE accepted_by = ? AND email IS NOT NULL`).all(userId) as Array<{ email: string }>;
+    return [...new Set([user.username.trim().toLowerCase(), ...emails.map((row) => row.email)])];
+  },
+
   /** Replaces the stored password hash (e.g. legacy bcrypt → argon2id rehash). */
   setPasswordHash(userId: number, passwordHash: string): void {
     const db = getConnection();
@@ -374,14 +396,35 @@ export const userDb = {
     }
   },
 
-  /** Returns public user fields by ID (no password hash), active only. */
-  getUserById(userId: number): UserPublicRow | undefined {
+  /** Returns public user fields and the token epoch by ID (no password hash), active only. */
+  getUserById(userId: number): UserAuthRow | undefined {
     const db = getConnection();
     return db
       .prepare(
-        `SELECT ${PUBLIC_COLUMNS} FROM users WHERE id = ? AND is_active = 1 AND status = 'active'`
+        `SELECT ${AUTH_COLUMNS} FROM users WHERE id = ? AND is_active = 1 AND status = 'active'`
       )
-      .get(userId) as UserPublicRow | undefined;
+      .get(userId) as UserAuthRow | undefined;
+  },
+
+  /** The user's current bearer epoch (0 when the row is missing). T-2035. */
+  getTokenEpoch(userId: number): number {
+    const row = getConnection()
+      .prepare('SELECT token_epoch FROM users WHERE id = ?')
+      .get(userId) as { token_epoch: number } | undefined;
+    return row?.token_epoch ?? 0;
+  },
+
+  /**
+   * Advances the user's bearer epoch, killing every JWT they hold on every
+   * device (T-2035 sign-out). Touches no column of the authorization-generation
+   * trigger, so permits, launch fences and running turns are unaffected.
+   * Returns the new epoch, or null when no such user exists.
+   */
+  bumpTokenEpoch(userId: number): number | null {
+    const row = getConnection()
+      .prepare('UPDATE users SET token_epoch = token_epoch + 1 WHERE id = ? RETURNING token_epoch')
+      .get(userId) as { token_epoch: number } | undefined;
+    return row?.token_epoch ?? null;
   },
 
   /**

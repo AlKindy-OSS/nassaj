@@ -603,7 +603,6 @@
     "agent": "Agente"
   },
   "customCommand": {
-    "confirmBashExecution": "Questo comando contiene comandi bash che verranno eseguiti. Vuoi procedere?",
     "executionCancelled": "Esecuzione del comando annullata",
     "executeError": "Errore durante l'esecuzione del comando: {{message}}",
     "unknownError": "Errore sconosciuto"

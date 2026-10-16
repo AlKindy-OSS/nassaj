@@ -146,17 +146,29 @@ function AgentRow({ agent, frozen }: { agent: RunAgent; frozen: boolean }) {
   const typeLabel = agent.agentName || agent.type || '—';
   const modelLabel = agent.model || '—';
   const effortLabel = agent.effort || '—';
-  const tools = agent.tools?.map((tool, index) => ({
-    key: `${tool.name}:${index}`,
-    name: tool.name,
-    succeeded: ['done', 'success', 'completed'].includes(tool.status ?? ''),
-    failed: tool.status === 'failed' || tool.status === 'error',
-  })) ?? agent.childTools?.map((tool, index) => ({
-    key: tool.toolId || `${tool.toolName}:${index}`,
-    name: tool.toolName,
-    succeeded: Boolean(tool.toolResult && !tool.toolResult.isError),
-    failed: Boolean(tool.toolResult?.isError),
-  }));
+  const toolRows = new Map<
+    string,
+    { key: string; name: string; succeeded: boolean; failed: boolean }
+  >();
+  for (const tool of agent.childTools ?? []) {
+    const key = tool.toolId || `legacy:${tool.toolName}`;
+    toolRows.set(key, {
+      key,
+      name: tool.toolName,
+      succeeded: Boolean(tool.toolResult && !tool.toolResult.isError),
+      failed: Boolean(tool.toolResult?.isError),
+    });
+  }
+  for (const tool of agent.tools ?? []) {
+    const key = tool.id || `legacy:${tool.name}`;
+    toolRows.set(key, {
+      key,
+      name: tool.name,
+      succeeded: ['done', 'success', 'completed'].includes(tool.status ?? ''),
+      failed: tool.status === 'failed' || tool.status === 'error',
+    });
+  }
+  const tools = [...toolRows.values()];
   const rowPercent = agent.status === 'done' ? 100 : running ? (agent.progress?.percent ?? null) : null;
 
   // صدق العرض (B-208، بند 8 — فيتو): الأداة الجارية وعدّاد الاستدعاءات يأتيان
@@ -222,14 +234,28 @@ function AgentRow({ agent, frozen }: { agent: RunAgent; frozen: boolean }) {
 
         {/* Name, model and effort stay scannable as compact chips. */}
         <span className="flex min-w-0 flex-wrap items-center gap-1">
-          <span className="max-w-40 truncate rounded bg-muted/60 px-1.5 py-0.5 text-xs font-medium text-foreground" aria-label={t('agentActivity.name')}>
+          <span
+            className={[
+              'max-w-40 truncate rounded bg-muted/60 px-1.5 py-0.5 text-xs',
+              'font-medium text-foreground',
+            ].join(' ')}
+          >
             <bdi>{typeLabel}</bdi>
           </span>
-          <span className="max-w-48 truncate rounded border border-border px-1.5 py-0.5 text-[10px] text-muted-foreground" aria-label={t('agentActivity.model')}>
+          <span
+            className={[
+              'max-w-48 truncate rounded border border-border px-1.5 py-0.5 text-[10px]',
+              'text-muted-foreground',
+            ].join(' ')}
+          >
             <bdi>{modelLabel}</bdi>
-            {agent.modelInherited && agent.model && <span> · {t('agentActivity.inherited')}</span>}
           </span>
-          <span className="max-w-32 truncate rounded border border-border px-1.5 py-0.5 text-[10px] text-muted-foreground" aria-label={t('agentActivity.effort')}>
+          <span
+            className={[
+              'max-w-32 truncate rounded border border-border px-1.5 py-0.5 text-[10px]',
+              'text-muted-foreground',
+            ].join(' ')}
+          >
             <bdi>{effortLabel}</bdi>
           </span>
         </span>

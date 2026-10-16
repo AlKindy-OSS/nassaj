@@ -693,7 +693,7 @@ export function useChatProviderState({ selectedSession, selectedProject }: UseCh
     sessionId: string,
     engine: string,
     model: string,
-    confirmExport: (turns: number) => Promise<boolean> | boolean,
+    confirmExport: (turns: number) => Promise<boolean>,
   ): Promise<{ engine: string; model: string; outcome: string }> => {
     const call = async (acknowledgedExport: boolean) => authenticatedFetch(
       `/api/providers/claude/sessions/${encodeURIComponent(sessionId)}/engine`,

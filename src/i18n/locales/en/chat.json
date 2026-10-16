@@ -59,7 +59,8 @@
       "sdk_error": "Couldn't complete the side question — an unexpected error occurred.",
       "empty_response": "The model produced no visible answer — try rephrasing the question.",
       "timeout": "This feature requires a server update.",
-      "disconnected": "Can't send — connection lost."
+      "disconnected": "Can't send — connection lost.",
+      "btw_forbidden": "You need write access to this session to ask a side question."
     },
     "hints": {
       "quota": "Uses your provider account quota.",
@@ -175,7 +176,8 @@
       "stamp": "From your click at {{time}} — not a live status",
       "stampRepeat": "Attempt {{count}} at {{time}} — same result",
       "dismiss": "Dismiss"
-    }
+    },
+    "maskedRunDisabled": "Contains masked secrets — run it from the original source"
   },
   "copyMessage": {
     "copy": "Copy message",
@@ -709,7 +711,6 @@
     "estimateTooltip": "Rough estimate — based on completed tasks so far."
   },
   "agentActivity": {
-    "genericType": "Agent",
     "percentAria": "Agent progress",
     "declaredHeading": "Reported by the agent",
     "declaredDone": "Done",
@@ -943,12 +944,13 @@
     }
   },
   "customCommand": {
-    "confirmBashExecution": "This command contains bash commands that will be executed. Do you want to proceed?",
+    "confirmBashExecution": "This command includes the Bash snippets shown below. Its text is sent to the agent, which may decide to run them — Nassaj itself runs nothing. Continue?",
     "executionCancelled": "Command execution cancelled",
     "executeError": "Error executing command: {{message}}",
     "emptyResult": "Could not display the command result: no content was returned.",
     "invalidResult": "The command returned an unsupported result.",
-    "unknownError": "Unknown error"
+    "unknownError": "Unknown error",
+    "bashSnippetsTitle": "Custom command with Bash snippets"
   },
   "inlineModelSwitcher": {
     "label": "Model",
@@ -1337,5 +1339,72 @@
       "short": "Public read link active",
       "full": "A public read link is active for this session: anyone holding it can read it without signing in."
     }
+  },
+  "richBlock": {
+    "render": "Render",
+    "runD3": "Run D3",
+    "error": "This block could not be rendered",
+    "showSource": "Show source",
+    "runD3Title": "Runs the code written in this message inside an isolated frame",
+    "retry": "Retry"
+  },
+  "table": {
+    "sortAscending": "Sort ascending",
+    "sortDescending": "Sort descending",
+    "sortNone": "Unsorted"
+  },
+  "shellMode": {
+    "toggle": "Shell mode: what you type runs as a command in the Shell tab",
+    "badge": "Shell",
+    "placeholder": "Type a command to run in the Shell tab — Enter runs, Esc exits",
+    "run": "Run in shell",
+    "exit": "Leave shell mode",
+    "disabledReason": {
+      "loading": "Checking raw execution permission…",
+      "forbidden": "Shell mode is available to the owner and admins only.",
+      "raw_exec_disabled": "Raw execution is not enabled for you. Enable it in Settings › Command board.",
+      "raw_exec_blocked": "Raw execution is blocked in this server's environment.",
+      "config_denied": "The command board configuration denies this run.",
+      "denied_command": "The server refused this command under the deny rule “{{rule}}”.",
+      "forbidden_control_char": "The command contains a control character that is not allowed.",
+      "carriage_return_forbidden": "The command contains a carriage return (CR), which is not allowed.",
+      "command_too_long": "The command is longer than allowed.",
+      "too_many_lines": "The command has more lines than allowed.",
+      "oneshot_shape_invalid": "The run request was malformed.",
+      "oneshot_limit": "Too many runs at once; wait for one to finish.",
+      "audit_unavailable": "The audit log is unavailable right now, so the run was refused as a precaution.",
+      "oneshot_in_progress": "This run is already in progress.",
+      "oneshot_start_failed": "The server could not start the run.",
+      "invalid_command": "The command is not valid.",
+      "provider_removed": "This terminal's provider was removed, so the run was stopped.",
+      "oneshot_ledger_unavailable": "The run ledger is temporarily unavailable; the command was not executed.",
+      "unknown": "The server refused to run the command."
+    },
+    "riskConfirm": {
+      "title": "Confirm a sensitive command",
+      "body": "This command can stop services or processes on this server. It will run exactly as shown below, in the Shell tab.",
+      "confirm": "Run command"
+    },
+    "blocked": "This command is blocked and will not be sent: killing by name (pkill/killall) is always refused by the server. Stop the process by its PID or its port instead.",
+    "tmpfsWarning": "This command writes to /tmp or /dev/shm, which live in memory, not on disk. Agent hooks do not apply to commands you type here; use TMPDIR=/var/tmp instead."
+  },
+  "shellRuns": {
+    "label": "Shell runs",
+    "agentCli": "{{provider}} interactive CLI",
+    "attach": "Attach output to message",
+    "attached": "Output added to your message draft — review it before sending.",
+    "captureFailed": "Could not fetch this run's output.",
+    "truncated": "(output truncated)",
+    "exit": "exit code {{code}}",
+    "running": "Running",
+    "stale": "No longer tracked (earlier page)",
+    "outcome": {
+      "interrupted": "Interrupted — completion unknown",
+      "unknown": "Unknown — not run in this session",
+      "refused": "Refused — not executed"
+    }
+  },
+  "sessionDelete": {
+    "forbidden": "Only the conversation's creator, the project owner, or an admin can delete it permanently. You can archive it instead."
   }
 }

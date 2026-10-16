@@ -88,13 +88,23 @@ test('B-164: different milliseconds in one JWT second mint byte-identical tokens
   t.mock.method(Date, 'now', () => nowMs);
   // Model a refresh burst at distinct milliseconds without crossing
   // jsonwebtoken's second-level iat. The old `|| Date.now()` fallback made
-  // every pwd_iat payload (and therefore every token) different.
+  // every pwd_iat payload (and therefore every token) different. A refresh
+  // keeps the device's session id (T-2035 round 3), so the burst passes one.
   const burst = Array.from({ length: 64 }, () => {
-    const token = generateToken({ id: 1, username: 'a', role: 'user' });
+    const token = generateToken({ id: 1, username: 'a', role: 'user' }, { sid: 'deviceSid0000000000000' });
     nowMs += 5;
     return token;
   });
   assert.equal(new Set(burst).size, 1);
+});
+
+test('T-2035 round 3: every sign-in mints its own 128-bit session id; a refresh keeps it', () => {
+  const first = decode(generateToken({ id: 1, username: 'a', role: 'user' }));
+  const second = decode(generateToken({ id: 1, username: 'a', role: 'user' }));
+  assert.match(first.sid as string, /^[A-Za-z0-9_-]{22}$/);
+  assert.notEqual(first.sid, second.sid);
+  const refreshed = decode(generateToken({ id: 1, username: 'a', role: 'user' }, { sid: first.sid as string }));
+  assert.equal(refreshed.sid, first.sid);
 });
 
 test('B-164: crossing a JWT second advances iat and exp while pwd_iat stays deterministic', (t) => {

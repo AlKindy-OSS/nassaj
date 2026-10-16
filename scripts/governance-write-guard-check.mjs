@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // ============================================================================
-// scripts/governance-write-guard.test.mjs
+// scripts/governance-write-guard-check.mjs
 // ----------------------------------------------------------------------------
 // حارس B-573 — لا قناةَ كتابةٍ من دليل عمل مشروع إلى مادة حوكمة الأسطول.
 //
@@ -33,8 +33,9 @@
 // في نسّاج-كور لا هنا، commit a91bb036)، فلا يظهر في `git status` ولا في أي
 // مراجعة diff. هذا الحارس هو ما يجعل ملفاً غير مرئيّ **مُثبَتاً** على كل تشغيل.
 //
-// التشغيل:  node scripts/governance-write-guard.test.mjs     (exit 0 = نجح)
-//           يعمل ضمن `npm test` ← `test:scripts`، ومنه في CI على كل دفعة.
+// التشغيل:  npm run check:governance     (exit 0 = نجح)
+//           فحصٌ لهذا المضيف لا اختبار مجموعة: يقرأ مادة الحوكمة الحيّة على المضيف،
+//           فلا يدخل `test:scripts` ولا بوابة الإصدار.
 // ============================================================================
 import { lstatSync, readFileSync, existsSync, readdirSync, realpathSync } from 'node:fs';
 import { createHash } from 'node:crypto';

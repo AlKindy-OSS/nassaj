@@ -20,7 +20,10 @@ export type UserIdentityRow = {
   created_at: string;
   /** Epoch ms of the last SSO login that carried a recognized role (T-1939). */
   last_attested_at: number | null;
-  /** Epoch ms of the owner's own opt-in to SSO sign-in on this link, or null (ADR-194 A1). */
+  /**
+   * Legacy ADR-194 A1 opt-in stamp. Unused since owner SSO sign-in became
+   * always on (2026-10-16); the column stays so the schema and rollback hold.
+   */
   owner_sso_opt_in_at: number | null;
 };
 
@@ -81,24 +84,6 @@ export const userIdentitiesDb = {
     return getConnection()
       .prepare('UPDATE user_identities SET last_attested_at = ? WHERE id = ? AND user_id = ?')
       .run(attestedAtMs, identityId, userId).changes === 1;
-  },
-
-  /** The user's links for one issuer (more than one only on a legacy duplicate). */
-  findForUserAndIssuer(userId: number, issuer: string): UserIdentityRow[] {
-    return getConnection()
-      .prepare('SELECT * FROM user_identities WHERE user_id = ? AND issuer = ? ORDER BY id')
-      .all(userId, issuer) as UserIdentityRow[];
-  },
-
-  /**
-   * Sets or clears the owner SSO opt-in of one link (ADR-194 A1). Scoped by
-   * user_id as well as the link id, so a caller only ever touches its own row.
-   * Returns true only when exactly that link was written.
-   */
-  setOwnerSsoOptIn(identityId: number, userId: number, optInAtMs: number | null): boolean {
-    return getConnection()
-      .prepare('UPDATE user_identities SET owner_sso_opt_in_at = ? WHERE id = ? AND user_id = ?')
-      .run(optInAtMs, identityId, userId).changes === 1;
   },
 
   /** Whether the user holds at least one IdP link (SSO-only gate, T-1939). */

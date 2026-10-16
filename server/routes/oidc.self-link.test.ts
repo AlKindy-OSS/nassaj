@@ -15,6 +15,7 @@ import express from 'express';
 
 import { createSsoRuntimeDouble } from '../services/__tests__/sso-runtime-double.js';
 import { createSsoConfigDouble, doubleMapping } from '../services/__tests__/sso-config-double.js';
+import { configureMemoryLoginThrottle } from '../services/__tests__/login-throttle-memory-store.js';
 
 const url = (spec: string) => pathToFileURL(path.resolve(import.meta.dirname, spec)).href;
 const sso = createSsoConfigDouble();
@@ -268,6 +269,9 @@ const failureReasons = () => audits
 // POST /link/self/start
 // ---------------------------------------------------------------------------
 
+// T-2035: the auth middleware (the throttle's configurer) is a double here.
+const throttleStore = await configureMemoryLoginThrottle();
+
 test('start: SSO login unavailable answers 501 before authentication, like every OIDC route', async () => {
   sso.state.loginAvailable = false;
   const res = await startLink(null);
@@ -294,6 +298,22 @@ test('start: a wrong password is 401 with a NON-session code and starts nothing'
   assert.deepEqual(passwordChecks, ['hash-12']);
   assert.deepEqual(failureReasons(), ['bad_current_password']);
   assert.ok(!JSON.stringify(audits).includes('wrong'));
+});
+
+test('T-2035: start shares the account login throttle — the sixth wrong password is 429', async () => {
+  throttleStore.rows.clear();
+  try {
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      assert.equal((await startLink(12, { currentPassword: 'wrong' })).status, 401);
+    }
+    const locked = await startLink(12, { currentPassword: 'right' });
+    assert.equal(locked.status, 429);
+    assert.ok(Number(locked.headers.get('retry-after')) > 0);
+    assert.equal((await locked.json()).code, 'login_temporarily_locked');
+    assert.equal(passwordChecks.length, 5, 'argon2 never ran while locked');
+  } finally {
+    throttleStore.rows.clear();
+  }
 });
 
 test('start: the per-account limiter answers 429 BEFORE any argon2 verification', async () => {

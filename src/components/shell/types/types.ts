@@ -17,6 +17,26 @@ export type ShellInitMessage = {
   initialCommand: string | null | undefined;
   isPlainShell: boolean;
   forceRestart?: boolean;
+  /**
+   * T-2037: binds the init to ONE composer-submitted one-shot run. The server
+   * launches a runId at most once; every later init with the same id only
+   * re-attaches (or reports the run finished). A one-shot init never carries
+   * forceRestart.
+   */
+  runId?: string;
+  /** T-2037: marks a composer one-shot for the server's audit and gate. */
+  origin?: 'composer_shell';
+  /**
+   * T-2037: re-attach only — never launch. Set on every one-shot init except
+   * the single launching one, which alone carries initialCommand.
+   */
+  attachOnly?: true;
+};
+
+/** T-2037: asks the server for the captured output of a one-shot run. */
+export type ShellOneShotCaptureRequest = {
+  type: 'oneshot_capture';
+  runId: string;
 };
 
 export type ShellResizeMessage = {
@@ -30,7 +50,35 @@ export type ShellInputMessage = {
   data: string;
 };
 
-export type ShellOutgoingMessage = ShellInitMessage | ShellResizeMessage | ShellInputMessage;
+export type ShellOutgoingMessage =
+  | ShellInitMessage
+  | ShellResizeMessage
+  | ShellInputMessage
+  | ShellOneShotCaptureRequest;
+
+/** T-2037: server frames that belong to a one-shot run (never to a session shell). */
+export type OneShotFrame =
+  | {
+      type: 'oneshot_finished';
+      runId: string;
+      /** Only a number is a real exit; null never means success. */
+      exitCode: number | null;
+      /** Cut short (e.g. a server restart): completion is unknown. */
+      interrupted?: true;
+      /** The server has no record of running it in this session. */
+      unknown?: true;
+      /** Refused and never executed. */
+      refused?: true;
+    }
+  | {
+      type: 'oneshot_capture';
+      runId: string;
+      text: string;
+      truncated: boolean;
+      exitCode: number | null;
+    }
+  /** The capture could not be served; the run and socket are unaffected. */
+  | { type: 'oneshot_capture_unavailable'; runId: string };
 
 export type ShellIncomingMessage =
   | { type: 'output'; data: string }
@@ -70,6 +118,16 @@ export type UseShellRuntimeOptions = {
    */
   onShellError?: ((error: ShellErrorInfo | null) => void) | null;
   onOutputRef?: MutableRefObject<(() => void) | null>;
+  /**
+   * T-2037: the one-shot run this shell is bound to. When set, every init
+   * re-sends this same id (reconnect, remount, Connect) and never forceRestart,
+   * so nothing but a fresh composer submit can start a command.
+   */
+  oneShotRunId?: string | null;
+  /** T-2037: `oneshot_finished` / `oneshot_capture` frames for that run. */
+  onOneShotFrame?: ((frame: OneShotFrame) => void) | null;
+  /** T-2037: true once per run — only that init may carry the command. */
+  claimOneShotLaunch?: ((runId: string) => boolean) | null;
 };
 
 export type ShellSharedRefs = {

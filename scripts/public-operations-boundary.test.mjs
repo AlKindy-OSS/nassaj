@@ -425,15 +425,17 @@ test('the gate scans only paths the public export ships', () => {
   for (const excluded of [
     'scripts/operator-gate/leak-rules.mjs', 'scripts/release.mjs',
     'scripts/lib/public-release-provenance.mjs',
-    'scripts/lib/release-baseline-comparator.mjs',
+    'scripts/lib/release-frozen-build.mjs',
     'scripts/release-orchestrator-phases.test.mjs', 'docs/plans/roadmap.md',
-    'scripts/release-preflight.mjs', 'scripts/lib/release-baseline-cache.mjs',
+    'scripts/release-preflight.mjs', 'scripts/lib/release-orchestrator-phases.mjs',
     'automation/ai-news-daily/run.mjs', '.github/workflows/release.yml',
     'server/modules/database/deletion-writer-inventory.test.ts',
     'src/components/code-editor/utils/office/__fixtures__/ar/arabic-rtl.docx',
     'src/components/code-editor/utils/office/__fixtures__/ar/generate.py',
     'src/components/code-editor/utils/office/testing/fixtures/arabic-rtl.docx',
     'src/components/code-editor/utils/office/testing/fixtures/arabic-rtl.xlsx',
+    'scripts/proofs/codex-steer-b1/evidence-summary.json',
+    'scripts/proofs/codex-steer-b1/rpc.mjs',
   ]) assert.equal(isPublicExportPath(excluded), false, excluded);
 });
 

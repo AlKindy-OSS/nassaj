@@ -16,8 +16,8 @@ import {
   type ProgressPlan,
   type ProgressSubagent,
   type SubagentState,
-} from '@/shared/progress-normalize.js';
-import type { NormalizedMessage } from '@/shared/types.js';
+} from '../../../../shared/progress-normalize.js';
+import type { NormalizedMessage } from '../../../../shared/types.js';
 
 type AnyRecord = Record<string, any>;
 
@@ -38,7 +38,7 @@ export function claudeParentToolUseId(raw: AnyRecord): string | null {
  */
 export function claudeToolUseProgress(
   name: unknown, toolId: unknown, input: unknown, parentId: string | null,
-  parentModel?: unknown,
+  _parentModel?: unknown,
 ): { plan?: ProgressPlan; subagent?: ProgressSubagent } {
   if (typeof name !== 'string') return {};
   const record = input && typeof input === 'object' ? input as AnyRecord : {};
@@ -55,9 +55,6 @@ export function claudeToolUseProgress(
   const label = typeof record.description === 'string' && record.description.trim()
     ? record.description
     : record.subagent_type;
-  const model = typeof record.model === 'string' && record.model.trim() ? record.model : parentModel;
-  const modelInherited = !(typeof record.model === 'string' && record.model.trim())
-    && typeof model === 'string' && model.length > 0;
   const effort = record.effort ?? record.reasoning_effort;
   const subagent = buildProgressSubagent({
     id: toolId,
@@ -65,8 +62,6 @@ export function claudeToolUseProgress(
     label,
     state: 'started',
     agentName: record.subagent_type,
-    model,
-    modelInherited,
     effort,
   });
   return subagent ? { subagent } : {};
@@ -94,6 +89,8 @@ export type ClaudeSubagentTracker = {
    * notification can never invent a subagent.
    */
   settle(toolUseId: string, state: SubagentState): ProgressSubagent | null;
+  /** Live SDK task_progress snapshot for a child without parent_tool_use_id rows. */
+  progress(raw: AnyRecord): ProgressSubagent | null;
 };
 
 /**
@@ -101,9 +98,12 @@ export type ClaudeSubagentTracker = {
  * carries no tool name, so the pairing needs the earlier tool_use; the map is
  * bounded so a long run cannot grow it without limit.
  */
-export function createClaudeSubagentTracker(maxEntries = TRACKER_MAX_ENTRIES): ClaudeSubagentTracker {
+export function createClaudeSubagentTracker(
+  maxEntries = TRACKER_MAX_ENTRIES,
+): ClaudeSubagentTracker {
   const started = new Map<string, ProgressSubagent>();
   const childTools = new Map<string, Map<string, { name: string; status: string }>>();
+  const settled = new Set<string>();
   return {
     observe(raw, messages) {
       const updates: ProgressSubagent[] = [];
@@ -115,23 +115,64 @@ export function createClaudeSubagentTracker(maxEntries = TRACKER_MAX_ENTRIES): C
             childTools.delete(oldestId);
           }
           started.set(message.toolId, message.subagent);
+          settled.delete(message.toolId);
           continue;
         }
-        const parentValue: unknown = message.parentToolUseId ?? claudeParentToolUseId(raw);
+        const origin = message.kind === 'tool_result' && message.toolId
+          ? started.get(message.toolId) : undefined;
+        if (origin && !message.subagent) {
+          settleDelegation(raw, message, origin, childTools);
+          continue;
+        }
+        const parentValue: unknown = message.parentToolUseId
+          ?? claudeParentToolUseId(raw);
         const parentId = typeof parentValue === 'string' ? parentValue : null;
-        if (parentId && (message.kind === 'tool_use' || message.kind === 'tool_result')) {
+        if (parentId && started.has(parentId)
+          && (message.kind === 'tool_use' || message.kind === 'tool_result')) {
           const update = trackChildTool(message, parentId, started, childTools);
           if (update) updates.push(update);
           continue;
         }
-        const origin = message.kind === 'tool_result' && message.toolId ? started.get(message.toolId) : undefined;
-        if (origin && !message.subagent) settleDelegation(raw, message, origin, childTools);
       }
       return updates;
     },
     settle(toolUseId, state) {
       const origin = started.get(toolUseId);
-      return origin ? buildProgressSubagent({ ...origin, state }) : null;
+      if (!origin) return null;
+      settled.add(toolUseId);
+      const tools = childTools.get(toolUseId);
+      return buildProgressSubagent({ ...origin, state,
+        ...(tools ? { tools: [...tools].map(([id, tool]) => ({ id, ...tool,
+          status: tool.status === 'running'
+            ? (state === 'failed' ? 'failed' : 'completed')
+            : tool.status })) } : {}),
+      });
+    },
+    progress(raw) {
+      const toolUseId = typeof raw.tool_use_id === 'string' ? raw.tool_use_id : '';
+      const origin = started.get(toolUseId);
+      const toolName = typeof raw.last_tool_name === 'string' ? raw.last_tool_name : '';
+      if (!origin || settled.has(toolUseId)) return null;
+      const tools = childTools.get(toolUseId) ?? new Map();
+      if (toolName && tools) {
+        const toolId = typeof raw.tool_id === 'string' ? raw.tool_id : toolName;
+        if (!raw.tool_id && !raw.tool_status) {
+          for (const [id, tool] of tools) {
+            if (tool.status === 'running' && id !== toolId) tool.status = 'completed';
+          }
+        }
+        tools.set(toolId, { name: toolName, status: raw.tool_status ?? 'running' });
+      }
+      childTools.set(toolUseId, tools);
+      const current = { ...origin,
+        ...(typeof raw.resolvedModel === 'string' ? { model: raw.resolvedModel } : {}),
+        ...(typeof (raw.effort ?? raw.reasoning_effort) === 'string'
+          ? { effort: raw.effort ?? raw.reasoning_effort } : {}),
+      };
+      started.set(toolUseId, current);
+      return buildProgressSubagent({ ...current, state: 'running',
+        ...(tools ? { tools: [...tools].map(([id, tool]) => ({ id, ...tool })) } : {}),
+        model: current.model, modelInherited: false, effort: current.effort });
     },
   };
 }
@@ -142,7 +183,10 @@ function snapshotWithTools(
   tools: Map<string, { name: string; status: string }>,
 ): ProgressSubagent | null {
   if (!parent) return null;
-  return buildProgressSubagent({ ...parent, state: 'running', tools: [...tools.values()] });
+  const latest = [...tools.values()].at(-1);
+  return buildProgressSubagent({ ...parent, state: 'running',
+    tools: latest ? [{ id: [...tools.keys()].at(-1), ...latest }] : [],
+  });
 }
 
 /** Adds or settles one child tool and returns the updated parent snapshot. */
@@ -174,18 +218,28 @@ function settleDelegation(
   childTools: Map<string, Map<string, { name: string; status: string }>>,
 ): void {
   const result = raw.toolUseResult ?? raw.tool_use_result;
-  const resultModel = result && typeof result === 'object' ? (result as AnyRecord).resolvedModel : undefined;
+  const resultModel = result && typeof result === 'object'
+    ? (result as AnyRecord).resolvedModel : undefined;
+  const childModel = resultModel ?? raw.subagentModel;
+  const childEffort = raw.subagentEffort;
   const subagent = buildProgressSubagent({
     ...origin,
     state: claudeSubagentResultState(result, message.isError === true),
-    ...(typeof resultModel === 'string' && resultModel ? { model: resultModel, modelInherited: false } : {}),
+    ...(typeof childModel === 'string' && childModel
+      ? { model: childModel, modelInherited: false } : {}),
+    ...(typeof childEffort === 'string' && childEffort ? { effort: childEffort } : {}),
     ...(Array.isArray(raw.subagentTools) ? {
       tools: raw.subagentTools.map((tool: AnyRecord) => ({
+        id: tool.toolId,
         name: tool.toolName,
-        status: tool.toolResult?.isError ? 'failed' : tool.toolResult ? 'completed' : 'running',
+        status: tool.toolResult?.isError ? 'failed' : 'completed',
       })),
     } : {}),
-    ...(childTools.has(message.toolId ?? '') ? { tools: [...childTools.get(message.toolId ?? '')!.values()] } : {}),
+    ...(childTools.has(message.toolId ?? '') ? {
+      tools: [...childTools.get(message.toolId ?? '')!.entries()]
+        .map(([toolId, tool]) => ({ id: toolId, ...tool,
+          status: tool.status === 'running' ? 'completed' : tool.status })),
+    } : {}),
   });
   if (subagent) message.subagent = subagent;
 }

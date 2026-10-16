@@ -20,10 +20,15 @@
  * RUNNER: vitest (`npm run test:client`) — jsdom.
  */
 
-import assert from 'node:assert/strict';
-
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
-import { afterEach, describe, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+
+const assert = {
+  equal: (actual: unknown, expected: unknown, message?: string) =>
+    expect(actual, message).toBe(expected),
+  deepEqual: (actual: unknown, expected: unknown, message?: string) =>
+    expect(actual, message).toEqual(expected),
+};
 
 const translationLanguage = vi.hoisted(() => ({ value: 'en' }));
 
@@ -109,18 +114,29 @@ describe('عدّاد الاستدعاءات', () => {
   });
 
   it('يعرض شرطة للحقول المجهولة ولا يخترع اسماً أو نموذجاً أو جهداً', () => {
-    renderCard({ agents: [agent({ type: '', description: '' })] });
+    const { container } = renderCard({ agents: [agent({ type: '', description: '' })] });
 
-    assert.equal(screen.getByLabelText('agentActivity.name').textContent?.trim(), '—');
-    assert.equal(screen.getByLabelText('agentActivity.model').textContent?.trim(), '—');
-    assert.equal(screen.getByLabelText('agentActivity.effort').textContent?.trim(), '—');
+    const chips = [...container.querySelectorAll('bdi')].map((node) => node.textContent?.trim());
+    assert.deepEqual(chips.slice(0, 3), ['—', '—', '—']);
   });
 
-  it('يستخدم الوصف كاسم فقط عند غياب اسم الدور', () => {
+  it('يعرض وصف المهمة بجانب اسم الدور', () => {
     const { container } = renderCard({
-      agents: [agent({ agentName: undefined, type: '', description: 'Inspect the logs' })],
+      agents: [agent({
+        agentName: undefined, type: 'backend-dev', description: 'Inspect the logs',
+      })],
     });
 
+    assert.equal((container.textContent ?? '').includes('backend-dev'), true);
+    assert.equal((container.textContent ?? '').includes('Inspect the logs'), true);
+  });
+
+  it('does not label an unresolved model as inherited', () => {
+    const { container } = renderCard({
+      agents: [agent({ model: undefined, description: 'Inspect the logs' })],
+    });
+
+    assert.equal((container.textContent ?? '').includes('inherited'), false);
     assert.equal((container.textContent ?? '').includes('Inspect the logs'), true);
   });
 

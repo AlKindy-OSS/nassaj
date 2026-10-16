@@ -29,11 +29,11 @@ import {
   type ContainmentDependencies,
 } from '@/modules/execution-permissions/index.js';
 import { isSessionAccessibleByUser } from '@/modules/providers/services/sessions.service.js';
+import { isSessionId } from '@/shared/session-id.js';
 
 // eslint-disable-next-line boundaries/no-unknown -- shared HTTP rate limiter, as in connectors.
 import { createRateLimiter } from '../../middleware/rate-limit.js';
 
-const SESSION_ID_PATTERN = /^[a-zA-Z0-9._-]{1,120}$/u;
 const VERIFIED_ACTOR_KINDS = new Set(['session', 'device_session']);
 
 export type DecisionOwnerNotice = Readonly<{ ownerUserId: number; sessionId: string; operationId: string }>;
@@ -82,7 +82,7 @@ const resolveAccess = (req: Request, res: Response): Access | null => {
     return null;
   }
   const sessionId = typeof req.params.sessionId === 'string' ? req.params.sessionId : '';
-  const session = SESSION_ID_PATTERN.test(sessionId) ? sessionsDb.getSessionById(sessionId) : null;
+  const session = isSessionId(sessionId) ? sessionsDb.getSessionById(sessionId) : null;
   if (!session || !isSessionAccessibleByUser(sessionId, session.project_path, userId, 'read')) {
     res.status(404).json({ error: 'Session not found', code: 'SESSION_NOT_FOUND' });
     return null;

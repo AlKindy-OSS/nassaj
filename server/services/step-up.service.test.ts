@@ -31,6 +31,7 @@ import {
   verifyRegistration,
 } from './webauthn.service.js';
 import { createSoftAuthenticator } from './webauthn-soft-authenticator.fixture.js';
+import { configureMemoryLoginThrottle } from './__tests__/login-throttle-memory-store.js';
 
 const PASSWORD = 'correct horse battery';
 let tempDirectory = '';
@@ -87,6 +88,9 @@ async function withOidc(run: () => Promise<void>) {
     else process.env.OIDC_ENABLED = saved;
   }
 }
+
+// T-2035: the auth middleware (the throttle's configurer) is a double here.
+await configureMemoryLoginThrottle();
 
 test('password evidence: correct → password method; wrong → 401 step_up_failed; none → 403', async () => {
   const user = newUser();

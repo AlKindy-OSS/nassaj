@@ -82,6 +82,10 @@ export type WorkflowAgentRow = {
   label: string | null;
   /** Last write to this agent's transcript (ISO), or null when unreadable. */
   updatedAt: string | null;
+  /** Resolved model from a child transcript message, when present. */
+  model: string | null;
+  /** Resolved effort from a child transcript message, when present. */
+  effort: string | null;
 };
 
 /**
@@ -115,6 +119,8 @@ type AgentScanState = {
   size: number;
   callCount: number;
   currentTool: string | null;
+  model: string | null;
+  effort: string | null;
   label: string | null;
   /** True once the first line was inspected, so the label is derived once only. */
   labelResolved: boolean;
@@ -255,6 +261,8 @@ async function scanAgentTranscript(key: string, handle: FileHandle): Promise<Age
       size: 0,
       callCount: 0,
       currentTool: null,
+      model: null,
+      effort: null,
       label: null,
       labelResolved: false,
     };
@@ -274,6 +282,8 @@ async function scanAgentTranscript(key: string, handle: FileHandle): Promise<Age
     state.offset = 0;
     state.callCount = 0;
     state.currentTool = null;
+    state.model = null;
+    state.effort = null;
     state.labelResolved = false;
     state.label = null;
   }
@@ -310,13 +320,18 @@ async function scanAgentTranscript(key: string, handle: FileHandle): Promise<Age
       state.label = deriveAgentLabel(trimmed);
     }
 
-    let row: { message?: { content?: unknown } };
+    let row: { effort?: unknown; message?: {
+      content?: unknown; model?: unknown; effort?: unknown; reasoning_effort?: unknown;
+    } };
     try {
       row = JSON.parse(trimmed) as { message?: { content?: unknown } };
     } catch {
       continue;
     }
     const content = row?.message?.content;
+    if (typeof row.message?.model === 'string') state.model = row.message.model;
+    const effort = row.effort ?? row.message?.effort ?? row.message?.reasoning_effort;
+    if (typeof effort === 'string') state.effort = effort;
     if (!Array.isArray(content)) continue;
     for (const block of content) {
       if (
@@ -390,6 +405,8 @@ function agentRow(agentId: string, index: number, done: boolean, view: AgentFile
     currentTool: done || stale ? null : view.scan?.currentTool ?? null,
     label: view.scan?.label ?? null,
     updatedAt: view.mtimeMs > 0 ? new Date(view.mtimeMs).toISOString() : null,
+    model: view.scan?.model ?? null,
+    effort: view.scan?.effort ?? null,
   };
 }
 

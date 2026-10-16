@@ -37,6 +37,7 @@ import {
   writeSidebarSection,
 } from '../utils/utils';
 import { SESSION_BUCKET_KEYS } from '../../../../shared/sessionBuckets';
+import { alertDialog, confirmDialog } from '../../../shared/dialogs/dialogService';
 import {
   computeSurfacedSessionsForProject,
   useSurfacedSessionsDriver,
@@ -105,6 +106,23 @@ type UseSidebarControllerArgs = {
   // AppContent can mirror it onto the main-content surface.
   onSectionChange?: (section: SidebarSection) => void;
 };
+
+/** B-1647: server refusal of a permanent delete by a non-creator/non-owner/non-admin. */
+const SESSION_DELETE_FORBIDDEN = 'session_delete_forbidden';
+const SESSION_DELETE_FORBIDDEN_KEY = 'chat:sessionDelete.forbidden';
+const SESSION_DELETE_FORBIDDEN_FALLBACK =
+  "Only the conversation's creator, the project owner, or an admin can delete it permanently. "
+  + 'You can archive it instead.';
+
+/** Bulk `results` entries refused with session_delete_forbidden. */
+function countForbiddenDeletes(results: unknown): number {
+  if (!Array.isArray(results)) return 0;
+  return results.filter((item) => {
+    if (!item || typeof item !== 'object') return false;
+    const error = (item as { error?: { code?: unknown } }).error;
+    return error?.code === SESSION_DELETE_FORBIDDEN;
+  }).length;
+}
 
 export function useSidebarController({
   projects,
@@ -621,7 +639,7 @@ export function useSidebarController({
             return next;
           });
           console.error('[Sidebar] Failed to toggle project star:', error);
-          alert(t('messages.updateProjectError'));
+          void alertDialog(t('messages.updateProjectError'));
           projectStarMutationsRef.current.delete(projectId);
           return;
         }
@@ -900,7 +918,7 @@ export function useSidebarController({
       await onLoadMoreSessions(projectId);
     } catch (error) {
       console.error('[Sidebar] Failed to load more sessions:', error);
-      alert(t('messages.refreshError'));
+      void alertDialog(t('messages.refreshError'));
     } finally {
       setLoadingMoreProjects((previous) => {
         const next = new Set(previous);
@@ -1085,24 +1103,31 @@ export function useSidebarController({
           onSessionDelete?.(sessionId);
           await fetchArchivedSessions();
           if (hardDelete && isRecord(body) && isSessionLeftOnDisk(body.data)) {
-            alert(t('messages.deleteSessionFileKept', SESSION_FILE_KEPT_FALLBACK));
+            void alertDialog(t('messages.deleteSessionFileKept', SESSION_FILE_KEPT_FALLBACK));
           }
           return;
         }
         if (response.status === 409 && readErrorCode(body) === TRANSCRIPT_REMOVAL_RETRY) {
-          if (window.confirm(t('messages.deleteSessionRetry', SESSION_RETRY_FALLBACK))) continue;
+          // T-2039: the themed confirm is async; awaiting it inside the loop keeps the
+          // retry semantics of the old blocking confirm.
+          if (await confirmDialog(t('messages.deleteSessionRetry', SESSION_RETRY_FALLBACK))) continue;
+          return;
+        }
+        if (readErrorCode(body) === SESSION_DELETE_FORBIDDEN) {
+          // B-1647: permanent delete is reserved to creator/project owner/admin.
+          void alertDialog(t(SESSION_DELETE_FORBIDDEN_KEY, SESSION_DELETE_FORBIDDEN_FALLBACK));
           return;
         }
         console.error('[Sidebar] Failed to delete session:', {
           status: response.status,
           code: readErrorCode(body),
         });
-        alert(t('messages.deleteSessionFailed'));
+        void alertDialog(t('messages.deleteSessionFailed'));
         return;
       }
     } catch (error) {
       console.error('[Sidebar] Error deleting session:', error);
-      alert(t('messages.deleteSessionError'));
+      void alertDialog(t('messages.deleteSessionError'));
     }
   }, [fetchArchivedSessions, onSessionDelete, sessionDeleteConfirmation, t]);
 
@@ -1122,7 +1147,7 @@ export function useSidebarController({
           status: response.status,
           error: errorText,
         });
-        alert(t('messages.archiveSessionFailed', 'Failed to archive the session. Please try again.'));
+        void alertDialog(t('messages.archiveSessionFailed', 'Failed to archive the session. Please try again.'));
         return;
       }
 
@@ -1130,7 +1155,7 @@ export function useSidebarController({
       await fetchArchivedSessions();
     } catch (error) {
       console.error('[Sidebar] Error archiving session:', error);
-      alert(t('messages.archiveSessionFailed', 'Failed to archive the session. Please try again.'));
+      void alertDialog(t('messages.archiveSessionFailed', 'Failed to archive the session. Please try again.'));
     }
   }, [fetchArchivedSessions, onSessionDelete, t]);
 
@@ -1164,23 +1189,23 @@ export function useSidebarController({
         if (response.ok) {
           onProjectDelete?.(project.projectId);
           const notice = transcriptSummaryNotice(t, readTranscriptSummary(body));
-          if (notice) alert(notice);
+          if (notice) void alertDialog(notice);
           return;
         }
         if (response.status === 409 && readErrorCode(body) === TRANSCRIPT_REMOVAL_RETRY) {
-          if (window.confirm(t('messages.deleteProjectRetry', PROJECT_RETRY_FALLBACK))) continue;
+          if (await confirmDialog(t('messages.deleteProjectRetry', PROJECT_RETRY_FALLBACK))) continue;
           return;
         }
         const err = isRecord(body) ? body.error : undefined;
         const message =
           typeof err === 'string' ? err : isRecord(err) && typeof err.message === 'string' && err.message
             ? err.message : t('messages.deleteProjectFailed');
-        alert(message);
+        void alertDialog(message);
         return;
       }
     } catch (error) {
       console.error('Error deleting project:', error);
-      alert(t('messages.deleteProjectError'));
+      void alertDialog(t('messages.deleteProjectError'));
     } finally {
       setDeletingProjects((prev) => {
         const next = new Set(prev);
@@ -1220,11 +1245,11 @@ export function useSidebarController({
         const err = data.error;
         const message =
           typeof err === 'string' ? err : err && typeof err === 'object' && err.message ? err.message : t('messages.archiveProjectFailed');
-        alert(message);
+        void alertDialog(message);
       }
     } catch (error) {
       console.error('Error archiving project:', error);
-      alert(t('messages.archiveProjectFailed'));
+      void alertDialog(t('messages.archiveProjectFailed'));
     } finally {
       setDeletingProjects((prev) => {
         const next = new Set(prev);
@@ -1275,7 +1300,7 @@ export function useSidebarController({
           status: response.status,
           error: errorText,
         });
-        alert(t('messages.restoreProjectFailed', 'Failed to restore project. Please try again.'));
+        void alertDialog(t('messages.restoreProjectFailed', 'Failed to restore project. Please try again.'));
         return;
       }
 
@@ -1285,7 +1310,7 @@ export function useSidebarController({
       ]);
     } catch (error) {
       console.error('[Sidebar] Error restoring project:', error);
-      alert(t('messages.restoreProjectError', 'Error restoring project. Please try again.'));
+      void alertDialog(t('messages.restoreProjectError', 'Error restoring project. Please try again.'));
     }
   }, [fetchArchivedSessions, onRefresh, t]);
 
@@ -1298,7 +1323,7 @@ export function useSidebarController({
           status: response.status,
           error: errorText,
         });
-        alert(t('messages.restoreSessionFailed', 'Failed to restore session. Please try again.'));
+        void alertDialog(t('messages.restoreSessionFailed', 'Failed to restore session. Please try again.'));
         return;
       }
 
@@ -1308,7 +1333,7 @@ export function useSidebarController({
       ]);
     } catch (error) {
       console.error('[Sidebar] Error restoring session:', error);
-      alert(t('messages.restoreSessionError', 'Error restoring session. Please try again.'));
+      void alertDialog(t('messages.restoreSessionError', 'Error restoring session. Please try again.'));
     }
   }, [fetchArchivedSessions, onRefresh, t]);
 
@@ -1362,7 +1387,7 @@ export function useSidebarController({
     // before the confirmation dialog so an unavailable server cannot produce
     // a misleading confirmation followed by a 404.
     if (!bulkLifecycleActions) {
-      alert(t('bulk.unavailable', 'Bulk changes are unavailable until the server update completes.'));
+      void alertDialog(t('bulk.unavailable', 'Bulk changes are unavailable until the server update completes.'));
       return false;
     }
 
@@ -1377,7 +1402,7 @@ export function useSidebarController({
         'Permanently delete {{count}} {{kind}}? This cannot be undone.',
         { count, kind },
       );
-      if (!window.confirm(confirmationMessage)) {
+      if (!(await confirmDialog({ message: confirmationMessage, tone: 'danger' }))) {
         return false;
       }
     }
@@ -1414,11 +1439,14 @@ export function useSidebarController({
         exitBulkSelection();
       }
       const notices = bulkOutcomeNotices(t, outcome);
-      if (notices.length > 0) alert(notices.join('\n'));
+      if (countForbiddenDeletes(payload.data?.results) > 0) {
+        notices.push(t(SESSION_DELETE_FORBIDDEN_KEY, SESSION_DELETE_FORBIDDEN_FALLBACK));
+      }
+      if (notices.length > 0) void alertDialog(notices.join('\n'));
       return true;
     } catch (error) {
       console.error('[Sidebar] Bulk action failed:', error);
-      alert(failureMessage ?? t('bulk.actionFailed', 'Could not update all selected items. Please try again.'));
+      void alertDialog(failureMessage ?? t('bulk.actionFailed', 'Could not update all selected items. Please try again.'));
       return false;
     } finally {
       setIsBulkMutating(false);
@@ -1441,11 +1469,11 @@ export function useSidebarController({
           await onRefresh();
         } else {
           console.error('[Sidebar] Failed to rename session:', response.status);
-          alert(t('messages.renameSessionFailed'));
+          void alertDialog(t('messages.renameSessionFailed'));
         }
       } catch (error) {
         console.error('[Sidebar] Error renaming session:', error);
-        alert(t('messages.renameSessionError'));
+        void alertDialog(t('messages.renameSessionError'));
       } finally {
         setEditingSession(null);
         setEditingSessionName('');

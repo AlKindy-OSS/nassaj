@@ -23,6 +23,11 @@ import {
   useSessionProcessStateAuthority,
 } from '../../../stores/sessionProcessStateStore';
 import { useAuth } from '../../auth/context/AuthContext';
+import { confirmDialog } from '../../../shared/dialogs';
+import {
+  isComposerShellModeActive,
+  registerComposerInsertConsumer,
+} from '../../../stores/composerInsertStore';
 import { DEFAULT_EFFORT_MODE, effortModes } from '../constants/thinkingModes';
 import { grantClaudeToolPermission } from '../utils/chatPermissions';
 import { safeLocalStorage } from '../utils/chatStorage';
@@ -263,7 +268,17 @@ export interface CommandExecutionResult {
   data?: any;
   content?: string;
   hasBashCommands?: boolean;
+  /** `!`-prefixed snippets in the command text (T-2037); only non-empty ones count. */
+  bashSnippets?: string[];
   hasFileIncludes?: boolean;
+}
+
+/** The non-empty bash snippets a custom-command result declares (T-2037). */
+export function readBashSnippets(result: CommandExecutionResult): string[] {
+  if (!Array.isArray(result.bashSnippets)) return [];
+  return result.bashSnippets.filter(
+    (snippet): snippet is string => typeof snippet === 'string' && snippet.trim().length > 0,
+  );
 }
 
 export interface ExecutingSlashCommand {
@@ -637,14 +652,17 @@ export function useChatComposerState({
   }, []);
 
   const handleCustomCommand = useCallback(async (result: CommandExecutionResult) => {
-    const { content, hasBashCommands } = result;
+    const { content } = result;
+    const bashSnippets = readBashSnippets(result);
 
-    if (hasBashCommands) {
-      const confirmed = window.confirm(
-        t('customCommand.confirmBashExecution', {
-          defaultValue: 'This command contains bash commands that will be executed. Do you want to proceed?',
-        }),
-      );
+    if (bashSnippets.length > 0) {
+      // The text goes to the agent, which may run the snippets; Nassaj runs
+      // nothing itself (T-2037). The snippets are shown verbatim, LTR.
+      const confirmed = await confirmDialog({
+        title: t('customCommand.bashSnippetsTitle'),
+        message: t('customCommand.confirmBashExecution'),
+        code: bashSnippets.join('\n'),
+      });
       if (!confirmed) {
         addMessage({
           type: 'assistant',
@@ -2566,7 +2584,9 @@ export function useChatComposerState({
     if (!selectedProjectId) {
       return;
     }
-    if (input !== '') {
+    // A shell-mode draft is not saved: after a reload it would come back as
+    // chat text, out of the mode it was typed in (T-2037).
+    if (input !== '' && !isComposerShellModeActive()) {
       safeLocalStorage.setItem(`draft_input_${selectedProjectId}`, input);
     } else {
       safeLocalStorage.removeItem(`draft_input_${selectedProjectId}`);
@@ -2679,6 +2699,21 @@ export function useChatComposerState({
       });
     },
     [handleCommandInputChange, resetCommandMenuState, setCursorPosition],
+  );
+
+  // T-2037: the Shell tab attaches one-shot output here. Appended as its own
+  // paragraph and left in the draft — the user reviews, sends or deletes it.
+  useEffect(
+    () =>
+      registerComposerInsertConsumer((text) => {
+        const previous = inputValueRef.current ?? '';
+        const separator = previous.trim() ? (previous.endsWith('\n') ? '\n' : '\n\n') : '';
+        const nextValue = `${previous.trim() ? previous : ''}${separator}${text}`;
+        setInput(nextValue);
+        inputValueRef.current = nextValue;
+        setCursorPosition(nextValue.length);
+      }),
+    [setCursorPosition],
   );
 
   const handleKeyDown = useCallback(

@@ -137,6 +137,23 @@ describe('readWorkflowAgents', () => {
     assert.equal(agents[0]?.callCount, 1, 'the call count is still real for a finished agent');
   });
 
+  it('reads top-level effort from an existing recorded transcript line', async () => {
+    const realTranscript = await fsp.readFile(
+      path.resolve('server/services/__fixtures__/session-share/claude.jsonl'),
+      'utf8',
+    );
+    const realLine = realTranscript.split('\n')
+      .find((line) => /"effort"\s*:\s*"medium"/.test(line));
+    assert.ok(realLine, 'the recorded transcript must include its top-level effort field');
+    assert.equal(JSON.parse(realLine).effort, 'medium');
+
+    await fsp.writeFile(path.join(dir, 'journal.jsonl'), `${started('a1')}\n`, 'utf8');
+    await fsp.writeFile(path.join(dir, 'agent-a1.jsonl'), `${realLine}\n`, 'utf8');
+
+    const { agents } = await readAt(dir);
+    assert.equal(agents[0]?.effort, 'medium');
+  });
+
   it('counts only newly appended bytes on the second read (incremental cursor)', async () => {
     const journal = path.join(dir, 'journal.jsonl');
     const agentFile = path.join(dir, 'agent-a1.jsonl');

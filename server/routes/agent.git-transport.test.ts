@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import { access, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import path from 'node:path';
 import { PassThrough } from 'node:stream';
 import test from 'node:test';
@@ -295,6 +295,28 @@ test('clone cleanup requires the exact server creation receipt for auto and cust
     });
     assert.equal(replacedResult.creationReceipt.directoryHandle.fd, -1);
     await access(replaced);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('B-1643: clone cleanup refuses dot session ids and never removes the sessions root', async () => {
+  const root = await mkdtemp('/var/tmp/nassaj-agent-session-cleanup-');
+  const sessionsRoot = path.join(homedir(), '.claude', 'sessions');
+  await mkdir(sessionsRoot, { recursive: true });
+  await writeFile(path.join(sessionsRoot, 'other-session.json'), '{}');
+  try {
+    for (const sessionId of ['.', '..', '.x', 'a..b', 'a/b', ' x']) {
+      const target = path.join(root, `clone-${Buffer.from(sessionId).toString('hex')}`);
+      const result = await createCloneReceipt(target);
+      const removed: string[] = [];
+      await assert.rejects(cleanupClonedProject(result.creationReceipt, sessionId, {
+        removeDirectory: async (dir: string) => { removed.push(dir); },
+      }), { code: 'CLONE_CLEANUP_REFUSED' }, JSON.stringify(sessionId));
+      assert.deepEqual(removed, [], `nothing is removed for ${JSON.stringify(sessionId)}`);
+      await access(target);
+    }
+    await access(path.join(sessionsRoot, 'other-session.json'));
   } finally {
     await rm(root, { recursive: true, force: true });
   }

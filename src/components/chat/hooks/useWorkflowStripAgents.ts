@@ -65,9 +65,12 @@ export function useWorkflowStripAgents(sessionId?: string | null): RunAgent[] {
       for (const agent of wf.agents) {
         rows.push({
           id: `${wf.wfId}:${agent.agentId}`,
-          // The workflow journal has no role field; the id/ordinal is not an
-          // agent name, so leave type empty and let the card use the description.
+          // The workflow journal has no role field; show its stable short id and
+          // delegation order as the agent's name.
           type: '',
+          agentName: `${agent.agentId.slice(0, 8)} · #${agent.ordinal}`,
+          model: agent.model,
+          effort: agent.effort,
           description: agent.label ?? '',
           status: agent.status,
           // Never a "current tool" for a row that is not live: for a stale agent

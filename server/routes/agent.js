@@ -55,6 +55,7 @@ import {
   isRetiredProvider,
 } from '../../shared/retiredProviders.js';
 
+import { isSessionId } from '../shared/session-id.js';
 import { ResponseCollector } from './agent-response-collector.js';
 import { isForbiddenProjectRoot } from '../shared/secret-path-guard.js';
 
@@ -820,14 +821,16 @@ export async function cleanupClonedProject(receipt, sessionId = null, dependenci
   try {
     let sessionPath = null;
     if (sessionId) {
-      if (!/^[a-zA-Z0-9._-]{1,120}$/.test(sessionId)) {
+      // B-1643: the shared grammar refuses '.', '..' and leading dots.
+      if (!isSessionId(sessionId)) {
         const error = new Error('Clone session cleanup identifier is invalid');
         error.code = 'CLONE_CLEANUP_REFUSED';
         throw error;
       }
       const sessionsRoot = path.resolve(os.homedir(), '.claude', 'sessions');
       sessionPath = path.resolve(sessionsRoot, sessionId);
-      if (!isPathWithinRoot(sessionPath, sessionsRoot)) {
+      // A session dir is a strict child: the root itself is never removed.
+      if (sessionPath === sessionsRoot || !isPathWithinRoot(sessionPath, sessionsRoot)) {
         const error = new Error('Clone session cleanup escaped its root');
         error.code = 'CLONE_CLEANUP_REFUSED';
         throw error;

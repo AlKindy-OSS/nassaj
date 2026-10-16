@@ -130,6 +130,9 @@ export function createClaudeProgressFold(mode: 'history' | 'live', sessionId: st
 
   const fold = (raw: AnyRecord, rows: NormalizedMessage[]): NormalizedMessage[] => {
     const subagentUpdates = subagents.observe(raw, rows);
+    const taskProgress = raw?.type === 'system' && raw.subtype === 'task_progress'
+      ? subagents.progress(raw) : null;
+    if (taskProgress) subagentUpdates.push(taskProgress);
     if (mode === 'live') {
       const base = typeof raw.uuid === 'string' && raw.uuid ? raw.uuid : generateMessageId('claude');
       const rowSessionId = raw.session_id ?? raw.sessionId ?? sessionId;

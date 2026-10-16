@@ -34,6 +34,8 @@ import type { Server } from 'node:http';
 import express from 'express';
 import jwt from 'jsonwebtoken';
 
+import { createMemoryLoginThrottleStore } from '../services/__tests__/login-throttle-memory-store.js';
+
 const url = (spec: string) => pathToFileURL(path.resolve(import.meta.dirname, spec)).href;
 
 const FIXED_SECRET = 'refresh-grace-test-secret-0123456789ab';
@@ -104,6 +106,7 @@ mock.module(url('../modules/database/index.js'), {
       },
     },
     appConfigDb: { getOrCreateJwtSecret: () => FIXED_SECRET },
+    loginThrottleDb: createMemoryLoginThrottleStore(),
     // ADR-194 D1: with the store mocked out, the SSO state read fails closed
     // (enforced), so the attestation gate consults identity links; this
     // account has none and is therefore never SSO-governed.

@@ -21,9 +21,13 @@ import { useSessionProtection } from '../../hooks/useSessionProtection';
 import { useProjectsState } from '../../hooks/useProjectsState';
 import {
   applyOutcomeDelta,
+  getSessionOutcome,
   useTopOutcome,
 } from '../../stores/sessionCompletionStore';
 import { setTitleOutcome } from '../../utils/pageTitleNotification';
+import { setFaviconAttention } from '../../utils/faviconAttention';
+import { playChatQuestionSound } from '../../utils/notificationSound';
+import { installTabFocusTracking, shouldChimeForQuestionDelta } from '../../utils/questionChime';
 import { loadConnectors } from '../../stores/connectorsStore';
 import { useActiveWorkflows } from '../../stores/useActiveWorkflows';
 import { forgetSurfacedNegativeCache } from '../../stores/surfacedSessionsStore';
@@ -118,6 +122,7 @@ function AppContentInner() {
   } = useSessionProtection();
 
   const {
+    projects,
     selectedProject,
     selectedSession,
     activeTab,
@@ -358,6 +363,13 @@ function AppContentInner() {
   // delivery is intentionally not consumed here: this slot can overwrite a
   // terminal event before React observes it.
   const processedCompletionRef = useRef<unknown>(null);
+  // يُقرأ داخل تأثير البثّ دون أن يصير اعتماداً له: تحديث القائمة لا يعيد
+  // معالجة آخر رسالة.
+  const projectsRef = useRef(projects);
+  projectsRef.current = projects;
+  useEffect(() => {
+    installTabFocusTracking();
+  }, []);
   useSessionOutcomeAcknowledgement({
     routeSessionId: sessionId ?? null,
     routeLocationKey: location.key,
@@ -393,13 +405,23 @@ function AppContentInner() {
       if (outcomeState !== 'visible' && outcomeState !== 'seen' && outcomeState !== 'absent') {
         return;
       }
-      applyOutcomeDelta(
-        msg.sessionId,
-        (msg.outcome ?? null) as Parameters<typeof applyOutcomeDelta>[1],
-        typeof msg.outcomeAt === 'string' ? msg.outcomeAt : null,
+      const outcome = (msg.outcome ?? null) as Parameters<typeof applyOutcomeDelta>[1];
+      const outcomeAt = typeof msg.outcomeAt === 'string' ? msg.outcomeAt : null;
+      const projectId =
+        typeof msg.projectId === 'string' && msg.projectId.length > 0 ? msg.projectId : null;
+      // T-2041: الحكم على «انتقالٍ جديد» يحتاج النتيجة قبل تطبيق الدلتا.
+      const chime = shouldChimeForQuestionDelta({
+        sessionId: msg.sessionId,
+        outcome,
+        outcomeAt,
         outcomeState,
-        typeof msg.projectId === 'string' && msg.projectId.length > 0 ? msg.projectId : null,
-      );
+        previousOutcome: getSessionOutcome(msg.sessionId),
+        project: projectId
+          ? projectsRef.current.find((project) => project.projectId === projectId)
+          : null,
+      });
+      applyOutcomeDelta(msg.sessionId, outcome, outcomeAt, outcomeState, projectId);
+      if (chime) void playChatQuestionSound();
     }
 
   }, [latestMessage]);
@@ -426,6 +448,8 @@ function AppContentInner() {
   const topOutcome = useTopOutcome();
   useEffect(() => {
     setTitleOutcome(topOutcome);
+    // T-2041: أيقونة التبويب تحمل «ينتظر جوابك» ما دام سؤالٌ قائماً.
+    setFaviconAttention(topOutcome === 'question');
   }, [topOutcome]);
 
   /**

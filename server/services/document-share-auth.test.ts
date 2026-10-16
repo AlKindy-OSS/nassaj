@@ -22,6 +22,7 @@ const secret = 'synthetic-test-secret-document-share-attestation-0001';
 
 type Summary = { linkCount: number; latestAttestedAt: number | null };
 const summaries = new Map<number, Summary>();
+const revokedRows: Array<{ sid: string; expires_at: number }> = [];
 const sso = createSsoConfigDouble();
 mock.module(url('./sso-config.service.js'), { namedExports: sso.exports });
 mock.module(url('../modules/database/index.js'), {
@@ -30,10 +31,16 @@ mock.module(url('../modules/database/index.js'), {
       attestationSummary: (userId: number) => summaries.get(userId) ?? { linkCount: 0, latestAttestedAt: null },
     },
     userDb: { getUserById: () => undefined },
+    // T-2035 round 3: device sign-outs in force (sid -> expires_at).
+    revokedTokenSidsDb: {
+      isRevoked: (sid: string, nowMs: number) => revokedRows.some((row) => row.sid === sid && row.expires_at > nowMs),
+      revoke: () => {},
+    },
   },
 });
 
 const { createDocumentShareVerifier } = await import('./document-share-auth.js');
+const { legacyTokenSid } = await import('../modules/account-wallet/token-session.js');
 const { createDocumentSharesRouter } = await import('../routes/document-shares.js');
 const { createDocumentSharesStore, migrateDocumentShares } = await import('../modules/database/document-shares.js');
 
@@ -118,6 +125,42 @@ test('a missing or mismatched auth_gen is refused', async (t) => {
   users.get(2)!.authorization_generation = 2;
   assert.equal((await f.get(bearer(2, 1))).status, 401, 'generation bumped after issue');
   assert.equal((await f.get(bearer(2, 2))).status, 200, 'current generation');
+});
+
+test('T-2035: a token from an older sign-out epoch is refused (qa probe tok_ep 0 vs epoch 3)', async (t) => {
+  const f = await fixture(t);
+  const signed = (tokEp?: number) => `Bearer ${jwt.sign(
+    { userId: 2, pwd_iat: 0, auth_gen: 1, ...(tokEp === undefined ? {} : { tok_ep: tokEp }) },
+    secret, { expiresIn: '1h' },
+  )}`;
+  assert.equal((await f.get(signed())).status, 200, 'legacy token at epoch 0');
+  (users.get(2) as User & { token_epoch?: number }).token_epoch = 3;
+  assert.equal((await f.get(signed(0))).status, 401, 'tok_ep 0 after three sign-outs');
+  assert.equal((await f.get(signed())).status, 401, 'legacy token after a sign-out');
+  assert.equal(f.verifyUser(signed(2)), null);
+  assert.equal((await f.get(signed(3))).status, 200, 'current epoch');
+});
+
+test('T-2035 round 3: a token whose device signed out (revoked sid) is refused', async (t) => {
+  const f = await fixture(t);
+  const signed = (sid: string) => `Bearer ${jwt.sign({ userId: 2, pwd_iat: 0, auth_gen: 1, sid }, secret, { expiresIn: '1h' })}`;
+  const revoked = 'revokedSid000000000000';
+  const live = 'liveDeviceSid000000000';
+  revokedRows.length = 0;
+  revokedRows.push({ sid: revoked, expires_at: Date.now() + 3_600_000 });
+  try {
+    assert.equal((await f.get(signed(revoked))).status, 401, 'signed-out device');
+    assert.equal(f.verifyUser(signed(revoked)), null);
+    assert.equal((await f.get(signed(live))).status, 200, 'another device of the same user');
+    assert.equal((await f.get(signed('bad sid'))).status, 401, 'a malformed sid is refused');
+    // H1: a pre-release token (no sid) is judged under the sid derived from it.
+    const legacy = jwt.sign({ userId: 2, pwd_iat: 0, auth_gen: 1 }, secret, { expiresIn: '1h' });
+    assert.equal((await f.get(`Bearer ${legacy}`)).status, 200);
+    revokedRows.push({ sid: legacyTokenSid(legacy), expires_at: Date.now() + 3_600_000 });
+    assert.equal((await f.get(`Bearer ${legacy}`)).status, 401, 'signed-out pre-release token');
+  } finally {
+    revokedRows.length = 0;
+  }
 });
 
 test('SSO policy off: attestation is not consulted, other checks unchanged', async (t) => {

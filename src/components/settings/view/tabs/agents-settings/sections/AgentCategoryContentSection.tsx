@@ -14,6 +14,7 @@ import AgyConnectionSection from './content/AgyConnectionSection';
 import ClaudeConnectionSection from './content/ClaudeConnectionSection';
 import ComingSoonContent from './content/ComingSoonContent';
 import CredentialGrantsSection from './content/CredentialGrantsSection';
+import DelegationModeSection from './content/DelegationModeSection';
 import EnginesContent from './content/EnginesContent';
 import InstructionSourcesContent from './content/InstructionSourcesContent';
 import HarnessFilesSection from './HarnessFilesSection';
@@ -133,8 +134,13 @@ export default function AgentCategoryContentSection({
           أنه يجيب سؤالها من الجهة الأخرى، فقُرئ ذيلاً للبطاقة لا جواباً مستقلاً،
           والبطاقةُ فوقه تدفعه خارج أول شاشة. `standalone` يجعله يعلن نفسه ولو لم
           يُجب الخادم بقنوات — تبويبٌ فارغ سؤالٌ بلا جواب. */}
+      {/* وضع التفويض الافتراضي (عامّ لكل الوكلاء) أعلى التبويب: يحكم كيف يعمل
+          المنسّق، فهو تعليماتٌ لا إذن — و«التعليمات» حاضرة لكل وكيل. */}
       {selectedCategory === 'instructions' && (
-        <InstructionSourcesContent agent={selectedAgent} standalone />
+        <div className="space-y-8">
+          <DelegationModeSection />
+          <InstructionSourcesContent agent={selectedAgent} standalone />
+        </div>
       )}
 
       {selectedCategory === 'permissions' && selectedAgent === 'claude' && (

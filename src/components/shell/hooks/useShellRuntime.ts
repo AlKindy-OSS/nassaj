@@ -21,6 +21,9 @@ export function useShellRuntime({
   onProcessComplete,
   onShellError,
   onOutputRef,
+  oneShotRunId = null,
+  onOneShotFrame = null,
+  claimOneShotLaunch = null,
 }: UseShellRuntimeOptions): UseShellRuntimeResult {
   const terminalContainerRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
@@ -37,6 +40,10 @@ export function useShellRuntime({
   const providerOverrideRef = useRef(provider);
   const onProcessCompleteRef = useRef(onProcessComplete);
   const onShellErrorRef = useRef(onShellError);
+  // T-2037: read by every init, so a reconnect/remount re-sends the same runId.
+  const oneShotRunIdRef = useRef(oneShotRunId);
+  const onOneShotFrameRef = useRef(onOneShotFrame);
+  const claimOneShotLaunchRef = useRef(claimOneShotLaunch);
   const authUrlRef = useRef('');
   const lastSessionIdRef = useRef<string | null>(selectedSession?.id ?? null);
 
@@ -49,7 +56,13 @@ export function useShellRuntime({
     providerOverrideRef.current = provider;
     onProcessCompleteRef.current = onProcessComplete;
     onShellErrorRef.current = onShellError;
+    oneShotRunIdRef.current = oneShotRunId;
+    onOneShotFrameRef.current = onOneShotFrame;
+    claimOneShotLaunchRef.current = claimOneShotLaunch;
   }, [
+    claimOneShotLaunch,
+    oneShotRunId,
+    onOneShotFrame,
     selectedProject,
     selectedSession,
     initialCommand,
@@ -143,6 +156,9 @@ export function useShellRuntime({
     providerOverrideRef,
     onProcessCompleteRef,
     onShellErrorRef: shellErrorSinkRef,
+    oneShotRunIdRef,
+    onOneShotFrameRef,
+    claimOneShotLaunchRef,
     isInitialized,
     autoConnect,
     closeSocket,

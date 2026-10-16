@@ -79,6 +79,7 @@ const SYNCED_STORAGE_KEYS: string[] = [
   'userLanguage', // i18n/config.js
   'uiPreferences', // hooks/useUiPreferences.ts (6 booleans, JSON)
   'notificationSoundEnabled', // utils/notificationSound.ts ("true"/"false")
+  'notificationQuestionSoundEnabled', // utils/notificationSound.ts question chime (T-2041)
   // code-editor (components/code-editor/constants/settings.ts)
   'codeEditorTheme',
   'codeEditorWordWrap',

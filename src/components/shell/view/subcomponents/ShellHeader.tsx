@@ -20,6 +20,8 @@ type ShellHeaderProps = {
   restartLabel: string;
   restartTitle: string;
   disableRestart: boolean;
+  /** False hides Restart (one-shot runs must never be re-launched from here). */
+  showRestart?: boolean;
   /** Currently active xterm theme id */
   terminalThemeId: TerminalThemeId;
   /** Called when the user picks a new theme */
@@ -42,6 +44,7 @@ export default function ShellHeader({
   restartLabel,
   restartTitle,
   disableRestart,
+  showRestart = true,
   terminalThemeId,
   onTerminalThemeChange,
 }: ShellHeaderProps) {
@@ -149,7 +152,7 @@ export default function ShellHeader({
             </button>
           )}
 
-          <button
+          {showRestart && <button
             type="button"
             onClick={onRestart}
             disabled={disableRestart}
@@ -158,7 +161,7 @@ export default function ShellHeader({
           >
             <RotateCcw className={`h-3.5 w-3.5 ${isRestarting ? 'animate-spin' : ''}`} aria-hidden="true" />
             <span>{restartLabel}</span>
-          </button>
+          </button>}
         </div>
       </div>
     </div>

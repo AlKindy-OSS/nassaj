@@ -240,6 +240,12 @@ export type { ClosedSessionRow } from '@/modules/database/repositories/closed-se
 export { uiPreferencesDb } from '@/modules/database/repositories/ui-preferences.js';
 export type { UiPreferences } from '@/modules/database/repositories/ui-preferences.js';
 export { userDb } from '@/modules/database/repositories/users.js';
+export { loginThrottleDb } from '@/modules/database/repositories/login-throttle.db.js';
+export type { LoginThrottleRow } from '@/modules/database/repositories/login-throttle.db.js';
+export { revokedTokenSidsDb } from '@/modules/database/repositories/revoked-token-sids.db.js';
+export { shellOneShotRunsDb, SHELL_ONESHOT_RUN_RETENTION_MS } from '@/modules/database/repositories/shell-oneshot-runs.db.js';
+export type { ShellOneShotRunRow, ShellOneShotRunState } from '@/modules/database/repositories/shell-oneshot-runs.db.js';
+export type { RevokedTokenSidRow } from '@/modules/database/repositories/revoked-token-sids.db.js';
 export {
   deviceAccountSessionsDb, DEVICE_ABSOLUTE_TTL_MS, DEVICE_COOKIE, DEVICE_IDLE_TTL_MS, MAX_ACCOUNT_SLOTS,
   WalletConflictError,

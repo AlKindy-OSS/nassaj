@@ -11,6 +11,15 @@ import styleLock from "./eslint-style-lock-plugin.js";
 import unusedImports from "eslint-plugin-unused-imports";
 import globals from "globals";
 
+// T-2039: native blocking dialogs are banned in src; use confirmDialog/alertDialog
+// from src/shared/dialogs (themed, RTL, keyboard-operable). Tests are exempt.
+const NATIVE_DIALOG_MESSAGE = "Use confirmDialog/alertDialog from src/shared/dialogs (T-2039).";
+const NATIVE_DIALOG_GLOBALS = ["confirm", "alert", "prompt"].map((name) => ({ name, message: NATIVE_DIALOG_MESSAGE }));
+const NATIVE_DIALOG_PROPERTIES = ["window", "globalThis", "self"].flatMap((object) =>
+  ["confirm", "alert", "prompt"].map((property) => ({ object, property, message: NATIVE_DIALOG_MESSAGE })),
+);
+const TEST_FILE_GLOBS = ["src/**/*.test.{ts,tsx,js,jsx}", "src/**/*.spec.{ts,tsx,js,jsx}", "src/**/__tests__/**"];
+
 export default tseslint.config(
   {
     ignores: ["dist/**", "node_modules/**", "public/**"],
@@ -63,6 +72,14 @@ export default tseslint.config(
       "no-useless-escape": "off",
     },
   },
+  {
+    files: ["src/**/*.{ts,tsx,js,jsx}"],
+    ignores: TEST_FILE_GLOBS,
+    rules: {
+      "no-restricted-globals": ["error", ...NATIVE_DIALOG_GLOBALS],
+      "no-restricted-properties": ["error", ...NATIVE_DIALOG_PROPERTIES],
+    },
+  },
   // The public share viewer is a sandboxed page isolated from the app (auth token in
   // localStorage on the same origin). It may import only its own files and packages:
   // nothing from src/components, contexts, hooks or any other app module.
@@ -79,11 +96,13 @@ export default tseslint.config(
         { name: "localStorage", message: "src/share must not touch storage." },
         { name: "sessionStorage", message: "src/share must not touch storage." },
         { name: "WebSocket", message: "src/share must not open sockets." },
+        ...NATIVE_DIALOG_GLOBALS,
       ],
       "no-restricted-properties": ["error",
         { object: "navigator", property: "serviceWorker", message: "src/share must not use service workers." },
         { object: "window", property: "localStorage", message: "src/share must not touch storage." },
         { object: "document", property: "cookie", message: "src/share must not touch cookies." },
+        ...NATIVE_DIALOG_PROPERTIES,
       ],
     },
   },
@@ -123,7 +142,7 @@ export default tseslint.config(
       ],
       "boundaries/elements": [
         { type: "backend-shared-type-contract", pattern: ["server/shared/types.{js,ts}","server/shared/interfaces.{js,ts}"], mode: "file" },
-        { type: "backend-shared-utils", pattern: ["server/shared/utils.{js,ts}","server/shared/frontmatter.ts","server/shared/r3-evidence-lexical.ts","server/shared/claude-cli-path.ts","server/shared/cli-executable-path.ts","server/shared/harness-binaries.ts","server/shared/__tests__/harness-binary-fixtures.ts","server/shared/__tests__/sandbox-home.ts","server/shared/__tests__/stub-harness-binaries.ts","server/shared/codex-executable.js","server/shared/codex-runtime-compat.js","server/shared/writer-target.js","server/shared/user-revocation-epoch.js","server/services/image-signature.js","server/services/svg-sanitizer.js"], mode: "file" },
+        { type: "backend-shared-utils", pattern: ["server/shared/utils.{js,ts}","server/shared/frontmatter.ts","server/shared/r3-evidence-lexical.ts","server/shared/claude-cli-path.ts","server/shared/cli-executable-path.ts","server/shared/harness-binaries.ts","server/shared/__tests__/harness-binary-fixtures.ts","server/shared/__tests__/sandbox-home.ts","server/shared/__tests__/stub-harness-binaries.ts","server/shared/codex-executable.js","server/shared/codex-runtime-compat.js","server/shared/writer-target.js","server/shared/user-revocation-epoch.js","server/shared/session-id.ts","server/services/image-signature.js","server/services/svg-sanitizer.js"], mode: "file" },
         { type: "backend-test-fixture", pattern: ["server/shared/tests/*"], mode: "file" },
         { type: "backend-isolation-service", pattern: "server/services/isolation/*", mode: "file" },
         { type: "backend-service-shared", pattern: ["server/services/provider-sharing.js","server/services/agent-sse-ticket.service.js","server/services/system-resource-sampler.service.ts","server/services/update-maintenance-gate.js","server/services/update-writer-lease.js"], mode: "file" },

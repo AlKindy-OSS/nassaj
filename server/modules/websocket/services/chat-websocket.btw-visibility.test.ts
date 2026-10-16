@@ -7,6 +7,8 @@
  *
  *   - an OUTSIDER asking /btw on a PRIVATE-project session gets btw-error
  *     `not_visible` and spawnClaudeSideQuery is NEVER called (C3 visibility);
+ *   - a read-only VIEWER of a visible session gets `btw_forbidden` (B-1647: /btw
+ *     takes the session write gate, like a composer send);
  *   - a non-claude session yields `unsupported_provider` and no fork;
  *   - an unknown session yields `session_not_found` and no fork;
  *   - a second concurrent /btw on the same socket is refused `busy` (flood guard)
@@ -31,6 +33,7 @@ const PUBLIC_PROJECT_ID = 'proj-public';
 
 const OWNER_USER_ID = 1; // member of the private project
 const OUTSIDER_USER_ID = 2; // NOT a member of the private project
+const SECOND_WRITER_USER_ID = 3; // a second writer (public project), for per-user caps
 
 // sessionId → project_path (sessions table) and the provider persisted for it.
 const SESSION_PROJECT: Record<string, string> = {
@@ -69,10 +72,11 @@ mock.module('@/modules/database/index.js', {
         projectId === PUBLIC_PROJECT_ID ||
         (projectId === PRIVATE_PROJECT_ID && userId === OWNER_USER_ID),
       getVisibleProjectPaths: () => [],
-      // T-1090 write gate: the outsider can SEE the public project but is a member
-      // of neither, so they may ask /btw there and may NOT fork into it.
-      isProjectWritableByUser: (_projectId: string, userId: number | null) =>
-        userId === OWNER_USER_ID,
+      // T-1090 / B-1647 write gate: the outsider can SEE the public project but is
+      // a member of neither, so they may neither ask /btw there nor fork into it.
+      isProjectWritableByUser: (projectId: string, userId: number | null) =>
+        userId === OWNER_USER_ID
+        || (projectId === PUBLIC_PROJECT_ID && userId === SECOND_WRITER_USER_ID),
     },
     // Same gate's first membership probe. No one is a session participant here, so
     // the project-level predicate above is what decides.
@@ -390,7 +394,7 @@ describe('T-881 /btw WS gate', () => {
   });
 
   test('Codex session routes to the native Codex side-query adapter', async () => {
-    const { ws, sideQueryCalls, codexSideQueryCalls } = connect(OUTSIDER_USER_ID);
+    const { ws, sideQueryCalls, codexSideQueryCalls } = connect(SECOND_WRITER_USER_ID);
     emitBtw(ws, { btwId: 'btw-2', sessionId: 'sess-public-codex', question: 'hi' });
     await waitForWriterLease();
 
@@ -498,9 +502,13 @@ describe('T-881 /btw WS gate', () => {
     assert.ok(acceptedIdx < chunkIdx, 'btw-accepted arrives BEFORE the first btw-chunk');
     const chunk = findSent(ws, 'btw-chunk');
     assert.ok(chunk, 'a btw-chunk was relayed');
-    assert.equal(chunk.btwId, 'btw-h');
-    assert.equal(chunk.text, 'The failure was a missing env var.');
+    // ADR-210: chunks pass a display stream masker that may hold the last word
+    // until completion; the relayed chunks, in order, carry the whole answer.
+    const chunks = ws.sent.filter((m) => m.type === 'btw-chunk') as Array<{ btwId?: string; text?: string }>;
+    assert.ok(chunks.every((m) => m.btwId === 'btw-h'));
+    assert.equal(chunks.map((m) => m.text).join(''), 'The failure was a missing env var.');
     const done = findSent(ws, 'btw-complete');
+    assert.ok(ws.sent.indexOf(done as never) > ws.sent.lastIndexOf(chunks.at(-1) as never), 'the held tail precedes btw-complete');
     assert.ok(done, 'a btw-complete was relayed');
     assert.equal(done.btwId, 'btw-h');
     assert.equal(findSent(ws, 'btw-error'), undefined, 'no error on the happy path');
@@ -558,7 +566,7 @@ describe('T-881 /btw WS gate', () => {
     assert.equal(findSent(c.ws, 'btw-accepted'), undefined, 'no accept frame when refused');
 
     // A DIFFERENT user has their own independent per-user cap.
-    const other = connect(OUTSIDER_USER_ID);
+    const other = connect(SECOND_WRITER_USER_ID);
     emitBtw(other.ws, { btwId: 'o1', sessionId: 'sess-public-claude', question: 'q' });
     await waitForWriterLease();
     assert.equal(other.sideQueryCalls.length, 1, 'another user is unaffected by this user\'s cap');
@@ -634,13 +642,17 @@ describe('T-1090 /btw fork WS gate', () => {
     ws.emit('message', JSON.stringify({ type: 'btw-fork', ...payload }));
   }
 
-  test('a VIEWER of a public project may ask /btw but may NOT fork it', async () => {
-    // The very asymmetry this gate exists for: same session, same user, same
-    // socket — the read passes and the write is refused.
+  test('B-1647: a read-only VIEWER of a public project may neither ask /btw nor fork it', async () => {
+    // Owner decision 2026-10-16: /btw takes the session WRITE gate, like a send.
     const { ws, sideQueryCalls, forkCalls } = connect(OUTSIDER_USER_ID);
     emitBtw(ws, { btwId: 'read', sessionId: 'sess-public-claude', question: 'q' });
     await waitForWriterLease();
-    assert.equal(sideQueryCalls.length, 1, 'the READ (side query) is allowed');
+    const btwErr = findSent(ws, 'btw-error');
+    assert.ok(btwErr, 'the side query is refused');
+    assert.equal(btwErr.code, 'btw_forbidden');
+    assert.equal(btwErr.btwId, 'read', 'the error echoes the client btwId');
+    assert.equal(findSent(ws, 'btw-accepted'), undefined, 'no accept frame');
+    assert.equal(sideQueryCalls.length, 0, 'no side query is spawned for a viewer');
 
     emitFork(ws, { btwId: 'write', ...FORK_PAYLOAD });
     const err = findSent(ws, 'btw-fork-error');
@@ -648,6 +660,14 @@ describe('T-1090 /btw fork WS gate', () => {
     assert.equal(err.btwId, 'write', 'the error echoes the client btwId');
     assert.equal(err.code, 'not_writable', 'a non-member cannot create a session in the project');
     assert.equal(forkCalls.length, 0, 'the fork service is NEVER reached');
+  });
+
+  test('B-1647: a writer who is not the session owner may still ask /btw', async () => {
+    const { ws, sideQueryCalls } = connect(SECOND_WRITER_USER_ID);
+    emitBtw(ws, { btwId: 'writer', sessionId: 'sess-public-claude', question: 'q' });
+    await waitForWriterLease();
+    assert.equal(findSent(ws, 'btw-error'), undefined);
+    assert.equal(sideQueryCalls.length, 1, 'a project writer is admitted');
   });
 
   test('a member forks: the service gets the exchange and the reply carries the new id', async () => {

@@ -1,8 +1,16 @@
+import { useEffect, useState } from 'react';
 import { Bell, BellOff, BellRing, Loader2, Megaphone, Play, Radio } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
+import { onApplyServerPreference } from '../../../../preferences/preferencesSync';
 import { Button } from '../../../../shared/view/ui';
-import { playChatCompletionSound } from '../../../../utils/notificationSound';
+import {
+  NOTIFICATION_QUESTION_SOUND_ENABLED_STORAGE_KEY,
+  isNotificationQuestionSoundEnabled,
+  playChatCompletionSound,
+  playChatQuestionSound,
+  setNotificationQuestionSoundEnabled,
+} from '../../../../utils/notificationSound';
 import type { NotificationPreferencesState } from '../../types/types';
 import SettingsCard from '../SettingsCard';
 import SettingsGroup from '../SettingsGroup';
@@ -41,6 +49,7 @@ export default function NotificationsSettingsTab({
   onDisablePush,
 }: NotificationsSettingsTabProps) {
   const { t } = useTranslation('settings');
+  const questionSound = useQuestionSoundPreference();
 
   const pushSupported = pushPermission !== 'unsupported';
   const pushDenied = pushPermission === 'denied';
@@ -150,6 +159,30 @@ export default function NotificationsSettingsTab({
               />
             </div>
           </SettingsRow>
+
+          <SettingsRow
+            label={t('notifications.questionSound')}
+            description={t('notifications.questionSoundDescription')}
+          >
+            <div className="flex items-center gap-3">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  void playChatQuestionSound({ force: true });
+                }}
+              >
+                <Play className="h-4 w-4" />
+                {t('notifications.sound.test')}
+              </Button>
+              <SettingsToggle
+                checked={questionSound.enabled}
+                onChange={questionSound.setEnabled}
+                ariaLabel={t('notifications.questionSound')}
+              />
+            </div>
+          </SettingsRow>
         </SettingsGroup>
         </SettingsSection>
       </SettingsSection>
@@ -183,4 +216,28 @@ export default function NotificationsSettingsTab({
       </SettingsSection>
     </div>
   );
+}
+
+/**
+ * مفتاح صوت الأسئلة (‏T-2041): مصدره `localStorage` مباشرةً، ومزامنته عبر مرآة
+ * التفضيلات (المفتاح مسجَّل في `preferencesSync`). والاستماع لحدث التطبيق الحيّ
+ * يعكس قيمةً وصلت من الحساب والتبويب مفتوح، بلا إعادة تحميل.
+ */
+function useQuestionSoundPreference() {
+  const [enabled, setEnabledState] = useState(isNotificationQuestionSoundEnabled);
+
+  useEffect(
+    () =>
+      onApplyServerPreference(NOTIFICATION_QUESTION_SOUND_ENABLED_STORAGE_KEY, (raw) => {
+        setEnabledState(raw !== 'false');
+      }),
+    [],
+  );
+
+  const setEnabled = (value: boolean) => {
+    setNotificationQuestionSoundEnabled(value);
+    setEnabledState(value);
+  };
+
+  return { enabled, setEnabled };
 }

@@ -136,6 +136,54 @@ const baseline = [
   },
   {
     "phase": "security_startup_authorized",
+    "method": "exec",
+    "sql": "CREATE TABLE IF NOT EXISTS login_throttle (\n  key_hash TEXT PRIMARY KEY,\n  failures INTEGER NOT NULL,\n  first_failure_at INTEGER NOT NULL,\n  locked_until INTEGER,\n  lock_count INTEGER NOT NULL DEFAULT 0,\n  updated_at INTEGER NOT NULL\n)",
+    "shadow": null
+  },
+  {
+    "phase": "security_startup_authorized",
+    "method": "exec",
+    "sql": "CREATE INDEX IF NOT EXISTS idx_login_throttle_updated_at ON login_throttle(updated_at)",
+    "shadow": null
+  },
+  {
+    "phase": "security_startup_authorized",
+    "method": "exec",
+    "sql": "CREATE TABLE IF NOT EXISTS revoked_token_sids (\n  sid TEXT PRIMARY KEY,\n  user_id INTEGER NOT NULL,\n  revoked_at INTEGER NOT NULL,\n  expires_at INTEGER NOT NULL\n)",
+    "shadow": null
+  },
+  {
+    "phase": "security_startup_authorized",
+    "method": "exec",
+    "sql": "CREATE INDEX IF NOT EXISTS idx_revoked_token_sids_expires_at ON revoked_token_sids(expires_at)",
+    "shadow": null
+  },
+  {
+    "phase": "security_startup_authorized",
+    "method": "all",
+    "sql": "PRAGMA table_info(users)",
+    "shadow": null
+  },
+  {
+    "phase": "security_startup_authorized",
+    "method": "exec",
+    "sql": "ALTER TABLE users ADD COLUMN token_epoch INTEGER NOT NULL DEFAULT 0 CHECK (token_epoch >= 0)",
+    "shadow": null
+  },
+  {
+    "phase": "security_startup_authorized",
+    "method": "exec",
+    "sql": "CREATE TABLE IF NOT EXISTS shell_oneshot_runs (\n  user_id INTEGER NOT NULL,\n  run_id TEXT NOT NULL,\n  consumed_at INTEGER NOT NULL,\n  state TEXT NOT NULL DEFAULT 'started' CHECK (state IN ('started', 'finished', 'refused')),\n  exit_code INTEGER,\n  ended_at INTEGER,\n  PRIMARY KEY (user_id, run_id)\n)",
+    "shadow": null
+  },
+  {
+    "phase": "security_startup_authorized",
+    "method": "exec",
+    "sql": "CREATE INDEX IF NOT EXISTS idx_shell_oneshot_runs_ended_at ON shell_oneshot_runs(ended_at)",
+    "shadow": null
+  },
+  {
+    "phase": "security_startup_authorized",
     "method": "run",
     "sql": "UPDATE connector_runtime_anchor SET\n    maximum_fencing_token = ?, maximum_writer_epoch = ?, clock_high_water_ms = ?, authority_mac = ?\n    WHERE singleton = 1 AND authority_mac = ?",
     "shadow": null

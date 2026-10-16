@@ -1,0 +1,24 @@
+{
+  "_provenance": [
+    "Scrubbed T-2002 backup rows: task sessionId matched child id and",
+    "parentSessionId matched session.parent_id; child read was completed."
+  ],
+  "parentSessionId": "parent_session",
+  "childSessionId": "child_session",
+  "parentTask": {
+    "type": "tool",
+    "tool": "task",
+    "state": {
+      "status": "completed",
+      "metadata": {
+        "sessionId": "child_session",
+        "parentSessionId": "parent_session"
+      }
+    }
+  },
+  "childTool": {
+    "type": "tool",
+    "tool": "read",
+    "state": { "status": "completed" }
+  }
+}

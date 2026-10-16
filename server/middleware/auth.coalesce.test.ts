@@ -34,6 +34,9 @@ const FIXED_SECRET = 'coalesce-test-secret-0123456789abcdef';
 // and the module never depends on an ambient JWT_SECRET.
 delete process.env.JWT_SECRET;
 
+// T-2035: per-user sign-out epoch, mutable per test (missing = 0).
+const tokenEpochs = new Map<number, number>();
+
 // Register mocks BEFORE importing auth.js (node:test mocks are not hoisted).
 mock.module(url('../modules/database/index.js'), {
   namedExports: {
@@ -46,6 +49,7 @@ mock.module(url('../modules/database/index.js'), {
         role: 'user',
         password_changed_at: null,
         authorization_generation: 1,
+        token_epoch: tokenEpochs.get(id) ?? 0,
       }),
     },
     appConfigDb: { getOrCreateJwtSecret: () => FIXED_SECRET },
@@ -71,12 +75,12 @@ const SEVEN_DAYS = 7 * 24 * 60 * 60;
 const FOUR_DAYS = 4 * 24 * 60 * 60;
 
 /** Token whose iat is 4 days ago and exp is iat + 7 days → safely past half-life. */
-function pastHalfLifeToken(userId: number): { token: string; exp: number } {
+function pastHalfLifeToken(userId: number, tokEp = 0): { token: string; exp: number } {
   const iat = Math.floor(Date.now() / 1000) - FOUR_DAYS;
   const exp = iat + SEVEN_DAYS;
   // Explicit iat/exp (no expiresIn option, which would conflict with exp).
   const token = jwt.sign(
-    { userId, username: 'coalesce-user', role: 'user', pwd_iat: 0, auth_gen: 1, iat, exp },
+    { userId, username: 'coalesce-user', role: 'user', pwd_iat: 0, auth_gen: 1, tok_ep: tokEp, iat, exp },
     JWT_SECRET
   );
   return { token, exp };
@@ -166,4 +170,15 @@ test('B-163: a request past the coalesce window mints a second, distinct token a
   assert.notEqual(first, second, 'a post-window request mints a distinct token');
   const refreshRows = auditCalls.filter((c) => c.event === 'token_refresh');
   assert.equal(refreshRows.length, 2, 'each mint logs exactly one token_refresh row');
+});
+
+test('T-2035: a coalesced token from an older epoch is never handed out after the epoch moves', async () => {
+  const userId = 909;
+  const first = await invoke(pastHalfLifeToken(userId, 0).token);
+  assert.equal((jwt.decode(first as string) as { tok_ep: number }).tok_ep, 0);
+  // The epoch moves inside the coalesce window WITHOUT a cache invalidation.
+  tokenEpochs.set(userId, 1);
+  const second = await invoke(pastHalfLifeToken(userId, 1).token);
+  assert.notEqual(second, first, 'the cache tuple includes the epoch');
+  assert.equal((jwt.decode(second as string) as { tok_ep: number }).tok_ep, 1);
 });

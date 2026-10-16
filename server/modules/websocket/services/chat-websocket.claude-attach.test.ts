@@ -185,8 +185,9 @@ test('ADR-041: mid text-stream reconnect replays only seq>lastSeq, no swap/abort
 
   const replayed = ws.sent.filter((m: any) => m.kind === 'stream_delta');
   assert.deepEqual(
-    replayed.map((m: any) => m.content),
-    ['t4', 't5'],
+    replayed.map((m: any) => m.content).join(''),
+    // ADR-210: replay passes a display masker that may regroup deltas; the replayed TEXT is the contract.
+    ['t4', 't5'].join(''),
     'only seq>lastSeq replayed — no duplicate (t1..t3 withheld), no gap',
   );
 
@@ -217,7 +218,10 @@ test('ADR-041: reconnect mid tool_use replays the unseen tool_use + tool_result 
 
   const kinds = ws.sent
     .filter((m: any) => ['stream_delta', 'tool_use', 'tool_result'].includes(m.kind))
-    .map((m: any) => m.kind);
+    .map((m: any) => m.kind)
+    // ADR-210: the replay masker may release a held delta tail as one more
+    // delta frame; only ADJACENT stream_delta frames are merged.
+    .filter((kind: string, index: number, all: string[]) => !(kind === 'stream_delta' && all[index - 1] === 'stream_delta'));
   assert.deepEqual(
     kinds,
     ['tool_use', 'tool_result', 'stream_delta'],
@@ -253,13 +257,15 @@ test('ADR-041: multiple mirrors each receive their own differential slice', () =
   sendCheckStatus(wsB, sid, 3);
 
   assert.deepEqual(
-    wsA.sent.filter((m: any) => m.kind === 'stream_delta').map((m: any) => m.content),
-    ['m2', 'm3', 'm4'],
+    wsA.sent.filter((m: any) => m.kind === 'stream_delta').map((m: any) => m.content).join(''),
+    // ADR-210: replay passes a display masker that may regroup deltas; the replayed TEXT is the contract.
+    ['m2', 'm3', 'm4'].join(''),
     'mirror A gets seq>1',
   );
   assert.deepEqual(
-    wsB.sent.filter((m: any) => m.kind === 'stream_delta').map((m: any) => m.content),
-    ['m4'],
+    wsB.sent.filter((m: any) => m.kind === 'stream_delta').map((m: any) => m.content).join(''),
+    // ADR-210: replay passes a display masker that may regroup deltas; the replayed TEXT is the contract.
+    ['m4'].join(''),
     'mirror B gets seq>3',
   );
   assert.equal(reg.isActive(), true, 'shared live session untouched by either mirror');
@@ -372,8 +378,9 @@ test('B-736: orphaned active claude writer replays delta before one reclaim and 
   assert.deepEqual(events, ['replay:missing-2', 'replay:missing-3', 'reconnect']);
   assert.equal(reconnects, 1, 'orphaned writer is reclaimed exactly once');
   assert.deepEqual(
-    ws.sent.filter((m: any) => m.kind === 'stream_delta').map((m: any) => m.content),
-    ['missing-2', 'missing-3'],
+    ws.sent.filter((m: any) => m.kind === 'stream_delta').map((m: any) => m.content).join(''),
+    // ADR-210: replay passes a display masker that may regroup deltas; the replayed TEXT is the contract.
+    ['missing-2', 'missing-3'].join(''),
     'new socket receives only seq > lastSeq before the reclaim',
   );
   const status = ws.sent.find((m: any) => m.type === 'session-status');
@@ -405,8 +412,9 @@ test('B-736: failed orphaned-writer reclaim preserves replay and active status',
 
   assert.equal(reconnects, 1, 'failed reclaim is attempted once only');
   assert.deepEqual(
-    ws.sent.filter((m: any) => m.kind === 'stream_delta').map((m: any) => m.content),
-    ['replayed'],
+    ws.sent.filter((m: any) => m.kind === 'stream_delta').map((m: any) => m.content).join(''),
+    // ADR-210: replay passes a display masker that may regroup deltas; the replayed TEXT is the contract.
+    ['replayed'].join(''),
     'differential replay remains valid even when reclaim returns false',
   );
   const status = ws.sent.find((m: any) => m.type === 'session-status');
@@ -437,8 +445,9 @@ test('B-736: active claude session with live primary socket never swaps writer',
 
   assert.equal(reconnects, 0, 'live primary socket keeps the active writer intact');
   assert.deepEqual(
-    ws.sent.filter((m: any) => m.kind === 'stream_delta').map((m: any) => m.content),
-    ['delta'],
+    ws.sent.filter((m: any) => m.kind === 'stream_delta').map((m: any) => m.content).join(''),
+    // ADR-210: replay passes a display masker that may regroup deltas; the replayed TEXT is the contract.
+    ['delta'].join(''),
     'live-primary guard does not suppress differential replay',
   );
   const status = ws.sent.find((m: any) => m.type === 'session-status');

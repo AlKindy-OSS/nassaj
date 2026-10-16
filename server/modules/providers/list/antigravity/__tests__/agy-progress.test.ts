@@ -34,6 +34,8 @@ after(() => fs.rmSync(sandbox, { recursive: true, force: true }));
 type Row = Record<string, any>;
 const real = JSON.parse(fs.readFileSync(
   path.join(import.meta.dirname, '__fixtures__', 'agy-progress.real.json'), 'utf8')) as Row;
+const childReal = JSON.parse(fs.readFileSync(
+  path.join(import.meta.dirname, '__fixtures__', 'agy-child-tool.real.json'), 'utf8')) as Row;
 const copy = <T>(value: T): T => JSON.parse(JSON.stringify(value));
 const BRAIN: string = real.brainUUID;
 const CHILD: string = real.childUUID;
@@ -86,6 +88,38 @@ test('invoke_subagent: role label only, completed once the child reports back', 
     steps: progress.summarizeAgyTranscript(jsonl(unreported)), afterStepIndex: -1, brainUUID: BRAIN, sessionId: BRAIN, plan: null,
   });
   assert.equal(running.subagent.state, 'running');
+});
+
+test('child conversation tool_calls are attached to the matching subagent', async () => {
+  const childId = childReal.childUUID as string;
+  const root = path.join(sandbox, `child-${counter++}`);
+  const transcript = path.join(root, childId, '.system_generated', 'logs', 'transcript.jsonl');
+  fs.mkdirSync(path.dirname(transcript), { recursive: true });
+  fs.writeFileSync(transcript, jsonl([childReal.row]));
+  const rows = await progress.readAgyChildTools(root, [{
+    stepIndex: 1, type: 'GENERIC', conversationIds: [childId],
+  }]);
+  assert.deepEqual(rows.get(childId), [{ name: 'view_file' }]);
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('child tool transcript reads a bounded tail when the transcript exceeds one MiB', async () => {
+  const childId = childReal.childUUID as string;
+  const root = path.join(sandbox, `child-tail-${counter++}`);
+  const transcript = path.join(root, childId, '.system_generated', 'logs', 'transcript.jsonl');
+  fs.mkdirSync(path.dirname(transcript), { recursive: true });
+  const early = JSON.stringify({ tool_calls: [{ name: 'early_tool' }] });
+  const filler = JSON.stringify({ content: 'x'.repeat(1024 * 1024) });
+  const late = JSON.stringify({ tool_calls: [{ name: 'tail_tool' }] });
+  fs.writeFileSync(transcript, `${early}\n${filler}\n${late}\n`);
+  try {
+    const rows = await progress.readAgyChildTools(root, [{
+      stepIndex: 1, type: 'GENERIC', conversationIds: [childId],
+    }]);
+    assert.deepEqual(rows.get(childId), [{ name: 'tail_tool' }]);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test('history: plan and subagents land on the LAST turn only, after its steps', async () => {

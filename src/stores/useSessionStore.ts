@@ -124,7 +124,7 @@ export interface NormalizedMessage {
     model?: string;
     modelInherited?: boolean;
     effort?: string;
-    tools?: { name: string; status?: string }[];
+    tools?: { id?: string; name: string; status?: string }[];
   };
   images?: string[];
   files?: { name: string; path: string; relPath?: string; size?: number; mimeType?: string }[];

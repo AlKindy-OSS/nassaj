@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -319,40 +320,160 @@ export async function appendVendorTranscriptTurnIdempotent(
   if (!content.trim()) return;
   if (!eventId || Buffer.byteLength(eventId) > 256 || /[\x00-\x1f\x7f]/u.test(eventId)) throw new Error('Invalid vendor message identity');
   const filePath = vendorTranscriptPath(provider, sessionId, projectPath);
+  await appendEventOnce(filePath, eventId, () => JSON.stringify({
+    type: 'message', eventId, message: { id: eventId, role, content,
+      ...vendorReceiptMetadata(provider, sessionId, role, receipt) },
+  }));
+}
+
+/**
+ * Per-file eventId index (T-2038). Re-reading the whole transcript on every
+ * append made a session's writes quadratic, so each file's committed eventIds
+ * are scanned ONCE (streamed) and then maintained as appends land. `size` is
+ * the byte offset up to which the index is known to mirror the file; it always
+ * sits on a line boundary. The index is a cache of the disk, never the truth:
+ * a new process reseeds from disk, and an inode change, a shrink, or a broken
+ * line boundary discards it. Growth made by another writer is scanned from
+ * `size` onwards. Every read and write happens under the per-file process lock.
+ */
+interface EventIdIndex { dev: number; ino: number; size: number; ids: Set<string> }
+
+const EVENT_ID_INDEX_MAX = 256;
+const TAIL_CHUNK_BYTES = 64 * 1024;
+const NEWLINE = 0x0a;
+const eventIdIndexes = new Map<string, EventIdIndex>();
+
+/** Serialises one idempotent append per file (in-process chain + process lock). */
+async function appendEventOnce(filePath: string, eventId: string, serialize: () => string): Promise<void> {
   const previous = transcriptLocks.get(filePath) ?? Promise.resolve();
   const next = previous.then(async () => {
     await fsp.mkdir(path.dirname(filePath), { recursive: true });
     const release = await acquireProcessLock(filePath);
     try {
-      let existing = '';
-      try { existing = await fsp.readFile(filePath, 'utf8'); }
-      catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-      }
-      // A process can die midway through append. Remove only the unterminated
-      // suffix; every earlier newline-delimited event is already committed.
-      if (existing && !existing.endsWith('\n')) {
-        const lastNewline = existing.lastIndexOf('\n');
-        const validPrefix = lastNewline < 0 ? '' : existing.slice(0, lastNewline + 1);
-        await fsp.truncate(filePath, Buffer.byteLength(validPrefix));
-        existing = validPrefix;
-      }
-      const exists = existing.split(/\r?\n/).some((line) => {
-        try { return (JSON.parse(line) as { eventId?: unknown }).eventId === eventId; }
-        catch { return false; }
-      });
-      if (!exists) {
-        await fsp.appendFile(filePath, `${JSON.stringify({
-          type: 'message', eventId, message: { id: eventId, role, content,
-            ...vendorReceiptMetadata(provider, sessionId, role, receipt) },
-        })}\n`);
-      }
+      const index = await loadEventIdIndex(filePath);
+      if (index.ids.has(eventId)) return;
+      const line = `${serialize()}\n`;
+      await fsp.appendFile(filePath, line);
+      await recordAppend(filePath, index, eventId, Buffer.byteLength(line));
     } finally {
       await release();
     }
   });
   transcriptLocks.set(filePath, next.catch(() => undefined));
   await next;
+}
+
+async function statOrNull(filePath: string): Promise<fs.Stats | null> {
+  try { return await fsp.stat(filePath); }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+    throw error;
+  }
+}
+
+/** Brings the file's index up to date with disk, repairing a torn tail first. */
+async function loadEventIdIndex(filePath: string): Promise<EventIdIndex> {
+  const stat = await statOrNull(filePath);
+  if (!stat) {
+    eventIdIndexes.delete(filePath);
+    return { dev: 0, ino: 0, size: 0, ids: new Set() };
+  }
+  const size = await repairUnterminatedSuffix(filePath, stat.size);
+  let index = eventIdIndexes.get(filePath);
+  const stale = !index || index.dev !== stat.dev || index.ino !== stat.ino || size < index.size
+    || (size > index.size && !(await isLineBoundary(filePath, index.size)));
+  if (!index || stale) index = { dev: stat.dev, ino: stat.ino, size: 0, ids: new Set() };
+  if (size > index.size) {
+    await scanEventIds(filePath, index.size, size, index.ids);
+    index.size = size;
+  }
+  rememberIndex(filePath, index);
+  return index;
+}
+
+/** Records our own append; any interleaved foreign write drops the index instead. */
+async function recordAppend(filePath: string, index: EventIdIndex, eventId: string, bytes: number): Promise<void> {
+  const stat = await statOrNull(filePath);
+  if (!stat || stat.size !== index.size + bytes) {
+    eventIdIndexes.delete(filePath);
+    return;
+  }
+  Object.assign(index, { dev: stat.dev, ino: stat.ino, size: stat.size });
+  index.ids.add(eventId);
+  rememberIndex(filePath, index);
+}
+
+/** LRU insert/touch, capped at EVENT_ID_INDEX_MAX files. */
+function rememberIndex(filePath: string, index: EventIdIndex): void {
+  eventIdIndexes.delete(filePath);
+  eventIdIndexes.set(filePath, index);
+  if (eventIdIndexes.size > EVENT_ID_INDEX_MAX) {
+    const oldest = eventIdIndexes.keys().next().value;
+    if (oldest !== undefined) eventIdIndexes.delete(oldest);
+  }
+}
+
+async function isLineBoundary(filePath: string, offset: number): Promise<boolean> {
+  if (offset === 0) return true;
+  const handle = await fsp.open(filePath, 'r');
+  try {
+    const byte = Buffer.alloc(1);
+    const { bytesRead } = await handle.read(byte, 0, 1, offset - 1);
+    return bytesRead === 1 && byte[0] === NEWLINE;
+  } finally {
+    await handle.close();
+  }
+}
+
+/**
+ * A process can die midway through append. Remove only the unterminated
+ * suffix; every earlier newline-delimited event is already committed. Reads
+ * the last byte, then (only when torn) walks back in ≤64 KiB positional reads.
+ */
+async function repairUnterminatedSuffix(filePath: string, size: number): Promise<number> {
+  if (size === 0) return 0;
+  const handle = await fsp.open(filePath, 'r');
+  let validSize = size;
+  try {
+    const last = Buffer.alloc(1);
+    await handle.read(last, 0, 1, size - 1);
+    if (last[0] === NEWLINE) return size;
+    validSize = 0;
+    const chunk = Buffer.alloc(TAIL_CHUNK_BYTES);
+    for (let end = size; end > 0;) {
+      const start = Math.max(0, end - TAIL_CHUNK_BYTES);
+      const { bytesRead } = await handle.read(chunk, 0, end - start, start);
+      const newline = chunk.subarray(0, bytesRead).lastIndexOf(NEWLINE);
+      if (newline >= 0) { validSize = start + newline + 1; break; }
+      end = start;
+    }
+  } finally {
+    await handle.close();
+  }
+  await fsp.truncate(filePath, validSize);
+  return validSize;
+}
+
+/** Streams [start, end) and adds every string eventId on a complete JSON line. */
+async function scanEventIds(filePath: string, start: number, end: number, ids: Set<string>): Promise<void> {
+  const addLine = (bytes: Buffer): void => {
+    try {
+      const parsed = JSON.parse(bytes.toString('utf8')) as { eventId?: unknown } | null;
+      if (typeof parsed?.eventId === 'string') ids.add(parsed.eventId);
+    } catch {
+      // A non-JSON line never carries an identity, as before.
+    }
+  };
+  let pending: Buffer = Buffer.alloc(0);
+  for await (const chunk of fs.createReadStream(filePath, { start, end: end - 1 })) {
+    let data = Buffer.concat([pending, chunk as Buffer]);
+    for (let newline = data.indexOf(NEWLINE); newline >= 0; newline = data.indexOf(NEWLINE)) {
+      addLine(data.subarray(0, newline));
+      data = data.subarray(newline + 1);
+    }
+    pending = data;
+  }
+  if (pending.length > 0) addLine(pending);
 }
 
 /** Provider events cannot mint invocation-owned receipt metadata. */
@@ -385,32 +506,6 @@ async function appendTrustedVendorEvent(
 ): Promise<string> {
   if (!eventId.trim()) throw new Error('eventId is required');
   const filePath = vendorTranscriptPath(provider, sessionId, projectPath);
-  const previous = transcriptLocks.get(filePath) ?? Promise.resolve();
-  const next = previous.then(async () => {
-    await fsp.mkdir(path.dirname(filePath), { recursive: true });
-    const release = await acquireProcessLock(filePath);
-    try {
-      let existing = '';
-      try { existing = await fsp.readFile(filePath, 'utf8'); }
-      catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-      }
-      if (existing && !existing.endsWith('\n')) {
-        const lastNewline = existing.lastIndexOf('\n');
-        const validPrefix = lastNewline < 0 ? '' : existing.slice(0, lastNewline + 1);
-        await fsp.truncate(filePath, Buffer.byteLength(validPrefix));
-        existing = validPrefix;
-      }
-      const exists = existing.split(/\r?\n/u).some((line) => {
-        try { return (JSON.parse(line) as { eventId?: unknown }).eventId === eventId; }
-        catch { return false; }
-      });
-      if (!exists) await fsp.appendFile(filePath, `${JSON.stringify({ ...event, eventId })}\n`);
-    } finally {
-      await release();
-    }
-  });
-  transcriptLocks.set(filePath, next.catch(() => undefined));
-  await next;
+  await appendEventOnce(filePath, eventId, () => JSON.stringify({ ...event, eventId }));
   return filePath;
 }

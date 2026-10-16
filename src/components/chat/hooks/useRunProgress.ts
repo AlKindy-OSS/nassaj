@@ -97,7 +97,7 @@ export interface RunAgent {
   /** Provider effort/reasoning setting, when exposed. */
   effort?: string;
   /** Provider-neutral child tool history, including in-progress calls. */
-  tools?: Array<{ name: string; status?: string }>;
+  tools?: Array<{ id?: string; name: string; status?: string }>;
   /** `description` from the container toolInput, else the neutral `subagent.label`; '' when neither. */
   description: string;
   /**

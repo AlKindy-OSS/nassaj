@@ -26,6 +26,11 @@ export type AuditAction =
   | 'project_manually_readded'
   | 'login_success'
   | 'login_failure'
+  // T-2035: a per-identifier lock began. Metadata { lockSeconds, lockCount };
+  // userId only when the account exists, never the identifier.
+  | 'login_lockout'
+  // T-2035 owner break-glass: metadata { targetUserId, cleared, via: 'api'|'cli' }.
+  | 'login_unlocked'
   | 'logout'
   | 'auth_rejected'
   | 'token_refresh'
@@ -268,13 +273,10 @@ export type AuditAction =
   // ADR-194 I6: an IdP identity linked to an owner was refused for login or
   // self-link. Metadata { purpose } and, for login (A1), { reason }.
   | 'oidc_owner_sign_in_refused'
-  // ADR-194 A1: an opted-in owner signed in through SSO with a fresh passkey.
+  // ADR-194 A1: an owner signed in through SSO with a fresh passkey.
   // Metadata { provider, identityId, signInId, amr, authAgeSec } only; never
   // the subject or a token.
   | 'oidc_owner_sign_in'
-  // ADR-194 A1: an owner turned their own SSO sign-in opt-in on or off.
-  // Metadata { identityId, enabled } only.
-  | 'sso_owner_sign_in_changed'
   // ADR-194 D3/ADR-193: the owner confirmed the installation origin on a node
   // without the connector origin store. Metadata { replaced } only.
   | 'installation_origin_confirmed'

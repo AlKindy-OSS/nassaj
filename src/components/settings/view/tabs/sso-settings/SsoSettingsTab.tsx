@@ -33,7 +33,6 @@ import {
   type HeaderState,
   type StepId,
 } from './ssoModel';
-import SsoOwnerSignIn from './SsoOwnerSignIn';
 import { BusyLine, CopyField, SsoError, Tech } from './SsoParts';
 import SsoStepUpDialog from './SsoStepUpDialog';
 import SsoWizard from './SsoWizard';
@@ -157,10 +156,6 @@ export default function SsoSettingsTab({ onNavigateTab }: Props) {
             </div>
           )}
         </SettingsSection>
-      )}
-
-      {hasActive && status.ownerSignIn && (
-        <SsoOwnerSignIn ownerSignIn={status.ownerSignIn} setOwnerSignIn={sso.setOwnerSignIn} requestStepUp={requestStepUp} />
       )}
 
       {showWizard && (

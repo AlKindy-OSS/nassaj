@@ -57,5 +57,9 @@ test('qa M2: both replay buffers skip a revoked fence', () => {
   const claude = fs.readFileSync(path.join(SERVER_ROOT, 'claude-sdk.js'), 'utf8');
   assert.match(claude, /sessionKey && ws\?\.runFenceRevoked !== true\s*\?\s*claudeSessionRegistry\.record/);
   const agy = fs.readFileSync(path.join(SERVER_ROOT, 'agy-cli.js'), 'utf8');
-  assert.match(agy, /if \(ws\?\.runFenceRevoked !== true\) agySessionRegistry\.record\(registryKey, normalized\)/);
+  // ADR-210 (af5101d0e) wraps the record in a block that stamps the ring seq; the
+  // record must still sit inside the guard (no closing brace in between) and be the only one.
+  assert.match(agy,
+    /if \(ws\?\.runFenceRevoked !== true\)\s*(?:\{[^}]*?)?\bagySessionRegistry\.record\(registryKey, normalized\)/);
+  assert.equal(agy.match(/agySessionRegistry\.record\(/g)?.length, 1, 'one agy replay-buffer write');
 });

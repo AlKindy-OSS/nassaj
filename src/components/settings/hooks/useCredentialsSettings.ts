@@ -12,6 +12,7 @@ import type {
   CreatedApiKey,
 } from '../view/tabs/api-settings/types';
 import { copyTextToClipboard } from '../../../utils/clipboard';
+import { confirmDialog } from '../../../shared/dialogs/dialogService';
 
 type UseCredentialsSettingsArgs = {
   confirmDeleteApiKeyText: string;
@@ -75,7 +76,7 @@ export function useCredentialsSettings({
   }, [fetchData, newKeyName]);
 
   const deleteApiKey = useCallback(async (keyId: string) => {
-    if (!window.confirm(confirmDeleteApiKeyText)) {
+    if (!(await confirmDialog({ message: confirmDeleteApiKeyText, tone: 'danger' }))) {
       return;
     }
 

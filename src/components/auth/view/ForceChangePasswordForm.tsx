@@ -3,6 +3,7 @@ import type { FormEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAuth } from '../context/AuthContext';
 import { MIN_PASSWORD_LENGTH } from '../constants';
+import { LOGIN_LOCKED_CODE, loginLockedMessage } from '../loginLock';
 import AuthErrorAlert from './AuthErrorAlert';
 import AuthInputField from './AuthInputField';
 import AuthScreenLayout from './AuthScreenLayout';
@@ -61,7 +62,9 @@ export default function ForceChangePasswordForm() {
       const result = await changePassword(formState.currentPassword, formState.newPassword);
       if (!result.success) {
         // B-1533: a wrong temporary password is a form error, not an identity failure.
-        setErrorMessage(result.code === 'current_password_incorrect'
+        // T-2035: a throttle lock names the wait instead.
+        if (result.code === LOGIN_LOCKED_CODE) setErrorMessage(loginLockedMessage(t, result.retryAfterSeconds));
+        else setErrorMessage(result.code === 'current_password_incorrect'
           ? t('forceChangePassword.errors.incorrectCurrent')
           : result.error);
       }

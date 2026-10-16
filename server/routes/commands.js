@@ -1515,13 +1515,17 @@ router.post("/execute", async (req, res) => {
       );
     });
 
+    // Report-only (T-2037): the client may OFFER these to the owner; nothing here
+    // executes them.
+    const bashSnippets = extractBashSnippets(processedContent);
     res.json({
       type: "custom",
       command: commandName,
       content: processedContent,
       metadata,
       hasFileIncludes: processedContent.includes("@"),
-      hasBashCommands: processedContent.includes("!"),
+      bashSnippets,
+      hasBashCommands: bashSnippets.length > 0,
     });
   } catch (error) {
     if (error.code === "COMMAND_ACCESS_DENIED") {
@@ -1548,8 +1552,34 @@ router.post("/execute", async (req, res) => {
   }
 });
 
+/** Most bash snippets reported for one command file. */
+const MAX_BASH_SNIPPETS = 10;
+/**
+ * Claude Code's `!`backtick`` bash-snippet syntax: `!` at line start or after
+ * whitespace / `(`, then a single-line backtick span of at most 500 chars. A
+ * plain exclamation mark ("Hello!") is not a snippet.
+ */
+const BASH_SNIPPET_PATTERN = /(^|[\s(])!`([^`\n]{1,500})`/gm;
+
+/**
+ * Lists the bash snippets of a custom command body (at most MAX_BASH_SNIPPETS,
+ * in document order). Report-only: never executed by the server.
+ * @param {string} content
+ * @returns {string[]}
+ */
+function extractBashSnippets(content) {
+  if (typeof content !== "string") return [];
+  const snippets = [];
+  for (const match of content.matchAll(BASH_SNIPPET_PATTERN)) {
+    snippets.push(match[2]);
+    if (snippets.length >= MAX_BASH_SNIPPETS) break;
+  }
+  return snippets;
+}
+
 // Exported for unit testing the dynamic built-in merge/dedupe/resolve logic.
 export {
+  extractBashSnippets,
   mergeBuiltInCommands,
   builtInCommands,
   builtInsForProvider,

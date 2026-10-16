@@ -20,6 +20,7 @@ import {
   isMcpScope,
   isMcpTransport,
 } from '../utils/mcpFormatting';
+import { confirmDialog } from '../../../shared/dialogs/dialogService';
 
 type ProviderMcpServerResponse = {
   provider: McpProvider;
@@ -480,7 +481,7 @@ export function useMcpServers({ selectedProvider, currentProjects }: UseMcpServe
 
   const deleteServer = useCallback(
     async (server: ProviderMcpServer) => {
-      if (!window.confirm('Are you sure you want to delete this MCP server?')) {
+      if (!(await confirmDialog({ message: 'Are you sure you want to delete this MCP server?', tone: 'danger' }))) {
         return;
       }
 

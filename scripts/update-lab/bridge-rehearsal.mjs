@@ -11,6 +11,15 @@ import {hashDependencyTreeV2} from '../lib/dependency-tree-identity-v2.mjs';
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../..');
 const base=path.join(root,'.artifacts/t1772-bridge-rehearsal');
 
+/** Resolve the shared object store; in a linked worktree `.git` is a file, not a directory. */
+export function gitObjectsRoot() {
+    const common=spawnSync('/usr/bin/git',['rev-parse','--git-common-dir'],{cwd:root,encoding:'utf8'});
+    if(common.status!==0 || !common.stdout.trim())throw Error('bridge_git_common_dir_unknown');
+    const objects=fs.realpathSync(path.join(path.resolve(root,common.stdout.trim()),'objects'));
+    if(!fs.statSync(objects).isDirectory())throw Error('bridge_git_objects_not_directory');
+    return objects;
+}
+
 /** Create only a disk-backed, private child workspace; never provision/install dependencies. */
 export function prepareBridgeWorkspace() {
     fs.mkdirSync(base,{recursive:true,mode:0o700});
@@ -23,17 +32,30 @@ export function prepareBridgeWorkspace() {
     return lab;
 }
 
+/**
+ * Locate the pinned public Node 24.17/npm 12 runtime (`<tooling>/usr`), or null when this host has none.
+ * NASSAJ_TEST_NPM12_TOOLING lets a fresh worktree use the copy kept in another tree's lab scratch.
+ */
+export function publicRuntimeTooling() {
+    const tooling=process.env.NASSAJ_TEST_NPM12_TOOLING||path.join(base,'run-Mx3eDp/tooling');
+    if(!/^\/.+\/\.artifacts\/t1772-bridge-rehearsal\/run-[^/]+\/tooling$/.test(tooling))throw Error('bridge_public_runtime_path_invalid');
+    if(!fs.existsSync(path.join(tooling,'usr/bin/node')))return null;
+    if(fs.realpathSync(tooling)!==tooling)throw Error('bridge_public_runtime_path_invalid');
+    return path.join(tooling,'usr');
+}
+
 /** Execute a fixed child under separate user/mount/net/PID namespaces, preserving HOME's value. */
 export function runBridgeIsolated(lab,entry,{timeout=30000,privateDependencies=false,runtimeProfile='host-local'}={}) {
     if(!lab.startsWith(`${base}/run-`) || fs.realpathSync(lab)!==lab || !entry.startsWith(`${lab}/harness/`))throw Error('bridge_entry_unsafe');
     if(!['host-local','fleet-public-24.17-npm12'].includes(runtimeProfile) || (runtimeProfile!=='host-local'&&!privateDependencies))throw Error('bridge_runtime_profile_invalid');
     const environment=Object.fromEntries(['PATH','HOME','LANG','LC_ALL'].filter(key=>process.env[key]!==undefined).map(key=>[key,process.env[key]]));
     for(const [key,name] of [['USER','user'],['MOUNT','mnt'],['NET','net'],['PID','pid']])environment[`NASSAJ_LAB_PARENT_${key}_NS`]=fs.readlinkSync(`/proc/self/ns/${name}`);
-    const tooling=path.join(base,'run-Mx3eDp/tooling/usr');
+    const tooling=runtimeProfile==='host-local'?null:publicRuntimeTooling();
+    if(runtimeProfile!=='host-local'&&!tooling)throw Error('bridge_public_runtime_unavailable');
     const runtimeIdentity=()=>({nodeSha256:createHash('sha256').update(fs.readFileSync(path.join(tooling,'bin/node'))).digest('hex'),npmTree:hashDependencyTreeV2(path.join(tooling,'lib/node_modules/npm'))});
     const pinnedRuntime=runtimeProfile==='host-local'?null:runtimeIdentity();
     const result=spawnSync('/usr/bin/unshare',['--user',...(privateDependencies?['--map-current-user','--keep-caps']:['--map-root-user']),'--mount','--net','--pid','--fork','--kill-child=SIGKILL','--mount-proc',
-        path.join(root,'scripts/update-lab',privateDependencies?'triple-namespace.sh':'bridge-namespace.sh'),lab,process.env.HOME,path.join(root,'node_modules'),entry,path.join(root,'.git/objects'),runtimeProfile],
+        path.join(root,'scripts/update-lab',privateDependencies?'triple-namespace.sh':'bridge-namespace.sh'),lab,process.env.HOME,path.join(root,'node_modules'),entry,gitObjectsRoot(),runtimeProfile,...(tooling?[tooling]:[])],
     {env:environment,encoding:'utf8',timeout,killSignal:'SIGKILL',maxBuffer:1024*1024});
     if(pinnedRuntime){
         if(JSON.stringify(runtimeIdentity())!==JSON.stringify(pinnedRuntime))throw Error('bridge_public_runtime_changed');

@@ -76,6 +76,8 @@ import {
   SessionArtifactDir,
 } from '@/modules/providers/shared/session-transcript.js';
 import { isSessionAccessibleByUser } from '@/modules/providers/services/session-access.js';
+// eslint-disable-next-line boundaries/no-unknown -- ADR-210: display masking is a leaf service shared by every viewer egress.
+import { maskClippedSessionText, maskSessionText } from '@/services/display-secret-mask.js';
 
 /** One owned session's transcript row from the batched lookup. */
 type OwnedSessionRow = ReturnType<typeof sessionsDb.getSessionFilePathsByIds>[number];
@@ -257,14 +259,17 @@ async function orphanOf(
     outcome: outcome.outcome,
     unknownReason: outcome.unknownReason,
     agentType: meta.agentType,
-    description: meta.description,
+    // ADR-210 (T-2036): agent text reaches viewers masked; the preview is cut
+    // only after masking so a cut can never leave half a secret unmatched.
+    description: maskSessionText(meta.description, sessionId),
     toolUseId: meta.toolUseId,
     model: meta.model,
     startedAt: outcome.startedAt,
     lastActivityAt: outcome.lastActivityAt,
     updatedAt: outcome.updatedAt,
     hasReport: outcome.finalText !== null,
-    reportPreview: outcome.finalText !== null ? outcome.finalText.slice(0, REPORT_PREVIEW_CHARS) : null,
+    reportPreview: outcome.finalText !== null
+      ? maskClippedSessionText(outcome.finalText, outcome.finalTextTruncated, sessionId).slice(0, REPORT_PREVIEW_CHARS) : null,
     resumeHint: `SendMessage → ${agentId}`,
   };
 }
@@ -283,13 +288,13 @@ async function reportOf(
     outcome: outcome.outcome,
     unknownReason: outcome.unknownReason,
     agentType: meta.agentType,
-    description: meta.description,
+    description: maskSessionText(meta.description, sessionId),
     toolUseId: meta.toolUseId,
     startedAt: outcome.startedAt,
     lastActivityAt: outcome.lastActivityAt,
-    report: outcome.finalText,
+    report: maskClippedSessionText(outcome.finalText, outcome.finalTextTruncated, sessionId),
     reportTruncated: outcome.finalTextTruncated,
-    interruptionText: outcome.interruptionText,
+    interruptionText: maskSessionText(outcome.interruptionText, sessionId),
   };
 }
 

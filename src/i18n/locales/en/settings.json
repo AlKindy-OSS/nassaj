@@ -890,7 +890,9 @@
       "actionRequired": "Action required",
       "stop": "Run stopped",
       "error": "Run failed"
-    }
+    },
+    "questionSound": "Question sound",
+    "questionSoundDescription": "Play an alert sound when the agent asks a question that awaits your answer."
   },
   "appearanceSettings": {
     "darkMode": {
@@ -1246,7 +1248,7 @@
       },
       "coordinationLevel": {
         "label": "Default delegation mode",
-        "description": "Applies to new conversations and to any conversation without its own choice; a choice made inside a conversation still wins."
+        "description": "A global setting for all agents: applies to new conversations and to any conversation without its own choice; a choice made inside a conversation still wins."
       }
     },
     "authStatus": {
@@ -2860,13 +2862,6 @@
       "usePasskey": "Use passkey",
       "openProfile": "Open Profile"
     },
-    "ownerSignIn": {
-      "title": "Your sign-in",
-      "label": "Allow me to sign in with SSO using a passkey",
-      "description": "Your identity provider sign-in must include your passkey; if you signed in there with a password only, Nassaj asks for your key once. Your password and passkey here always keep working.",
-      "notLinked": "Your account is not linked to the identity provider in use, so this cannot be turned on.",
-      "stepUpIntro": "Confirm it's you with your password or passkey here to allow SSO sign-in for your owner account."
-    },
     "technical": {
       "title": "Technical details",
       "ignoredEnv": "These old server variables are no longer used:",
@@ -2944,9 +2939,6 @@
       "password_change_required": "Change your password first, then come back.",
       "no_eligible_passkey": "You have no passkey that can confirm this. Use your password.",
       "passkey_failed": "The passkey could not confirm it's you. Try again or use your password.",
-      "owner_sso_not_linked": "Your account is not linked to the identity provider in use.",
-      "oidc_duplicate_links": "Your account has more than one link to this identity provider. Remove the extra links first.",
-      "owner_sso_invalid": "This request is not valid. Reload the page and try again.",
       "field": {
         "generic": "One of the values is not valid. Check the fields and try again.",
         "issuer": "Enter the identity provider address exactly, starting with https://.",
@@ -3081,5 +3073,9 @@
       "HARNESS_FILES_STORE_FAILED": "Your private files could not be prepared. Try again or contact the owner.",
       "UNKNOWN": "Could not save the change. Please try again."
     }
+  },
+  "security": {
+    "displayMasking": "Mask sensitive values on screen",
+    "displayMaskingDescription": "Keys and secrets are hidden in the interface and shown in full only when you explicitly reveal them."
   }
 }

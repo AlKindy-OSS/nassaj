@@ -10,19 +10,25 @@
  * RUNNER: vitest (`npm run test:client`) — jsdom.
  */
 
-import assert from 'node:assert/strict';
-
 import { renderHook } from '@testing-library/react';
-import { describe, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import type { NormalizedMessage } from '../../../stores/useSessionStore';
 
+import { FOREGROUND_ROWS, FOREGROUND_AGENT } from './__fixtures__/claude-foreground-child.real';
 import capture from './__fixtures__/claude-task-plan-live.real.json';
 import { resolveOverallPercent } from './declaredProgress';
 import { normalizedToChatMessages } from './useChatMessages';
-import { countPlan, useRunProgress } from './useRunProgress';
+import { computeRunProgress, countPlan, useRunProgress } from './useRunProgress';
 
 const ROWS = capture.rows as unknown as NormalizedMessage[];
+const assert = {
+  equal: (actual: unknown, expected: unknown, message?: string) =>
+    expect(actual, message).toBe(expected),
+  deepEqual: (actual: unknown, expected: unknown, message?: string) =>
+    expect(actual, message).toEqual(expected),
+  ok: (actual: unknown, message?: string) => expect(actual, message).toBeTruthy(),
+};
 const COMPLETED_AGENT = 'toolu_01H48H2qDEZsGjV6DhgMGGrh';
 const FAILED_AGENT = 'toolu_01M53A5Rb27vy4bsis9151KZ';
 const isStatus = (m: NormalizedMessage) => m.kind === 'status';
@@ -81,6 +87,32 @@ describe('background agents settle through status rows', () => {
   it('a settlement for an unseen agent invents nothing', () => {
     const orphan = ROWS.filter((m) => m.kind !== 'tool_use' || !m.subagent);
     assert.equal(progressOf(orphan).agentsTotal, 0);
+  });
+});
+
+describe('foreground agent with a captured child tool', () => {
+  it('shows child metadata while running and preserves the result settlement', () => {
+    const runningChat = normalizedToChatMessages(FOREGROUND_ROWS.slice(0, 3));
+    const runningProgress = computeRunProgress(runningChat, true);
+    const runningAgent = runningProgress.agents.find(
+      (row) => row.id === FOREGROUND_AGENT,
+    )!;
+
+    assert.equal(runningAgent.status, 'running');
+    assert.equal(runningAgent.model, 'claude-opus-5-5');
+    assert.equal(runningAgent.effort, 'medium');
+    assert.deepEqual(runningAgent.tools, [{ name: 'Bash', status: 'done' }]);
+
+    const chat = normalizedToChatMessages(FOREGROUND_ROWS);
+    const progress = computeRunProgress(chat, true);
+    const agent = progress.agents.find((row) => row.id === FOREGROUND_AGENT)!;
+
+    assert.equal(agent.status, 'done');
+    assert.equal(progress.agentsDone, 1);
+    assert.equal(agent.model, 'claude-opus-5-5');
+    assert.equal(agent.effort, 'medium');
+    assert.deepEqual(agent.tools, [{ name: 'Bash', status: 'done' }]);
+    assert.deepEqual(agent.childTools?.map((tool) => tool.toolName), ['Bash']);
   });
 });
 

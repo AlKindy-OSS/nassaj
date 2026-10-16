@@ -29,10 +29,12 @@ import {
 import {
   boundProgressPlan,
   boundProgressSubagent,
+  buildProgressSubagent,
   type ProgressPlan,
   type ProgressSubagent,
 } from '@/shared/progress-normalize.js';
 import { createCodexReceiptCollector, codexHistoryIdentity, setCodexHistoryIdentities } from './codex-receipt-identity.js';
+import { resolveCodexLinkedRollouts } from './codex-rollout-links.js';
 
 const PROVIDER = 'codex';
 const CURSOR_VERSION = 2;
@@ -382,6 +384,9 @@ type CodexSubagentRecord = {
   isComplete: boolean;
   /** Plain label of the delegation, reused by its settling row (ADR-199). */
   label?: string;
+  agentType?: string;
+  model?: string;
+  effort?: string;
 };
 
 const CODEX_COLLABORATION_CONTROL_TOOLS = new Set([
@@ -773,7 +778,9 @@ async function getCodexSessionMessages(
                 timestamp: entry.timestamp,
                 toolCallId: subagent.toolCallId,
                 output: agentMessage.result,
-                subagent: codexSpawnSubagent(subagent.toolCallId, subagent.label, 'completed'),
+                subagent: codexSpawnSubagent(
+                  subagent.toolCallId, subagent.label, 'completed', subagent,
+                ),
               });
               subagent.isComplete = true;
             }
@@ -787,9 +794,15 @@ async function getCodexSessionMessages(
           if (toolName === 'spawn_agent') {
             let taskName = 'agent';
             let prompt: string | undefined;
+            let agentType: string | undefined;
+            let model: string | undefined;
+            let effort: string | undefined;
             try {
               const args = (lease ? lease.parseNested(String(entry.payload.arguments || '{}')) : JSON.parse(String(entry.payload.arguments || '{}'))) as AnyRecord;
               taskName = readNonEmptyString(args.task_name) || taskName;
+              agentType = readNonEmptyString(args.agent_type);
+              model = readNonEmptyString(args.model);
+              effort = readNonEmptyString(args.reasoning_effort);
               const candidatePrompt = readNonEmptyString(args.prompt);
               // `message` is usually an encrypted blob (`gAAAAA...`), not
               // human-readable prompt text. Surface only a real plain prompt.
@@ -811,12 +824,17 @@ async function getCodexSessionMessages(
                 ...(prompt ? { prompt } : {}),
               }),
               toolCallId: entry.payload.call_id,
-              subagent: codexSpawnSubagent(entry.payload.call_id, label, 'started'),
+              subagent: codexSpawnSubagent(entry.payload.call_id, label, 'started', {
+                agentType, model, effort,
+              }),
             });
             subagentsByCallId.set(entry.payload.call_id, {
               toolCallId: entry.payload.call_id,
               isComplete: false,
               label,
+              agentType,
+              model,
+              effort,
             });
             ignoredToolCallIds.add(entry.payload.call_id);
             continue;
@@ -1416,6 +1434,28 @@ export class CodexSessionsProvider implements IProviderSessions {
     for (const msg of normalized) {
       if (msg.kind === 'tool_result' && msg.toolId) {
         toolResultMap.set(msg.toolId, msg);
+      }
+    }
+
+    const rootRolloutPath = options.historyLease?.mainFile ?? options.transcript?.realpath;
+    if (rootRolloutPath) {
+      try {
+        const linked = await resolveCodexLinkedRollouts(rootRolloutPath);
+        for (const child of linked.linked) {
+          const callId = child.spawn.callId;
+          if (!callId) continue;
+          for (const row of normalized) {
+            if (row.toolId !== callId || !row.subagent) continue;
+            row.subagent = buildProgressSubagent({
+              ...row.subagent,
+              ...(child.model ? { model: child.model } : {}),
+              ...(child.effort ? { effort: child.effort } : {}),
+              ...(child.tools.length ? { tools: child.tools } : {}),
+            }) ?? row.subagent;
+          }
+        }
+      } catch {
+        // Child enrichment is optional; the parent rollout remains authoritative.
       }
     }
     for (const msg of normalized) {

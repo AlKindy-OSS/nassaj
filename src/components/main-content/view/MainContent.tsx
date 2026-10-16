@@ -1,9 +1,27 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import ChatInterface from '../../chat/view/ChatInterface';
 import FileTree from '../../file-tree/view/FileTree';
 import StandaloneShell from '../../standalone-shell/view/StandaloneShell';
+import Shell from '../../shell/view/Shell';
+import OneShotRunStrip from '../../shell/view/subcomponents/OneShotRunStrip';
+import {
+  claimOneShotLaunch,
+  consumeOneShotRequest,
+  isLiveOneShotRun,
+  markOneShotFinished,
+  oneShotRunsKey,
+  markOneShotRefused,
+  resolveOneShotCapture,
+  selectOneShotRun,
+  startOneShotRun,
+  useOneShotRuns,
+  usePendingOneShotRequest,
+} from '../../shell/oneShot/oneShotRunsStore';
+import type { OneShotFrame, ShellErrorInfo } from '../../shell/types/types';
+import { isOneShotRefusalCode } from '../../shell/utils/reconnect';
+import { getProviderDisplayName } from '../../chat/constants/providerCapabilities';
 import GitPanel from '../../git-panel/view/GitPanel';
 import type { MainContentProps } from '../types/types';
 import type { SessionDeepLinkResolution } from '../../../hooks/useProjectsState';
@@ -135,6 +153,70 @@ function MainContent({
   // deep-link/tab from rendering an empty, error-looping terminal panel.
   const { user } = useAuth();
   const canUseTerminals = user?.role === 'owner' || user?.role === 'admin';
+
+  // T-2037: composer one-shot runs. A confirmed composer submit leaves a
+  // request; this is the only place that turns it into a run (and a runId),
+  // then shows it in the Shell tab. The chat transcript is never touched.
+  // Runs are scoped to the signed-in user AND the project (qa critical-1).
+  const projectKey = oneShotRunsKey(user?.id ?? user?.username, selectedProject?.projectId);
+  const pendingOneShot = usePendingOneShotRequest();
+  const { runs: oneShotRuns, activeRunId } = useOneShotRuns(projectKey);
+  const activeOneShot = oneShotRuns.find((run) => run.runId === activeRunId) ?? null;
+
+  useEffect(() => {
+    if (!pendingOneShot || !projectKey) return;
+    const request = consumeOneShotRequest();
+    if (!request) return;
+    startOneShotRun(projectKey, request.command);
+    setActiveTab('shell');
+  }, [pendingOneShot, projectKey, setActiveTab]);
+
+  const handleSelectOneShot = useCallback(
+    (runId: string | null) => {
+      if (projectKey) selectOneShotRun(projectKey, runId);
+    },
+    [projectKey],
+  );
+
+  const handleOneShotFrame = useCallback(
+    (frame: OneShotFrame) => {
+      if (!projectKey) return;
+      if (frame.type === 'oneshot_finished') {
+        markOneShotFinished(projectKey, frame.runId, frame);
+        return;
+      }
+      resolveOneShotCapture(frame.runId, frame.type === 'oneshot_capture' ? frame : null);
+    },
+    [projectKey],
+  );
+
+  const activeOneShotId = activeOneShot?.runId ?? null;
+  const handleOneShotError = useCallback(
+    (error: ShellErrorInfo | null) => {
+      if (!projectKey || !activeOneShotId || !error || !isOneShotRefusalCode(error.code ?? '')) return;
+      markOneShotRefused(projectKey, activeOneShotId, error.code ?? 'unknown');
+    },
+    [activeOneShotId, projectKey],
+  );
+
+  const handleOneShotAttached = useCallback(() => setActiveTab('chat'), [setActiveTab]);
+
+  // A shell is mounted only for a run started in THIS page lifetime while it
+  // runs, and stays mounted (output visible, capture possible) once it finishes
+  // there. Restored, finished-elsewhere and refused runs are static entries:
+  // nothing is mounted, so nothing can send an init for them.
+  const mountedOneShotRef = useRef<string | null>(null);
+  const mountOneShotShell = Boolean(
+    activeOneShot &&
+      isLiveOneShotRun(activeOneShot.runId) &&
+      activeOneShot.status !== 'refused' &&
+      (activeOneShot.status === 'running' || mountedOneShotRef.current === activeOneShot.runId),
+  );
+  mountedOneShotRef.current = mountOneShotShell && activeOneShot ? activeOneShot.runId : null;
+
+  const agentProviderName = getProviderDisplayName(
+    selectedSession?.__provider || localStorage.getItem('selected-provider') || 'claude',
+  );
 
   if (isLoading) {
     return <MainContentStateView mode="loading" isMobile={isMobile} onMenuClick={onMenuClick} />;
@@ -270,13 +352,49 @@ function MainContent({
           )}
 
           {activeTab === 'shell' && (
-            <div className="h-full w-full overflow-hidden">
-              <StandaloneShell
-                project={project}
-                session={selectedSession}
-                showHeader={false}
-                isActive={activeTab === 'shell'}
-              />
+            <div className="flex h-full w-full flex-col overflow-hidden">
+              {oneShotRuns.length > 0 && (
+                <OneShotRunStrip
+                  providerName={agentProviderName}
+                  runs={oneShotRuns}
+                  activeRunId={activeOneShotId}
+                  onSelect={handleSelectOneShot}
+                  onAttached={handleOneShotAttached}
+                />
+              )}
+              <div className="min-h-0 flex-1">
+                {!activeOneShot ? (
+                  <StandaloneShell
+                    project={project}
+                    session={selectedSession}
+                    showHeader={false}
+                    isActive={activeTab === 'shell'}
+                  />
+                ) : !mountOneShotShell ? (
+                  // Static entry: refused, finished, or restored from storage.
+                  // No shell is mounted, so no init can be sent for it.
+                  <div className="flex h-full items-center justify-center bg-gray-900 p-6">
+                    <pre dir="ltr" className="max-w-full overflow-auto whitespace-pre-wrap break-all font-mono text-sm text-gray-300">
+                      $ {activeOneShot.command}
+                    </pre>
+                  </div>
+                ) : (
+                  <Shell
+                    // Keyed by runId: switching runs remounts, and a remount
+                    // only re-attaches to that same runId.
+                    key={activeOneShot.runId}
+                    selectedProject={project}
+                    initialCommand={activeOneShot.command}
+                    isPlainShell
+                    autoConnect
+                    isActive={activeTab === 'shell'}
+                    oneShotRunId={activeOneShot.runId}
+                    claimOneShotLaunch={claimOneShotLaunch}
+                    onOneShotFrame={handleOneShotFrame}
+                    onShellError={handleOneShotError}
+                  />
+                )}
+              </div>
             </div>
           )}
 

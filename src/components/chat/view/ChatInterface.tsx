@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 
+import { confirmDialog } from '../../../shared/dialogs/dialogService';
 import { useConversationCost } from '../hooks/useConversationCost';
 import { ConversationCostContext } from '../context/ConversationCostContext';
 import { TurnCostContext } from '../context/TurnCostContext';
@@ -478,7 +479,9 @@ function ChatInterface({
           // بلا بادئة `chat.` — الـnamespace محدَّد في useTranslation('chat')
           // أعلاه، فإضافتها تبحث عن chat.chat.* فيسقط i18next إلى طباعة
           // المفتاح نفسه في نافذة التأكيد.
-          (turns) => window.confirm(t('engineSwitch.exportWarning', { turns })),
+          // Sends the transcript to another provider: destructive tone, so
+          // focus starts on Cancel (T-2039 qa).
+          (turns) => confirmDialog({ message: t('engineSwitch.exportWarning', { turns }), tone: 'danger' }),
         );
         setSessionCurrentModel(moved.model);
         stampSessionEngineProvider(sid, engine ?? null);

@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
+import {
+  copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync,
+} from 'node:fs';
 import { sign } from 'node:crypto';
 import path from 'node:path';
 import test from 'node:test';
@@ -19,6 +21,37 @@ test('sign tool refuses tmpfs and .git key directories', () => {
     const result = run(['keygen', '--dir', dir, '--key-id', 'owner-x']);
     assert.equal(result.status, 2);
     assert.match(result.stdout, /CONNECTOR_SIGN_KEYDIR_FORBIDDEN/u);
+  }
+});
+
+test('sign tool refuses the shared git common dir when run from a linked worktree', () => {
+  const work = mkdtempSync('/var/tmp/nassaj-connector-sign-wt-');
+  const git = (...args) => {
+    const env = { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't',
+      GIT_COMMITTER_EMAIL: 't@t' };
+    delete env.GIT_DIR;
+    delete env.GIT_COMMON_DIR;
+    const result = spawnSync('git', args, { encoding: 'utf8', env });
+    assert.equal(result.status, 0, result.stderr);
+  };
+  try {
+    const main = path.join(work, 'main');
+    const tree = path.join(work, 'tree');
+    git('init', '-q', main);
+    git('-C', main, 'commit', '-q', '--allow-empty', '-m', 'init');
+    git('-C', main, 'worktree', 'add', '-q', '--detach', tree);
+    mkdirSync(path.join(tree, 'scripts'));
+    copyFileSync(path.join(root, 'scripts', 'connectors-sign.mjs'), path.join(tree, 'scripts', 'connectors-sign.mjs'));
+    symlinkSync(dist, path.join(tree, 'dist-server'));
+    // A hostile GIT_DIR must not redirect the probe away from the real common dir.
+    const result = spawnSync(process.execPath, [path.join(tree, 'scripts', 'connectors-sign.mjs'), 'keygen',
+      '--dir', path.join(main, '.git', 'keys'), '--key-id', 'owner-x'],
+    { cwd: tree, encoding: 'utf8', env: { ...process.env, GIT_DIR: path.join(work, 'decoy') } });
+    assert.equal(result.status, 2, result.stdout + result.stderr);
+    assert.match(result.stdout, /CONNECTOR_SIGN_KEYDIR_FORBIDDEN/u);
+    assert.equal(existsSync(path.join(main, '.git', 'keys')), false);
+  } finally {
+    rmSync(work, { recursive: true, force: true });
   }
 });
 

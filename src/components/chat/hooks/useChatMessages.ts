@@ -86,7 +86,7 @@ const LEGACY_CONTAINER_TOOLS: ReadonlySet<string> = new Set(['Task', 'Agent']);
 
 /**
  * Latest lifecycle of the subagent a container delegates to (ADR-199). A
- * settlement `status` row wins, then the result row, then the call's
+ * terminal settlement `status` row wins, then the result row, then the call's
  * `started`. When the result row is outside the loaded window (only an inline
  * result survives), a resolved, non-background result settles a still-open
  * state, as before the neutral fields existed.
@@ -99,7 +99,18 @@ function effectiveSubagent(
   settlement?: ProgressSubagent,
 ): ProgressSubagent | undefined {
   const latest = result ?? call;
-  if (settlement && latest) return { ...latest, state: settlement.state };
+  if (settlement && latest) {
+    const { state, tools, ...fields } = settlement;
+    const settledState = settlementIsTerminal(settlement.state)
+      ? settlement.state
+      : settlementIsTerminal(latest.state) ? latest.state : state;
+    return {
+      ...latest,
+      ...fields,
+      state: settledState,
+      ...(tools ? { tools: mergeSubagentTools(latest.tools, tools) } : {}),
+    };
+  }
   if (result) return result;
   if (!call) return undefined;
   if (resolved && (call.state === 'started' || call.state === 'running')) {
@@ -108,15 +119,51 @@ function effectiveSubagent(
   return call;
 }
 
+function settlementIsTerminal(state: ProgressSubagent['state']): boolean {
+  return state === 'completed' || state === 'failed';
+}
+
+/** Merge event deltas without losing earlier child tools or their later status. */
+function mergeSubagentTools(
+  previous: ProgressSubagent['tools'],
+  updates: ProgressSubagent['tools'],
+): ProgressSubagent['tools'] {
+  const merged = new Map<string, NonNullable<ProgressSubagent['tools']>[number]>();
+  for (const tool of [...(previous ?? []), ...(updates ?? [])]) {
+    const key = tool.id || `legacy:${tool.name}`;
+    const existing = merged.get(key);
+    const existingSettled = existing && ['done', 'success', 'completed', 'failed', 'error']
+      .includes(existing.status ?? '');
+    merged.set(key, existing
+      ? { ...existing, ...tool, ...(existingSettled && tool.status === 'running'
+        ? { status: existing.status }
+        : {}) }
+      : tool);
+  }
+  return [...merged.values()];
+}
+
 /**
- * Latest settlement per subagent id from text-less `status` rows (ADR-199 P1c:
- * a background agent closes through its notification, never a second result).
+ * Latest lifecycle update per subagent id from text-less `status` rows. Running
+ * snapshots carry live tools/model/effort; terminal snapshots also settle state.
  * The rows themselves are control events and are never rendered.
  */
 function collectSubagentSettlements(messages: NormalizedMessage[]): Map<string, ProgressSubagent> {
   const byId = new Map<string, ProgressSubagent>();
   for (const msg of messages) {
-    if (msg.kind === 'status' && msg.subagent?.id) byId.set(msg.subagent.id, msg.subagent);
+    if (msg.kind !== 'status' || !msg.subagent?.id) continue;
+    const previous = byId.get(msg.subagent.id);
+    const next = msg.subagent;
+    byId.set(next.id, {
+      ...previous,
+      ...next,
+      state: previous && settlementIsTerminal(previous.state) && !settlementIsTerminal(next.state)
+        ? previous.state
+        : next.state,
+      ...(previous?.tools || next.tools
+        ? { tools: mergeSubagentTools(previous?.tools, next.tools) }
+        : {}),
+    });
   }
   return byId;
 }

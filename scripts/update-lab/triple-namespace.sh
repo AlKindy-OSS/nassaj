@@ -7,6 +7,7 @@ host_modules=$3
 child_entry=$4
 host_objects=$5
 runtime_profile=${6:-host-local}
+public_tooling=${7:-}
 [[ "$runtime_profile" = host-local || "$runtime_profile" = fleet-public-24.17-npm12 ]]
 [[ "$lab_root" = /*/.artifacts/t1772-bridge-rehearsal/run-* && "$(readlink -f "$lab_root")" = "$lab_root" ]]
 [[ "$HOME" = "$original_home" && "$child_entry" = "$lab_root"/harness/* ]]
@@ -36,7 +37,7 @@ sha256sum /usr/bin/which.debianutils > "$lab_root/which-target.sha256"
 /usr/bin/mount --bind "$private_root" "$private_root"
 /usr/bin/mount --rbind -o ro=recursive /usr "$private_root/usr"
 if [[ "$runtime_profile" = fleet-public-24.17-npm12 ]]; then
-  public_tooling="${lab_root%/run-*}/run-Mx3eDp/tooling/usr"
+  [[ "$public_tooling" = /*/.artifacts/t1772-bridge-rehearsal/run-*/tooling/usr && "$(readlink -f "$public_tooling")" = "$public_tooling" ]]
   [[ "$(readlink -f "$public_tooling/bin/node")" = "$public_tooling/bin/node" && -f "$public_tooling/bin/node" && -x "$public_tooling/bin/node" ]]
   [[ "$(readlink -f /usr/bin/npm)" = /usr/lib/node_modules/npm/bin/npm-cli.js ]]
   [[ "$(readlink -f "$public_tooling/bin/npm")" = "$public_tooling/lib/node_modules/npm/bin/npm-cli.js" ]]

@@ -18,11 +18,13 @@ import type {
   OnboardingStatusPayload,
 } from '../types';
 import { parseJsonSafely, resolveApiErrorMessage } from '../utils';
+import { LOGIN_LOCKED_CODE, readLoginLock, recordSignedOutEverywhereNotice } from '../loginLock';
 import {
   hydratePreferencesFromServer,
   setPreferenceIdentityAuthenticated,
 } from '../../../preferences/preferencesSync';
 import { clearOutbox, setOutboxUser } from '../../chat/utils/messageOutbox';
+import { clearOneShotRunsStorage } from '../../shell/oneShot/oneShotRunsStore';
 import { useOutboxDurableRecovery } from '../../chat/hooks/useOutboxDurableRecovery';
 import {
   beginIdentityTransition,
@@ -243,6 +245,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
     // بالأصل (origin) لا بالحساب — فصندوقٌ متروك يعني كلامَ عضوٍ ظاهراً لعضو
     // بعده على المتصفّح نفسه، ونسّاج يُفترض فيه أعضاء لا يثق بعضهم ببعض.
     clearOutbox();
+    // T-2037: composer shell runs (commands and their ids) are per member too.
+    clearOneShotRunsStorage();
   }, []);
 
   // Compare-and-clear eviction (B-131 "vortex killer"). An involuntary logout
@@ -781,7 +785,11 @@ export function AuthProvider({ children }: AuthProviderProps) {
         if (!response.ok || !payload?.user || (!payload.token && !payload.wallet)) {
           const message = resolveApiErrorMessage(payload, AUTH_ERROR_MESSAGES.loginFailed);
           setError(message);
-          return { success: false, error: message, code: payload?.code };
+          // T-2035: a throttle lock is a form error with a wait, not a session failure.
+          const lockSeconds = readLoginLock(response, payload);
+          return lockSeconds === null
+            ? { success: false, error: message, code: payload?.code }
+            : { success: false, error: message, code: LOGIN_LOCKED_CODE, retryAfterSeconds: lockSeconds };
         }
 
         adoptPrimarySession(payload.user, payload);
@@ -948,7 +956,10 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
         if (!response.ok || (!payload?.token && !payload?.wallet)) {
           const message = resolveApiErrorMessage(payload, AUTH_ERROR_MESSAGES.passwordChangeFailed);
-          return { success: false, error: message, code: payload?.code };
+          const lockSeconds = readLoginLock(response, payload);
+          return lockSeconds === null
+            ? { success: false, error: message, code: payload?.code }
+            : { success: false, error: message, code: LOGIN_LOCKED_CODE, retryAfterSeconds: lockSeconds };
         }
 
         if (payload.wallet) {
@@ -1012,8 +1023,16 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const logout = useCallback(() => {
     const tokenToInvalidate = token;
     if (tokenToInvalidate) {
+      // T-2035: the request is started with the captured token BEFORE the
+      // session is cleared, and carries it explicitly, so the server can end
+      // this device's session. Only a sign-out the server confirms as
+      // `scope: 'all'` leaves the "signed out on all devices" notice.
+      const request = api.auth.logout(tokenToInvalidate);
       clearSession();
-      void api.auth.logout().catch((caughtError: unknown) => {
+      void request.then(async (response: Response) => {
+        const payload = await parseJsonSafely<{ scope?: string }>(response);
+        if (response.ok && payload?.scope === 'all') recordSignedOutEverywhereNotice();
+      }).catch((caughtError: unknown) => {
         console.error('Logout endpoint error:', caughtError);
       });
       return;

@@ -921,7 +921,13 @@ async function spawnAntigravity(command, options = {}, ws) {
         // gone away. No-op when SESSION_REGISTRY_agy is off; buffering does not
         // depend on `ws` being present (the live stream may outlive the socket).
         // T-1854 (qa M2): a revoked run fence also stops replay buffering.
-        if (ws?.runFenceRevoked !== true) agySessionRegistry.record(registryKey, normalized);
+        if (ws?.runFenceRevoked !== true) {
+            // ADR-210 (as Claude's bufferThenSend): stamp the ring seq on the
+            // buffered original before sending, so the display chokepoint can
+            // record what live viewers saw and a replay can send exactly that.
+            const seq = agySessionRegistry.record(registryKey, normalized);
+            if (seq !== null && seq !== undefined) normalized.sequence = seq;
+        }
         if (!ws) return;
         try {
             ws.send(normalized);

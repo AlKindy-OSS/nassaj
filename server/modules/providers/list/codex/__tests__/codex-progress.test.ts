@@ -12,16 +12,22 @@
  */
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 
 import { transformCodexEvent } from '../../../../../openai-codex.js';
 import { codexSpawnSubagent, createCodexLiveProgressPhases, stampCodexProgressPhase } from '../codex-progress.js';
 import { CodexSessionsProvider } from '../codex-sessions.provider.js';
+import { readCodexRolloutMetadata } from '../codex-rollout-links.js';
 
 type Row = Record<string, any>;
 const real = JSON.parse(fs.readFileSync(
   path.join(import.meta.dirname, '__fixtures__', 'codex-progress.real.json'), 'utf8')) as Row;
+const spawnArgsPath = path.join(import.meta.dirname, '__fixtures__',
+  'codex-spawn-agent-args.real.json');
+const realSpawnArgs = JSON.parse(fs.readFileSync(spawnArgsPath, 'utf8')) as Row;
 const copy = <T>(value: T): T => JSON.parse(JSON.stringify(value));
 const provider = new CodexSessionsProvider();
 const NONCE = 'nonce-test';
@@ -49,6 +55,34 @@ test('spawn_agent task_name remains a fallback description, not a role name', ()
   const normalized = codexSpawnSubagent(spawn.payload.call_id, args.task_name, 'started');
   assert.equal(normalized?.label, 'agent_1');
   assert.equal(normalized?.agentName, undefined);
+  const captured = codexSpawnSubagent(spawn.payload.call_id, args.task_name, 'started', {
+    agentType: realSpawnArgs.agent_type,
+    effort: realSpawnArgs.reasoning_effort,
+  });
+  assert.equal(captured?.agentName, 'brand-marketer');
+  assert.equal(captured?.effort, 'medium');
+});
+
+test('child rollout reads model, effort and post-fork tool calls from real rows', async () => {
+  const rows = JSON.parse(fs.readFileSync(path.join(import.meta.dirname,
+    '__fixtures__/codex-child-rollout.real.json'), 'utf8')) as Row[];
+  const tempRoot = process.env.TMPDIR || os.tmpdir();
+  const directory = await mkdtemp(path.join(tempRoot, 'codex-child-rollout-'));
+  const rollout = path.join(directory,
+    'rollout-11111111-1111-4111-8111-111111111111.jsonl');
+  try {
+    await writeFile(rollout, `${rows.map((row) => JSON.stringify(row)).join('\n')}\n`);
+    const child = await readCodexRolloutMetadata(rollout);
+    assert.equal(child.parentThreadId, '33333333-3333-4333-8333-333333333333');
+    assert.equal(child.agentPath, '/root/agent_1');
+    assert.equal(child.model, 'gpt-6-luna');
+    assert.equal(child.effort, 'high');
+    assert.deepEqual(child.tools, [{
+      id: 'call_scrubbed', name: 'send_message', status: 'completed',
+    }]);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
 });
 
 /** Real update_plan steps in the SDK TodoListItem shape (the SDK carries only `completed`). */

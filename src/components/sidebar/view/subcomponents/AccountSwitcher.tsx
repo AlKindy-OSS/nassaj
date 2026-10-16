@@ -12,6 +12,7 @@ import {
   reconcileRevokedIdentity,
 } from '../../../auth/accountIdentityBarrier';
 import { hasPendingAccountWork } from '../../../auth/accountIdentityIsolation';
+import { LOGIN_LOCKED_CODE, loginLockedMessage } from '../../../auth/loginLock';
 import {
   AccountWalletError,
   finishWalletIdentityTransition,
@@ -57,6 +58,8 @@ export default function AccountSwitcher({ current, t, onShowSettings, onLegacyLo
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // T-2035: wait of a `login_temporarily_locked` refusal from /accounts/add.
+  const [lockSeconds, setLockSeconds] = useState<number | undefined>(undefined);
   const [announcement, setAnnouncement] = useState('');
   const [addOpen, setAddOpen] = useState(false);
   const [addIdentifier, setAddIdentifier] = useState('');
@@ -164,6 +167,7 @@ export default function AccountSwitcher({ current, t, onShowSettings, onLegacyLo
 
   const recoverWalletEdit = async (caught: unknown, previousActiveSlotId: string | null) => {
     setError(walletError(caught));
+    setLockSeconds(caught instanceof AccountWalletError ? caught.retryAfterSeconds : undefined);
     if (!isConflict(caught) && !(caught instanceof AccountWalletError && caught.outcomeUnknown)) return;
     try {
       const errorWallet = caught instanceof AccountWalletError ? caught.wallet : undefined;
@@ -265,7 +269,7 @@ export default function AccountSwitcher({ current, t, onShowSettings, onLegacyLo
       </div>}
     </div>
 
-    <Dialog open={addOpen} onOpenChange={(next) => { setAddOpen(next); if (!next) { setAddIdentifier(''); setAddPassword(''); } }}><DialogContent className="w-[calc(100vw-2rem)] max-w-sm p-0"><DialogTitle className="sr-only">{t('account.add')}</DialogTitle><form className="space-y-4 p-5" onSubmit={(event) => void addAccount(event)}><div><h2 className="text-lg font-semibold">{t('account.add')}</h2><p className="text-sm text-muted-foreground">{t('account.addDescription')}</p></div>{error && <p role="alert" className="text-sm text-danger">{t(`account.errors.${error}`, { defaultValue: t('account.errors.add_account_failed') })}</p>}<label className="block space-y-1.5 text-sm font-medium"><span>{t('account.identifier')}</span><Input type="text" value={addIdentifier} onChange={(event) => setAddIdentifier(event.target.value)} autoComplete="username" autoCapitalize="none" spellCheck={false} dir="ltr" required autoFocus /></label><label className="block space-y-1.5 text-sm font-medium"><span>{t('account.password')}</span><Input type="password" value={addPassword} onChange={(event) => setAddPassword(event.target.value)} autoComplete="current-password" required /></label><div className="flex justify-end gap-2"><Button type="button" variant="outline" onClick={() => setAddOpen(false)}>{t('account.cancel')}</Button><Button type="submit" disabled={busy === 'add' || !addIdentifier.trim() || !addPassword}>{busy === 'add' ? t('account.adding') : t('account.add')}</Button></div></form></DialogContent></Dialog>
+    <Dialog open={addOpen} onOpenChange={(next) => { setAddOpen(next); if (!next) { setAddIdentifier(''); setAddPassword(''); } }}><DialogContent className="w-[calc(100vw-2rem)] max-w-sm p-0"><DialogTitle className="sr-only">{t('account.add')}</DialogTitle><form className="space-y-4 p-5" onSubmit={(event) => void addAccount(event)}><div><h2 className="text-lg font-semibold">{t('account.add')}</h2><p className="text-sm text-muted-foreground">{t('account.addDescription')}</p></div>{error && <p role="alert" className="text-sm text-danger">{error === LOGIN_LOCKED_CODE ? loginLockedMessage(t, lockSeconds) : t(`account.errors.${error}`, { defaultValue: t('account.errors.add_account_failed') })}</p>}<label className="block space-y-1.5 text-sm font-medium"><span>{t('account.identifier')}</span><Input type="text" value={addIdentifier} onChange={(event) => setAddIdentifier(event.target.value)} autoComplete="username" autoCapitalize="none" spellCheck={false} dir="ltr" required autoFocus /></label><label className="block space-y-1.5 text-sm font-medium"><span>{t('account.password')}</span><Input type="password" value={addPassword} onChange={(event) => setAddPassword(event.target.value)} autoComplete="current-password" required /></label><div className="flex justify-end gap-2"><Button type="button" variant="outline" onClick={() => setAddOpen(false)}>{t('account.cancel')}</Button><Button type="submit" disabled={busy === 'add' || !addIdentifier.trim() || !addPassword}>{busy === 'add' ? t('account.adding') : t('account.add')}</Button></div></form></DialogContent></Dialog>
 
     <Dialog open={Boolean(pendingSwitch)} onOpenChange={(next) => { if (!next) setPendingSwitch(null); }}><DialogContent className="w-[calc(100vw-2rem)] max-w-sm p-0"><DialogTitle className="sr-only">{t('account.switchConfirmTitle')}</DialogTitle><div className="space-y-4 p-5"><div><h2 className="text-lg font-semibold">{t('account.switchConfirmTitle')}</h2><p className="text-sm text-muted-foreground">{t('account.switchConfirmDescription')}</p></div><div className="flex justify-end gap-2"><Button variant="outline" onClick={() => setPendingSwitch(null)}>{t('account.cancel')}</Button><Button onClick={() => { const target = pendingSwitch; setPendingSwitch(null); if (target) void switchTo(target); }}>{t('account.switchConfirm')}</Button></div></div></DialogContent></Dialog>
 

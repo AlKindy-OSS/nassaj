@@ -6,6 +6,8 @@ import BetterSqlite3 from 'better-sqlite3';
 import type { Database } from 'better-sqlite3';
 
 import { migrateUserHarnessFilesMode } from '@/modules/database/harness-files-mode.migration.js';
+import { migrateAuthTokenEpoch } from '@/modules/database/auth-token-epoch.migration.js';
+import { migrateShellOneShotRuns } from '@/modules/database/shell-oneshot-runs.migration.js';
 import { migratePermissionExecution } from '@/modules/database/permission-execution.migration.js';
 import { isForeignTempRootPath } from '@/modules/database/temp-root-guard.js';
 import { createUsageStatisticsV3Fresh } from '@/modules/database/usage-statistics-v3.migration.js';
@@ -3104,6 +3106,12 @@ export const runMigrations = (db: Database) => {
     // Per-user shared/private skills choice (ADR-203, T-2003) — after users
     // exists so the CASCADE FK resolves. Idempotent; no backfill (no row = shared).
     migrateUserHarnessFilesMode(db);
+
+    // Sign-out epoch + login throttle (ADR-212, T-2035). Idempotent, additive.
+    migrateAuthTokenEpoch(db);
+
+    // Durable one-shot runId ledger (ADR-213, T-2037). Idempotent, additive.
+    migrateShellOneShotRuns(db);
 
     // FK CASCADE on session_agents tables — must run after sessions exist so
     // the REFERENCES sessions(session_id) constraint is satisfiable. (B-38.)

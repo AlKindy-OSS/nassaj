@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { FormEvent } from 'react';
-import { AlertTriangle, KeyRound, ShieldCheck } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, KeyRound, ShieldCheck } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 import { IS_PLATFORM } from '../../../constants/config';
@@ -11,6 +11,12 @@ import { useWebAuthn } from '../hooks/useWebAuthn';
 import type { WebAuthnLoginResult } from '../hooks/useWebAuthn';
 import { startOidcLogin } from '../oidc';
 import { consumeSsoReauthNotice, hasSsoReauthNotice } from '../ssoReauth';
+import {
+  consumeSignedOutEverywhereNotice,
+  hasSignedOutEverywhereNotice,
+  LOGIN_LOCKED_CODE,
+  loginLockedMessage,
+} from '../loginLock';
 
 import AuthErrorAlert from './AuthErrorAlert';
 import AuthInputField from './AuthInputField';
@@ -83,8 +89,11 @@ export default function LoginForm() {
   const [errorMessage, setErrorMessage] = useState(
     () => (hasSsoReauthNotice() ? t('login.errors.ssoReauthRequired') : ''),
   );
+  // T-2035: after a sign-out that ended every device's session, say so once.
+  const [signedOutEverywhere] = useState(() => hasSignedOutEverywhereNotice());
   useEffect(() => {
     consumeSsoReauthNotice();
+    consumeSignedOutEverywhereNotice();
   }, []);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isPasskeySubmitting, setIsPasskeySubmitting] = useState(false);
@@ -119,7 +128,9 @@ export default function LoginForm() {
       const result = await login(formState.username.trim(), formState.password);
       if (!result.success) {
         // T-1939: a linked team account signs in through the IdP (SSO button below).
-        setErrorMessage(result.code === 'sso_required' ? t('login.errors.ssoRequired') : result.error);
+        // T-2035: a throttle lock names the wait instead of a generic failure.
+        if (result.code === LOGIN_LOCKED_CODE) setErrorMessage(loginLockedMessage(t, result.retryAfterSeconds));
+        else setErrorMessage(result.code === 'sso_required' ? t('login.errors.ssoRequired') : result.error);
       }
       setIsSubmitting(false);
     },
@@ -183,6 +194,13 @@ export default function LoginForm() {
           type="password"
           autoComplete="current-password"
         />
+
+        {signedOutEverywhere && !errorMessage && (
+          <p role="status" className="flex items-start gap-2 rounded-md border border-success/30 bg-success/10 p-3 text-sm text-foreground">
+            <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-success" aria-hidden />
+            {t('loggedOutEverywhere')}
+          </p>
+        )}
 
         <AuthErrorAlert errorMessage={errorMessage} />
 

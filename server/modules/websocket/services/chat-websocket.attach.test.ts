@@ -150,8 +150,9 @@ test('B-N-ATTACH: check-session-status replays seq>lastSeq to the reconnecting s
 
   const replayed = ws.sent.filter((m: any) => m.kind === 'stream_delta');
   assert.deepEqual(
-    replayed.map((m: any) => m.content),
-    ['m3', 'm4'],
+    replayed.map((m: any) => m.content).join(''),
+    // ADR-210: replay passes a display masker that may regroup deltas; the replayed TEXT is the contract.
+    ['m3', 'm4'].join(''),
     'only seq>lastSeq replayed — no duplicate, no gap'
   );
 

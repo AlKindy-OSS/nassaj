@@ -22,6 +22,8 @@ export type CodexRolloutMetadata = {
   /** Distinct models observed in this rollout, ordered by first use. */
   models: string[];
   model: string | null;
+  effort: string | null;
+  tools: Array<{ id: string; name: string; status: string }>;
   threadId: string | null;
   sessionId: string | null;
   parentThreadId: string | null;
@@ -286,6 +288,16 @@ async function childPathForThread(
   return null;
 }
 
+/** Resolves one already-linked child once for the live incremental tail. */
+export function resolveCodexChildRolloutPath(
+  parentRolloutPath: string,
+  threadId: string,
+  occurredAtMs: number | null,
+  signal?: AbortSignal,
+): Promise<string | null> {
+  return childPathForThread(parentRolloutPath, threadId, occurredAtMs, signal);
+}
+
 /** A refused rollout open; `reason` carries no path or content. */
 export class CodexRolloutRefusedError extends Error {
   constructor(readonly reason: string) {
@@ -326,6 +338,8 @@ export async function readCodexRolloutMetadata(
 async function readRolloutMetadataFrom(handle: FileHandle, signal?: AbortSignal): Promise<CodexRolloutMetadata> {
   return withCodexRolloutRead(signal, async () => {
   let model: string | null = null;
+  let effort: string | null = null;
+  const toolCalls = new Map<string, { id: string; name: string; status: string }>();
   const models: string[] = [];
   const modelsSeen = new Set<string>();
   let threadId: string | null = null;
@@ -390,6 +404,23 @@ async function readRolloutMetadataFrom(handle: FileHandle, signal?: AbortSignal)
           modelsSeen.add(payload.model);
           models.push(payload.model);
         }
+      }
+
+      if (entry.type === 'turn_context') {
+        const nextEffort = typeof payload.effort === 'string' ? payload.effort
+          : typeof payload.reasoning_effort === 'string' ? payload.reasoning_effort : '';
+        if (nextEffort) effort = nextEffort;
+      }
+      if (entry.type === 'response_item' && payload.type === 'function_call'
+        && typeof payload.call_id === 'string' && typeof payload.name === 'string') {
+        toolCalls.set(payload.call_id, {
+          id: payload.call_id, name: payload.name, status: 'running',
+        });
+      }
+      if (entry.type === 'response_item' && payload.type === 'function_call_output'
+        && typeof payload.call_id === 'string') {
+        const tool = toolCalls.get(payload.call_id);
+        if (tool) tool.status = payload.is_error ? 'failed' : 'completed';
       }
 
       if (entry.type === 'response_item' && payload.type === 'function_call') {
@@ -534,6 +565,8 @@ async function readRolloutMetadataFrom(handle: FileHandle, signal?: AbortSignal)
   return {
     models,
     model,
+    effort,
+    tools: [...toolCalls.values()],
     threadId,
     sessionId,
     parentThreadId,
@@ -553,6 +586,8 @@ async function readRolloutMetadataFrom(handle: FileHandle, signal?: AbortSignal)
 export type CodexLinkedRollout = {
   rolloutPath: string;
   model: string | null;
+  effort: string | null;
+  tools: Array<{ id: string; name: string; status: string }>;
   /** Parent declared by this child's own immutable session metadata. */
   parentThreadId: string;
   spawn: CodexSpawn;
@@ -689,7 +724,14 @@ async function buildCodexRolloutManifest(
       visitedPaths.add(childPath);
       metadataByPath.set(childPath, child);
       spawn.childRolloutPath = childPath;
-      linked.push({ rolloutPath: childPath, model: child.model, parentThreadId: child.parentThreadId!, spawn });
+      linked.push({
+        rolloutPath: childPath,
+        model: child.model,
+        effort: child.effort,
+        tools: child.tools,
+        parentThreadId: child.parentThreadId!,
+        spawn,
+      });
       await visit(childPath, child, depth + 1, new Set([...ancestors, childPath]));
     }
   };
@@ -730,6 +772,7 @@ type ManifestFlight = {
   refs: number;
 };
 const manifestFlights = new Map<string, ManifestFlight>();
+const manifestCache = new Map<string, CodexRolloutManifest>();
 
 /** Canonical-path singleflight; one caller leaving does not cancel remaining readers. */
 export async function resolveCodexLinkedRollouts(
@@ -743,12 +786,30 @@ export async function resolveCodexLinkedRollouts(
   const canonicalPath = path.join(await realpath(path.dirname(rootRolloutPath)), path.basename(rootRolloutPath));
   signal?.throwIfAborted();
   if (afterMetadata) return buildCodexRolloutManifest(canonicalPath, signal, afterMetadata);
+  let rootStat;
+  try { rootStat = await lstat(canonicalPath); } catch { rootStat = null; }
+  const cached = rootStat?.isFile() ? manifestCache.get(canonicalPath) : null;
+  if (cached) {
+    const sameSnapshot = await Promise.all(cached.files.map(async (file) => {
+      try {
+        const current = await lstat(file.rolloutPath);
+        return current.isFile() && current.size === file.size && current.mtimeMs === file.mtimeMs;
+      } catch { return false; }
+    }));
+    if (sameSnapshot.every(Boolean)) return cached;
+  }
   let flight = manifestFlights.get(canonicalPath);
   if (!flight) {
     const controller = new AbortController();
     const created = { controller, refs: 0 } as ManifestFlight;
     created.promise = buildCodexRolloutManifest(canonicalPath, controller.signal)
-      .finally(() => {
+      .then((manifest) => {
+        if (rootStat?.isFile() && manifest.complete && manifest.root.snapshotStable) {
+          manifestCache.set(canonicalPath, manifest);
+          while (manifestCache.size > 100) manifestCache.delete(manifestCache.keys().next().value!);
+        }
+        return manifest;
+      }).finally(() => {
         if (manifestFlights.get(canonicalPath) === created) manifestFlights.delete(canonicalPath);
       });
     flight = created;

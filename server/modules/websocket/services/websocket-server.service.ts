@@ -6,6 +6,7 @@ import {
   bindUserRealtimeRevocation,
   connectionRevocationRegistry,
   devicePrincipalFromUser,
+  registerTokenSessionSocket,
 } from '@/modules/account-wallet/index.js';
 import {
   handleChatConnection,
@@ -163,6 +164,11 @@ export function createWebSocketServer(
     const socketUserId = readRequestUserId(incomingRequest);
     if (socketUserId !== null && socketUserId !== undefined && socketUserId !== '') {
       ws.once('close', trackUserSocket(socketUserId, aliveWs as never));
+    }
+    // T-2035 round 3: a bearer socket closes (4401) when its device signs out.
+    const tokenSid = (incomingRequest.user as { tokenSid?: unknown } | undefined)?.tokenSid;
+    if (typeof tokenSid === 'string' && tokenSid) {
+      ws.once('close', registerTokenSessionSocket(tokenSid, () => closeWebSocketForIdentityRevocation(aliveWs)));
     }
     const url = incomingRequest.url ?? '/';
     const pathname = new URL(url, 'http://localhost').pathname;

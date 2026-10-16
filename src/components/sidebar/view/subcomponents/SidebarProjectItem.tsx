@@ -38,6 +38,7 @@ import { announceContextMenuOpen, useDismissableContextMenu } from '../../hooks/
 import { useOptionalAuth } from '../../../../contexts/AuthContext';
 import { getAllSessions } from '../../utils/utils';
 import { useProjectPushReminder } from '../../hooks/useProjectPushReminder';
+import { alertDialog } from '../../../../shared/dialogs/dialogService';
 
 import SidebarProjectSessions from './SidebarProjectSessions';
 
@@ -371,7 +372,7 @@ export default function SidebarProjectItem({
     // 2 MB — the same ceiling multer enforces server-side. Checked here too so
     // an oversized file is refused instantly instead of after a full upload.
     if (file.size > 2 * 1024 * 1024) {
-      alert(t('tooltips.projectLogoTooLarge', { defaultValue: 'Image exceeds the 2MB size limit' }));
+      void alertDialog(t('tooltips.projectLogoTooLarge', { defaultValue: 'Image exceeds the 2MB size limit' }));
       return;
     }
 
@@ -385,7 +386,7 @@ export default function SidebarProjectItem({
       setLogoOverride(payload.data?.logoUrl ?? null);
     } catch (error) {
       console.error('[Sidebar] Failed to upload project logo:', error);
-      alert(t('tooltips.projectLogoFailed', { defaultValue: 'Failed to save the project logo' }));
+      void alertDialog(t('tooltips.projectLogoFailed', { defaultValue: 'Failed to save the project logo' }));
     } finally {
       setIsLogoBusy(false);
     }
@@ -402,7 +403,7 @@ export default function SidebarProjectItem({
       setLogoOverride(null);
     } catch (error) {
       console.error('[Sidebar] Failed to remove project logo:', error);
-      alert(t('tooltips.projectLogoFailed', { defaultValue: 'Failed to save the project logo' }));
+      void alertDialog(t('tooltips.projectLogoFailed', { defaultValue: 'Failed to save the project logo' }));
     } finally {
       setIsLogoBusy(false);
     }

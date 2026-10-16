@@ -95,7 +95,13 @@ async function setup(t, options = {}) {
         pm_out_log_path: path.join(outer, 'out'), pm_err_log_path: path.join(outer, 'err'), pm_pid_path: path.join(outer, 'pid'),
         status: 'stopped', autostart: true, autorestart: false, watch: false, pmx: false, vizion: false, wait_ready: false,
         restart_time: 0, unstable_restarts: 0, prev_restart_delay: 0, env: {} };
-    const socketPath = path.join(process.env.NASSAJ_TEST_TMP, 'facade.rpc');
+    // The PM2 locator must fit sun_path (<104); a deep worktree scratch does not, so use a short disk dir.
+    let socketPath = path.join(process.env.NASSAJ_TEST_TMP, 'facade.rpc');
+    if (socketPath.length >= 100) {
+        const short = fs.mkdtempSync('/var/tmp/facade-');
+        t.after(() => fs.rmSync(short, { recursive: true, force: true }));
+        socketPath = path.join(short, 'facade.rpc');
+    }
     const daemonInput = { codecEntry: path.join(generation, 'node_modules/amp-message/index.js'), oldDescriptor: descriptor,
         socketPath, home: outer, version: 'fixture', traceFile: path.join(outer, 'rpc-trace'), childOutput: path.join(outer, 'child-output'), readyFile: path.join(outer, 'daemon-ready') };
     const daemonFile = path.join(outer, 'daemon-input.json'); put(daemonFile, daemonInput);

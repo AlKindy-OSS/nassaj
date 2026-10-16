@@ -82,6 +82,8 @@ import { describeSteerTurnForViewer, handleSessionSteerWithImages } from '@/modu
 
 // eslint-disable-next-line boundaries/no-unknown -- steer images reuse the normal prompt's chat-image store.
 import { buildChatImageNote, saveChatImages } from '../../../services/chat-image-store.js';
+// eslint-disable-next-line boundaries/no-unknown -- ADR-210: display masking is a leaf service shared by every viewer egress.
+import { createBtwDisplaySink, createDisplayReplaySink, maskPendingPermissionsFor } from '../../../services/display-secret-mask.js';
 import { reportWriterLeaseRefusal, withLocalUpdateWriterLease } from '../../../services/update-writer-lease.js';
 // Top-level shared/ (compiled into dist-server/shared/) — the single source of
 // truth for globally disabled providers (T-864). Relative on purpose: the `@/`
@@ -162,6 +164,31 @@ const BTW_MAX_ID_BYTES = 128;
 // excerpts while bounding the App Server/SDK prompt and diagnostic path.
 const BTW_MAX_QUESTION_BYTES = 32 * 1024;
 const btwInFlightByUser = new Map<string, number>();
+
+/** Run owner recorded on a pending approval listing entry (ADR-210). */
+function approvalOwnerOf(entry: Record<string, unknown>): unknown {
+  return entry.ownerUserId;
+}
+
+/** Drops the owner id the listing carries for masking; clients never receive it. */
+function withoutApprovalOwner(entry: unknown): unknown {
+  if (!entry || typeof entry !== 'object' || !('ownerUserId' in entry)) return entry;
+  const { ownerUserId: _owner, ...rest } = entry as Record<string, unknown>;
+  return rest;
+}
+
+/** True for a replayed permission prompt whose run `viewerUserId` owns (ADR-210). */
+function ownedApprovalPredicate(
+  pending: readonly unknown[], viewerUserId: string | number | null,
+): (frame: Record<string, unknown>) => boolean {
+  const owned = new Set<string>();
+  for (const entry of pending) {
+    const row = entry as Record<string, unknown> | null;
+    if (row && viewerUserId !== null && row.ownerUserId !== null && row.ownerUserId !== undefined
+      && String(row.ownerUserId) === String(viewerUserId) && typeof row.requestId === 'string') owned.add(row.requestId);
+  }
+  return (frame) => typeof frame.requestId === 'string' && owned.has(frame.requestId);
+}
 
 /**
  * Stores a steer's images through the same chat-image store and path note a
@@ -1423,7 +1450,7 @@ export function isModelActivityFrame(payload: { kind?: unknown; role?: unknown }
 
 // B-553/م1: per-run writer wrappers (clientMsgId echo and friends) use
 // transparentWriterWithSend from writer-proxy.ts — one Proxy definition.
-function withClientMsgIdEcho(writer: WebSocketWriter, data: ChatIncomingMessage): WebSocketWriter {
+export function withClientMsgIdEcho(writer: WebSocketWriter, data: ChatIncomingMessage): WebSocketWriter {
   const echo = clientMsgIdEcho(data);
   if (!echo.clientMsgId) {
     return writer;
@@ -2760,9 +2787,11 @@ export function handleChatConnection(
   // /btw replies go to THIS requesting socket ALONE (contract C2): a raw send
   // that bypasses WebSocketWriter entirely, so there is no sessionId-keyed
   // fan-out to mirrors. btw payloads carry `btwId`, never `sessionId`.
-  const sendBtwRaw = (payload: Record<string, unknown>): void => {
+  // ADR-210 (T-2036): btw text derives from the session transcript, so it is
+  // masked like any other viewer egress (chunks through a stream masker).
+  const sendBtwRaw = createBtwDisplaySink((payload: Record<string, unknown>): void => {
     sendRawToThisSocket(payload);
-  };
+  });
 
   ws.on('message', async (rawMessage) => {
     if (!assertRealtimePrincipalCurrent(request.user)) {
@@ -3074,6 +3103,13 @@ export function handleChatConnection(
         // BEFORE any fork is spawned.
         if (!isSessionVisibleToUser(btwSessionId, presenceUserId)) {
           emitBtwError('not_visible', 'Session not found.');
+          return;
+        }
+        // B-1647 (owner decision 2026-10-16): a /btw question forks and runs the
+        // session's context, so it takes the SAME write gate as a composer send —
+        // a read-only viewer may look at the conversation but not ask into it.
+        if (!isSessionWritableByUser(btwSessionId, presenceUserId)) {
+          emitBtwError('btw_forbidden', 'You need write access to this session to ask a side question.');
           return;
         }
         // Restricted to providers with a native, isolated thread-fork path.
@@ -3735,7 +3771,11 @@ export function handleChatConnection(
           // B-SEC-REPLAY-UNICAST: unicast to the requesting socket (see note
           // above `if (provider === 'cursor')`) — `writer.send` would fan the
           // replay out to every mirror of this session.
-          dependencies.attachAntigravitySession(sessionId, lastSeq, sendRawToThisSocket);
+          // ADR-210: replayed frames are masked like live ones; the attach is
+          // synchronous, so `finish()` releases what this pass held back.
+          const agyReplay = createDisplayReplaySink(sendRawToThisSocket, { sessionId });
+          dependencies.attachAntigravitySession(sessionId, lastSeq, agyReplay);
+          agyReplay.finish();
         } else if (provider === 'opencode') {
           isActive = dependencies.isOpenCodeSessionActive(sessionId);
         } else if (provider === 'qwen') {
@@ -3780,7 +3820,14 @@ export function handleChatConnection(
           // B-SEC-REPLAY-UNICAST: unicast to the requesting socket — the buffered
           // payloads carry their own sessionId, so `writer.send` fanned the whole
           // backlog out to every other viewer of this session.
-          dependencies.attachClaudeSDKSession(sessionId, lastSeq, sendRawToThisSocket);
+          // ADR-210: replayed frames are masked like live ones; a replayed
+          // permission prompt stays raw only for the user who owns that run.
+          const claudeReplay = createDisplayReplaySink(sendRawToThisSocket, {
+            sessionId,
+            keepRaw: ownedApprovalPredicate(dependencies.getPendingApprovalsForSession(sessionId), presenceUserId),
+          });
+          dependencies.attachClaudeSDKSession(sessionId, lastSeq, claudeReplay);
+          claudeReplay.finish();
           // Writer reclaim: swap only when safe.
           // Safe = session is idle (!isActive) OR session is active but its primary
           // socket is dead (orphaned writer — primarySocketAlive=false). When the
@@ -3858,11 +3905,14 @@ export function handleChatConnection(
         }
         if (sessionId && dependencies.isClaudeSDKSessionActive(sessionId)) {
           const pending = dependencies.getPendingApprovalsForSession(sessionId);
-          writer.send({
+          // ADR-210: the run owner's own entries stay raw for this socket (their
+          // edited input executes verbatim); every other viewer gets them masked.
+          const listing = (viewer: string | number | null) => ({
             type: 'pending-permissions-response',
             sessionId,
-            data: pending,
+            data: maskPendingPermissionsFor(pending, viewer, sessionId, approvalOwnerOf).map(withoutApprovalOwner),
           });
+          writer.sendViewerFrames(listing(presenceUserId), listing(null), sessionId);
         }
         return;
       }

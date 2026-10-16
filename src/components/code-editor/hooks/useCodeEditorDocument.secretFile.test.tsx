@@ -14,6 +14,11 @@ vi.mock('../../../utils/api', () => ({
     saveFile: (...a: unknown[]) => saveFile(...a),
   },
 }));
+// T-2039: the secrets prompt is the themed dialog service, not window.confirm.
+const confirmDialog = vi.fn<(options: unknown) => Promise<boolean>>();
+vi.mock('../../../shared/dialogs/dialogService', () => ({
+  confirmDialog: (options: unknown) => confirmDialog(options),
+}));
 
 import { useCodeEditorDocument } from './useCodeEditorDocument';
 
@@ -26,13 +31,14 @@ describe('useCodeEditorDocument with a secrets file', () => {
   beforeEach(() => {
     readFile.mockReset();
     saveFile.mockReset();
+    confirmDialog.mockReset();
   });
   afterEach(() => {
     vi.restoreAllMocks();
   });
 
   it('asks, then opens and saves with the confirmation flag', async () => {
-    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const confirm = confirmDialog.mockResolvedValue(true);
     readFile.mockImplementation(async (_p: string, _f: string, { confirmSecret }: { confirmSecret: boolean }) =>
       (confirmSecret ? jsonResponse(200, { content: 'JWT=1' }) : askAgain()));
     saveFile.mockResolvedValue(jsonResponse(200, { success: true }));
@@ -50,7 +56,7 @@ describe('useCodeEditorDocument with a secrets file', () => {
   });
 
   it('shows nothing and never saves when the user declines', async () => {
-    vi.spyOn(window, 'confirm').mockReturnValue(false);
+    confirmDialog.mockResolvedValue(false);
     readFile.mockResolvedValue(askAgain());
 
     const { result } = renderHook(() => useCodeEditorDocument({ file: envFile as never }));
@@ -63,7 +69,7 @@ describe('useCodeEditorDocument with a secrets file', () => {
   });
 
   it('opens an ordinary file without asking', async () => {
-    const confirm = vi.spyOn(window, 'confirm');
+    const confirm = confirmDialog;
     readFile.mockResolvedValue(jsonResponse(200, { content: 'hello' }));
     const { result } = renderHook(() => useCodeEditorDocument({
       file: { name: 'a.ts', path: '/p/a.ts', projectId: 'proj-1' } as never,

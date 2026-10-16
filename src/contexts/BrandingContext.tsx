@@ -1,7 +1,8 @@
-import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 
 import { api } from '../utils/api';
+import { setBaseFavicon } from '../utils/faviconAttention';
 import { setPageBrandName } from '../utils/pageTitleNotification';
 
 /**
@@ -74,9 +75,6 @@ export const useBranding = (): BrandingContextValue => {
 export function BrandingProvider({ children }: { children: ReactNode }) {
   const [branding, setBranding] = useState<Branding>({ title: null, logoUrl: null, logoDarkUrl: null, logoOnly: false, splashHideTitle: false, nodeIconDataUri: null, nodeIconPosition: 'end', nodeIconHref: null });
   const [isLoading, setIsLoading] = useState(true);
-  // روابط الأيقونة الساكنة من index.html تُلتقط مرة واحدة لاستعادتها عند إزالة المخصّصة.
-  const originalIconsRef = useRef<Element[] | null>(null);
-  const customFaviconRef = useRef(false);
 
   const refresh = useCallback(async () => {
     try {
@@ -126,24 +124,10 @@ export function BrandingProvider({ children }: { children: ReactNode }) {
     setPageBrandName(branding.title);
     // الأولوية: أيقونة الخادم > الشعار > أيقونات index.html الأصلية. apple-touch-icon
     // تُترك كما هي: iOS يحتاج PNG بمقاسات ثابتة ويتراجع بسلاسة.
-    const faviconHref = branding.nodeIconDataUri ?? branding.logoUrl;
-    if (!originalIconsRef.current) {
-      originalIconsRef.current = Array.from(document.head.querySelectorAll('link[rel="icon"]'));
-    }
-    if (!faviconHref && !customFaviconRef.current) {
-      return;
-    }
-    document.head.querySelectorAll('link[rel="icon"]').forEach((node) => node.remove());
-    if (faviconHref) {
-      const link = document.createElement('link');
-      link.rel = 'icon';
-      link.href = faviconHref;
-      document.head.appendChild(link);
-    } else {
-      originalIconsRef.current.forEach((node) => document.head.appendChild(node));
-    }
-    customFaviconRef.current = Boolean(faviconHref);
-  }, [branding.title, branding.logoUrl, branding.nodeIconDataUri, isLoading]);
+    // الكتابة عبر الكاتب المشترك لا مباشرةً: الكتابة الخام تمحو نقطة «ينتظر
+    // جوابك» الحيّة (‏T-2041). `null` ⇒ العودة إلى أيقونات index.html.
+    setBaseFavicon(branding.nodeIconDataUri ?? branding.logoUrl);
+  },[branding.title, branding.logoUrl, branding.nodeIconDataUri, isLoading]);
 
   return (
     <BrandingContext.Provider value={{ ...branding, isLoading, refresh }}>

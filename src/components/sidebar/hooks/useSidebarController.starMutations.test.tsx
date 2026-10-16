@@ -17,6 +17,14 @@ vi.mock('../../../utils/api', () => ({
   api: apiMocks,
 }));
 
+// T-2039: confirm/alert go through the themed dialog service, not window.*.
+const dialogMocks = vi.hoisted(() => ({
+  confirmDialog: vi.fn<(options: unknown) => Promise<boolean>>(),
+  alertDialog: vi.fn<(options: unknown) => Promise<void>>(),
+}));
+
+vi.mock('../../../shared/dialogs/dialogService', () => dialogMocks);
+
 const { useSidebarController } = await import('./useSidebarController');
 
 type Deferred<T> = {
@@ -78,7 +86,8 @@ function renderController(projects: Project[], bulkLifecycleActions = true) {
 beforeEach(() => {
   localStorage.clear();
   vi.clearAllMocks();
-  vi.spyOn(window, 'alert').mockImplementation(() => undefined);
+  dialogMocks.alertDialog.mockResolvedValue(undefined);
+  dialogMocks.confirmDialog.mockResolvedValue(false);
   vi.spyOn(console, 'error').mockImplementation(() => undefined);
   apiMocks.archivedProjects.mockResolvedValue(response({ success: true, data: { projects: [] } }));
   apiMocks.getArchivedSessions.mockResolvedValue(response({ success: true, data: { sessions: [] } }));
@@ -224,13 +233,13 @@ describe('B-754 — project star mutations', () => {
     });
 
     expect(result.current.isProjectStarred('alpha')).toBe(true);
-    expect(window.alert).toHaveBeenCalledTimes(1);
+    expect(dialogMocks.alertDialog).toHaveBeenCalledTimes(1);
   });
 });
 
 describe('bulk lifecycle safety', () => {
   it('does not open confirmation or call the API when health has not advertised the capability', async () => {
-    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const confirm = dialogMocks.confirmDialog.mockResolvedValue(true);
     const { result } = renderController([project('alpha')], false);
 
     act(() => {

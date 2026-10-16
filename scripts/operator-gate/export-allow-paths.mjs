@@ -49,8 +49,6 @@ const DENY_EXACT = new Set([
     'scripts/release.test.mjs',
     'scripts/lib/public-release-provenance.mjs',
     'scripts/public-release-provenance.test.mjs',
-    'scripts/lib/release-baseline-comparator.mjs',
-    'scripts/release-baseline-comparator.test.mjs',
     'scripts/lib/release-orchestrator-journal.mjs',
     'scripts/lib/release-orchestrator-phases.mjs',
     'scripts/release-orchestrator-journal.test.mjs',
@@ -58,8 +56,8 @@ const DENY_EXACT = new Set([
     'scripts/release-orchestrator-sandbox.test.mjs',
     'scripts/release-preflight.mjs',
     'scripts/release-preflight.test.mjs',
-    'scripts/lib/release-baseline-cache.mjs',
-    'scripts/release-baseline-cache.test.mjs',
+    'scripts/lib/release-frozen-build.mjs',
+    'scripts/release-frozen-build.test.mjs',
     'scripts/run-isolated-node-tests.release-gate.test.mjs',
     'scripts/fixtures/runner-hang-probe.mjs',
     'scripts/prepare-release-version.test.mjs',
@@ -72,8 +70,13 @@ const DENY_EXACT = new Set([
 //     tests/e2e/office-preview-egress.browser.mjs (tests/ is not exported), and
 //     generate.py beside them only regenerates them;
 //   - the Office testing/fixtures/ docx/xlsx are the same undecodable ZIP class; the
-//     two shipped vitest cases that read them skip when the file is absent.
+//     two shipped vitest cases that read them skip when the file is absent;
+//   - scripts/proofs/ holds operator-run experiment proofs (probe/contract scripts
+//     plus their captured JSON evidence with our home paths and real session ids);
+//     nothing shipped imports them and their write-up lives in the private
+//     docs/evidence/, so the whole tree stays private like that write-up.
 const DENY_PREFIXES = [
+    'scripts/proofs/',
     'src/components/code-editor/utils/office/__fixtures__/ar/',
     'src/components/code-editor/utils/office/testing/fixtures/',
 ];

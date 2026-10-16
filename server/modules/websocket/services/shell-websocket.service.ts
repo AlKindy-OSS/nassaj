@@ -11,6 +11,7 @@ import {
   isProjectPathWritableByUser,
   readRequestUserId,
 } from '@/modules/websocket/services/chat-websocket.service.js';
+import { shellOneShotRunsDb, userDb } from '@/modules/database/index.js';
 import {
   findOwningProject,
   isProjectMembershipEnforced,
@@ -53,6 +54,20 @@ import {
 import { assertCodexRuntimeCompatible, isCodexRuntimeIncompatible } from '@/shared/codex-runtime-compat.js';
 
 import { reportWriterLeaseRefusal, withLocalUpdateWriterLease } from '../../../services/update-writer-lease.js';
+import {
+  createOneShotLimiter,
+  evaluateFreeFormShellAdmission,
+  evaluateOneShotAttach,
+  FREE_SHELL_ALLOWED_ROLES as ONESHOT_ALLOWED_ROLES,
+  isValidRunId,
+  oneShotBrakeFor,
+  oneShotLifetimeMs,
+// eslint-disable-next-line boundaries/no-unknown -- T-2037: the raw-exec gate is a leaf service shared with the command board.
+} from '../../../services/free-form-shell-gate.js';
+// eslint-disable-next-line boundaries/no-unknown -- T-2037: the raw-exec audit sink is shared with the command board.
+import { actorFromRequest, auditRawExec, auditRawExecStrict } from '../../../services/raw-exec-audit.js';
+// eslint-disable-next-line boundaries/no-unknown -- T-2037: one-shot captures reuse the ADR-210 masking leaf.
+import { createOneShotCaptureStore, maskClippedCaptureText } from '../../../services/oneshot-capture-store.js';
 
 /** Providers with a per-user credential knob in resolveProviderEnv. */
 type IsolationProvider =
@@ -86,6 +101,12 @@ type ShellIncomingMessage = {
   initialCommand?: string;
   isPlainShell?: boolean;
   forceRestart?: boolean;
+  /** T-2037: client-generated UUID of a composer shell one-shot. */
+  runId?: string;
+  /** T-2037: client-declared origin of a one-shot (audit label only). */
+  origin?: string;
+  /** T-2037: reattach to / report a run, never spawn (reconnect, remount, restore). */
+  attachOnly?: boolean;
 };
 
 export function isProviderLoginCommand(
@@ -95,18 +116,14 @@ export function isProviderLoginCommand(
   isPlainShell: boolean
 ): boolean {
   const isAgyProvider = provider === 'agy' || provider === 'antigravity';
-  return (
-    initialCommand.includes('setup-token')
-    || initialCommand.includes('cursor-agent login')
-    || initialCommand.includes('codex login')
-    // `kimi login` runs Moonshot's DEVICE-CODE flow (verified on disk: `kimi
-    // login` → "Authenticate with Kimi Code CLI via the device-code flow"), so
-    // it carries the same expiry hazard as `codex login --device-auth`: a stale
-    // reattached PTY would show an already-dead code. Force a fresh PTY.
-    || initialCommand.includes('kimi login')
-    || initialCommand.includes('auth login')
-    || (isAgyProvider && !hasSession && !isPlainShell)
-  );
+  // T-2037 (qa critical-1): EXACT match against the fixed login commands. The
+  // old substring test made any free-form command containing `auth login` a
+  // "login", and a login kills and respawns its PTY on every init — i.e. a
+  // reconnect would silently re-run an arbitrary command. `kimi login` and
+  // `codex login --device-auth` are device-code flows whose codes expire, so a
+  // stale reattached PTY would show a dead code: they force a fresh PTY.
+  return FRESH_PTY_LOGIN_COMMANDS.has(initialCommand.trim())
+    || (isAgyProvider && !hasSession && !isPlainShell);
 }
 
 // ---------------------------------------------------------------------------
@@ -188,6 +205,15 @@ const PROVIDER_CANONICAL_LOGIN_COMMANDS: ReadonlyMap<string, ReadonlySet<string>
 /** Every fixed provider-login command, across all providers. */
 const ALL_PROVIDER_LOGIN_COMMANDS: ReadonlySet<string> = new Set(
   [...PROVIDER_CANONICAL_LOGIN_COMMANDS.values()].flatMap((set) => [...set]),
+);
+
+/**
+ * Login commands that always get a fresh PTY (isProviderLoginCommand). Bare
+ * `agy` is excluded: as a plain-shell command it never forced a restart under
+ * the old substring test, and the agy provider PTY is covered by its own clause.
+ */
+const FRESH_PTY_LOGIN_COMMANDS: ReadonlySet<string> = new Set(
+  [...ALL_PROVIDER_LOGIN_COMMANDS].filter((command) => command !== 'agy'),
 );
 
 /**
@@ -297,7 +323,202 @@ type PtySessionEntry = {
   writerLease: ShellWriterLease;
   releaseHarnessLaunch?: () => void;
   managedClaudeSelector?: string;
+  /** T-2037: present only on a composer shell one-shot PTY. */
+  oneShot?: OneShotState;
 };
+
+/** A one-shot whose slot is reserved and runId consumed, not yet spawned. */
+type PendingOneShot = { userKey: string; runId: string; releaseSlot: () => void };
+
+/**
+ * Settles a one-shot that never reached pty.spawn: frees its slot, records the
+ * consumed runId as ended without an exit code (so a reconnect spawns nothing)
+ * and closes the socket with the final refusal code if no refusal did yet.
+ */
+function abortPendingOneShot(ws: WebSocket, pending: PendingOneShot, code = 'oneshot_start_failed'): void {
+  pending.releaseSlot();
+  pendingRunIds.delete(pendingRunKey(pending.userKey, pending.runId));
+  endRunInLedger(pending.userKey, pending.runId, 'refused', null);
+  if (ws.readyState === WebSocket.OPEN) refuseOneShot(ws, code, pending.runId);
+}
+
+/** Book-keeping of one live composer shell one-shot (T-2037). */
+type OneShotState = {
+  runId: string;
+  userKey: string;
+  digest: string;
+  actor: ReturnType<typeof actorFromRequest>;
+  startedAt: number;
+  releaseSlot: () => void;
+  lifetimeTimer: NodeJS.Timeout | null;
+  lifetimeExceeded: boolean;
+  finalized: boolean;
+};
+
+// T-2037 one-shot state, all in memory: per-user caps, the consumed-runId
+// ledger (no second spawn for a runId) and the output captures.
+const oneShotLimiter = createOneShotLimiter();
+/** `${user}:${runId}` of runs reserved by THIS process and not yet spawned. */
+const pendingRunIds = new Set<string>();
+const pendingRunKey = (userKey: string, runId: string): string => `${userKey}:${runId}`;
+
+/**
+ * Records how a run ended in the durable ledger. Best-effort: a write failure
+ * leaves the row 'started', which a later init reads as interrupted — never as
+ * permission to spawn again.
+ */
+function endRunInLedger(userKey: string, runId: string, state: 'finished' | 'refused', exitCode: number | null): void {
+  try {
+    shellOneShotRunsDb.end(Number(userKey), runId, state, exitCode, Date.now());
+  } catch (error) {
+    console.error('[ERROR] One-shot ledger end not recorded:', (error as Error).message);
+  }
+}
+
+/**
+ * qa high-3: the owner's role NOW, from the database — never the role the
+ * socket opened with. A missing, disabled or unreadable user has no role.
+ */
+function currentRoleOf(userKey: string): string | null {
+  try {
+    return userDb.getUserById(Number(userKey))?.role ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The frame answering an init for a runId that will not spawn: how the run
+ * ended, or that it was interrupted (started before a restart, never seen
+ * ending), refused, or is unknown to this server.
+ */
+function oneShotFinishedFrame(runId: string, row: { state: string; exit_code: number | null } | undefined) {
+  if (!row) return { type: 'oneshot_finished', runId, exitCode: null, unknown: true };
+  if (row.state === 'started') return { type: 'oneshot_finished', runId, exitCode: null, interrupted: true };
+  if (row.state === 'refused') return { type: 'oneshot_finished', runId, exitCode: null, refused: true };
+  return { type: 'oneshot_finished', runId, exitCode: row.exit_code };
+}
+const oneShotCaptures = createOneShotCaptureStore();
+/** How often live one-shots re-check the raw-exec brakes (flag off, tier revoked). */
+const ONESHOT_BRAKE_SWEEP_MS = 5_000;
+let oneShotBrakeSweeper: NodeJS.Timeout | null = null;
+
+/** Final close code of every one-shot refusal (the client never auto-reconnects on it). */
+const ONESHOT_REFUSAL_CLOSE_CODE = 4403;
+
+/** Sends a one-shot refusal frame and closes the socket with the final code. */
+function refuseOneShot(ws: WebSocket, code: string, runId: string | null = null): void {
+  if (ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({
+      type: 'error',
+      code,
+      ...(runId ? { runId } : {}),
+      message: 'This shell command was not run.',
+    }));
+  }
+  ws.close(ONESHOT_REFUSAL_CLOSE_CODE, 'Forbidden');
+}
+
+/** A pre-spawn one-shot refusal raised inside the spawn block. */
+class OneShotRefusal extends Error {
+  readonly code: string;
+
+  constructor(code: string) {
+    super(code);
+    this.code = code;
+  }
+}
+
+/**
+ * Ends a one-shot's book-keeping exactly once: frees its live slot, stops the
+ * lifetime timer, seals the capture and the consumed-runId record with the exit
+ * code, and writes the best-effort completion audit row.
+ */
+function finalizeOneShot(entry: PtySessionEntry, exitCode: number | null, reason: string): void {
+  const state = entry.oneShot;
+  if (!state || state.finalized) return;
+  state.finalized = true;
+  if (state.lifetimeTimer) clearTimeout(state.lifetimeTimer);
+  state.releaseSlot();
+  oneShotCaptures.finish(state.userKey, state.runId, exitCode);
+  endRunInLedger(state.userKey, state.runId, 'finished', exitCode);
+  try {
+    auditRawExec(state.actor, 'shell_exec_end', {
+      runId: state.runId,
+      digest: state.digest,
+      exitCode,
+      durationMs: Date.now() - state.startedAt,
+      truncated: oneShotCaptures.get(state.userKey, state.runId)?.truncated ?? false,
+      reason: state.lifetimeExceeded ? 'lifetime_cap' : reason,
+    });
+  } catch { /* completion audit is best-effort; the start row is the strict one */ }
+  stopOneShotSweeperIfIdle();
+}
+
+/** True while any one-shot PTY is live. */
+function hasLiveOneShot(): boolean {
+  for (const entry of ptySessionsMap.values()) {
+    if (entry.oneShot && !entry.oneShot.finalized) return true;
+  }
+  return false;
+}
+
+function stopOneShotSweeperIfIdle(): void {
+  if (oneShotBrakeSweeper && !hasLiveOneShot()) {
+    clearInterval(oneShotBrakeSweeper);
+    oneShotBrakeSweeper = null;
+  }
+}
+
+/**
+ * Ends every live one-shot whose owner may no longer run raw commands (the
+ * owner turned raw exec off, revoked the role's raw tier, or an environment
+ * blocker appeared). Returns the number ended. Exported for the test suite.
+ */
+export function sweepOneShotBrakes(): number {
+  let ended = 0;
+  for (const [key, entry] of [...ptySessionsMap]) {
+    const state = entry.oneShot;
+    if (!state || state.finalized) continue;
+    const brake = oneShotBrakeFor(currentRoleOf(state.userKey));
+    if (!brake) continue;
+    if (entry.ws && entry.ws.readyState === WebSocket.OPEN) {
+      entry.ws.send(JSON.stringify({ type: 'error', code: brake, runId: state.runId }));
+    }
+    endShellSession(key, entry, ONESHOT_REFUSAL_CLOSE_CODE, brake);
+    ended += 1;
+  }
+  return ended;
+}
+
+function ensureOneShotSweeper(): void {
+  if (oneShotBrakeSweeper) return;
+  oneShotBrakeSweeper = setInterval(sweepOneShotBrakes, ONESHOT_BRAKE_SWEEP_MS);
+  oneShotBrakeSweeper.unref?.();
+}
+
+/**
+ * Test seam: a server restart as the one-shot code sees it — every PTY entry is
+ * gone WITHOUT any exit/finalize bookkeeping (the process died), and all
+ * in-memory one-shot state is lost. Only the durable ledger remains.
+ */
+export function __simulateRestartForTests(): void {
+  for (const entry of ptySessionsMap.values()) {
+    if (entry.timeoutId) clearTimeout(entry.timeoutId);
+    if (entry.oneShot?.lifetimeTimer) clearTimeout(entry.oneShot.lifetimeTimer);
+  }
+  ptySessionsMap.clear();
+  __resetOneShotStateForTests();
+}
+
+/** Test seam: clears every in-memory one-shot cap, pending run and capture. */
+export function __resetOneShotStateForTests(): void {
+  oneShotLimiter.reset();
+  pendingRunIds.clear();
+  oneShotCaptures.reset();
+  if (oneShotBrakeSweeper) clearInterval(oneShotBrakeSweeper);
+  oneShotBrakeSweeper = null;
+}
 
 /** Owning project id of a PTY cwd, or null (unregistered / lookup failure). */
 function resolveOwningProjectId(projectPath: string): string | null {
@@ -353,6 +574,8 @@ export function terminateShellSessionsForUser(userId: string | number): number {
     endShellSession(key, entry, 4401, 'identity_revoked');
     ended += 1;
   }
+  // T-2037: a revoked identity also loses its one-shot output captures.
+  oneShotCaptures.dropUser(userId);
   return ended;
 }
 
@@ -387,6 +610,7 @@ function endShellSession(key: string, entry: PtySessionEntry, code: number, reas
   if (entry.timeoutId) clearTimeout(entry.timeoutId);
   try { entry.ws?.close(code, reason); } catch { /* already closed */ }
   try { entry.pty.kill(); } catch { /* already exited */ }
+  finalizeOneShot(entry, null, `terminated:${reason}`);
   // B-1448 M2: the ended entry leaves the map here, so its onExit finds no
   // session and could not release the harness-launch reservation itself.
   entry.releaseHarnessLaunch?.();
@@ -901,6 +1125,9 @@ export function handleShellConnection(
       return;
     }
     try { await withLocalUpdateWriterLease('shell-websocket-frame', async () => {
+    // T-2037: a one-shot reserved but not yet handed to a live PTY entry. Every
+    // path that leaves this frame without spawning settles it in `finally`.
+    let pendingOneShot: PendingOneShot | null = null;
     try {
       const data = parseShellMessage(rawMessage);
       if (!data?.type) {
@@ -909,12 +1136,17 @@ export function handleShellConnection(
 
       if (data.type === 'init') {
         let projectPath = readString(data.projectPath, process.cwd());
-        const sessionId = readString(data.sessionId) || null;
-        const hasSession = readBoolean(data.hasSession);
-        const provider = readString(data.provider, 'claude');
-        const initialCommand = readString(data.initialCommand);
-        const forceRestart = readBoolean(data.forceRestart);
-        const isPlainShell =
+        // `let`: a free-form one-shot pins these after admission (T-2037).
+        let sessionId = readString(data.sessionId) || null;
+        let hasSession = readBoolean(data.hasSession);
+        let provider = readString(data.provider, 'claude');
+        // T-2037: an attachOnly init never runs a command, so its command is
+        // dropped HERE — before isLoginCommand — or a crafted attachOnly carrying
+        // a login command would force-restart (kill) the user's live run.
+        const attachOnly = data.attachOnly === true;
+        const initialCommand = attachOnly ? '' : readString(data.initialCommand);
+        let forceRestart = readBoolean(data.forceRestart);
+        let isPlainShell =
           readBoolean(data.isPlainShell) ||
           (!!initialCommand && !hasSession) ||
           provider === 'plain-shell';
@@ -927,6 +1159,8 @@ export function handleShellConnection(
             code: PROVIDER_REMOVED_CODE,
             message: PROVIDER_REMOVED_MESSAGE,
           }));
+          // T-2037: a free-form one-shot refusal is always final.
+          if (!isAllowlistedShellCommand(initialCommand)) ws.close(ONESHOT_REFUSAL_CLOSE_CODE, 'Forbidden');
           return;
         }
 
@@ -994,6 +1228,59 @@ export function handleShellConnection(
           }
           ws.close(4403, 'Forbidden');
           return;
+        }
+
+        // T-2037 — every command outside the fixed allowlist is a composer shell
+        // ONE-SHOT and passes the raw-exec brakes (free-form-shell-gate.js) before
+        // any key build, reattach or spawn. Once admitted, the server — not the
+        // payload — decides how it runs: a plain shell, no provider session, no
+        // forceRestart, under its own per-run key (never the provider `_default`).
+        // `attachOnly` (reconnect, remount, restored run) can never spawn: it
+        // reattaches to a live run or reports how the run ended.
+        let oneShot: { command: string; digest: string; runId: string } | null = null;
+        if (attachOnly) {
+          const attach = evaluateOneShotAttach({
+            // qa round 3: the role NOW (database), not the one the socket opened with.
+            role: currentRoleOf(String(userId)),
+            isPlainShell: data.isPlainShell,
+            hasSession: data.hasSession,
+            runId: data.runId,
+          });
+          if (!attach.ok) {
+            console.error(`[ERROR] Shell WebSocket rejected one-shot attach: ${attach.code}`);
+            refuseOneShot(ws, attach.code);
+            return;
+          }
+          oneShot = { command: '', digest: '', runId: attach.value.runId };
+          provider = 'plain-shell';
+          sessionId = null;
+          hasSession = false;
+          isPlainShell = true;
+          forceRestart = false;
+        } else if (!isAllowlistedShellCommand(initialCommand)) {
+          const admission = evaluateFreeFormShellAdmission({
+            role: userRole,
+            command: initialCommand,
+            isPlainShell: data.isPlainShell,
+            hasSession: data.hasSession,
+            runId: data.runId,
+          });
+          if (!admission.ok) {
+            console.error(`[ERROR] Shell WebSocket rejected one-shot: ${admission.code}`);
+            if (admission.code !== 'forbidden' && admission.code !== 'oneshot_shape_invalid') {
+              auditRawExec(actorFromRequest(request), 'reject', {
+                origin: 'composer_shell', reason: admission.code, command: initialCommand,
+              });
+            }
+            refuseOneShot(ws, admission.code);
+            return;
+          }
+          oneShot = admission.value;
+          provider = 'plain-shell';
+          sessionId = null;
+          hasSession = false;
+          isPlainShell = true;
+          forceRestart = false;
         }
 
         // B-1260 — command↔provider binding: a fixed provider-login command
@@ -1068,7 +1355,56 @@ export function handleShellConnection(
         }
 
         const userKey = userId;
-        ptySessionKey = `${userKey}_${projectPath}_${sessionId ?? 'default'}${commandSuffix}`;
+        ptySessionKey = oneShot
+          ? `${userKey}_${projectPath}_oneshot_${oneShot.runId}`
+          : `${userKey}_${projectPath}_${sessionId ?? 'default'}${commandSuffix}`;
+
+        // T-2037 (qa critical-1): a runId runs at most once, across restarts —
+        // the ledger is durable (shell_oneshot_runs). A live run reattaches; any
+        // other known runId, and every attachOnly init, only reports how the run
+        // ended. Only a non-attach init with a never-seen runId may spawn.
+        if (oneShot) {
+          const live = ptySessionsMap.get(ptySessionKey);
+          const isLive = !!live?.oneShot && !live.oneShot.finalized;
+          if (!isLive) {
+            const runKey = pendingRunKey(String(userKey), oneShot.runId);
+            if (pendingRunIds.has(runKey)) {
+              refuseOneShot(ws, 'oneshot_in_progress', oneShot.runId);
+              return;
+            }
+            let row: ReturnType<typeof shellOneShotRunsDb.get>;
+            try {
+              row = shellOneShotRunsDb.get(Number(userKey), oneShot.runId);
+            } catch (error) {
+              console.error('[ERROR] One-shot ledger unreadable:', (error as Error).message);
+              refuseOneShot(ws, 'oneshot_ledger_unavailable', oneShot.runId);
+              return;
+            }
+            if (attachOnly || row) {
+              ws.send(JSON.stringify(oneShotFinishedFrame(oneShot.runId, row)));
+              return;
+            }
+            // qa high-1: reserved synchronously, before the first await below.
+            const reservation = oneShotLimiter.reserve(String(userKey));
+            if (!reservation.ok) {
+              refuseOneShot(ws, reservation.code, oneShot.runId);
+              return;
+            }
+            let consumed = false;
+            try {
+              consumed = shellOneShotRunsDb.consume(Number(userKey), oneShot.runId, Date.now());
+            } catch (error) {
+              console.error('[ERROR] One-shot ledger not written:', (error as Error).message);
+            }
+            if (!consumed) {
+              reservation.release();
+              refuseOneShot(ws, 'oneshot_ledger_unavailable', oneShot.runId);
+              return;
+            }
+            pendingRunIds.add(runKey);
+            pendingOneShot = { userKey: String(userKey), runId: oneShot.runId, releaseSlot: reservation.release };
+          }
+        }
 
         if (isLoginCommand || forceRestart) {
           const oldSession = ptySessionsMap.get(ptySessionKey);
@@ -1122,6 +1458,13 @@ export function handleShellConnection(
           ptySessionsMap.delete(ptySessionKey);
         }
 
+        // Defence in depth: a one-shot reaches the spawn path only with a fresh
+        // reservation from the ledger block above.
+        if (oneShot && !pendingOneShot) {
+          refuseOneShot(ws, 'oneshot_start_failed', oneShot.runId);
+          return;
+        }
+
         const resolvedProjectPath = path.resolve(projectPath);
         try {
           const stats = fs.statSync(resolvedProjectPath);
@@ -1165,7 +1508,11 @@ export function handleShellConnection(
         if (provider === 'codex' && !isPlainShell && !(await admitCodexTerminalLinkMode(ws, userId))) {
           return;
         }
-        const shellCommand = buildShellCommand(data, dependencies, codexIdentity);
+        // A one-shot is built from the server-pinned shape, never the payload's.
+        const launchMessage: ShellIncomingMessage = oneShot
+          ? { ...data, provider, sessionId: undefined, hasSession, isPlainShell, initialCommand }
+          : data;
+        const shellCommand = buildShellCommand(launchMessage, dependencies, codexIdentity);
         const shell = os.platform() === 'win32' ? 'powershell.exe' : 'bash';
         const shellArgs =
           os.platform() === 'win32' ? ['-Command', shellCommand] : ['-c', shellCommand];
@@ -1298,6 +1645,24 @@ export function handleShellConnection(
               throw error;
             }
           }
+          if (oneShot) {
+            // qa high-2: brakes re-read and the start row written AND verified
+            // here, after the lease and the final admission, with no await
+            // between this block and pty.spawn.
+            const brake = oneShotBrakeFor(currentRoleOf(String(userId)));
+            if (brake) throw new OneShotRefusal(brake);
+            try {
+              auditRawExecStrict(actorFromRequest(request), 'shell_exec_start', {
+                origin: readString(data.origin) === 'composer_shell' ? 'composer_shell' : 'unspecified',
+                command: oneShot.command,
+                digest: oneShot.digest,
+                projectId: resolveOwningProjectId(projectPath),
+                runId: oneShot.runId,
+              });
+            } catch {
+              throw new OneShotRefusal('audit_unavailable');
+            }
+          }
           if (codexIdentity) assertCodexIdentityUnchanged(codexIdentity);
           shellProcess = pty.spawn(ptyLaunch.cmd, ptyLaunch.args, {
           name: 'xterm-256color',
@@ -1326,7 +1691,43 @@ export function handleShellConnection(
           releaseHarnessLaunch?.();
           revokeManagedClaudeTerminal(broker?.selector);
           writerLease.release();
+          if (error instanceof OneShotRefusal && pendingOneShot) {
+            console.error(`[ERROR] Shell WebSocket rejected one-shot at spawn: ${error.code}`);
+            const pending = pendingOneShot;
+            pendingOneShot = null;
+            abortPendingOneShot(ws, pending, error.code);
+            return;
+          }
           throw error;
+        }
+
+        const oneShotState: OneShotState | undefined = oneShot && pendingOneShot
+          ? {
+            runId: oneShot.runId,
+            userKey: pendingOneShot.userKey,
+            digest: oneShot.digest,
+            actor: actorFromRequest(request),
+            startedAt: Date.now(),
+            releaseSlot: pendingOneShot.releaseSlot,
+            lifetimeTimer: null,
+            lifetimeExceeded: false,
+            finalized: false,
+          }
+          : undefined;
+        if (oneShotState) {
+          // Handed to the live entry: from here finalizeOneShot settles it.
+          pendingRunIds.delete(pendingRunKey(oneShotState.userKey, oneShotState.runId));
+          pendingOneShot = null;
+          oneShotCaptures.begin(oneShotState.userKey, oneShotState.runId);
+          const lifetimePty = shellProcess;
+          // qa high-3: a hard lifetime cap. Killing the PTY ends bash and its
+          // process group; a child that detached itself (nohup, setsid, disown)
+          // is outside that group and survives — documented, not prevented.
+          oneShotState.lifetimeTimer = setTimeout(() => {
+            oneShotState.lifetimeExceeded = true;
+            try { lifetimePty.kill(); } catch { /* already exited */ }
+          }, oneShotLifetimeMs());
+          oneShotState.lifetimeTimer.unref?.();
         }
 
         ptySessionsMap.set(ptySessionKey, {
@@ -1340,7 +1741,9 @@ export function handleShellConnection(
           writerLease,
           releaseHarnessLaunch,
           managedClaudeSelector: broker?.selector,
+          oneShot: oneShotState,
         });
+        if (oneShotState) ensureOneShotSweeper();
 
         shellProcess.onData((chunk) => {
           if (!ptySessionKey) {
@@ -1357,6 +1760,9 @@ export function handleShellConnection(
           } else {
             session.buffer.shift();
             session.buffer.push(chunk);
+          }
+          if (session.oneShot) {
+            oneShotCaptures.append(session.oneShot.userKey, session.oneShot.runId, chunk);
           }
 
           if (session.ws && session.ws.readyState === WebSocket.OPEN) {
@@ -1453,6 +1859,14 @@ export function handleShellConnection(
           revokeManagedClaudeTerminal(session.managedClaudeSelector);
 
           ptySessionsMap.delete(ptySessionKey);
+          if (session.oneShot) {
+            finalizeOneShot(session, exitCode.exitCode, 'exit');
+            if (session.ws && session.ws.readyState === WebSocket.OPEN) {
+              session.ws.send(JSON.stringify({
+                type: 'oneshot_finished', runId: session.oneShot.runId, exitCode: exitCode.exitCode,
+              }));
+            }
+          }
           if (shellProcess === exitingPty) shellProcess = null;
         });
 
@@ -1484,6 +1898,27 @@ export function handleShellConnection(
             data: welcomeMsg,
           })
         );
+        return;
+      }
+
+      // T-2037: the owner reads a one-shot's capture (masked unconditionally).
+      // Keyed by the JWT user, so another user's runId is simply not found.
+      if (data.type === 'oneshot_capture') {
+        const runId = isValidRunId(data.runId) ? data.runId.toLowerCase() : null;
+        const currentRole = userId === null || userId === undefined ? null : currentRoleOf(String(userId));
+        const allowed = typeof currentRole === 'string' && ONESHOT_ALLOWED_ROLES.includes(currentRole);
+        const capture = runId && allowed && userId !== null && userId !== undefined
+          ? oneShotCaptures.get(String(userId), runId)
+          : null;
+        ws.send(JSON.stringify(capture
+          ? {
+            type: 'oneshot_capture',
+            runId,
+            text: maskClippedCaptureText(capture.text, capture.truncated),
+            truncated: capture.truncated,
+            exitCode: capture.exitCode,
+          }
+          : { type: 'error', code: 'oneshot_capture_unavailable', runId }));
         return;
       }
 
@@ -1523,6 +1958,8 @@ export function handleShellConnection(
           })
         );
       }
+    } finally {
+      if (pendingOneShot) abortPendingOneShot(ws, pendingOneShot);
     }
     }); gateDenialAnnounced = false; } catch (frameError) {
       // This catch wraps the WHOLE frame handler, so it sees every rejection the
@@ -1572,6 +2009,7 @@ export function handleShellConnection(
       session.writerLease.release();
       revokeManagedClaudeTerminal(session.managedClaudeSelector);
       ptySessionsMap.delete(ptySessionKey as string);
+      finalizeOneShot(session, null, 'detached_timeout');
     }, PTY_SESSION_TIMEOUT);
   });
 

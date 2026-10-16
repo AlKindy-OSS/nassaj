@@ -35,6 +35,8 @@ import { migrateDeviceAccountSessions } from './device-account-sessions.migratio
 import { inspectExistingSecurityState } from './existing-security-state.js';
 import { migrateSsoOidc } from './sso-oidc-config.migration.js';
 import { migrateUserHarnessFilesMode } from './harness-files-mode.migration.js';
+import { migrateAuthTokenEpoch } from './auth-token-epoch.migration.js';
+import { migrateShellOneShotRuns } from './shell-oneshot-runs.migration.js';
 
 /** True when a ledger project path still resolves to a real directory. */
 const projectPathResolves = (projectPath: string): boolean => {
@@ -68,6 +70,12 @@ export const initializeAdmittedDatabase = (db: ReturnType<typeof getConnection>,
     // ADR-203 (T-2003): one additive CREATE TABLE; without it the private-skills
     // switch reads a missing table on update-button nodes (fails safe to shared).
     migrateUserHarnessFilesMode(db);
+    // ADR-212 (T-2035): login_throttle + users.token_epoch. Without the column
+    // every verifier reads a missing field and the logout bump fails.
+    migrateAuthTokenEpoch(db);
+    // ADR-213 (T-2037): the durable one-shot runId ledger. Without it a restart
+    // would let a client's re-sent runId run its command again.
+    migrateShellOneShotRuns(db);
     const result = initializeConnectorPolicyV2SubstrateOnly(db, authorityRootPath);
     if (!result.ready) throw new Error(`existing_security_connector_initialization_failed:${result.reason}`);
 };
@@ -101,6 +109,10 @@ export const initializeDatabase = async () => {
             // Idempotent; also inside runMigrations. Kept explicit so both boot
             // paths name the T-1962 tables (ADR-194).
             migrateSsoOidc(db);
+            // ADR-212 (T-2035): sign-out epoch and login throttle (idempotent).
+            migrateAuthTokenEpoch(db);
+            // ADR-213 (T-2037): durable one-shot runId ledger (idempotent).
+            migrateShellOneShotRuns(db);
             migrateConnectorAuthSchema(db);
             const existingInstallation = db.prepare(`SELECT installation_id AS installationId
                 FROM connector_installations WHERE singleton=1`).get() as { installationId: string } | undefined;

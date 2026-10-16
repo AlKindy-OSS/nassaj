@@ -8,6 +8,7 @@ import { formatToolContent, openCodeToolPart } from '@/modules/providers/list/op
 import { redactLiteralSecrets } from '@/services/isolation/opencode-qwen-plan.js';
 import type { IProviderSessions } from '@/shared/interfaces.js';
 import type { AnyRecord, FetchHistoryOptions, FetchHistoryResult, NormalizedMessage } from '@/shared/types.js';
+import { buildProgressSubagent } from '@/shared/progress-normalize.js';
 import {
   createNormalizedMessage,
   generateMessageId,
@@ -31,6 +32,36 @@ type OpenCodeHistoryRow = {
   part_time_created: number | null;
   part_data: string | null;
 };
+
+type OpenCodeChildTool = { name: string; status: string };
+
+export function readChildTools(
+  db: Database.Database,
+  parentSessionId: string,
+): Map<string, OpenCodeChildTool[]> {
+  const grouped = new Map<string, Map<string, OpenCodeChildTool>>();
+  const rows = db.prepare(`
+    SELECT p.session_id AS session_id, p.id AS part_id, p.data AS part_data
+    FROM session child
+    JOIN part p ON p.session_id = child.id
+    WHERE child.parent_id = ?
+    ORDER BY COALESCE(p.time_created, 0), p.id
+  `).all(parentSessionId) as Array<{
+    session_id: string; part_id: string; part_data: string | null;
+  }>;
+  for (const row of rows) {
+    const part = readJsonRecord(row.part_data);
+    if (part?.type !== 'tool') continue;
+    const state = readObjectRecord(part.state);
+    const name = readOptionalString(part.tool);
+    if (!name) continue;
+    const status = readOptionalString(state?.status) ?? 'running';
+    const tools = grouped.get(row.session_id) ?? new Map<string, OpenCodeChildTool>();
+    tools.set(row.part_id, { name, status: status === 'error' ? 'failed' : status });
+    grouped.set(row.session_id, tools);
+  }
+  return new Map([...grouped].map(([id, tools]) => [id, [...tools.values()]]));
+}
 
 type OpenCodeTokenTotals = {
   inputTokens: number;
@@ -437,7 +468,19 @@ export class OpenCodeSessionsProvider implements IProviderSessions {
           p.id
       `).all(sessionId) as OpenCodeHistoryRow[];
 
-      const normalized = this.normalizeHistoryRows(rows, sessionId);
+      const dataHome = path.dirname(getOpenCodeDatabasePath());
+      const secrets = collectOpenCodeSessionSecrets(sessionId, {
+        dataHome,
+        extraUserIds: [resolveOpenCodeDataHomeOwner(dataHome)],
+      });
+      let childTools = new Map<string, OpenCodeChildTool[]>();
+      try {
+        childTools = readChildTools(db, sessionId);
+      } catch (error) {
+        console.warn('[OpenCodeProvider] Child tool enrichment unavailable:',
+          error instanceof Error ? error.message : String(error));
+      }
+      const normalized = this.normalizeHistoryRows(rows, sessionId, childTools, secrets);
       const tokenUsage = aggregateOpenCodeSessionTokenUsage(db, sessionId);
 
       const normalizedOffset = Math.max(0, offset);
@@ -469,18 +512,18 @@ export class OpenCodeSessionsProvider implements IProviderSessions {
     }
   }
 
-  private normalizeHistoryRows(rows: OpenCodeHistoryRow[], sessionId: string): NormalizedMessage[] {
+  private normalizeHistoryRows(
+    rows: OpenCodeHistoryRow[],
+    sessionId: string,
+    childTools: Map<string, OpenCodeChildTool[]> = new Map(),
+    secrets: ReadonlyArray<unknown> = [],
+  ): NormalizedMessage[] {
     const normalized: NormalizedMessage[] = [];
     const emittedMessageErrors = new Set<string>();
     // ADR-200 §8 / M-5: under ADR-089 every member reads every session, so the
     // current vendor keys of EVERY sender in it are redacted, not the reader's.
     // M-6: the owner of the data dir this history is read from, and the
     // auth.json in that dir, are covered too (same rule as the synchronizer).
-    const dataHome = path.dirname(getOpenCodeDatabasePath());
-    const secrets = collectOpenCodeSessionSecrets(sessionId, {
-      dataHome,
-      extraUserIds: [resolveOpenCodeDataHomeOwner(dataHome)],
-    });
     // ADR-199 Addendum B §16: each todowrite is a full snapshot, so history
     // stamps only the last one of each turn (a user message opens a turn).
     let turnPlan: { message: NormalizedMessage; plan: NonNullable<NormalizedMessage['plan']> } | null = null;
@@ -574,6 +617,11 @@ export class OpenCodeSessionsProvider implements IProviderSessions {
 
       if (partType === 'tool') {
         const tool = openCodeToolPart(partData);
+        const childSessionId = readOptionalString(readObjectRecord(
+          readObjectRecord(partData.state)?.metadata,
+        )?.sessionId);
+        const childSessionTools = childSessionId
+          ? childTools.get(childSessionId) : undefined;
         const toolMessage = createNormalizedMessage({
           id: baseId,
           sessionId,
@@ -584,7 +632,16 @@ export class OpenCodeSessionsProvider implements IProviderSessions {
           toolInput: tool.toolInput,
           toolId: tool.toolId ?? row.part_id,
           ...(tool.toolResult ? { toolResult: tool.toolResult } : {}),
-          ...(tool.subagent ? { subagent: tool.subagent } : {}),
+          ...(tool.subagent ? {
+            subagent: buildProgressSubagent({
+              ...tool.subagent,
+              ...(childSessionTools ? { tools: childSessionTools.map((childTool) => ({
+                ...childTool,
+                name: redactLiteralSecrets(childTool.name, secrets),
+                status: redactLiteralSecrets(childTool.status, secrets),
+              })) } : {}),
+            }) ?? tool.subagent,
+          } : {}),
         });
         if (tool.plan) {
           turnPlan = { message: toolMessage, plan: tool.plan };

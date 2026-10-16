@@ -30,7 +30,15 @@ type ClaudeToolResult = {
   content: unknown;
   isError: boolean;
   subagentTools?: unknown;
+  subagentModel?: string;
   toolUseResult?: unknown;
+  subagentEffort?: string;
+};
+
+type ClaudeAgentTranscript = {
+  tools: AnyRecord[];
+  model?: string;
+  effort?: string;
 };
 
 type ClaudeHistoryResult =
@@ -86,13 +94,15 @@ async function readAgentFileNames(source: ClaudeHistorySource): Promise<string[]
 
 async function parseAgentTools(
   source: ClaudeHistorySource, fileName: string, lease?: HistoryReadLease,
-): Promise<AnyRecord[]> {
+): Promise<ClaudeAgentTranscript> {
   const tools: AnyRecord[] = [];
+  let model: string | undefined;
+  let effort: string | undefined;
   const progress = createClaudeChildToolsProgress();
 
   try {
     const fileStream = await source.agent(fileName);
-    if (!fileStream) return tools;
+    if (!fileStream) return { tools };
     const rl = readline.createInterface({
       input: fileStream,
       crlfDelay: Infinity,
@@ -106,6 +116,11 @@ async function parseAgentTools(
       try {
         const entry = (lease ? lease.parse(line) : JSON.parse(line)) as AnyRecord;
         if (!isClaudeConversationRow(entry)) continue;
+        const candidateModel = entry.message?.model ?? entry.model;
+        const candidateEffort = entry.message?.effort
+          ?? entry.message?.reasoning_effort ?? entry.effort ?? entry.reasoning_effort;
+        if (typeof candidateModel === 'string' && candidateModel) model = candidateModel;
+        if (typeof candidateEffort === 'string' && candidateEffort) effort = candidateEffort;
 
         if (entry.message?.role === 'assistant' && Array.isArray(entry.message?.content)) {
           for (const part of entry.message.content as AnyRecord[]) {
@@ -157,7 +172,7 @@ async function parseAgentTools(
     console.warn(`Error parsing agent file ${fileName}:`, message);
   }
 
-  return tools;
+  return { tools, model, effort };
 }
 
 /**
@@ -196,7 +211,7 @@ async function getSessionMessages(
     const agentFiles = await readAgentFileNames(source);
 
     const messages: AnyRecord[] = [];
-    const agentToolsCache = new Map<string, AnyRecord[]>();
+    const agentToolsCache = new Map<string, ClaudeAgentTranscript>();
 
     const rl = readline.createInterface({
       input: source.main(),
@@ -236,8 +251,8 @@ async function getSessionMessages(
 
       // B-1564/ADR-201: an agent file is opened only through the pinned
       // subagents directory (or the lease's scoped open for bounded reads).
-      const tools = await parseAgentTools(source, agentFileName, lease);
-      agentToolsCache.set(agentId, tools);
+      const transcript = await parseAgentTools(source, agentFileName, lease);
+      agentToolsCache.set(agentId, transcript);
     }
 
     for (const message of messages) {
@@ -247,9 +262,16 @@ async function getSessionMessages(
       }
 
       const agentTools = agentToolsCache.get(String(agentId));
-      if (agentTools && agentTools.length > 0) {
-        message.subagentTools = agentTools;
-        stampChildParent(message, agentTools);
+      if (agentTools) {
+        const result = message.toolUseResult as AnyRecord | undefined;
+        const toolId = message.message?.content?.find((part: AnyRecord) =>
+          part?.type === 'tool_result')?.tool_use_id;
+        if (result?.agentId === agentId && toolId) {
+          message.subagentTools = agentTools.tools;
+          message.subagentModel = agentTools.model;
+          message.subagentEffort = agentTools.effort;
+          stampChildParent(message, agentTools.tools);
+        }
       }
     }
 
@@ -558,6 +580,7 @@ export class ClaudeSessionsProvider implements IProviderSessions {
               content: typeof part.content === 'string' ? part.content : (lease ? lease.stringify(part.content) : JSON.stringify(part.content)),
               isError: Boolean(part.is_error),
               subagentTools: raw.subagentTools,
+              subagentModel: raw.subagentModel,
               toolUseResult: raw.toolUseResult,
             }));
           } else if (part.type === 'text') {
@@ -854,6 +877,7 @@ export class ClaudeSessionsProvider implements IProviderSessions {
               content: part.content,
               isError: Boolean(part.is_error),
               subagentTools: raw.subagentTools,
+              subagentModel: raw.subagentModel,
               toolUseResult: raw.toolUseResult,
             });
           }
@@ -889,6 +913,13 @@ export class ClaudeSessionsProvider implements IProviderSessions {
           toolUseResult: toolResult.toolUseResult,
         };
         msg.subagentTools = toolResult.subagentTools;
+        if (msg.subagent && typeof toolResult.subagentModel === 'string') {
+          msg.subagent = {
+            ...msg.subagent,
+            model: toolResult.subagentModel,
+            modelInherited: false,
+          };
+        }
       }
     }
 

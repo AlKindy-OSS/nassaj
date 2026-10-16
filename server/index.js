@@ -12,9 +12,8 @@ import crypto from 'node:crypto';
 import express from 'express';
 import cors from 'cors';
 import mime from 'mime-types';
-import Database from 'better-sqlite3';
 
-import { AppError, WORKSPACES_ROOT, getOpenCodeDatabasePath, validateWorkspacePath } from '@/shared/utils.js';
+import { AppError, WORKSPACES_ROOT, validateWorkspacePath } from '@/shared/utils.js';
 import { buildProjectFileTreeResponse, getFileTree } from './utils/file-tree.js';
 import { closeSessionsWatcher, forkSessionAtMessage, forkSessionFromSideQuery, initializeSessionsWatcher, isSessionAccessibleByUser, setEngineSwitchLivenessProbe, setSessionLivenessProbes, startCostLedgerScheduler, startParkedTranscriptSweep, stopCostLedgerScheduler } from '@/modules/providers/index.js';
 import { createWebSocketServer } from '@/modules/websocket/index.js';
@@ -174,6 +173,7 @@ import {
     shouldAutoOpenUrlFromOutput,
 } from './utils/url-detection.js';
 import { createRateLimiter } from './middleware/rate-limit.js';
+import { enforceFrameSrcPolicy } from './middleware/frame-src-csp.js';
 import gitRoutes from './routes/git.js';
 import authRoutes from './routes/auth.js';
 import { warnOnOwnerOidcLinks } from './services/oidc-owner-link-check.js';
@@ -229,13 +229,7 @@ import governancePreferencesRoutes from './modules/providers/governance-preferen
 import { harnessFilesRoutes } from './modules/harness-files/index.js';
 import participantsRoutes from './modules/providers/participants.routes.js';
 import { createSessionPermissionFenceRouter } from './modules/providers/session-permission-fence.routes.js';
-import {
-    latestClaudeCacheTtlMinutes,
-    latestClaudeTokenUsage,
-    claudeTranscriptContextSnapshot,
-    readClaudeTranscriptForSession,
-} from './modules/providers/list/claude/claude-token-usage.js';
-import { extractCodexTokenBudget } from './modules/providers/list/codex/codex-token-budget.js';
+import { readSessionTokenUsage } from './modules/providers/services/session-token-usage.service.js';
 import workflowSupervisorLaunchRoutes from './modules/workflow-supervisor/launch.route.js';
 import { ensureBackgroundTasksWatcher } from './modules/workflow-supervisor/background-tasks-watcher.service.js';
 import {
@@ -292,9 +286,6 @@ import { ensureOwnerBootstrapped } from './services/bootstrap-owner.service.js';
 import { enforcePlatformIsolationGuard } from './services/platform-isolation-guard.service.js';
 import { enforceDockerSockBootGuard } from './services/isolation/docker-sock-boot-guard.js';
 import { resolveSecurityPosture } from './services/isolation/security-posture.js';
-import { credentialPrincipalId } from './services/isolation/credential-principal.js';
-import { userConfigDir } from './services/isolation/provision-user-dirs.js';
-import { isProviderIsolated } from './services/provider-sharing.js';
 import { validateApiKey, authenticateToken, authenticateDeviceCookieIfPresent, authenticateWebSocket, authenticateDeviceWebSocket, requireRole, JWT_SECRET } from './middleware/auth.js';
 import { recordAuthRejection } from './middleware/auth-rejection-audit.js';
 import { IS_PLATFORM } from './constants/config.js';
@@ -1256,6 +1247,10 @@ app.use((req, res, next) => {
     res.setHeader('Content-Security-Policy-Report-Only', CSP_REPORT_ONLY_POLICY);
     next();
 });
+
+// B-1657: the one ENFORCED directive (frame-src) — a sandboxed rich-block frame
+// cannot navigate itself to an external page. Rationale in the module.
+app.use(enforceFrameSrcPolicy);
 
 // Public health check endpoint (no authentication required).
 // `service: 'nassaj-server'` is a stable fingerprint the B-41 listen guard
@@ -3768,219 +3763,28 @@ app.post('/api/projects/:projectId/upload-attachments', authenticateToken,
     }
 });
 
-// Get token usage for a specific session. `projectId` is the DB primary key;
-// the Claude branch below resolves it to an absolute path via the DB.
+// Get token usage for a specific session (B-1643, T-2034). The visibility gate
+// stays here; the session row, its project binding, the provider and the pinned
+// transcript read are decided in readSessionTokenUsage.
 app.get('/api/projects/:projectId/sessions/:sessionId/token-usage', authenticateToken, async (req, res) => {
     try {
         const { projectId, sessionId } = req.params;
-        const { provider = 'claude' } = req.query;
-        const homeDir = os.homedir();
+        const userId = coerceUserId(req.user?.id);
 
         // B-PRIV guard: 404 (not 403) when the project is not visible to the user,
         // so a private project's token usage is never disclosed to a non-member.
-        if (!isProjectVisible(projectId, coerceUserId(req.user?.id))) {
+        if (!isProjectVisible(projectId, userId)) {
             return res.status(404).json({ error: 'Project not found' });
         }
 
-        // Allow only safe characters in sessionId
-        const safeSessionId = String(sessionId).replace(/[^a-zA-Z0-9._-]/g, '');
-        if (!safeSessionId || safeSessionId !== String(sessionId)) {
-            return res.status(400).json({ error: 'Invalid sessionId' });
-        }
-
-        // Handle Cursor sessions - they use SQLite and don't have token usage info
-        if (provider === 'cursor') {
-            return res.json({
-                used: 0,
-                total: 0,
-                inputTokens: 0,
-                outputTokens: 0,
-                breakdown: { input: 0, output: 0 },
-                unsupported: true,
-                message: 'Token usage tracking not available for Cursor sessions'
-            });
-        }
-
-        if (provider === 'opencode') {
-            const dbPath = getOpenCodeDatabasePath();
-            if (!fs.existsSync(dbPath)) {
-                return res.status(404).json({ error: 'OpenCode database not found' });
-            }
-
-            const db = new Database(dbPath, { readonly: true, fileMustExist: true });
-            try {
-                const columns = db.prepare('PRAGMA table_info(session)').all();
-                const columnNames = new Set(columns.map((column) => column.name));
-                const requiredColumns = ['tokens_input', 'tokens_output', 'tokens_reasoning', 'tokens_cache_read', 'tokens_cache_write'];
-                if (!requiredColumns.every((column) => columnNames.has(column))) {
-                    return res.json({
-                        used: 0,
-                        inputTokens: 0,
-                        outputTokens: 0,
-                        breakdown: { input: 0, output: 0 },
-                        unsupported: true,
-                        message: 'Token usage tracking is not available in this OpenCode database schema'
-                    });
-                }
-
-                const row = db.prepare(`
-                    SELECT
-                        tokens_input AS inputTokens,
-                        tokens_output AS outputTokens,
-                        tokens_reasoning AS reasoningTokens,
-                        tokens_cache_read AS cacheReadTokens,
-                        tokens_cache_write AS cacheWriteTokens
-                    FROM session
-                    WHERE id = ?
-                `).get(safeSessionId);
-
-                if (!row) {
-                    return res.status(404).json({ error: 'OpenCode session not found', sessionId: safeSessionId });
-                }
-
-                const inputTokens = Number(row.inputTokens || 0) + Number(row.cacheReadTokens || 0);
-                const outputTokens = Number(row.outputTokens || 0);
-                const totalUsed = Number(row.inputTokens || 0)
-                    + outputTokens
-                    + Number(row.reasoningTokens || 0)
-                    + Number(row.cacheReadTokens || 0)
-                    + Number(row.cacheWriteTokens || 0);
-
-                return res.json({
-                    used: totalUsed,
-                    inputTokens,
-                    outputTokens,
-                    breakdown: {
-                        input: inputTokens,
-                        output: outputTokens
-                    }
-                });
-            } finally {
-                db.close();
-            }
-        }
-
-        // Handle Codex sessions
-        if (provider === 'codex') {
-            // B-136: the codex SPAWN writes sessions under a per-user CODEX_HOME
-            // (resolveProviderEnv → userConfigDir(userId,'.codex')) whenever codex
-            // is isolated for an authenticated user, so this read/resume path must
-            // look in the SAME tree — otherwise it never finds the caller's own
-            // codex sessions. When codex is admin-marked 'shared' (or the caller is
-            // anonymous) the spawn inherits the operator env, so fall back to the
-            // shared ~/.codex exactly as before. Mirrors the spawn gate precisely.
-            const codexUserId = coerceUserId(req.user?.id);
-            // T-1675: under a credential grant the sessions live in the OWNER's tree.
-            const codexHome = (codexUserId !== null && isProviderIsolated('codex'))
-                ? userConfigDir(credentialPrincipalId(codexUserId, 'codex'), '.codex')
-                : path.join(homeDir, '.codex');
-            const codexSessionsDir = path.join(codexHome, 'sessions');
-
-            // Find the session file by searching for the session ID
-            const findSessionFile = async (dir) => {
-                try {
-                    const entries = await fsPromises.readdir(dir, { withFileTypes: true });
-                    for (const entry of entries) {
-                        const fullPath = path.join(dir, entry.name);
-                        if (entry.isDirectory()) {
-                            const found = await findSessionFile(fullPath);
-                            if (found) return found;
-                        } else if (entry.name.includes(safeSessionId) && entry.name.endsWith('.jsonl')) {
-                            return fullPath;
-                        }
-                    }
-                } catch (error) {
-                    // Skip directories we can't read
-                }
-                return null;
-            };
-
-            const sessionFilePath = await findSessionFile(codexSessionsDir);
-
-            if (!sessionFilePath) {
-                return res.status(404).json({ error: 'Codex session file not found', sessionId: safeSessionId });
-            }
-
-            // Read and parse the Codex JSONL file
-            let fileContent;
-            try {
-                fileContent = await fsPromises.readFile(sessionFilePath, 'utf8');
-            } catch (error) {
-                if (error.code === 'ENOENT') {
-                    return res.status(404).json({ error: 'Session file not found', path: sessionFilePath });
-                }
-                throw error;
-            }
-            let budget = null;
-            let modelId = null;
-            for (const line of fileContent.split('\n')) {
-                let entry;
-                try { entry = JSON.parse(line); } catch { continue; }
-                if (entry.type === 'turn_context') {
-                    if (modelId !== (entry.payload?.model ?? null)) budget = null;
-                    modelId = entry.payload?.model ?? null;
-                }
-                if (entry.type === 'event_msg' && entry.payload?.type === 'token_count') {
-                    budget = extractCodexTokenBudget(entry, modelId, safeSessionId, 'history');
-                }
-                if (entry.type === 'compacted' || entry.payload?.type === 'context_compacted') {
-                    budget = null;
-                }
-            }
-            return res.json(budget ?? { used: null, total: null, contextSnapshot: null, cacheSnapshot: null });
-        }
-
-        // Handle Claude sessions (default)
-        // Resolve the project path through the DB using the caller-supplied
-        // `projectId`. Legacy code here called extractProjectDirectory with a
-        // folder-encoded project name; the migration centralizes that lookup
-        // in the projects table.
-        const projectPath = await projectsDb.getProjectPathById(projectId);
-        if (!projectPath) {
-            return res.status(404).json({ error: 'Project not found' });
-        }
-
-        // B-823: the transcript belongs to the SESSION, not to a path re-derived
-        // from the project. A session launched in a nassaj session overlay writes
-        // under an overlay-encoded directory while its row still names the repo
-        // project, so the derived path named a file that never existed and this
-        // route answered 404 for every overlay session. `jsonl_path` is what every
-        // other Claude reader uses; the pinned transcript reader (ADR-201 A1)
-        // confines it to its tree and binds it to the session id, because that
-        // column is DB-written.
-        const session = sessionsDb.getSessionById(safeSessionId);
-        // The session must belong to the project whose visibility was checked
-        // above — otherwise a visible projectId paired with a foreign sessionId
-        // would read another project's usage. `sessions.project_path` is a foreign
-        // key onto `projects.project_path` (ON UPDATE CASCADE), so this equality
-        // is exact by construction and needs no normalization.
-        if (!session || session.project_path !== projectPath) {
-            return res.status(404).json({ error: 'Session not found' });
-        }
-
-        const fileContent = await readClaudeTranscriptForSession(session, projectPath);
-        if (fileContent === null) {
-            // `reason` lets the client tell a failed lookup from a genuine zero;
-            // the old response echoed the fabricated path back, which is what made
-            // this look like a client-side bug for so long.
-            return res.status(404).json({ error: 'Session file not found', reason: 'transcript_unavailable' });
-        }
-        const { inputTokens, outputTokens, modelName, breakdown, cacheSnapshot } = latestClaudeTokenUsage(fileContent, safeSessionId);
-
-        // A restored transcript exposes request input, not a fresh native context measurement;
-        // B-1356: the window comes from the model id, or stays null when it is not known.
-        const contextSnapshot = claudeTranscriptContextSnapshot(safeSessionId, modelName, inputTokens);
-
-        res.json({
-            used: null,
-            total: null,
-            contextSnapshot,
-            cacheSnapshot,
-            inputTokens,
-            outputTokens,
-            breakdown,
-            cacheTtlMinutes: latestClaudeCacheTtlMinutes(fileContent)
-        });
+        const { status, body } = await readSessionTokenUsage(
+            { projectId, sessionId, provider: req.query.provider },
+            {
+                getSessionById: (id) => sessionsDb.getSessionById(id),
+                getProjectPathById: (id) => projectsDb.getProjectPathById(id),
+            },
+        );
+        res.status(status).json(body);
     } catch (error) {
         console.error('Error reading session token usage:', error);
         res.status(500).json({ error: 'Failed to read session token usage' });

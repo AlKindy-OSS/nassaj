@@ -23,3 +23,14 @@ export {
   type UserRealtimeRevocationResult,
 } from './user-realtime-revocation.js';
 export { revokeUserIdentity } from './user-identity-revocation.js';
+export { currentTokenEpoch, tokenEpochCurrent } from './token-epoch.js';
+export {
+  closeTokenSessionSockets,
+  legacyTokenSid,
+  mintTokenSid,
+  registerTokenSessionSocket,
+  revokeTokenSession,
+  sessionSidOf,
+  tokenSessionCurrent,
+  tokenSidOf,
+} from './token-session.js';

@@ -226,8 +226,6 @@ export default function AgentsSettingsTab({
             canMakeDefault={isUsableDefaultSettingsAgent(selectedAgent)}
             isDefault={defaultAgent === selectedAgent}
             onMakeDefault={() => setPreference('defaultSettingsAgent', selectedAgent)}
-            coordinationLevel={preferences.defaultCoordinationLevel}
-            onCoordinationLevelChange={(level) => setPreference('defaultCoordinationLevel', level)}
           />
         </SettingsSection>
       </div>

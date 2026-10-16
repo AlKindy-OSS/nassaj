@@ -50,6 +50,23 @@ describe('مُنتقي الوكلاء', () => {
     expect(screen.getByText('Antigravity')).toBeTruthy();
   });
 
+  it('لا علامة «الافتراضي» مرئية تحت اسم الوكيل، ويبقى الافتراضي في الاسم المُعلَن', () => {
+    render(
+      <AgentSelectorSection
+        agents={agents}
+        selectedAgent="codex"
+        onSelectAgent={() => {}}
+        agentContextById={agentContextById}
+        defaultAgent="claude"
+        defaultLabel="الافتراضي"
+      />,
+    );
+
+    expect(screen.queryByTestId('default-agent-indicator')).toBeNull();
+    expect(screen.queryByText('الافتراضي')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Claude — الافتراضي' })).toBeTruthy();
+  });
+
   it('يضيف بطاقة النماذج المحلية في نهاية الشبكة عند تمرير localModelsLabel', () => {
     render(
       <AgentSelectorSection

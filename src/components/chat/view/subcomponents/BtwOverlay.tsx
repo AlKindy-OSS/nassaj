@@ -27,6 +27,8 @@ const BTW_ERROR_CODE_KEYS: Record<string, string> = {
   unsupported_provider: 'btw.errors.unsupported_provider',
   session_not_found: 'btw.errors.session_not_found',
   not_visible: 'btw.errors.not_visible',
+  // B-1647: the caller may read the session but not write to it.
+  btw_forbidden: 'btw.errors.btw_forbidden',
   busy: 'btw.errors.busy',
   sdk_error: 'btw.errors.sdk_error',
   // B-1084: model returned no visible text (thinking-only or empty result).

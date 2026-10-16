@@ -21,6 +21,7 @@ import { userDb } from '@/modules/database/repositories/users.js';
 
 import { hashPassword } from '../services/password.service.js';
 import { createSoftAuthenticator } from '../services/webauthn-soft-authenticator.fixture.js';
+import { configureMemoryLoginThrottle } from '../services/__tests__/login-throttle-memory-store.js';
 
 const url = (spec: string) => pathToFileURL(path.resolve(import.meta.dirname, spec)).href;
 const connectorRecords: Array<{ userId: number; method: string }> = [];
@@ -120,6 +121,9 @@ async function withOidc(run: () => Promise<void>) {
     else process.env.OIDC_ENABLED = saved;
   }
 }
+
+// T-2035: the auth middleware (the throttle's configurer) is a double here.
+await configureMemoryLoginThrottle();
 
 test('JWT-only register/options → 403 step_up_required, audited without evidence', async () => {
   const user = newUser();

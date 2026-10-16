@@ -601,7 +601,6 @@
     "agent": "エージェント"
   },
   "customCommand": {
-    "confirmBashExecution": "このコマンドには実行されるbashコマンドが含まれています。続行しますか？",
     "executionCancelled": "コマンドの実行がキャンセルされました",
     "executeError": "コマンドの実行エラー: {{message}}",
     "unknownError": "不明なエラー"

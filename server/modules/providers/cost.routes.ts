@@ -36,6 +36,7 @@ import { applySubscriptionAmountVisibility } from '@/modules/providers/services/
 import type { SubscriptionPatch } from '@/modules/providers/services/cost/subscription-config.service.js';
 import { assertSessionAccessible } from '@/modules/providers/services/sessions.service.js';
 import type { ProviderBillingCycle, ProviderSubscriptionCost, SessionCostSummary } from '@/shared/types.js';
+import { parseSessionIdParam } from '@/shared/session-id.js';
 import { AppError, asyncHandler } from '@/shared/utils.js';
 
 const router = express.Router();
@@ -93,19 +94,7 @@ const assertSubscriptionWriteAllowed = (req: Request): void => {
   }
 };
 
-const SESSION_ID_PATTERN = /^[a-zA-Z0-9._-]{1,120}$/;
 const PROVIDER_PATTERN = /^[a-z][a-z0-9_-]{0,31}$/;
-
-function parseSessionId(value: unknown): string {
-  const raw = typeof value === 'string' ? value.trim() : '';
-  if (!SESSION_ID_PATTERN.test(raw)) {
-    throw new AppError('Invalid sessionId.', {
-      code: 'INVALID_SESSION_ID',
-      statusCode: 400,
-    });
-  }
-  return raw;
-}
 
 /**
  * Provider segment of the subscription path. Syntax only — whether the name is a
@@ -197,7 +186,7 @@ function parseSubscriptionPatch(body: unknown): SubscriptionPatch {
 router.get(
   '/session/:sessionId',
   asyncHandler(async (req: Request, res: Response) => {
-    const sessionId = parseSessionId(req.params.sessionId);
+    const sessionId = parseSessionIdParam(req.params.sessionId);
     const userId = readAuthenticatedUserId(req);
 
     assertSessionAccessible(sessionId, userId, 'read');

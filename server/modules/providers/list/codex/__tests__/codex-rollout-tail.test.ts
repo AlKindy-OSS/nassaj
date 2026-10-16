@@ -308,7 +308,30 @@ test('a torn trailing line is buffered until its newline arrives', async () => {
   }
 });
 
-test('only the parent rollout is opened: a child rollout beside it never gets an fd', async () => {
+test('incremental child reader consumes only bytes appended after its previous offset', async () => {
+  const { file } = freshRoot();
+  const first = lineOf(real.rollout[0]);
+  const appended = lineOf(real.rollout[1]);
+  fs.writeFileSync(file, first);
+  const fd = await open(file, 'r+');
+  const state = { offset: 0, carry: [] as Buffer[], carryBytes: 0, discarding: false };
+  const seen: string[] = [];
+  const limits = { ...CODEX_TAIL_LIMITS, chunkBytes: 32, tickBytes: 1024 };
+  try {
+    await readRolloutTick(fd, state, limits, (line) => seen.push(line.toString()));
+    const firstOffset = state.offset;
+    fs.appendFileSync(file, appended);
+    await readRolloutTick(fd, state, limits, (line) => seen.push(line.toString()));
+    assert.equal(firstOffset, Buffer.byteLength(first));
+    assert.equal(seen.length, 2);
+    assert.equal(seen[1], appended.trimEnd(), 'second tick sees only the appended child bytes');
+    assert.equal(state.offset, Buffer.byteLength(first + appended));
+  } finally {
+    await fd.close();
+  }
+});
+
+test('linked child rollouts with mismatched identity are declined', async () => {
   const { sessionsRoot, file } = freshRoot();
   const childThread = real.rollout.find((row: Row) => row.payload?.item?.agent_thread_id).payload.item.agent_thread_id;
   const child = path.join(path.dirname(file), `rollout-2026-10-09T10-17-42-${childThread}.jsonl`);
@@ -318,10 +341,52 @@ test('only the parent rollout is opened: a child rollout beside it never gets an
   await until(() => handle.phase === 'tailing');
   fs.appendFileSync(file, rollout().slice(1).join(''));
   await until(() => signals.length === 2);
-  assert.equal(fdsOn(child), 0);
-  assert.equal(fdsOn(file), 1);
+  assert.ok(fdsOn(child) <= 1, 'the candidate fd closes after identity validation');
+  assert.ok(fdsOn(file) >= 1, 'the pinned parent tail remains open');
   await handle.stop();
   assert.deepEqual(signals.map((signal) => signal.kind), ['spawn', 'settle']);
+});
+
+test('linked child reads honor the fork ordinal and diagnose one later truncation', async () => {
+  const { sessionsRoot, file } = freshRoot();
+  const childThread = real.rollout.find((row: Row) => row.payload?.item?.agent_thread_id)
+    .payload.item.agent_thread_id as string;
+  const child = path.join(path.dirname(file), `rollout-2026-10-09T10-17-06-${childThread}.jsonl`);
+  const childMeta = JSON.parse(codexSessionMetaLine(childThread));
+  childMeta.payload.subagent_history_start_ordinal = 4;
+  const childRows = [
+    childMeta,
+    { ordinal: 1, payload: { type: 'function_call', call_id: 'call_inherited', name: 'Read' } },
+    { ordinal: 2, payload: { type: 'function_call_output', call_id: 'call_inherited' } },
+    { ordinal: 3, payload: { type: 'function_call', call_id: 'call_inherited_2', name: 'Bash' } },
+    { ordinal: 4, payload: { type: 'function_call', call_id: 'call_owned', name: 'Read' } },
+    { ordinal: 5, payload: { type: 'function_call_output', call_id: 'call_owned' } },
+  ];
+  fs.writeFileSync(child, childRows.map(lineOf).join(''));
+  fs.writeFileSync(file, META);
+  const warnings: unknown[][] = [];
+  const originalWarn = console.warn;
+  console.warn = (...args: unknown[]) => { warnings.push(args); };
+  try {
+    const { handle, signals } = tail(sessionsRoot);
+    fs.appendFileSync(file, rollout().slice(1, 5).join(''));
+    await until(() => signals.some((signal) => signal.kind === 'progress'
+      && signal.tools?.length === 1));
+    const childProgress = signals.find((signal) => signal.kind === 'progress' && signal.tools?.length);
+    assert.deepEqual(childProgress?.tools?.map((tool) => tool.id), ['call_owned'],
+      'inherited parent history before ordinal 4 is ignored');
+
+    fs.truncateSync(child, 10);
+    await until(() => warnings.length === 1, 4000);
+    await new Promise((resolve) => setTimeout(resolve, 2100));
+    assert.equal(warnings.length, 1, 'a skipped child file logs exactly one diagnostic');
+    assert.equal(JSON.stringify(warnings[0]).includes(child), false, 'diagnostic omits paths');
+    assert.equal(JSON.stringify(warnings[0]).includes('call_owned'), false,
+      'diagnostic omits content');
+    await handle.stop();
+  } finally {
+    console.warn = originalWarn;
+  }
 });
 
 /** Takes every permit of the process-wide read gate (4) until `release` is called. */
@@ -391,7 +456,7 @@ test('T-1992 features.multi_agent gate: disabled opens no fd, takes no permit, p
     run.onThreadStarted(THREAD, false, null);
     if (enabled) {
       await until(() => rows.length === 1);
-      assert.equal(fdsOn(file), 1, 'enabled: the parent rollout is tailed');
+      assert.ok(fdsOn(file) >= 1, 'enabled: the parent rollout is tailed');
     } else {
       await new Promise((resolve) => setTimeout(resolve, 4 * FAST.pollMs + 20));
       assert.equal(fdsOn(file), 0, 'disabled: no fd');

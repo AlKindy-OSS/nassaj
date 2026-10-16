@@ -21,7 +21,13 @@ export type AuthUser = {
 
 // `code` carries the server's machine-readable refusal (e.g. T-1939
 // `sso_required`) so a view can show a specific, translated message.
-export type AuthActionResult = { success: true } | { success: false; error: string; code?: string };
+export type AuthActionResult = { success: true } | {
+  success: false;
+  error: string;
+  code?: string;
+  /** T-2035: set with code `login_temporarily_locked`; seconds until the lock ends. */
+  retryAfterSeconds?: number;
+};
 
 // SSO results carry a reason code, not server text: the return page owns the
 // translated message for each failure.

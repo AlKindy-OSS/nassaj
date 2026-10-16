@@ -113,3 +113,53 @@ describe('نغمتا نهاية التشغيل', () => {
     assert.equal(played.length, 2);
   });
 });
+
+describe('نغمة السؤال (T-2041)', () => {
+  const pressKey = () => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'a' }));
+
+  it('متمايزة عن الصاعدة والهابطة', async () => {
+    const { playChatQuestionSound, playChatCompletionSound, playChatErrorSound } =
+      await freshModule();
+    pressKey();
+
+    await playChatQuestionSound();
+    const question = played.map((p) => p.frequency);
+    played = [];
+    await playChatCompletionSound();
+    const completion = played.map((p) => p.frequency);
+    played = [];
+    await playChatErrorSound();
+    const failure = played.map((p) => p.frequency);
+
+    assert.ok(question.length > 0, 'نغمة السؤال لم تُشغَّل');
+    assert.notDeepEqual(question, completion);
+    assert.notDeepEqual(question, failure);
+  });
+
+  it('مفتاحها مستقلّ ومُفعَّل افتراضياً', async () => {
+    const mod = await freshModule();
+    assert.equal(mod.isNotificationQuestionSoundEnabled(), true);
+    pressKey();
+
+    mod.setNotificationSoundEnabled(false);
+    await mod.playChatQuestionSound();
+    assert.ok(played.length > 0, 'مفتاح صوت الانتهاء أسكت السؤال');
+
+    played = [];
+    mod.setNotificationQuestionSoundEnabled(false);
+    assert.equal(localStorage.getItem('notificationQuestionSoundEnabled'), 'false');
+    await mod.playChatQuestionSound();
+    assert.deepEqual(played, []);
+  });
+
+  it('لا صوت قبل أول تفاعلٍ من المستخدم (سياسة التشغيل التلقائي)', async () => {
+    const { playChatQuestionSound } = await freshModule();
+
+    await playChatQuestionSound();
+    assert.deepEqual(played, [], 'رنّ قبل أي تفاعل');
+
+    pressKey();
+    await playChatQuestionSound();
+    assert.ok(played.length > 0);
+  });
+});

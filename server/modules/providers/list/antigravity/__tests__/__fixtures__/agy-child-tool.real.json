@@ -1,0 +1,12 @@
+{
+  "_provenance": "Scrubbed child tool_calls row from a real local Antigravity brain transcript.",
+  "childUUID": "23e8835d-cab0-427f-a7ea-adf75952f16d",
+  "row": {
+    "step_index": 1,
+    "source": "MODEL",
+    "type": "PLANNER_RESPONSE",
+    "status": "DONE",
+    "created_at": "2026-10-01T00:00:00Z",
+    "tool_calls": [{ "name": "view_file", "args": {} }]
+  }
+}

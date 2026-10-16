@@ -29,6 +29,8 @@ import { createConnectorAuthDb } from '../database/repositories/connector-auth.d
 import { oidcStepUpGrantStore } from '../../services/oidc-step-up-grant.store.js';
 // eslint-disable-next-line boundaries/no-unknown
 import { hashPassword } from '../../services/password.service.js';
+// eslint-disable-next-line boundaries/no-unknown
+import { configureLoginThrottle } from '../../services/login-throttle.service.js';
 
 import {
   configureConnectorOwnerAuthSessionProduction,
@@ -65,6 +67,9 @@ before(async () => {
   process.env.DATABASE_PATH = path.join(tempDirectory, 'db.sqlite');
   await initializeDatabase();
   passwordHash = await hashPassword(PASSWORD);
+  // The auth middleware configures the step-up password throttle at load (ADR-212);
+  // authentication is replaced here, so configure it as that module does, on this database.
+  configureLoginThrottle('connector-step-up-test-secret-0123456789abcdef');
   assert.equal(connectorOwnerSessionAvailable(), true, 'the substrate composed the session adapter');
   assert.equal(connectorOwnerSessionOrigin(), ORIGIN, 'pre-origin bootstrap from NASSAJ_PUBLIC_ORIGIN');
 
