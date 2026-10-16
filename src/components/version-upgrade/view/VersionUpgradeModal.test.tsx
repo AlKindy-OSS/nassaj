@@ -1313,14 +1313,14 @@ describe('unified local update dialog', () => {
 
 });
 
-describe('VersionUpgradeModal stop-stuck-update button across polling', () => {
-  const STATUS_URL = '/api/system/update/jobs/stuck-1';
+describe('VersionUpgradeModal cancel-update button across polling', () => {
+  const STATUS_URL = '/api/system/update/jobs/job-1';
   const activeJob = (extra: Record<string, unknown> = {}) => ({
-    job: { jobId: 'stuck-1', state: 'restart_queued', targetVersion: '2.2.0.1', statusUrl: STATUS_URL,
+    job: { jobId: 'job-1', state: 'restart_queued', targetVersion: '2.2.0.1', statusUrl: STATUS_URL,
       abandonable: true, abandonBlockedReason: null, ...extra },
   });
   const statusCalls = () => authenticatedFetch.mock.calls.filter(([url]) => url === STATUS_URL).length;
-  const STOP = { name: 'Stop stuck update' };
+  const STOP = { name: 'Cancel update' };
 
   beforeEach(() => {
     localStorage.clear();
@@ -1351,7 +1351,7 @@ describe('VersionUpgradeModal stop-stuck-update button across polling', () => {
 
   it('an attempt restored from localStorage shows the button once discovery states the flag', async () => {
     localStorage.setItem(UPDATE_ATTEMPT_STORAGE_KEY, JSON.stringify({
-      idempotencyKey: 'k', jobId: 'stuck-1', statusUrl: STATUS_URL, targetVersion: '2.2.0.1', createdAt: Date.now(),
+      idempotencyKey: 'k', jobId: 'job-1', statusUrl: STATUS_URL, targetVersion: '2.2.0.1', createdAt: Date.now(),
     }));
     routeFetch({
       active: () => response(200, activeJob()),
@@ -1381,4 +1381,90 @@ describe('VersionUpgradeModal stop-stuck-update button across polling', () => {
     await waitFor(() => expect(statusCalls()).toBeGreaterThanOrEqual(1));
     expect(screen.queryByRole('button', STOP)).toBeNull();
   });
+});
+
+describe('VersionUpgradeModal tidy bottom area (T-2022)', () => {
+  const STATUS_URL = '/api/system/update/jobs/tidy-1';
+  const PENDING_PHASE_TEXT = 'تجري إعادة تشغيل آمنة تلقائياً فور خلوّ العقدة';
+
+  beforeEach(() => {
+    localStorage.clear();
+    authRole = 'owner';
+    activeLocale = 'ar';
+    authenticatedFetch.mockReset();
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response(200, {
+      systemUpdate: { updaterProtocol: 'async-v2', updaterStrategy: 'git-checkout-v2', updateReady: true },
+    })));
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+    authRole = 'owner';
+    activeLocale = 'en';
+  });
+
+  const serve = (job: Record<string, unknown>) => routeFetch({
+    active: () => response(200, { job: { jobId: 'tidy-1', targetVersion: '2.2.0.1', statusUrl: STATUS_URL, ...job } }),
+    status: () => response(200, { targetVersion: '2.2.0.1', statusUrl: STATUS_URL, ...job }),
+  });
+
+  it('never prints the updater strategy line', async () => {
+    serve({ state: 'restart_queued', autoActivate: true, strategy: 'git-checkout-v2' });
+    renderModal();
+    await screen.findByText('يُفعَّل عند خلوّ العقدة');
+    expect(document.body.textContent).not.toContain('استراتيجية التحديث');
+    expect(document.body.textContent).not.toContain('git-checkout-v2');
+  });
+
+  it('waiting for an idle node: no stuck wording, no duplicated banner, a neutral cancel action', async () => {
+    serve({ state: 'restart_queued', autoActivate: true, autoActivation: null, abandonable: true, abandonBlockedReason: null });
+    renderModal();
+    await screen.findByText('يُفعَّل عند خلوّ العقدة');
+    expect(screen.getByRole('button', { name: 'إلغاء التحديث' })).not.toBeNull();
+    expect(document.body.textContent).not.toContain('عالق');
+    // The plain "will activate automatically" sentence appears once (stage description only).
+    expect(screen.queryByRole('status')).toBeNull();
+    expect(document.body.textContent!.split(PENDING_PHASE_TEXT)).toHaveLength(2);
+    expect(document.body.textContent).not.toContain('سيُفعَّل الإصدار تلقائياً');
+  });
+
+  it('a specific wait (live sessions) still shows its banner', async () => {
+    serve({ state: 'restart_queued', autoActivate: true,
+      autoActivation: { state: 'waiting_sessions', liveSessions: 2, code: null, deadlineAt: null } });
+    renderModal();
+    expect((await screen.findByRole('status')).textContent).toContain('بانتظار انتهاء 2 جلسة حيّة');
+  });
+
+  it('waiting_scheduled without a due-soon panel adds no duplicate banner', async () => {
+    serve({ state: 'restart_queued', autoActivate: true,
+      autoActivation: { state: 'waiting_scheduled', liveSessions: null, code: null, deadlineAt: null,
+        scheduledDueSoon: null, scheduledOverride: false } });
+    renderModal();
+    await screen.findByText('يُفعَّل عند خلوّ العقدة');
+    expect(screen.queryByRole('status')).toBeNull();
+    expect(document.body.textContent).not.toContain('سيُفعَّل الإصدار تلقائياً');
+  });
+
+  it('cancel action sits in the same row as the terminal-output toggle', async () => {
+    serve({ state: 'restart_queued', autoActivate: true, abandonable: true, abandonBlockedReason: null });
+    renderModal();
+    const cancel = await screen.findByRole('button', { name: 'إلغاء التحديث' });
+    const toggle = screen.getByRole('button', { name: /إظهار مخرجات الطرفية/ });
+    expect(cancel.parentElement).toBe(toggle.parentElement);
+  });
+
+  it('success state: reload button, no cancel action, no resumed note, no strategy line', async () => {
+    localStorage.setItem(UPDATE_ATTEMPT_STORAGE_KEY, JSON.stringify({
+      idempotencyKey: 'k', jobId: 'tidy-1', statusUrl: STATUS_URL, targetVersion: '2.2.0.1', createdAt: Date.now(),
+    }));
+    serve({ state: 'activated', abandonable: false, abandonBlockedReason: 'terminal' });
+    renderModal();
+    await screen.findByRole('button', { name: 'إعادة تحميل' });
+    expect(screen.queryByRole('button', { name: 'إلغاء التحديث' })).toBeNull();
+    expect(screen.getByRole('button', { name: /إظهار مخرجات الطرفية/ })).not.toBeNull();
+    expect(document.body.textContent).not.toContain('استراتيجية التحديث');
+    expect(document.body.textContent).not.toContain('عالق');
+  });
+
 });

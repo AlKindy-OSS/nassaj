@@ -67,10 +67,10 @@ test('completion waits for the drain; the final stop runs in finally; the gate f
   assert.deepEqual(homes, [1], 'root resolved from the validated integer requester id');
 });
 
-// B-1616: features.multi_agent=false does not stop v2 models, so the tail runs on every
-// v2 turn (children show in the progress bar), never on a v1 turn while the flag is off,
-// and never on a model the catalog lists without an engine.
-for (const [engine, enabled] of [['v2', true], ['unknown', true], ['v1', false], ['none', false]] as const) {
+// B-1616: the tail runs on every v2 turn (children show in the progress bar). ADR-206 S9:
+// a helpers-on v1 turn has features.multi_agent=true, so it can delegate and is tailed too
+// (the fixture pins B = 1). Never on a model the catalog lists without an engine.
+for (const [engine, enabled] of [['v2', true], ['unknown', true], ['v1', true], ['none', false]] as const) {
   test(`B-1616: the rollout tail is ${enabled ? 'enabled' : 'dormant'} on a ${engine} engine`, async () => {
     const seen: { options?: any } = {};
     const asked: unknown[][] = [];
@@ -86,7 +86,10 @@ for (const [engine, enabled] of [['v2', true], ['unknown', true], ['v1', false],
     assert.equal(seen.options.enabled, enabled);
     const lines = logged.filter(([message]) => message === '[Codex] multi-agent engine');
     assert.deepEqual(lines, [['[Codex] multi-agent engine',
-      { engine, model: 'synthetic-model', childCap: null, tail: enabled }]], 'one line per launch, no path');
+      { engine, model: 'synthetic-model', childCap: null, tail: enabled,
+        // ADR-206 S1: the helpers switch outcome rides the same line (pinned quiet host).
+        helpers: true, helpersOffReason: null, cpuPercent: 10, cpuSource: 'window', projectRoleKind: null }]],
+    'one line per launch, no path');
     assert.deepEqual(asked, [['/fixture-owner', 'synthetic-model']], 'engine of the run model in the requester home');
   });
 }

@@ -35,7 +35,14 @@ export type OidcFailureReason =
   | 'rate_limited'
   | 'provider_unavailable'
   | 'session_failed'
-  | 'network';
+  | 'network'
+  | 'config_changed'
+  | 'login_not_initiated'
+  | 'sso_unavailable'
+  | 'password_change_required'
+  | 'owner_local_only'
+  | 'owner_key_required'
+  | 'owner_reauth_required';
 
 /**
  * What a redeemed code grants: a legacy JWT, or — with MULTI_ACCOUNT_SWITCHING
@@ -70,6 +77,14 @@ const RETURN_ERROR_REASONS: Readonly<Record<string, OidcFailureReason>> = {
   account_unavailable: 'account_unavailable',
   temporarily_unavailable: 'provider_unavailable',
   server_error: 'provider_unavailable',
+  oidc_config_changed: 'config_changed',
+  oidc_login_not_initiated: 'login_not_initiated',
+  sso_unavailable: 'sso_unavailable',
+  // ADR-194 A1: owner sign-in refusals.
+  password_change_required: 'password_change_required',
+  owner_must_sign_in_locally: 'owner_local_only',
+  owner_sso_key_required: 'owner_key_required',
+  owner_sso_reauth_required: 'owner_reauth_required',
 };
 
 /** Classifies an `error` query value on the return page. Unknown → provider_unavailable. */
@@ -195,7 +210,64 @@ export function resetOidcAvailabilityCache(): void {
   ssoStatus = null;
 }
 
-/** Leaves the SPA for the server-driven authorization redirect. */
-export function startOidcLogin(): void {
-  window.location.assign(OIDC_LOGIN_PATH);
+/**
+ * ADR-194 A1 re-authentication hint. Set after an SSO sign-in that yields an
+ * owner session, so the next SSO start asks the IdP for a fresh sign-in
+ * (`?reauth=1`) and the owner meets one passkey prompt instead of a stale-
+ * session refusal. It holds no user id and no token: on a shared device it
+ * only makes a member re-authenticate.
+ */
+export const SSO_REAUTH_HINT_KEY = 'nassaj.sso.reauthHint';
+export const OIDC_REAUTH_LOGIN_PATH = `${OIDC_LOGIN_PATH}?reauth=1`;
+
+type HintStorage = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
+
+function hintStorage(storage?: HintStorage): HintStorage | null {
+  if (storage) return storage;
+  try {
+    return window.localStorage;
+  } catch {
+    return null;
+  }
+}
+
+/** Whether the re-authentication hint is set. */
+export function hasSsoReauthHint(storage?: HintStorage): boolean {
+  try {
+    return hintStorage(storage)?.getItem(SSO_REAUTH_HINT_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+/** Sets the hint (after an owner SSO session). Storage failures are ignored. */
+export function setSsoReauthHint(storage?: HintStorage): void {
+  try {
+    hintStorage(storage)?.setItem(SSO_REAUTH_HINT_KEY, '1');
+  } catch {
+    // No storage: the plain SSO start still works.
+  }
+}
+
+/** Clears the hint (an owner that is not opted in). Storage failures are ignored. */
+export function clearSsoReauthHint(storage?: HintStorage): void {
+  try {
+    hintStorage(storage)?.removeItem(SSO_REAUTH_HINT_KEY);
+  } catch {
+    // Nothing to clear.
+  }
+}
+
+/** The SSO start URL: `?reauth=1` when asked or while the hint is set. */
+export function oidcLoginUrl(reauth: boolean = hasSsoReauthHint()): string {
+  return reauth ? OIDC_REAUTH_LOGIN_PATH : OIDC_LOGIN_PATH;
+}
+
+/**
+ * Leaves the SPA for the server-driven authorization redirect. Only a literal
+ * `true` forces re-authentication; otherwise the hint decides (an event
+ * object passed by an onClick never counts).
+ */
+export function startOidcLogin(reauth?: unknown): void {
+  window.location.assign(oidcLoginUrl(reauth === true || hasSsoReauthHint()));
 }

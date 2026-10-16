@@ -227,6 +227,8 @@ export function createUpdateAutoActivator({
     let running = false;
     // B-1448 T2: an activateNow that lands during a running tick re-runs it once.
     let rerunRequested = false;
+    // T-2024 S0: a wake already scheduled for the next turn; further wakes join it.
+    let wakeScheduled = false;
     let timer = null;
 
     const say = (jobId, message) => { try { jobLog?.line(jobId, message); } catch { /* never fatal */ } };
@@ -444,6 +446,28 @@ export function createUpdateAutoActivator({
             // in its finally. Otherwise the scheduled tick clears the flag.
             rerunRequested = true;
             setImmediate(() => { void tick(); });
+            return true;
+        },
+        /**
+         * T-2024 S0 (ADR-207): a job just reached restart_queued; check now
+         * instead of at the next poll. Coalesced (one pending wake at most; a
+         * wake during a running tick becomes its single re-run) and never a
+         * bypass: unlike activateNow it keeps the contention backoff, and the
+         * tick applies every gate. Polling stays the fallback. A no-op until
+         * start(), so a node whose activator is not running never activates.
+         */
+        wake() {
+            if (!timer) return false;
+            if (running) {
+                rerunRequested = true;
+                return true;
+            }
+            if (wakeScheduled) return true;
+            wakeScheduled = true;
+            setImmediate(() => {
+                wakeScheduled = false;
+                void tick();
+            });
             return true;
         },
         /**

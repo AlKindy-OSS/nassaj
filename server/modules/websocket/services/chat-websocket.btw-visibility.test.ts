@@ -22,6 +22,7 @@ import assert from 'node:assert/strict';
 import { test, describe, mock, beforeEach } from 'node:test';
 
 import { reviewEnvelopeDatabaseLinkStubs } from '../../../../tests/helpers/review-envelope-link-stubs.js';
+import { chatImageStoreDatabaseLinkStubs } from '../../../../tests/helpers/chat-image-store-link-stubs.js';
 
 const PRIVATE_PATH = '/workspace/private-project';
 const PUBLIC_PATH = '/workspace/public-project';
@@ -46,6 +47,7 @@ const SESSION_PROVIDER: Record<string, string> = {
 mock.module('@/modules/database/index.js', {
   namedExports: {
     ...reviewEnvelopeDatabaseLinkStubs(),
+    ...chatImageStoreDatabaseLinkStubs(),
     sessionsDb: {
       getSessionById: (sessionId: string) =>
         SESSION_PROJECT[sessionId]

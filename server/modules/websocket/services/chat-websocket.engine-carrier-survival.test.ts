@@ -20,6 +20,7 @@ import test, { mock } from 'node:test';
 import type { WebSocketWriter } from '@/modules/websocket/services/websocket-writer.service.js';
 
 import { reviewEnvelopeDatabaseLinkStubs } from '../../../../tests/helpers/review-envelope-link-stubs.js';
+import { chatImageStoreDatabaseLinkStubs } from '../../../../tests/helpers/chat-image-store-link-stubs.js';
 
 import { createPermissionTestWorkspaceModule, dispatchAuthorizedProviderCommand } from './chat-websocket.permission-test-helper.js';
 
@@ -39,6 +40,7 @@ const sessionRows = new Map<string, SessionRow>();
 mock.module('@/modules/database/index.js', {
   namedExports: {
     ...reviewEnvelopeDatabaseLinkStubs(),
+    ...chatImageStoreDatabaseLinkStubs(),
     projectsDb: {
       getProjectPath: () => ({ project_id: 'test-project' }),
       isProjectVisibleToUser: () => true,

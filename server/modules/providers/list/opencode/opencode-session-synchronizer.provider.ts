@@ -197,6 +197,7 @@ export class OpenCodeSessionSynchronizer implements IProviderSessionSynchronizer
       createdAt: normalizeProviderTimestamp(row.time_created),
       updatedAt: normalizeProviderTimestamp(row.time_updated ?? row.time_created),
       jsonlPath: null,
+      origin: 'watcher',
     });
 
     // Data-provenance attribution (T-857, part ب): an opencode session created
@@ -219,6 +220,11 @@ export class OpenCodeSessionSynchronizer implements IProviderSessionSynchronizer
     // "synchronizer first" is the normal order, not a rare race. Marked as
     // inferred, that no longer matters: the real spawner takes the owner badge
     // when their id finally arrives, and until then nobody has gained anything.
+    // B-1620: no row means discovery refused the path (temp/test/protected root),
+    // and a row frozen under an unregistered temp root stays frozen: provenance
+    // must neither resurrect nor attribute it.
+    const recorded = sessionsDb.getSessionById(sessionId);
+    if (!recorded || sessionsDb.isWatcherFrozenProjectPath(recorded.project_path)) return null;
     if (ownerUserId !== null && !participantsDb.hasParticipant(sessionId)) {
       participantsDb.recordSpawn(sessionId, ownerUserId, {
         provider: this.provider,

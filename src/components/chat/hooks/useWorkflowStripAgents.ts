@@ -23,9 +23,9 @@
  *
  * HONESTY OF EACH FIELD
  * ---------------------
- *   - `type`   — the workflow's short id + the agent's ordinal. NOT a subagent
- *     type: the journal records `{type,key,agentId}` only, and `meta.json` says
- *     `workflow-subagent` for every agent, so a specific type would be invented.
+ *   - `type`   — empty: the journal records `{type,key,agentId}` only, and
+ *     `meta.json` says `workflow-subagent` for every agent, so a specific role
+ *     would be invented. The card falls back to the server's best-effort label.
  *   - `description` — the server's best-effort label, or '' when the prompt did
  *     not open with a short task line. Never a truncated wall of context.
  *   - `callCount` / `currentTool` — derived from the agent's own transcript. Unlike
@@ -62,12 +62,12 @@ export function useWorkflowStripAgents(sessionId?: string | null): RunAgent[] {
     const rows: RunAgent[] = [];
     for (const wf of workflows) {
       if (!SURFACED_STATUSES.has(wf.status)) continue;
-      // Short, recognisable handle: `wf_10000000-demo` → `10000000`.
-      const shortId = wf.wfId.replace(/^wf_/, '').split('-')[0] ?? wf.wfId;
       for (const agent of wf.agents) {
         rows.push({
           id: `${wf.wfId}:${agent.agentId}`,
-          type: `${shortId} · #${agent.ordinal}`,
+          // The workflow journal has no role field; the id/ordinal is not an
+          // agent name, so leave type empty and let the card use the description.
+          type: '',
           description: agent.label ?? '',
           status: agent.status,
           // Never a "current tool" for a row that is not live: for a stale agent

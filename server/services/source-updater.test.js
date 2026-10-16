@@ -10,7 +10,7 @@ import { isSourceUpdateActionShape } from '../../scripts/lib/source-update-actio
 
 import { createUpdateMaintenanceGate } from './update-maintenance-gate.js';
 import { createSourceUpdateWorker } from './source-update-worker.js';
-import { assertUpdateStorage, defaultSourceUpdateControlRoot, evaluateUpdateStorage, publicStorageFigures, createSourceUpdater as createSourceUpdaterImpl, defaultGitCheckoutProbe as defaultGitCheckoutProbeExport, releaseGitEnvironment, resolveCandidateScript, resolveGovernedSshCommand, resolveUpdateHostCapability, runFile, SourceUpdateError, sourceUpdateErrorPayload } from './source-updater.js';
+import { advanceRemoteTrackingRef, assertUpdateStorage, defaultSourceUpdateControlRoot, evaluateUpdateStorage, publicStorageFigures, createSourceUpdater as createSourceUpdaterImpl, defaultGitCheckoutProbe as defaultGitCheckoutProbeExport, releaseGitEnvironment, resolveCandidateScript, resolveGovernedSshCommand, resolveUpdateHostCapability, runFile, SourceUpdateError, sourceUpdateErrorPayload } from './source-updater.js';
 
 // A non-tmpfs device with ample free space keeps the T-1553 storage gate out of
 // the way for tests that exercise other behaviour; the gate itself is covered
@@ -1050,3 +1050,121 @@ for (const [outcome, released] of [['failed', true], ['not_owner', false], [unde
         assert.equal(readClientPublicationBlockers(appRoot).fullUpdates.length, released ? 0 : 1);
     });
 }
+
+/** A real repository with a linear history base -> mid -> tip, for B-1625. */
+function trackingRepository(t) {
+    const root = fs.mkdtempSync(path.join('/var/tmp', 'nassaj-tracking-ref-'));
+    t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+    const sh = (...args) => execFileSync('git', args, { cwd: root, encoding: 'utf8' }).trim();
+    sh('init', '-q', '-b', 'main');
+    sh('config', 'user.email', 'tracking@example.invalid');
+    sh('config', 'user.name', 'Tracking');
+    const commits = {};
+    for (const name of ['base', 'mid', 'tip']) {
+        sh('commit', '-q', '--allow-empty', '-m', name);
+        commits[name] = sh('rev-parse', 'HEAD');
+    }
+    const git = async (args) => {
+        try { return { code: 0, stdout: execFileSync('git', args, { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }) }; }
+        catch (error) { return { code: error.status ?? 1, stdout: '' }; }
+    };
+    return { sh, git, commits };
+}
+
+test('B-1625: the tracking ref advances to the fetched branch by fast-forward', async (t) => {
+    const { sh, git, commits } = trackingRepository(t);
+    sh('update-ref', 'refs/remotes/origin/main', commits.base);
+    sh('update-ref', 'refs/nassaj-update/n/branch', commits.tip);
+    const outcome = await advanceRemoteTrackingRef({ git, remote: 'origin', branch: 'main', fetchedRef: 'refs/nassaj-update/n/branch' });
+    assert.equal(outcome, 'advanced');
+    assert.equal(sh('rev-parse', 'refs/remotes/origin/main'), commits.tip);
+    assert.equal(await advanceRemoteTrackingRef({ git, remote: 'origin', branch: 'main', fetchedRef: 'refs/nassaj-update/n/branch' }), 'unchanged');
+});
+
+test('B-1625: the tracking ref is created when absent and never rewound', async (t) => {
+    const { sh, git, commits } = trackingRepository(t);
+    sh('update-ref', 'refs/nassaj-update/n/branch', commits.mid);
+    assert.equal(await advanceRemoteTrackingRef({ git, remote: 'origin', branch: 'main', fetchedRef: 'refs/nassaj-update/n/branch' }), 'advanced');
+    assert.equal(sh('rev-parse', 'refs/remotes/origin/main'), commits.mid);
+
+    sh('update-ref', 'refs/remotes/origin/main', commits.tip);
+    const lines = [];
+    const outcome = await advanceRemoteTrackingRef({
+        git, remote: 'origin', branch: 'main', fetchedRef: 'refs/nassaj-update/n/branch', log: (line) => lines.push(line),
+    });
+    assert.equal(outcome, 'not_fast_forward');
+    assert.equal(sh('rev-parse', 'refs/remotes/origin/main'), commits.tip, 'a newer tracking ref is never rewound');
+    assert.match(lines.join(''), /left unchanged \(not_fast_forward\)/);
+});
+
+test('B-1625: a failing git never throws out of the tracking-ref advance', async () => {
+    const lines = [];
+    const outcome = await advanceRemoteTrackingRef({
+        git: async () => { throw new Error('spawn failed'); }, remote: 'origin', branch: 'main',
+        fetchedRef: 'refs/nassaj-update/n/branch', log: (line) => lines.push(line),
+    });
+    assert.equal(outcome, 'git_failed');
+    assert.equal(lines.length, 1);
+    assert.equal(await advanceRemoteTrackingRef({
+        git: async () => ({ code: 1, stdout: '' }), remote: 'origin', branch: 'main', fetchedRef: 'refs/x',
+    }), 'fetched_ref_unavailable');
+});
+
+/** The governed fake, plus the two reads the B-1625 tracking-ref advance needs. */
+function trackingAwareRunner(options) {
+    const fake = governedRunner(options);
+    const runner = async (command, args, runOptions) => {
+        const joined = args.join(' ');
+        if (joined.includes('rev-parse --verify --quiet') && joined.includes('/branch^{commit}')) {
+            fake.calls.push({ command, args, options: runOptions });
+            return response(`${fake.release}\n`);
+        }
+        if (joined.includes('rev-parse --verify --quiet refs/remotes/origin/main^{commit}')) {
+            fake.calls.push({ command, args, options: runOptions });
+            return response(`${fake.original}\n`);
+        }
+        return fake.runner(command, args, runOptions);
+    };
+    return { ...fake, runner };
+}
+
+const updateRefCalls = (calls) => calls
+    .map(({ args }, index) => ({ index, args: args.slice(args.indexOf('update-ref')) }))
+    .filter(({ args }) => args[0] === 'update-ref');
+
+test('B-1625: a successful update advances origin/main before dropping its private refs', async (t) => {
+    const appRoot = fixture();
+    t.after(() => fs.rmSync(appRoot, { recursive: true, force: true }));
+    const fake = trackingAwareRunner();
+    const update = createSourceUpdater({ appRoot, activeSessionCount: () => 0, commandRunner: fake.runner });
+    assert.equal((await update('1.42.0.1')).success, true);
+    const refs = updateRefCalls(fake.calls);
+    const advance = refs.find(({ args }) => args.includes('refs/remotes/origin/main'));
+    assert.ok(advance, 'the tracking ref is advanced');
+    assert.deepEqual(advance.args.slice(-3), ['refs/remotes/origin/main', fake.release, fake.original], 'CAS on the old value');
+    const dropBranch = refs.find(({ args }) => args[1] === '-d' && args[2].endsWith('/branch'));
+    assert.ok(dropBranch, 'the private branch ref is dropped');
+    assert.ok(advance.index < dropBranch.index, 'advance happens while the fetched ref still exists');
+});
+
+test('B-1625: a failed candidate build never touches origin/main', async (t) => {
+    const appRoot = fixture();
+    t.after(() => fs.rmSync(appRoot, { recursive: true, force: true }));
+    const fake = trackingAwareRunner({ candidateCode: 1 });
+    const update = createSourceUpdater({ appRoot, activeSessionCount: () => 0, commandRunner: fake.runner });
+    await assert.rejects(update('1.42.0.1'), (error) => error.code === 'candidate_build_failed');
+    assert.equal(updateRefCalls(fake.calls).some(({ args }) => args.includes('refs/remotes/origin/main')), false);
+    assert.equal(fake.calls.some(({ args }) => args.join(' ').includes('refs/remotes/origin/main')), false);
+});
+
+test('B-1625: a throw after update-ref was spawned logs "may be unchanged"', async () => {
+    const lines = [];
+    const git = async (args) => {
+        if (args[0] === 'update-ref') throw new Error('fence lost');
+        if (args.join(' ').includes('/branch^{commit}')) return { code: 0, stdout: `${'b'.repeat(40)}\n` };
+        return { code: 1, stdout: '' };
+    };
+    const outcome = await advanceRemoteTrackingRef({ git, remote: 'origin', branch: 'main', fetchedRef: 'refs/x/branch', log: (line) => lines.push(line) });
+    assert.equal(outcome, 'git_failed');
+    assert.match(lines.join(''), /may be unchanged \(git_failed\)/);
+});

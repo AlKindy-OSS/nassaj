@@ -152,6 +152,11 @@ describe('Visual gate — 3 required modal states', () => {
     const statusEl = screen.getByRole('status');
     expect(statusEl.textContent).toContain('Confirm activation in this dialog');
 
+    // T-2022: no updater-strategy line and no "stuck" wording in a normal waiting state
+    expect(document.body.textContent).not.toContain('Update strategy');
+    expect(document.body.textContent).not.toContain('git-checkout-v2');
+    expect(document.body.textContent).not.toMatch(/stuck/i);
+
     // No error panel shown
     expect(screen.queryByRole('alert')).toBeNull();
 

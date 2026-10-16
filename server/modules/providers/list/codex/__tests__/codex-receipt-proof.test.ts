@@ -442,7 +442,8 @@ test('deadline includes the delay between stable incomplete attempts', async t =
 
 if (process.env.B996_MEMORY_WORKER) {
   test('B996 isolated memory worker', async () => {
-    global.gc?.();
+    assert.equal(typeof global.gc, 'function', 'the parent must spawn this worker with --expose-gc');
+    global.gc!();
     const baselineRss = process.memoryUsage().rss;
     const baselinePeak = process.resourceUsage().maxRSS * 1024;
     const withImage = process.env.B996_MEMORY_WORKER === 'newline-image';
@@ -452,6 +453,11 @@ if (process.env.B996_MEMORY_WORKER) {
     const f = await snapshot([user, ...ending()]);
     const expected = codexReceiptPayloadHash(text, withImage ? [image] : [])!;
     assert.ok(expected);
+    // Fixture garbage (~100 MiB: the 25-MiB JSONL string, its write buffer and the hash input copy)
+    // otherwise stays resident or not at V8's whim and stacks onto the proof's peak, making
+    // `growth` trimodal (~224/249/275 MiB on identical code). Collect it so the peak reflects the
+    // proof. The baseline stays the pre-fixture sample, so retained fixture memory still counts.
+    global.gc!();
     const started = performance.now();
     assert.ok(await f.resolve(expected));
     const elapsedMs = performance.now() - started;

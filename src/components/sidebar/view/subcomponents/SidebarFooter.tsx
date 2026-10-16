@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import {
-  ArrowUpCircle, ChevronUp, LogOut, Palette, RefreshCw, Settings, UserRound,
+  ArrowUpCircle, CheckCircle2, ChevronUp, LogOut, Palette, RefreshCw, Settings, UserRound,
 } from 'lucide-react';
 import type { TFunction } from 'i18next';
 
@@ -30,6 +30,8 @@ type SidebarFooterProps = {
    * newer release, which the owner has not acted on yet.
    */
   updatePrepared?: boolean;
+  /** ADR-207: the offered release is already prepared in the background. */
+  prestageReady?: boolean;
   /** T-928: true when build:client ran after the server process started. */
   restartRequired: boolean;
   /** T-944 F1: pending server actions queue. */
@@ -51,6 +53,7 @@ type SidebarFooterProps = {
 export default function SidebarFooter({
   updateAvailable,
   updatePrepared = false,
+  prestageReady = false,
   restartRequired,
   actions,
   history,
@@ -207,7 +210,7 @@ export default function SidebarFooter({
               onClick={onShowVersionModal}
               className="flex min-h-9 items-center gap-1.5 rounded-md px-2 text-xs leading-none text-muted-foreground transition-colors hover:bg-accent/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring sm:min-h-6 sm:px-1.5"
               aria-label={updateAvailable
-                ? `${updatePrepared ? t('version.updatePrepared') : t('version.updateAvailable')}${latestVersion ? ` — v${latestVersion}` : ''}`
+                ? `${updatePrepared ? t('version.updatePrepared') : t('version.updateAvailable')}${latestVersion ? ` — v${latestVersion}` : ''}${prestageReady ? ` — ${t('version.prestageReady')}` : ''}`
                 : t('version.currentVersionLabel', { version: currentVersion, defaultValue: 'Nassaj v{{version}}' }) as string}
             >
               {/* round 3 (qa): dir="ltr" على الغلاف كان يفرض ترتيب قراءة
@@ -224,6 +227,13 @@ export default function SidebarFooter({
                   <ArrowUpCircle className="h-3 w-3 shrink-0 text-primary" aria-hidden="true" />
                   <span className="font-medium text-primary">{t('version.updateToLabel', { defaultValue: 'Update to' })}</span>
                   <bdi dir="ltr" className="font-medium tabular-nums text-primary">v{latestVersion}</bdi>
+                  {prestageReady && (
+                    <CheckCircle2
+                      className="h-3 w-3 shrink-0 text-green-600 dark:text-green-400"
+                      aria-hidden="true"
+                      data-testid="update-prestage-ready"
+                    />
+                  )}
                 </>
               )}
             </button>

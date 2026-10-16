@@ -149,10 +149,12 @@ export function useSsoSettings() {
   const importEnv = useCallback(() => write(() => ssoApi.importEnv()), [write]);
   const confirmOrigin = useCallback((origin: string, stepUp: StepUpEvidence) =>
     write(() => ssoApi.confirmOrigin(origin, stepUp)), [write]);
+  const setOwnerSignIn = useCallback((enabled: boolean, stepUp?: StepUpEvidence) =>
+    write(() => ssoApi.setOwnerSignIn(enabled, stepUp)), [write]);
 
   return {
     status, loading, loadError, discovery, testReturn, lastTestResult,
-    reload, saveDraft, testDiscovery, startTestLogin, apply, enable, disable, importEnv, confirmOrigin,
+    reload, saveDraft, testDiscovery, startTestLogin, apply, enable, disable, importEnv, confirmOrigin, setOwnerSignIn,
     dismissTestReturn: () => setTestReturn(null),
   };
 }

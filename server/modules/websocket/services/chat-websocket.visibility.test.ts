@@ -18,6 +18,7 @@ import assert from 'node:assert/strict';
 import test, { mock } from 'node:test';
 
 import { reviewEnvelopeDatabaseLinkStubs } from '../../../../tests/helpers/review-envelope-link-stubs.js';
+import { chatImageStoreDatabaseLinkStubs } from '../../../../tests/helpers/chat-image-store-link-stubs.js';
 
 // --- Module mock (must be registered before importing the service) -----------
 
@@ -30,6 +31,7 @@ let visibleResult = false;
 mock.module('@/modules/database/index.js', {
   namedExports: {
     ...reviewEnvelopeDatabaseLinkStubs(),
+    ...chatImageStoreDatabaseLinkStubs(),
     projectsDb: {
       getProjectPath: (projectPath: string) =>
         projectPath === REGISTERED_PATH ? { project_id: PROJECT_ID } : null,

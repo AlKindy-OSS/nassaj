@@ -109,7 +109,6 @@
       "viewOptions": "表示オプション",
       "inputSettings": "入力設定"
     },
-    "darkMode": "ダークモード",
     "autoExpandTools": "ツールを自動展開",
     "showRawParameters": "生パラメータを表示",
     "showThinking": "思考を表示",
@@ -459,7 +458,8 @@
       "description": "ライト、ダーク、またはシステム設定への自動追従から選択します",
       "light": "ライト",
       "dark": "ダーク",
-      "system": "システム"
+      "system": "システム",
+      "cycleLabel": "テーマ: {{current}}。{{next}} に切り替え"
     },
     "themePresets": {
       "title": "テーマ",

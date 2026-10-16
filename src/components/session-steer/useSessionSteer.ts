@@ -323,7 +323,7 @@ export function useSessionSteer({
   );
 
   const sendSteer = useCallback(
-    (text: string): Promise<SteerSendOutcome> => {
+    (text: string, images?: unknown[]): Promise<SteerSendOutcome> => {
       const trimmed = text.trim();
       // T-1903 (ADR-190 §backend fix 44e8ccc4e): turnId صار nullable — null
       // يعني «لا دورَ قابلاً للتوجيه إطلاقاً» (مزوّدٌ غير Claude، أو دورٌ غير
@@ -341,6 +341,7 @@ export function useSessionSteer({
         turnId: turnState.turnId,
         clientMsgId,
         text: trimmed,
+        ...(images && images.length > 0 ? { images } : {}),
       };
 
       return new Promise<SteerSendOutcome>((resolve) => {

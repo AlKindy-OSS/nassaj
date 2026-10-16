@@ -120,6 +120,11 @@ export interface NormalizedMessage {
     parentId: string | null;
     label: string;
     state: 'started' | 'running' | 'completed' | 'failed';
+    agentName?: string;
+    model?: string;
+    modelInherited?: boolean;
+    effort?: string;
+    tools?: { name: string; status?: string }[];
   };
   images?: string[];
   files?: { name: string; path: string; relPath?: string; size?: number; mimeType?: string }[];

@@ -115,6 +115,72 @@ const DEFAULT_CONFIG: ResourceAdmissionConfig = {
 
 type ActiveTotals = { count: number; cpu: number; memory: number };
 
+/**
+ * ADR-206 S2 (§3.2, §3.3): Codex SDK helper leases share this table. Their owner class is
+ * the `owner_id` prefix (no schema change). They are accounting only: never counted by the
+ * supervisor caps, never reclaimed by its pid watchdog, and their memory is read with the
+ * age rule below.
+ */
+export const CODEX_SDK_OWNER_PREFIX = 'codex-sdk:';
+/** A codex-sdk lease holds memory for at most this long after creation, at read time (M1). */
+export const CODEX_LEASE_MAX_AGE_MS = 120_000;
+
+export function isCodexSdkLeaseOwner(ownerId: unknown): boolean {
+  return typeof ownerId === 'string' && ownerId.startsWith(CODEX_SDK_OWNER_PREFIX);
+}
+
+export type CodexLeaseRow = {
+  leaseId: string;
+  turnId: string;
+  ownerId: string;
+  memoryReserved: number;
+  cpuReserved: number;
+  createdAtMs: number;
+  heartbeatAtMs: number;
+};
+
+/**
+ * The memory one lease row contributes to a capacity sum at `nowMs`. For a `codex-sdk:` row
+ * the stored value is advisory: it counts only while `0 <= age < 120 s`, so an orphan, a
+ * leak or a row a stopped sampler no longer refreshes holds nothing after 120 s. Other rows
+ * contribute their stored reservation unchanged. Both readers (the Codex helpers check and
+ * the supervisor admission sum) use this one function so they cannot diverge.
+ */
+export function codexLeaseMemoryContribution(
+  row: Pick<CodexLeaseRow, 'ownerId' | 'memoryReserved' | 'createdAtMs'>,
+  nowMs: number,
+): number {
+  const stored = Number.isFinite(row.memoryReserved) && row.memoryReserved > 0 ? row.memoryReserved : 0;
+  if (!isCodexSdkLeaseOwner(row.ownerId)) return stored;
+  const age = nowMs - row.createdAtMs;
+  return Number.isFinite(age) && age >= 0 && age < CODEX_LEASE_MAX_AGE_MS ? stored : 0;
+}
+
+/** Active `codex-sdk:` lease rows. Read inside the caller's transaction when it has one. */
+export function listActiveCodexSdkLeases(db: Database): CodexLeaseRow[] {
+  const rows = db.prepare(
+    `SELECT lease_id, turn_id, owner_id, memory_reserved, cpu_reserved, created_at_ms, heartbeat_at_ms
+       FROM turn_resource_leases
+      WHERE status = 'active' AND substr(owner_id, 1, ?) = ?`,
+  ).all(CODEX_SDK_OWNER_PREFIX.length, CODEX_SDK_OWNER_PREFIX) as Record<string, unknown>[];
+  return rows.map(row => ({
+    leaseId: String(row.lease_id),
+    turnId: String(row.turn_id),
+    ownerId: String(row.owner_id),
+    memoryReserved: Number(row.memory_reserved),
+    cpuReserved: Number(row.cpu_reserved),
+    createdAtMs: Number(row.created_at_ms),
+    heartbeatAtMs: Number(row.heartbeat_at_ms),
+  }));
+}
+
+/** Σ read-time memory of the active codex-sdk leases, optionally without one turn's own. */
+export function sumCodexSdkLeaseMemory(db: Database, nowMs: number, excludeTurnId?: string): number {
+  return listActiveCodexSdkLeases(db)
+    .filter(row => row.turnId !== excludeTurnId)
+    .reduce((sum, row) => sum + codexLeaseMemoryContribution(row, nowMs), 0);
+}
+
 function finiteNonNegative(value: number): boolean {
   return Number.isFinite(value) && value >= 0;
 }
@@ -205,23 +271,29 @@ export async function admitResources(
         : { admitted: false, code: 'invalid_request', reason: 'turn already owns a different active lease' };
     }
 
+    // Supervisor rows only: codex-sdk helper leases never count toward the turn caps (§3.2).
     const totals = db.prepare(
       `SELECT COUNT(*) AS count,
               COALESCE(SUM(cpu_reserved), 0) AS cpu,
               COALESCE(SUM(memory_reserved), 0) AS memory
-         FROM turn_resource_leases WHERE status = 'active'`,
-    ).get() as ActiveTotals;
+         FROM turn_resource_leases WHERE status = 'active' AND substr(owner_id, 1, ?) <> ?`,
+    ).get(CODEX_SDK_OWNER_PREFIX.length, CODEX_SDK_OWNER_PREFIX) as ActiveTotals;
     if (totals.count >= resolved.globalCap) {
       return { admitted: false, code: 'global_cap', reason: 'global active-turn cap reached' };
     }
     const user = db.prepare(
-      "SELECT COUNT(*) AS count FROM turn_resource_leases WHERE status = 'active' AND user_id = ?",
-    ).get(request.userId) as { count: number };
+      `SELECT COUNT(*) AS count FROM turn_resource_leases
+        WHERE status = 'active' AND user_id = ? AND substr(owner_id, 1, ?) <> ?`,
+    ).get(request.userId, CODEX_SDK_OWNER_PREFIX.length, CODEX_SDK_OWNER_PREFIX) as { count: number };
     if (user.count >= resolved.perUserCap) {
       return { admitted: false, code: 'user_cap', reason: 'per-user active-turn cap reached' };
     }
-    const projectedCpu = sample.cpuPercent + totals.cpu + request.reservation.cpuPercent;
-    const projectedMemory = sample.memoryPercent + totals.memory + request.reservation.memoryPercent;
+    // Codex helper leases: unrealised memory with the read-time age rule (M1); CPU is 0.
+    const codexRows = listActiveCodexSdkLeases(db);
+    const codexCpu = codexRows.reduce((sum, row) => sum + (row.cpuReserved > 0 ? row.cpuReserved : 0), 0);
+    const codexMemory = codexRows.reduce((sum, row) => sum + codexLeaseMemoryContribution(row, now), 0);
+    const projectedCpu = sample.cpuPercent + totals.cpu + codexCpu + request.reservation.cpuPercent;
+    const projectedMemory = sample.memoryPercent + totals.memory + codexMemory + request.reservation.memoryPercent;
     if (projectedCpu >= resolved.thresholdPercent || projectedMemory >= resolved.thresholdPercent) {
       return {
         admitted: false,
@@ -322,6 +394,24 @@ export function releaseWithExitProof(
     return result.changes === 1;
   });
   return transact.immediate();
+}
+
+/**
+ * ADR-206 S2 (§3.3): releases a codex-sdk helpers lease whose turn never reached the SDK
+ * effect seam (no `runStreamed`, so no process can carry its tag). Recorded as
+ * `dispatch_not_started`, like a supervisor reservation released before dispatch. Only
+ * `codex-sdk:` rows of the given owner qualify.
+ */
+export function releaseUnstartedCodexLease(
+  db: Database,
+  input: { leaseId: string; ownerId: string; observedAtMs: number },
+): boolean {
+  if (!input.leaseId || !isCodexSdkLeaseOwner(input.ownerId) || !Number.isFinite(input.observedAtMs)) return false;
+  return db.transaction(() => db.prepare(
+    `UPDATE turn_resource_leases
+        SET exit_proof_at_ms = ?, exit_proof_kind = 'dispatch_not_started', released_at_ms = ?, status = 'released'
+      WHERE lease_id = ? AND owner_id = ? AND status = 'active' AND exit_proof_at_ms IS NULL`,
+  ).run(input.observedAtMs, input.observedAtMs, input.leaseId, input.ownerId).changes === 1).immediate();
 }
 
 /** Releases a reservation only while its durable run is still pre-dispatch. */

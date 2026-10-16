@@ -148,6 +148,40 @@ export function deriveUpdateJobFailure(job, jobsDb) {
     return { failedPhase: failedPhase || null, errorCode, message, manifestDrift };
 }
 
+const PRESTAGE_REASON_PATTERN = /^[a-z0-9_]{1,48}$/;
+
+/**
+ * ADR-207 S5 (T-2024): whether this job adopted a prestaged candidate, and
+ * why not when adoption was tried and fell back to a build. Read from the
+ * job's `staging/done` receipts written by adoptPrestagedCandidate(); the last
+ * prestage receipt wins (a retried run writes a new one).
+ *
+ * `prestageRejectedReason` is the reason's head only (`identity_mismatch`,
+ * `tag_moved`, `other_version`, ...), validated on the way out because the
+ * receipt is durable; the full field list stays in the receipt and job log.
+ * Both are false/null for a job that never met a prestaged slot.
+ *
+ * @param {{ id: string }} job
+ * @param {{ listReceipts: (id: string) => Array<Record<string, unknown>> }} jobsDb
+ * @returns {{ prestaged: boolean, prestageRejectedReason: string | null }}
+ */
+export function deriveUpdateJobPrestage(job, jobsDb) {
+    let receipts = [];
+    try { receipts = jobsDb.listReceipts(job.id) || []; } catch { receipts = []; }
+    let outcome = { prestaged: false, prestageRejectedReason: null };
+    for (const row of receipts) {
+        if (row.phase !== 'staging' || row.kind !== 'done') continue;
+        let facts = {};
+        try { facts = JSON.parse(row.facts_json) || {}; } catch { facts = {}; }
+        if (facts.prestage === 'adopted') outcome = { prestaged: true, prestageRejectedReason: null };
+        else if (facts.prestage === 'rejected') {
+            const head = typeof facts.reason === 'string' ? facts.reason.split(':')[0] : '';
+            outcome = { prestaged: false, prestageRejectedReason: PRESTAGE_REASON_PATTERN.test(head) ? head : 'unknown' };
+        }
+    }
+    return outcome;
+}
+
 /**
  * Build the `deferral` snapshot field (ADR-156 §3.3, M15). deadlineAt and
  * rearmCount come from the durable job row; sessionCount and gateReason are LIVE

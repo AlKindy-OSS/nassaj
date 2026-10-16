@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { isForeignTestRunPath } from './test-run-root-guard.js';
+import { isForeignTestRunPath, isOwnTestRunPath } from './test-run-root-guard.js';
 
 const LIVE_DB = '/home/user/.local/share/nassaj-dev/db.sqlite';
 
@@ -22,4 +22,11 @@ test('a different run root or a non-test path is judged correctly', () => {
   assert.equal(isForeignTestRunPath('/home/user/Project/nassaj-dev', LIVE_DB), false);
   assert.equal(isForeignTestRunPath('/var/tmp/nassaj-server-tests-/case-a', LIVE_DB), false);
   assert.equal(isForeignTestRunPath('/var/tmp/my-nassaj-server-tests-abc/case-a', LIVE_DB), false);
+});
+
+test('isOwnTestRunPath is true only for a case path of the database run root', () => {
+  const caseRoot = '/var/tmp/nassaj-server-tests-OoUbHT/case-hLKgQv';
+  assert.equal(isOwnTestRunPath(`${caseRoot}/tmp/x`, `${caseRoot}/auth.db`), true);
+  assert.equal(isOwnTestRunPath(`${caseRoot}/tmp/x`, LIVE_DB), false);
+  assert.equal(isOwnTestRunPath('/var/tmp/plain/x', '/var/tmp/plain/auth.db'), false);
 });

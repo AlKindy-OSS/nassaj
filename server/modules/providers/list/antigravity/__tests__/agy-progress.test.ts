@@ -76,7 +76,9 @@ test('invoke_subagent: role label only, completed once the child reports back', 
   const rows = progress.buildAgyTurnProgressRows({ steps, afterStepIndex: -1, brainUUID: BRAIN, sessionId: BRAIN, plan: null });
   assert.equal(rows.length, 1);
   assert.equal(rows[0].kind, 'status');
-  assert.deepEqual(rows[0].subagent, { id: `antigravity_${BRAIN}_progress_0_agent_0`, parentId: null, label: 'scribe', state: 'completed' });
+  assert.deepEqual(rows[0].subagent, {
+    id: `antigravity_${BRAIN}_progress_0_agent_0`, parentId: null, label: 'scribe', state: 'completed', agentName: 'scribe',
+  });
   assert.ok(!JSON.stringify(rows).includes('prompt text'), 'the prompt never leaks into the label');
 
   const unreported = copy(real.transcript).filter((row: Row) => !String(row.content ?? '').includes(`sender=${CHILD}`));

@@ -143,8 +143,20 @@ function AgentRow({ agent, frozen }: { agent: RunAgent; frozen: boolean }) {
   const stale = agent.status === 'stale';
   const pulse = running && !frozen;
   const contentId = useId();
-  // No `subagent_type` on the delegation → a generic, untranslated label (as before ADR-199).
-  const typeLabel = agent.type || t('agentActivity.genericType', { defaultValue: 'Agent' });
+  const typeLabel = agent.agentName || agent.type || '—';
+  const modelLabel = agent.model || '—';
+  const effortLabel = agent.effort || '—';
+  const tools = agent.tools?.map((tool, index) => ({
+    key: `${tool.name}:${index}`,
+    name: tool.name,
+    succeeded: ['done', 'success', 'completed'].includes(tool.status ?? ''),
+    failed: tool.status === 'failed' || tool.status === 'error',
+  })) ?? agent.childTools?.map((tool, index) => ({
+    key: tool.toolId || `${tool.toolName}:${index}`,
+    name: tool.toolName,
+    succeeded: Boolean(tool.toolResult && !tool.toolResult.isError),
+    failed: Boolean(tool.toolResult?.isError),
+  }));
   const rowPercent = agent.status === 'done' ? 100 : running ? (agent.progress?.percent ?? null) : null;
 
   // صدق العرض (B-208، بند 8 — فيتو): الأداة الجارية وعدّاد الاستدعاءات يأتيان
@@ -208,16 +220,24 @@ function AgentRow({ agent, frozen }: { agent: RunAgent; frozen: boolean }) {
           </svg>
         )}
 
-        {/* نوع الوكيل + الوصف */}
-        <span className="min-w-0 truncate text-xs font-medium text-foreground">
-          {typeLabel}
-          {agent.description && (
-            <span className="text-muted-foreground/80">
-              {' · '}
-              {agent.description}
-            </span>
-          )}
+        {/* Name, model and effort stay scannable as compact chips. */}
+        <span className="flex min-w-0 flex-wrap items-center gap-1">
+          <span className="max-w-40 truncate rounded bg-muted/60 px-1.5 py-0.5 text-xs font-medium text-foreground" aria-label={t('agentActivity.name')}>
+            <bdi>{typeLabel}</bdi>
+          </span>
+          <span className="max-w-48 truncate rounded border border-border px-1.5 py-0.5 text-[10px] text-muted-foreground" aria-label={t('agentActivity.model')}>
+            <bdi>{modelLabel}</bdi>
+            {agent.modelInherited && agent.model && <span> · {t('agentActivity.inherited')}</span>}
+          </span>
+          <span className="max-w-32 truncate rounded border border-border px-1.5 py-0.5 text-[10px] text-muted-foreground" aria-label={t('agentActivity.effort')}>
+            <bdi>{effortLabel}</bdi>
+          </span>
         </span>
+        {agent.description && (
+          <span className="min-w-0 truncate text-xs text-muted-foreground">
+            <bdi>{agent.description}</bdi>
+          </span>
+        )}
 
         {skillCount > 0 && <ObservedSkillCount count={skillCount} coverage={agent.skillCoverage} />}
 
@@ -313,7 +333,7 @@ function AgentRow({ agent, frozen }: { agent: RunAgent; frozen: boolean }) {
             {agent.skillsStale && <p className="text-xs text-muted-foreground">{t('skillObservations.stale')}</p>}
             <ObservedSkillsList observations={agent.observedSkills} />
           </section>}
-          {!agent.childTools || agent.childTools.length === 0 ? (
+          {!tools || tools.length === 0 ? (
             <p className="py-1 text-[11px] text-muted-foreground/70">
               {t('agentActivity.noTools', {
                 defaultValue: 'No tool calls recorded yet.',
@@ -321,14 +341,13 @@ function AgentRow({ agent, frozen }: { agent: RunAgent; frozen: boolean }) {
             </p>
           ) : (
             <ul className="max-h-48 overflow-y-auto py-0.5">
-              {agent.childTools.map((tool, idx) => {
-                const succeeded = tool.toolResult != null;
+              {tools.map((tool) => {
                 return (
                   <li
-                    key={tool.toolId || idx}
+                    key={tool.key}
                     className="flex items-center gap-1.5 py-0.5 text-[11px]"
                   >
-                    {succeeded ? (
+                    {tool.succeeded ? (
                       <svg
                         className="h-2.5 w-2.5 shrink-0 text-green-600 dark:text-green-400"
                         fill="none"
@@ -345,6 +364,16 @@ function AgentRow({ agent, frozen }: { agent: RunAgent; frozen: boolean }) {
                           d="M5 13l4 4L19 7"
                         />
                       </svg>
+                    ) : tool.failed ? (
+                      <svg
+                        className="h-2.5 w-2.5 shrink-0 text-destructive"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                        aria-label={t('agentActivity.toolFailed', { defaultValue: 'Failed' })}
+                      >
+                        <path strokeLinecap="round" strokeWidth={2} d="M6 6l12 12M18 6L6 18" />
+                      </svg>
                     ) : (
                       <span
                         className="h-1.5 w-1.5 shrink-0 rounded-full bg-amber-400"
@@ -352,7 +381,7 @@ function AgentRow({ agent, frozen }: { agent: RunAgent; frozen: boolean }) {
                       />
                     )}
                     <span className="truncate font-mono text-foreground/80">
-                      {tool.toolName}
+                      <bdi>{tool.name}</bdi>
                     </span>
                   </li>
                 );
@@ -668,7 +697,17 @@ function MergedCard({
     (n, a) => (a.status === 'running' ? n + 1 : n),
     0,
   );
-  // "running" is shown only when something runs; never "0/3 running" on a silent card.
+  // نصّ المؤشّر الموحّد: العدد يمرّ كـ count للتصريف العربي، و n للعرض المحلّي.
+  const runningLabel = t('agentActivity.agentsRunning', {
+    count: runningCount,
+    n: runningCount.toLocaleString(locale),
+    defaultValue: '{{n}} running',
+  });
+  const completedLabel = t('agentActivity.agentsCompleted', {
+    count: completedCount,
+    n: completedCount.toLocaleString(locale),
+    defaultValue: '{{n}} done',
+  });
 
   // ── عرض البطاقة الموحّدة ──────────────────────────────────────────────────
   return (
@@ -840,15 +879,12 @@ function MergedCard({
             </div>
           )}
 
-          {/* ملخّص «يعمل» — فقط حين يعمل أحد. العدّ المنتهي يحمله شارة التبديل أدناه
-              (كان نصّ «أنهى» يكرّره بجانبها). */}
-          {runningCount > 0 && (
+          {/* مؤشّر وكلاء واحد بصيغة «N منتهٍ · M يعمل» بدل شارتين بصيغة x/N
+              متطابقة. حين لا يوجد منتهٍ يظهر «يعمل» وحده كنصّ، وإلا يحمله زر
+              التبديل أدناه. */}
+          {runningCount > 0 && completedCount === 0 && (
             <span className="shrink-0 text-[10px] font-medium tabular-nums text-muted-foreground/60">
-              {t('agentActivity.summary', {
-                running: runningCount,
-                total: agents.length,
-                defaultValue: '{{running}}/{{total}} running',
-              })}
+              {runningLabel}
             </span>
           )}
 
@@ -890,7 +926,9 @@ function MergedCard({
               )}
             >
               <ListChecks className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-              <span>{localeNum(completedCount)}/{localeNum(agents.length)}</span>
+              <span data-testid="agent-counts-chip">
+                {runningCount > 0 ? `${completedLabel} · ${runningLabel}` : completedLabel}
+              </span>
             </button>
           )}
 

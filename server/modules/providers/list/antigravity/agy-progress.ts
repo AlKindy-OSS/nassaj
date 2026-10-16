@@ -204,7 +204,14 @@ export function buildAgyTurnProgressRows(input: {
   const rows: NormalizedMessage[] = [];
   if (input.plan) rows.push(createNormalizedMessage({ ...base, id: `${idBase}_plan`, plan: input.plan }));
   turnSubagents(turn).forEach((record, index) => {
-    const subagent = buildProgressSubagent({ id: `${idBase}_agent_${index}`, parentId: null, ...record });
+    // Antigravity's invoke_subagent transcript gives Role/TypeName only; its
+    // task listing/report does not expose child model, effort, or tool events.
+    const subagent = buildProgressSubagent({
+      id: `${idBase}_agent_${index}`,
+      parentId: null,
+      ...record,
+      agentName: record.label,
+    });
     if (subagent) rows.push(createNormalizedMessage({ ...base, id: `${idBase}_agent_${index}`, subagent }));
   });
   return rows;

@@ -57,6 +57,8 @@ describe('B-373 — إزاحة مقبض المفتاح مشروطة بالاتج
       'rtl:-translate-x-[22px]',
       'ltr:translate-x-[2px]',
       'rtl:-translate-x-[2px]',
+      'ltr:translate-x-[12px]',
+      'rtl:-translate-x-[12px]',
     ]) {
       expect(source).toContain(token);
     }

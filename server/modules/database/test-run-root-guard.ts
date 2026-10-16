@@ -31,3 +31,14 @@ export function isForeignTestRunPath(
   const relative = path.relative(runRoot, path.resolve(databasePath));
   return relative === '' || relative.startsWith('..') || path.isAbsolute(relative);
 }
+
+/**
+ * True when `projectPath` sits under a test run root that also contains the
+ * active database: the case's own fixtures, legitimate for that database only.
+ */
+export function isOwnTestRunPath(
+  projectPath: string,
+  databasePath: string = getDatabasePath(),
+): boolean {
+  return findTestRunRoot(projectPath) !== null && !isForeignTestRunPath(projectPath, databasePath);
+}

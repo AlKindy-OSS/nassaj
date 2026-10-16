@@ -772,9 +772,16 @@ export const api = {
   readFile: (projectId, filePath, { confirmSecret = false } = {}) =>
     authenticatedFetch(`/api/projects/${projectId}/file?filePath=${encodeURIComponent(filePath)}`
       + (confirmSecret ? '&confirmSecret=1' : '')),
-  readFileBlob: (projectId, filePath, { confirmSecret = false } = {}) =>
-    authenticatedFetch(`/api/projects/${projectId}/files/content?path=${encodeURIComponent(filePath)}`
-      + (confirmSecret ? '&confirmSecret=1' : '')),
+  /**
+   * Raw file bytes. `signal` lets a caller abort a streamed read early.
+   * @param {string} projectId
+   * @param {string} filePath
+   * @param {{ confirmSecret?: boolean, signal?: AbortSignal }} [options]
+   * @returns {Promise<Response>}
+   */
+  readFileBlob: (projectId, filePath, { confirmSecret = false, signal } = {}) =>
+    authenticatedFetch(`/api/projects/${encodeURIComponent(projectId)}/files/content?path=${encodeURIComponent(filePath)}`
+      + (confirmSecret ? '&confirmSecret=1' : ''), signal ? { signal } : {}),
   saveFile: (projectId, filePath, content, { confirmSecret = false } = {}) =>
     authenticatedFetch(`/api/projects/${projectId}/file`, {
       method: 'PUT',

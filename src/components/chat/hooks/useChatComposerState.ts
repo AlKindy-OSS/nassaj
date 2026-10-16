@@ -15,6 +15,7 @@ import { useTranslation } from 'react-i18next';
 import { validateCodexImageInput } from '../../../../shared/codex-image-input';
 import { authenticatedFetch } from '../../../utils/api';
 import { useResolvedEnterBehavior } from '../../../hooks/useResolvedEnterBehavior';
+import { useUiPreferences } from '../../../hooks/useUiPreferences';
 import { decideEnterAction } from '../../../lib/enter-behavior';
 import { computeListContinuation } from '../../../lib/list-continuation';
 import {
@@ -93,8 +94,11 @@ const coordinationLevelStorageKey = (sessionId: string) => `coordination_level_$
 const COORDINATION_LEVELS = new Set<CoordinationLevel>(['direct', 'delegate', 'delegate_review']);
 const DEFAULT_COORDINATION_LEVEL: CoordinationLevel = 'delegate';
 
-function narrowCoordinationLevel(value: unknown): CoordinationLevel {
-  if (value === undefined || value === null) return DEFAULT_COORDINATION_LEVEL;
+function narrowCoordinationLevel(
+  value: unknown,
+  fallback: CoordinationLevel = DEFAULT_COORDINATION_LEVEL,
+): CoordinationLevel {
+  if (value === undefined || value === null) return fallback;
   return typeof value === 'string' && COORDINATION_LEVELS.has(value as CoordinationLevel)
     ? (value as CoordinationLevel)
     : 'direct';
@@ -201,7 +205,7 @@ interface UseChatComposerStateArgs {
    * النصّ هنا بدل مسار الرسائل العادي — يُرسل كإطار `session-steer` لا
    * كرسالة محادثة.
    */
-  onSteerSend?: (text: string) => void;
+  onSteerSend?: (text: string, images?: unknown[]) => void;
   /** T-1903: أهلية إظهار مدخلة «/steer» — من useSessionSteer.canSteer. */
   steerAvailable?: boolean;
   /**
@@ -363,6 +367,26 @@ export type CommandModalPayload = {
   data: HelpCommandData | ModelCommandData | CostCommandData | StatusCommandData;
 };
 
+/**
+ * Uploads composer images through `/upload-images` and returns the objects the
+ * server expects on a prompt. Shared by the normal send and `/steer`.
+ */
+async function uploadChatImages(projectId: string, files: File[]): Promise<unknown[]> {
+  if (files.length === 0) return [];
+  const formData = new FormData();
+  files.forEach((file) => {
+    formData.append('images', file);
+  });
+  const response = await authenticatedFetch(`/api/projects/${projectId}/upload-images`, {
+    method: 'POST',
+    headers: {},
+    body: formData,
+  });
+  if (!response.ok) throw new Error('Failed to upload images');
+  const result = await response.json();
+  return result.images;
+}
+
 const createFakeSubmitEvent = () => {
   return { preventDefault: () => undefined } as unknown as FormEvent<HTMLFormElement>;
 };
@@ -460,7 +484,11 @@ export function useChatComposerState({
   // inert. Reset to 'chat' whenever the open session's provider changes (below), so
   // a stale 'agent' can never cross into a provider that has no agent surface.
   const [composerMode, setComposerMode] = useState<'chat' | 'agent'>('chat');
-  const [coordinationLevel, setCoordinationLevel] = useState<CoordinationLevel>(DEFAULT_COORDINATION_LEVEL);
+  // الوضع الافتراضي من الإعدادات (الوكلاء ← وضع التفويض الافتراضي)؛ يسري على
+  // المحادثة الجديدة وعلى أي محادثة بلا اختيار مثبَّت، والمثبَّت يبقى الغالب.
+  const { preferences: uiPreferences } = useUiPreferences();
+  const defaultCoordinationLevel = uiPreferences.defaultCoordinationLevel;
+  const [coordinationLevel, setCoordinationLevel] = useState<CoordinationLevel>(defaultCoordinationLevel);
   const [commandModalPayload, setCommandModalPayload] = useState<CommandModalPayload | null>(null);
   // Execute-style commands are scoped to their session. Keeping a per-session
   // registry prevents a long native /compact in one conversation from blocking
@@ -1662,7 +1690,24 @@ export function useChatComposerState({
       if (isReservedSteerCommand(currentInput)) {
         const steerText = parseSteerText(currentInput);
         if (steerText && onSteerSend) {
-          onSteerSend(steerText);
+          // Images ride the steer the same way they ride a normal prompt:
+          // uploaded first, then sent with it. A failed upload keeps the
+          // composer intact instead of sending a text-only steer.
+          let steerImages: unknown[] = [];
+          if (attachedImages.length > 0) {
+            try {
+              if (!selectedProject) throw new Error('No project selected');
+              steerImages = await uploadChatImages(selectedProject.projectId, attachedImages);
+            } catch (error) {
+              console.error('Steer image upload failed:', error);
+              setSendError(t('steer.errors.image_rejected'));
+              if (sendErrorTimerRef.current) clearTimeout(sendErrorTimerRef.current);
+              sendErrorTimerRef.current = setTimeout(() => setSendError(null), 6000);
+              return;
+            }
+            setAttachedImages([]);
+          }
+          onSteerSend(steerText, steerImages);
         }
         setInput('');
         inputValueRef.current = '';
@@ -1769,19 +1814,7 @@ export function useChatComposerState({
 
       // Upload images and non-image files in parallel.
       const imageUploadPromise = (async () => {
-        if (attachedImages.length === 0) return;
-        const formData = new FormData();
-        attachedImages.forEach((file) => {
-          formData.append('images', file);
-        });
-        const response = await authenticatedFetch(`/api/projects/${selectedProject.projectId}/upload-images`, {
-          method: 'POST',
-          headers: {},
-          body: formData,
-        });
-        if (!response.ok) throw new Error('Failed to upload images');
-        const result = await response.json();
-        uploadedImages = result.images;
+        uploadedImages = await uploadChatImages(selectedProject.projectId, attachedImages);
       })();
 
       const fileUploadPromise = (async () => {
@@ -2437,20 +2470,29 @@ export function useChatComposerState({
   useEffect(() => {
     coordinationLevelRef.current = coordinationLevel;
   }, [coordinationLevel]);
+  // ‏ref لا اعتمادية في أثر الاستعادة: تغيير الافتراضي من الإعدادات لا يقلب
+  // محادثةً لها معرّف، بل يُقرأ عند الانتقال التالي إليها. أمّا المسودّة بلا
+  // معرّف فلا اختيار مثبَّتاً لها، فتتبع الافتراضي الجديد فوراً.
+  const defaultCoordinationLevelRef = useRef(defaultCoordinationLevel);
+  useEffect(() => {
+    defaultCoordinationLevelRef.current = defaultCoordinationLevel;
+    if (!stickyCoordinationSessionId) setCoordinationLevel(defaultCoordinationLevel);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- الافتراضي وحده يحرّك هذا الأثر
+  }, [defaultCoordinationLevel]);
 
   useEffect(() => {
     const previousSessionId = previousCoordinationSessionIdRef.current;
     previousCoordinationSessionIdRef.current = stickyCoordinationSessionId;
     if (!stickyCoordinationSessionId) {
       skipNextCoordinationWriteRef.current = true;
-      setCoordinationLevel(DEFAULT_COORDINATION_LEVEL);
+      setCoordinationLevel(defaultCoordinationLevelRef.current);
       return;
     }
     const stored = safeLocalStorage.getItem(coordinationLevelStorageKey(stickyCoordinationSessionId));
     const assignedAfterFirstSend = stored === null && previousSessionId === null;
     const restoredLevel = assignedAfterFirstSend
       ? coordinationLevelRef.current
-      : narrowCoordinationLevel(stored);
+      : narrowCoordinationLevel(stored, defaultCoordinationLevelRef.current);
 
     if (assignedAfterFirstSend) {
       // A new conversation has no id while its first turn is composed. When the

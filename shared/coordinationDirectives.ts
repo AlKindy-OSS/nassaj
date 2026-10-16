@@ -100,9 +100,9 @@ export function withCoordinationDirective(command: string | null | undefined, va
  *   `CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS` مقيسان على CLI 2.1.226 (حارس العمق
  *   في الثنائية `if (m >= h) throw`)، فوق التوجيه النصّي عبر `systemPrompt.append`.
  * • codex — `textual`: القناة النصّية هي مُدخَل الجولة (‏`thread.runStreamed`).
- *   والحدّ الميكانيكي `agents.max_depth` موجود لكنه **مثبَّت على 1 دائماً** بوصفه
- *   ضابطاً أمنياً (‏Gate 2 / T-886)، فلا يتحرّك مع المستوى ⇒ لا يُعدّ إنفاذاً
- *   للمستوى. رفعه عند `delegate_review` قرارٌ أمني ينتظر إذن المالك.
+ *   ومفتاح `agents.max_depth` يُرسل بقيمة 10 (‏T-1601) ويحكم محرّك v1 وحده، ومحرّك v2
+ *   يتجاهله (‏ADR-206 F5)؛ ولا يتحرّك مع المستوى ⇒ لا يُعدّ إنفاذاً للمستوى. الضابط
+ *   الميكانيكي الوحيد هو مفتاح الخانات لكل جولة (‏ADR-206 §2.2: خانة واحدة حين B = 0).
  * • antigravity/opencode/cursor/qwen/kimi — `textual`: لكلٍّ منها
  *   مُدخَل مطالبة واحد (‏`-p`/`--prompt`/وسيط موضعي) يُحقن فيه التوجيه؛ ولا
  *   مفتاحَ عمقٍ موثَّقاً لأيٍّ منها.

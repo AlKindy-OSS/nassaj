@@ -101,9 +101,17 @@ export default function AgentSelectorSection({
   localModelsSelected,
   localModelsLabel,
   onSelectLocalModels,
+  defaultAgent,
+  defaultLabel,
 }: AgentSelectorSectionProps) {
   const { t } = useTranslation('settings');
   const updateLabel = t('harnessVersion.updateIndicator', { defaultValue: 'Update available' });
+  // الاسم المُعلَن يجمع الاسم وما يُرى على البلاطة من علامات (تحديث، افتراضي).
+  const tileLabel = (agent: AgentProvider, hasUpdate: boolean, isDefault: boolean) => [
+    AGENT_NAMES[agent],
+    hasUpdate ? updateLabel : null,
+    isDefault && defaultLabel ? defaultLabel : null,
+  ].filter(Boolean).join(' — ');
   return (
     <div className="flex-shrink-0">
       {/* Deliberately NOT role="tablist"/"tab": that contract requires each tab
@@ -125,6 +133,7 @@ export default function AgentSelectorSection({
           // which is misleading for a provider that is not yet wired up at all.
           const isComingSoon = COMING_SOON_SETTINGS_PROVIDERS.includes(agent);
           const hasUpdate = Boolean(updateAvailableIds?.has(normalizeHarnessProvider(agent)));
+          const isDefault = defaultAgent === agent;
 
           return (
             <button
@@ -136,8 +145,8 @@ export default function AgentSelectorSection({
               // Left to content, it would concatenate whatever the logo SVG
               // contributes with the visible label, and the announced name
               // would drift with the artwork.
-              aria-label={hasUpdate ? `${AGENT_NAMES[agent]} — ${updateLabel}` : AGENT_NAMES[agent]}
-              title={hasUpdate ? `${AGENT_NAMES[agent]} — ${updateLabel}` : AGENT_NAMES[agent]}
+              aria-label={tileLabel(agent, hasUpdate, isDefault)}
+              title={tileLabel(agent, hasUpdate, isDefault)}
               className={cn(
                 'relative flex min-w-0 touch-manipulation flex-col items-center justify-center gap-1.5',
                 // بلا حدّ: الحدّ حول أيقونةٍ وكلمة لا يجمّع شيئاً — والصفّ نفسه
@@ -198,6 +207,17 @@ export default function AgentSelectorSection({
               >
                 {AGENT_NAMES[agent]}
               </span>
+              {/* علامة «الافتراضي» نصّاً لا رمزاً: نجمةٌ في الزاوية تحتاج تفسيراً،
+                  والزاويتان العلويتان محجوزتان لنقطتي الاتصال والتحديث. */}
+              {isDefault && defaultLabel && (
+                <span
+                  className="w-full truncate text-center text-[13px] leading-tight text-primary"
+                  aria-hidden="true"
+                  data-testid="default-agent-indicator"
+                >
+                  {defaultLabel}
+                </span>
+              )}
             </button>
           );
         })}

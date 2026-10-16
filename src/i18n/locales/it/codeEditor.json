@@ -40,5 +40,30 @@
     "message": "Il file \"{{fileName}}\" non può essere visualizzato nell'editor di testo perché è un file binario.",
     "download": "Scarica",
     "downloadError": "Impossibile scaricare il file."
+  },
+  "officePreview": {
+    "readOnly": "Read-only preview",
+    "loading": "Preparing preview…",
+    "unavailableTitle": "Preview unavailable",
+    "tooLarge": "The file \"{{fileName}}\" is too large to preview (maximum {{limit}} MB). You can download it instead.",
+    "failed": "Couldn't preview \"{{fileName}}\". The file may be damaged or in an unsupported format. You can download it instead.",
+    "documentFrameTitle": "Preview of {{fileName}}",
+    "sheetTabs": "Sheets",
+    "untitledSheet": "Sheet {{number}}",
+    "emptySheet": "This sheet is empty.",
+    "truncated": "Only the first {{rows}} rows and {{columns}} columns are shown.",
+    "slide": "Slide {{number}}",
+    "emptySlide": "No text on this slide.",
+    "slidesNotice": "Text only: layout, images and formatting are not shown.",
+    "slidesTruncated": "Only the first {{count}} slides are shown.",
+    "legacyTitle": "Formato Office obsoleto",
+    "legacyMessage": "\"{{fileName}}\" usa un formato Office obsoleto (.doc, .xls o .ppt) che non può essere visualizzato in anteprima. Scaricalo per vederlo.",
+    "rowsShown": "Visualizzate {{shown}} di {{total}} righe.",
+    "showMoreRows": "Mostra altre righe",
+    "noSlides": "Questa presentazione non ha diapositive.",
+    "textNotice": "Solo testo: layout, immagini e formattazione non vengono mostrati.",
+    "emptyDocument": "Questo documento non contiene testo.",
+    "textTruncated": "Viene mostrato solo l'inizio del documento.",
+    "secretNotPreviewed": "\"{{fileName}}\" è un file di segreti, quindi non viene mostrata l'anteprima."
   }
 }

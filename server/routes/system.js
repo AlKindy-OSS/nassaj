@@ -63,6 +63,8 @@ import { attachSessionTitles } from '../services/live-session-titles.js';
 import { createReleaseDiscovery, releaseErrorPayload } from '../services/release-discovery.js';
 import { createGitTagReleaseDiscovery } from '../services/git-tag-release-discovery.js';
 import { resolveUpdateHostCapability } from '../services/source-updater.js';
+import { toOwnerPrestageStatus } from '../services/update-prestage-status.js';
+import { createPrestageSettingsRouter } from './update-prestage-settings.js';
 import {
     buildPendingAction,
     toPublic,
@@ -171,6 +173,12 @@ function localUpdateFailure(res, error) {
     return res.status(status).json({ success: false, code });
 }
 
+// T-2030 (ADR-207 decision 4): the owner's prestage on/off + quarantine hours.
+router.use('/update/prestage', createPrestageSettingsRouter({
+    audit: (action, details) => auditLogDb.record(action, details),
+    onChange: () => updateRouteHooks.wakePrestager?.(),
+}));
+
 router.get('/update/local', requireRole('owner'), localUpdateLimiter, (_req, res) => {
     res.set('Cache-Control', 'no-store');
     try { return res.json(getLocalUpdateStatus()); }
@@ -264,8 +272,34 @@ router.post('/update/jobs/:jobId/confirm', requireRole('owner'), localUpdateLimi
         return res.status(409).json({ code: 'update_consent_target_changed' });
     }
     auditLogDb.record('update_activation_reconfirmed', { userId: req.user.id, metadata: { jobId: req.params.jobId, targetDigest } });
+    // T-2024 S0 follow-up: a renewed consent is acted on now, not at the next
+    // poll. wake() keeps every activation gate and backoff (never activateNow).
+    try { updateRouteHooks.wakeAutoActivator?.(); } catch { /* the poll still picks it up */ }
     return res.status(202).json({ success: true, state: 'restart_queued' });
 });
+
+/**
+ * Server-owned services the router reads but does not create (they live in
+ * server/index.js). Both are optional: a missing hook means "not on this node".
+ * @type {{ prestageStatus?: (() => Record<string, unknown> | null) | null, wakeAutoActivator?: (() => unknown) | null,
+ *   wakePrestager?: (() => unknown) | null }}
+ */
+let updateRouteHooks = {};
+
+/** Wire the prestager status and the auto-activator wake into the update routes (index.js; tests). */
+export function setUpdateRouteHooks(hooks) {
+    updateRouteHooks = hooks && typeof hooks === 'object' ? { ...hooks } : {};
+}
+
+/**
+ * ADR-207 S5: the owner-only prestage view, or null when this node has no
+ * prestager (artifact host, platform, disabled at boot).
+ * @returns {import('../services/update-prestage-status.js').OwnerPrestageStatus | null}
+ */
+function ownerPrestageStatus() {
+    if (typeof updateRouteHooks.prestageStatus !== 'function') return null;
+    try { return toOwnerPrestageStatus(updateRouteHooks.prestageStatus()); } catch { return null; }
+}
 
 let releaseDiscovery = null;
 let inspectActionServerCandidate = inspectServerActivationCandidate;
@@ -1492,7 +1526,10 @@ router.get('/release/latest', statsLimiter, async (req, res) => {
     try {
         const result = await getReleaseDiscovery()();
         const { htmlUrl: _repositoryUrl, ...release } = result.release;
-        return res.json({ success: true, ...release });
+        // ADR-207 S5: owners also see the background prestage (badge + modal
+        // label); every other role gets exactly the contract it had before.
+        const prestage = roleSatisfies(req.user?.role, 'owner') ? ownerPrestageStatus() : null;
+        return res.json({ success: true, ...release, ...(prestage ? { prestage } : {}) });
     } catch (error) {
         const response = releaseErrorPayload(error);
         return res.status(response.status).json(response.body);

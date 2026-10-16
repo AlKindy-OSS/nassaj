@@ -16,6 +16,7 @@ import {
   ssoRedirectUriForDraft,
 } from './installation-origin.service.js';
 import { ssoApplyImpact } from './sso-apply.service.js';
+import { ownerSignInView } from './sso-owner-sign-in.service.js';
 import { ssoConfigInvalidReason } from './sso-config-record.js';
 import { legacyEnvPresent, ssoForceOff, ssoState } from './sso-config.service.js';
 
@@ -103,6 +104,6 @@ export function ssoSettingsStatus(ownerUserId) {
       signIn: proofView(latestApplyProofOn(db, ownerUserId, 'sign_in'), draft),
     },
     ignoredEnv: ignoredEnvNames(active), identityCountsByIssuer: identityCountsByIssuerOn(db),
-    applyImpact: ssoApplyImpact(),
+    applyImpact: ssoApplyImpact(), ownerSignIn: ownerSignInView(db, ownerUserId),
   };
 }

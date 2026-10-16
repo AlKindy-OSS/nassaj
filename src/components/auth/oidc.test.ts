@@ -16,7 +16,13 @@ vi.mock('../../utils/api', () => ({
 }));
 
 import {
+  clearSsoReauthHint,
   detectOidcAvailability,
+  hasSsoReauthHint,
+  oidcLoginUrl,
+  setSsoReauthHint,
+  SSO_REAUTH_HINT_KEY,
+  startOidcLogin,
   detectSsoStatus,
   exchangeOidcCode,
   fetchOidcIdentity,
@@ -184,5 +190,64 @@ describe('detectOidcAvailability', () => {
 
     apiMock.status.mockResolvedValue(json({ ssoState: 'active', ssoLoginAvailable: true }));
     await expect(detectOidcAvailability()).resolves.toBe(true);
+  });
+});
+
+describe('ADR-194 A1 return codes', () => {
+  it.each([
+    ['owner_must_sign_in_locally', 'owner_local_only'],
+    ['owner_sso_key_required', 'owner_key_required'],
+    ['owner_sso_reauth_required', 'owner_reauth_required'],
+    ['password_change_required', 'password_change_required'],
+    ['oidc_config_changed', 'config_changed'],
+    ['oidc_login_not_initiated', 'login_not_initiated'],
+    ['sso_unavailable', 'sso_unavailable'],
+  ] as const)('maps %s to its own reason, never provider_unavailable', (code, reason) => {
+    expect(reasonFromReturnError(code)).toBe(reason);
+  });
+});
+
+describe('ADR-194 A1 re-authentication hint', () => {
+  beforeEach(() => window.localStorage.clear());
+
+  it('is absent by default; set and clear round-trip; it stores only "1"', () => {
+    expect(hasSsoReauthHint()).toBe(false);
+    setSsoReauthHint();
+    expect(hasSsoReauthHint()).toBe(true);
+    expect(window.localStorage.getItem(SSO_REAUTH_HINT_KEY)).toBe('1');
+    expect(Object.keys(window.localStorage)).toEqual([SSO_REAUTH_HINT_KEY]);
+    clearSsoReauthHint();
+    expect(hasSsoReauthHint()).toBe(false);
+  });
+
+  it('targets ?reauth=1 with the hint and the plain URL without it', () => {
+    expect(oidcLoginUrl()).toBe('/api/auth/oidc/login');
+    expect(oidcLoginUrl(true)).toBe('/api/auth/oidc/login?reauth=1');
+    setSsoReauthHint();
+    expect(oidcLoginUrl()).toBe('/api/auth/oidc/login?reauth=1');
+  });
+
+  it('startOidcLogin follows the hint; only a literal true forces re-authentication', () => {
+    const assign = vi.fn();
+    vi.stubGlobal('location', { ...window.location, assign });
+    startOidcLogin();
+    startOidcLogin({ type: 'click' });
+    startOidcLogin(true);
+    setSsoReauthHint();
+    startOidcLogin();
+    expect(assign.mock.calls.map(([target]) => target)).toEqual([
+      '/api/auth/oidc/login', '/api/auth/oidc/login', '/api/auth/oidc/login?reauth=1', '/api/auth/oidc/login?reauth=1',
+    ]);
+  });
+
+  it('a storage that throws reads as no hint and never breaks the start', () => {
+    const broken = {
+      getItem: () => { throw new Error('denied'); },
+      setItem: () => { throw new Error('denied'); },
+      removeItem: () => { throw new Error('denied'); },
+    };
+    expect(hasSsoReauthHint(broken)).toBe(false);
+    expect(() => setSsoReauthHint(broken)).not.toThrow();
+    expect(() => clearSsoReauthHint(broken)).not.toThrow();
   });
 });

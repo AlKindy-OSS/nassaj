@@ -122,6 +122,7 @@ export function createSourceUpdateWorker({
     afterTerminal = () => undefined,
     jobLog = null,
     loadedRuntimeCommit = () => null,
+    afterRestartQueued = () => undefined,
 } = {}) {
     if (typeof runUpdate !== 'function' || typeof resolveRelease !== 'function') {
         throw new TypeError('source update worker requires runUpdate and resolveRelease');
@@ -142,6 +143,7 @@ export function createSourceUpdateWorker({
         const logOutput = (chunk) => { try { jobLog?.append(job.id, chunk); } catch { /* view only */ } };
         const abortController = new AbortController();
         let fenced = false;
+        let restartQueued = false;
         const assertFence = () => {
             if (abortController.signal.aborted || !jobs.assertFence(job.id, identity.workerId, fence, now())) {
                 fenced = true;
@@ -356,6 +358,7 @@ export function createSourceUpdateWorker({
             transition(['candidate_sealed'], 'restart_queued');
             receipt('restart_queued', 'done', facts);
             measure('restart_queued', 'done', 'restart_queued');
+            restartQueued = true;
             return true;
         } catch (error) {
             if (fenced || abortController.signal.aborted) {
@@ -428,6 +431,14 @@ export function createSourceUpdateWorker({
             // names and is a no-op once a newer epoch owns the job.
             jobs.release(job.id, identity.workerId, fence);
             running = false;
+            // T-2024 S0 (ADR-207): after the lease is released, a hint that the
+            // job is queued so the activator need not wait for its poll. Only a
+            // hint: every gate still runs, and a failed hook leaves the poll.
+            if (restartQueued) {
+                try {
+                    afterRestartQueued({ jobId: job.id, autoActivate: Number(job.auto_activate) === 1 });
+                } catch { /* best-effort wake; polling remains the fallback */ }
+            }
         }
     };
 

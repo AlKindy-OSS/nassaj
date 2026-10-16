@@ -250,6 +250,18 @@ async function downscaleForModel(bytes, extension) {
 }
 
 /**
+ * The prompt note that tells the model where the stored images live. Shared by
+ * the normal prompt path and mid-turn steering so both reach the model the same
+ * way; empty when nothing was stored.
+ * @param {string[]} paths - Paths returned by saveChatImages
+ * @returns {string}
+ */
+export function buildChatImageNote(paths) {
+  if (!Array.isArray(paths) || paths.length === 0) return '';
+  return `\n\n[Images provided at the following paths:]\n${paths.map((p, i) => `${i + 1}. ${p}`).join('\n')}`;
+}
+
+/**
  * Writes base64 data-URL images into a fresh bucket.
  *
  * Partial failure is REPORTED, not swallowed (qa-critic): one unwritable image

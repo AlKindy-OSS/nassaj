@@ -385,3 +385,16 @@ test('abandonLapsedLease never touches a job a newer epoch owns', async () => {
     assert.equal(sourceUpdateJobsDb.assertFence(job.id, 'worker-b', b.worker_fence!, 1_150), true);
   });
 });
+
+test('B-1626: candidate retention references carry every job with its transaction and completion order', async () => {
+  await withDb((ownerId) => {
+    const first = sourceUpdateJobsDb.createOrReuse(request(ownerId)).job!;
+    getConnection().prepare(`UPDATE source_update_jobs SET state = 'activated', transaction_id = 'update-a',
+      completed_at = '2026-10-01 10:00:00' WHERE id = ?`).run(first.id);
+    const second = sourceUpdateJobsDb.createOrReuse(request(ownerId)).job!;
+    const rows = sourceUpdateJobsDb.listCandidateRetentionReferences();
+    assert.deepEqual(rows.map((row) => [row.id, row.state, row.transactionId, row.completedAt]).sort(),
+      [[first.id, 'activated', 'update-a', '2026-10-01 10:00:00'], [second.id, 'accepted', null, null]].sort());
+    assert.ok(rows.every((row) => Number.isSafeInteger(row.rowOrder)));
+  });
+});

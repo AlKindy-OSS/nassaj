@@ -54,5 +54,30 @@
     "save": "Save",
     "discard": "Discard changes",
     "keepEditing": "Keep editing"
+  },
+  "officePreview": {
+    "readOnly": "Read-only preview",
+    "loading": "Preparing preview…",
+    "unavailableTitle": "Preview unavailable",
+    "tooLarge": "The file \"{{fileName}}\" is too large to preview (maximum {{limit}} MB). You can download it instead.",
+    "failed": "Couldn't preview \"{{fileName}}\". The file may be damaged or in an unsupported format. You can download it instead.",
+    "documentFrameTitle": "Preview of {{fileName}}",
+    "sheetTabs": "Sheets",
+    "untitledSheet": "Sheet {{number}}",
+    "emptySheet": "This sheet is empty.",
+    "truncated": "Only the first {{rows}} rows and {{columns}} columns are shown.",
+    "slide": "Slide {{number}}",
+    "emptySlide": "No text on this slide.",
+    "slidesNotice": "Text only: layout, images and formatting are not shown.",
+    "slidesTruncated": "Only the first {{count}} slides are shown.",
+    "legacyTitle": "Legacy Office format",
+    "legacyMessage": "\"{{fileName}}\" uses a legacy Office format (.doc, .xls or .ppt) that can't be previewed. Download it to view it.",
+    "rowsShown": "Showing {{shown}} of {{total}} rows.",
+    "showMoreRows": "Show more rows",
+    "noSlides": "This presentation has no slides.",
+    "textNotice": "Text only: layout, images and formatting are not shown.",
+    "emptyDocument": "This document has no text.",
+    "textTruncated": "Only the beginning of the document is shown.",
+    "secretNotPreviewed": "\"{{fileName}}\" is a secrets file, so it is not previewed."
   }
 }

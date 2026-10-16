@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "reviewedSiteDigest": "sha256:dc3fd6759af24ee61b010bbd2b9bb3f0ee843bc17b452274099b4dea19853cfb",
+  "reviewedSiteDigest": "sha256:5292f72fbc4b138ff87ba81165ab76960c9e6c28fa1937cc49ffafb7c1e18061",
   "exact": {
     "server/services/document-share-preview.js#child_process.spawn#1": {
       "classification": "bounded_local_compute",
@@ -427,6 +427,33 @@
       "gate": "script executed only by tests under unshare -rn (loopback-only netns); base URL pinned to a local 401 echo; no production importer or route",
       "adapter": "header-echo harness",
       "test": "engine-pin-header-echo.matrix.test.ts and claude-auth.precedence.header-echo.test.ts"
+    },
+    "server/services/source-update-candidate-retention.js#child_process.spawn#1": {
+      "classification": "release_infrastructure_effect",
+      "owner": "source update candidate retention (B-1626, ADR-207 slice R)",
+      "purpose": "update_candidate_worktree_retention",
+      "actorSource": "server boot and one delayed boot retry; no request, route or caller-controlled input",
+      "gate": "fixed git argv (worktree list --porcelain, worktree remove --force) with core.hooksPath=/dev/null and shell false; worktree paths only under the candidates root of the common git dir; runs only under the maintenance-gate writer lease (kind source-update-retention) with an OPEN journal and settled phase; protected transactions (journal, handoff, non-terminal jobs, last activated, unreferenced update-pre-*, open safe-command rows) are never removed; 60000 ms timeout, stdout capped at 1 MiB, stderr ignored; kill switch NASSAJ_UPDATE_CANDIDATE_RETENTION=0",
+      "adapter": "runGitCommand",
+      "test": "source-update-candidate-retention.test.js"
+    },
+    "server/services/update-prestage-identity.js#child_process.execFile#1": {
+      "classification": "read_only_process_query",
+      "owner": "update prestage identity key (T-2024 S2, ADR-207 §3.5)",
+      "purpose": "prestage_runtime_and_npm_identity_probe",
+      "actorSource": "source updater and background prestager; executable is process.execPath or the first npm on the build PATH; no caller-controlled arguments",
+      "gate": "execFile without a shell; fixed argv only: node -e with a constant script that prints version/ABI/platform fields under an empty environment, or npm --version; 15000 ms timeout, 64 KiB maxBuffer; output parsed as identity data and never executed; no host mutation",
+      "adapter": "execFileText",
+      "test": "update-prestage-identity.test.js"
+    },
+    "server/services/update-prestage-slot.js#child_process.spawn#1": {
+      "classification": "release_infrastructure_effect",
+      "owner": "update prestage slot (T-2024 S2, ADR-207 §3.3)",
+      "purpose": "prestage_slot_cleanup",
+      "actorSource": "background prestager and the update job adopting or discarding a slot; no request or caller-controlled input",
+      "gate": "fixed git argv (worktree remove --force under candidates/update-pre-*, for-each-ref and update-ref -d under refs/nassaj-prestage/) with core.hooksPath=/dev/null and shell false, cwd the live source tree; transaction ids validated against the update-pre- pattern; every delete holds the exclusive prestage flock and passes assertDeleteAuthority after the build group is killed and verified gone; 60000 ms timeout, stdout capped at 1 MiB, stderr ignored",
+      "adapter": "defaultRunGit",
+      "test": "update-prestage-slot.test.js"
     }
   },
   "rules": [

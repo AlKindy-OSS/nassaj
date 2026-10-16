@@ -69,6 +69,7 @@ export class VendorSessionSynchronizer implements IProviderSessionSynchronizer {
       createdAt: timestamps.createdAt,
       updatedAt: timestamps.updatedAt,
       jsonlPath: filePath,
+      origin: 'watcher',
     });
   }
 

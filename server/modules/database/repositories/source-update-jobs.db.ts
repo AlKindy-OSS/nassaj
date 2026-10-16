@@ -485,6 +485,18 @@ export const sourceUpdateJobsDb = {
       WHERE state = 'restart_queued' AND strategy = 'git-checkout-v2' ORDER BY created_at, rowid`).all() as JobRow[];
   },
 
+  /**
+   * B-1626: every job's state and transaction, for git-checkout candidate retention.
+   * One row per update attempt, so the table stays small; `rowOrder` breaks
+   * `completed_at` ties (second resolution).
+   */
+  listCandidateRetentionReferences() {
+    return getConnection().prepare(`SELECT id, state, transaction_id AS transactionId,
+      completed_at AS completedAt, rowid AS rowOrder FROM source_update_jobs`).all() as Array<{
+        id: string; state: SourceUpdateState; transactionId: string | null; completedAt: string | null; rowOrder: number;
+      }>;
+  },
+
   listRuntimeReferences() {
     return getConnection().prepare(`SELECT id AS jobId, state, transaction_id AS transactionId,
       activation_identity_sha256 AS activationIdentitySha256,

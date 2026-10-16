@@ -101,6 +101,8 @@ const {
   buildAgentToml,
   materializeCoordinatorAgents,
   pruneStaleCoordinatorAgents,
+  coordinatorAgentTomlViolations,
+  COORDINATOR_AGENT_TOML_FIELDS,
 } = await import('./codex-coordinator-agents.js');
 
 // Reseed cards before EACH case so drift/missing/malformed cases stay independent.
@@ -480,5 +482,69 @@ describe('sweep — orphan delegate TOMLs are pruned on the next materialize (T-
   it('is a no-op (never throws, returns []) on a non-existent agents dir', () => {
     const pruned = pruneStaleCoordinatorAgents(path.join(sandbox, 'no-such-dir', 'agents'), ['architect']);
     assert.deepEqual(pruned, []);
+  });
+});
+
+// ADR-206 S5 (§4): a runtime field guard on every TOML the generator writes. Only the
+// allow-listed fields (name, description, developer_instructions; comments are not keys)
+// may appear: no mcp_servers, no sandbox widening, no model/approval override.
+describe('coordinatorAgentTomlViolations — role field guard (ADR-206 S5)', () => {
+  const base = () => {
+    const built = buildAgentToml('architect');
+    assert.ok(built);
+    return built.toml;
+  };
+
+  it('the allow-list is exactly name/description/developer_instructions', () => {
+    assert.deepEqual([...COORDINATOR_AGENT_TOML_FIELDS].sort(), DELEGATE_TOML_KEYS);
+    assert.deepEqual(coordinatorAgentTomlViolations(base()), []);
+  });
+
+  it('rejects mcp_servers (table and inline forms)', () => {
+    assert.deepEqual(
+      coordinatorAgentTomlViolations(`${base()}\n[mcp_servers.evil]\ncommand = "nc"\n`),
+      ['field:mcp_servers'],
+    );
+    assert.deepEqual(
+      coordinatorAgentTomlViolations(`mcp_servers = { evil = { command = "nc" } }\n${base()}`),
+      ['field:mcp_servers'],
+    );
+  });
+
+  it('rejects a sandbox override or widening', () => {
+    assert.deepEqual(
+      coordinatorAgentTomlViolations(`sandbox_mode = "danger-full-access"\n${base()}`),
+      ['field:sandbox_mode'],
+    );
+    assert.deepEqual(
+      coordinatorAgentTomlViolations(`${base()}\n[sandbox_workspace_write]\nnetwork_access = true\n`),
+      ['field:sandbox_workspace_write'],
+    );
+    assert.deepEqual(
+      coordinatorAgentTomlViolations(`approval_policy = "never"\nmodel = "x"\n${base()}`).sort(),
+      ['field:approval_policy', 'field:model'],
+    );
+  });
+
+  it('rejects missing or non-string allowed fields and unparsable text', () => {
+    assert.deepEqual(coordinatorAgentTomlViolations('name = "a"\ndescription = "b"\n'), ['missing:developer_instructions']);
+    assert.deepEqual(
+      coordinatorAgentTomlViolations('name = 1\ndescription = "b"\ndeveloper_instructions = "c"\n'),
+      ['type:name'],
+    );
+    assert.deepEqual(coordinatorAgentTomlViolations('name = "a"\nname = "b"\n'), ['unparsable']);
+    assert.deepEqual(coordinatorAgentTomlViolations(42 as unknown as string), ['unparsable']);
+  });
+
+  it('a card whose output fails the guard is not written: materialize returns ok:false', () => {
+    // A control character is not valid inside a TOML basic string: the generated file would
+    // not parse, so the guard refuses it rather than writing a broken or partial role.
+    fs.writeFileSync(path.join(CARDS_DIR, 'architect.md'), ARCHITECT_CARD.replace('## الدور', '## الدور \u0001'));
+    assert.equal(buildAgentToml('architect'), null);
+    const home = freshHome('home-field-guard');
+    const res = materializeCoordinatorAgents(home);
+    assert.equal(res.ok, false);
+    assert.equal(res.reason, 'card_unavailable:architect');
+    assert.equal(fs.existsSync(path.join(res.agentsDir, 'architect.toml')), false);
   });
 });

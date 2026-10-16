@@ -17,7 +17,18 @@ export type ProgressPlanItem = { id: string; label: string; status: ProgressItem
 export type ProgressPlanCounts = { done: number; total: number };
 export type ProgressPlan = { source: 'tool' | 'artifact'; items: ProgressPlanItem[]; counts?: ProgressPlanCounts };
 export type SubagentState = 'started' | 'running' | 'completed' | 'failed';
-export type ProgressSubagent = { id: string; parentId: string | null; label: string; state: SubagentState };
+export type ProgressSubagentTool = { name: string; status?: string };
+export type ProgressSubagent = {
+  id: string;
+  parentId: string | null;
+  label: string;
+  state: SubagentState;
+  agentName?: string;
+  model?: string;
+  modelInherited?: boolean;
+  effort?: string;
+  tools?: ProgressSubagentTool[];
+};
 
 export const PLAN_MAX_ITEMS = 50;
 export const PLAN_LABEL_MAX_CHARS = 200;
@@ -136,18 +147,45 @@ function boundPlanCounts(value: unknown, itemCount: number): ProgressPlanCounts 
  */
 export function buildProgressSubagent(fields: {
   id: unknown; parentId?: unknown; label: unknown; state: unknown;
+  agentName?: unknown; model?: unknown; modelInherited?: unknown; effort?: unknown; tools?: unknown;
 }): ProgressSubagent | null {
   const id = typeof fields.id === 'string' ? fields.id.slice(0, ID_MAX_CHARS) : '';
   if (!id || typeof fields.state !== 'string' || !SUBAGENT_STATES.has(fields.state)) return null;
   const parentId = typeof fields.parentId === 'string' && fields.parentId
     ? fields.parentId.slice(0, ID_MAX_CHARS)
     : null;
+  const agentName = toPlainLabel(fields.agentName, SUBAGENT_LABEL_MAX_CHARS);
+  const model = toPlainLabel(fields.model, SUBAGENT_LABEL_MAX_CHARS);
+  const effort = toPlainLabel(fields.effort, 32);
+  const tools = boundProgressSubagentTools(fields.tools);
   return {
     id,
     parentId,
     label: toPlainLabel(fields.label, SUBAGENT_LABEL_MAX_CHARS),
     state: fields.state as SubagentState,
+    ...(agentName ? { agentName } : {}),
+    ...(model ? { model } : {}),
+    ...(fields.modelInherited === true && model ? { modelInherited: true } : {}),
+    ...(effort ? { effort } : {}),
+    ...(tools ? { tools } : {}),
   };
+}
+
+const SUBAGENT_TOOLS_MAX = 100;
+
+/** Bounds the provider-neutral tool list attached to one subagent. */
+function boundProgressSubagentTools(value: unknown): ProgressSubagentTool[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const tools: ProgressSubagentTool[] = [];
+  for (const item of value.slice(-SUBAGENT_TOOLS_MAX)) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) continue;
+    const record = item as Record<string, unknown>;
+    const name = toPlainLabel(record.name, SUBAGENT_LABEL_MAX_CHARS);
+    if (!name) continue;
+    const status = toPlainLabel(record.status, 32);
+    tools.push({ name, ...(status ? { status } : {}) });
+  }
+  return tools;
 }
 
 /**
@@ -178,5 +216,7 @@ export function boundProgressSubagent(value: unknown): ProgressSubagent | null {
   const record = value as Record<string, unknown>;
   return buildProgressSubagent({
     id: record.id, parentId: record.parentId, label: record.label, state: record.state,
+    agentName: record.agentName, model: record.model, modelInherited: record.modelInherited,
+    effort: record.effort, tools: record.tools,
   });
 }

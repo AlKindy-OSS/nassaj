@@ -105,3 +105,19 @@ describe('T-1862 round 2: condensed update control', () => {
     expect(link.getAttribute('href')).toBeTruthy();
   });
 });
+
+describe('ADR-207: prepared-in-advance mark on the update control', () => {
+  it('marks the control and names it in the label when the offered release is prestaged', () => {
+    isPlatformBox.value = true;
+    render(<SidebarFooter {...baseProps} updateAvailable prestageReady currentVersion="2.3.0.8" latestVersion="2.3.0.9" onShowVersionModal={() => {}} />);
+    const button = screen.getByRole('button', { name: /v2\.3\.0\.9 — version\.prestageReady$/ });
+    expect(button.querySelector('[data-testid="update-prestage-ready"]')).not.toBeNull();
+  });
+
+  it('no mark without a ready prestage', () => {
+    isPlatformBox.value = true;
+    render(<SidebarFooter {...baseProps} updateAvailable currentVersion="2.3.0.8" latestVersion="2.3.0.9" onShowVersionModal={() => {}} />);
+    const button = screen.getByRole('button', { name: /v2\.3\.0\.9$/ });
+    expect(button.querySelector('[data-testid="update-prestage-ready"]')).toBeNull();
+  });
+});

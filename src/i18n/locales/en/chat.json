@@ -89,6 +89,10 @@
     "description": "Ask a side question on the current session context",
     "sideDescription": "Ask a side question on the current Codex thread"
   },
+  "quickReplies": {
+    "label": "Suggested replies",
+    "staticLabel": "Options offered in this reply"
+  },
   "messageFork": {
     "action": "Continue in new chat",
     "pending": "Forking…",
@@ -123,8 +127,8 @@
     "popoverTitle": "Context usage",
     "close": "Close",
     "alerts": {
-      "compact": "At 150K tokens — consider running /compact.",
-      "close": "At 250K tokens — consider continuing in a new conversation.",
+      "compact": "At {{value}} tokens — consider running /compact.",
+      "close": "At {{value}} tokens — consider continuing in a new conversation.",
       "hour": "This session is over an hour old — consider saving a continuation summary.",
       "pressure": "Proposed compaction threshold reached"
     },
@@ -712,7 +716,15 @@
     "declaredNext": "Next",
     "declaredLeft": "~{{minutes}} min left",
     "title": "Agent activity",
+    "name": "Agent name",
+    "model": "Model",
+    "effort": "Effort",
+    "inherited": "inherited",
     "summary": "{{running}}/{{total}} running",
+    "agentsRunning_one": "{{n}} running",
+    "agentsRunning_other": "{{n}} running",
+    "agentsCompleted_one": "{{n}} done",
+    "agentsCompleted_other": "{{n}} done",
     "approvalSummary": "{{approved}}/{{total}} approved · {{percent}}%",
     "running": "Running",
     "done": "Done",
@@ -729,6 +741,7 @@
     "detailsPlaceholder": "Tool history coming soon.",
     "noTools": "No tool calls recorded yet.",
     "toolSuccess": "Done",
+    "toolFailed": "Failed",
     "toolRunning": "Running",
     "backgroundWorkflow": "Background workflow running",
     "stale": "No signal",
@@ -1225,6 +1238,7 @@
       "steer_queue_full": "The steer queue for this turn is full.",
       "text_empty": "Type a message before sending a steer.",
       "text_too_long": "That steer is too long.",
+      "image_rejected": "The attached images could not be added to the steer, so it was not sent.",
       "duplicate": "That steer was already sent.",
       "turn_aborted": "The turn was stopped before your steer arrived.",
       "internal_error": "Couldn't send the steer.",

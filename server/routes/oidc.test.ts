@@ -54,17 +54,27 @@ let identityLookupFailure: Error | null = null;
 // T-1939 slice 5: legacy duplicate (user, issuer) links.
 let userIssuerLinkCount = 1;
 let duplicateUsersCount = 0;
+// ADR-194 A1: owner opt-in on the matched link, forced password change, strict audit and alerts.
+let ownerOptInAt: number | null = null;
+let mustChangePassword = 0;
+let strictAuditFailure: Error | null = null;
+const ownerAlerts: Array<{ userId: number; dedupeKey: string }> = [];
 
 let storedConfigVersion: unknown = null;
+let storedOwnerStepUp: unknown;
 const pkceStore = {
   store: (_state: string, value: Record<string, unknown>) => {
     currentTransaction = typeof value.browserTransaction === 'string' ? value.browserTransaction : null;
     storedConfigVersion = value.configVersion;
+    storedOwnerStepUp = value.ownerStepUp;
     return currentTransaction !== null;
   },
   consume: (state: string, browserTransaction: string | null) => (
     state === 'state-synthetic' && browserTransaction === currentTransaction
-      ? { nonce: 'nonce-synthetic', codeVerifier: 'verifier-synthetic', purpose: 'login', configVersion: storedConfigVersion }
+      ? {
+        nonce: 'nonce-synthetic', codeVerifier: 'verifier-synthetic', purpose: 'login', configVersion: storedConfigVersion,
+        ...(storedOwnerStepUp === undefined ? {} : { ownerStepUp: storedOwnerStepUp }),
+      }
       : null
   ),
   consumeWithOutcome: (state: string, browserTransaction: string | null) => ({
@@ -137,7 +147,13 @@ mock.module(url('../modules/database/index.js'), {
         return apiKeyCount;
       },
     },
-    auditLogDb: { record: (event: string, data: Record<string, unknown>) => audits.push({ event, ...data }) },
+    auditLogDb: {
+      record: (event: string, data: Record<string, unknown>) => audits.push({ event, ...data }),
+      recordStrict: (event: string, data: Record<string, unknown>) => {
+        if (strictAuditFailure) throw strictAuditFailure;
+        audits.push({ event, ...data });
+      },
+    },
     getConnection: () => ({
       prepare: () => ({ run: (_stamp: number, userId: number) => revocations.push(userId) }),
       // Mirrors better-sqlite3: a throw inside rolls back the stamps it wrote.
@@ -158,13 +174,16 @@ mock.module(url('../modules/database/index.js'), {
         storedUser.role = to;
         return true;
       },
-      getRawById: (id: number) => rawUsers.get(id),
+      getRawById: (id: number) => (id === storedUser.id
+        ? { ...rawUsers.get(id), role: storedUser.role, must_change_password: mustChangePassword }
+        : rawUsers.get(id)),
       updateLastLogin: () => {},
+      listActiveOwnerIds: () => [1, 2],
     },
     userIdentitiesDb: {
       findByIssuerAndSubject: () => {
         if (identityLookupFailure) throw identityLookupFailure;
-        return { id: 40, user_id: identityUserId };
+        return { id: 40, user_id: identityUserId, owner_sso_opt_in_at: ownerOptInAt };
       },
       markAttested: (identityId: number, userId: number, at: number) => {
         if (attestationFailure === 'throw') throw new Error('database is locked');
@@ -183,7 +202,12 @@ mock.module(url('../modules/database/index.js'), {
   },
 });
 mock.module(url('../services/notification-orchestrator.js'), {
-  namedExports: { createNotificationEvent: (event: unknown) => event, notifyUserIfEnabled: () => {} },
+  namedExports: {
+    createNotificationEvent: (event: unknown) => event,
+    notifyUserIfEnabled: ({ userId, event }: { userId: number; event: { dedupeKey: string } }) => {
+      ownerAlerts.push({ userId, dedupeKey: event.dedupeKey });
+    },
+  },
 });
 mock.module(url('../utils/client-ip.js'), { namedExports: { clientIp: () => '127.0.0.1' } });
 mock.module(url('../services/oidc-pkce.store.js'), { namedExports: { oidcPkceStore: pkceStore } });
@@ -524,6 +548,10 @@ function resetLoginState(role: string, claims: Record<string, unknown>) {
   identityRevocations.length = 0;
   apiKeyRevocations.length = 0;
   identityUserId = 12;
+  ownerOptInAt = null;
+  mustChangePassword = 0;
+  strictAuditFailure = null;
+  ownerAlerts.length = 0;
 }
 
 test('T-961: a rejected id_token never reaches session creation', async () => {
@@ -557,7 +585,7 @@ test('ADR-194 I6: an owner identity is refused with owner_must_sign_in_locally a
   assert.deepEqual(revocations, []);
   assert.equal(storedUser.role, 'owner');
   assert.deepEqual(audits.map((record) => record.event), ['oidc_owner_sign_in_refused']);
-  assert.deepEqual(audits[0]?.metadata, { provider: 'oidc', purpose: 'login' });
+  assert.deepEqual(audits[0]?.metadata, { provider: 'oidc', purpose: 'login', reason: 'not_opted_in' });
 });
 
 test('T-958: an attested owner value is ignored', async () => {
@@ -956,5 +984,263 @@ test('B-1066: an unexpected failure after verification redirects with server_err
     assert.equal(storedCode, null, 'no one-time code is issued');
   } finally {
     identityLookupFailure = null;
+  }
+});
+
+// ---------------------------------------------------------------------------
+// ADR-194 A1: owner SSO sign-in with a fresh passkey
+// ---------------------------------------------------------------------------
+
+const nowSec = () => Math.floor(Date.now() / 1000);
+const passkeyClaims = (overrides: Record<string, unknown> = {}) => ({
+  [ROLES_CLAIM]: ['member'], amr: ['user', 'mfa'], auth_time: nowSec(), ...overrides,
+});
+
+function resetOwnerState(claims: Record<string, unknown> = passkeyClaims()) {
+  resetLoginState('owner', claims);
+  ownerOptInAt = Date.now() - 60_000;
+  storedOwnerStepUp = undefined;
+}
+
+test('A1: an opted-in owner with a fresh passkey gets a code, both audits and a per-sign-in alert', async () => {
+  resetOwnerState();
+  const callback = await runCallback();
+  assert.equal(callback.status, 302);
+  assert.match(callback.headers.get('location') ?? '', /^\/auth\/oidc\/return\?oidc_code=/);
+  assert.deepEqual(mintedRoles, ['owner'], 'the owner role is kept, never mapped');
+  assert.equal(storedCode?.userId, 12);
+  const events = audits.map((record) => record.event);
+  assert.deepEqual(events.filter((event) => event !== 'oidc_owner_alerted'), ['oidc_owner_sign_in', 'oidc_login']);
+  const signIn = audits.find((record) => record.event === 'oidc_owner_sign_in');
+  const metadata = signIn?.metadata as Record<string, unknown>;
+  assert.equal(metadata.provider, 'oidc');
+  assert.equal(metadata.identityId, 40);
+  assert.deepEqual(metadata.amr, ['user', 'mfa']);
+  assert.ok(Number.isInteger(metadata.authAgeSec) && Number(metadata.authAgeSec) <= 2);
+  assert.match(String(metadata.signInId), /^[0-9a-f-]{36}$/);
+  assert.ok(audits.every((record) => !JSON.stringify(record).includes('subject-synthetic')), 'no subject');
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(ownerAlerts.map((alert) => alert.userId), [1, 2], 'every active owner is alerted');
+  assert.ok(ownerAlerts.every((alert) => alert.dedupeKey === `oidc:owner_sso_sign_in:12:${metadata.signInId}`));
+});
+
+test('A1: two owner sign-ins produce two distinct alert keys', async () => {
+  const keys: string[] = [];
+  const signInIds: string[] = [];
+  for (let round = 0; round < 2; round += 1) {
+    resetOwnerState();
+    await runCallback();
+    await new Promise((resolve) => setImmediate(resolve));
+    signInIds.push((audits.find((record) => record.event === 'oidc_owner_sign_in')?.metadata as { signInId: string }).signInId);
+    keys.push(...ownerAlerts.map((alert) => alert.dedupeKey));
+  }
+  assert.notEqual(signInIds[0], signInIds[1]);
+  assert.deepEqual([...new Set(keys)].sort(), signInIds.map((id) => `oidc:owner_sso_sign_in:12:${id}`).sort());
+});
+
+test('A1: the owner role is untouched — no mapping, role sync, denial or attestation, even with no mapped role', async () => {
+  for (const claims of [passkeyClaims({ [ROLES_CLAIM]: { member: {} } }), passkeyClaims({ [ROLES_CLAIM]: undefined })]) {
+    resetOwnerState(claims);
+    assert.equal((await runCallback()).status, 302);
+    assert.equal(storedUser.role, 'owner');
+    assert.deepEqual(mintedRoles, ['owner']);
+    assert.deepEqual(attestations, [], 'no attestation stamp');
+    assert.deepEqual(revocations, [], 'no denial revocation');
+    assert.ok(!audits.some((record) => ['external_role_synced', 'oidc_access_denied_no_role'].includes(String(record.event))));
+  }
+});
+
+test('A1: an opted-in owner flagged must_change_password is refused, audited only, and gets no code', async () => {
+  resetOwnerState();
+  mustChangePassword = 1;
+  const callback = await runCallback();
+  assert.equal(callback.headers.get('location'), '/auth/oidc/return?error=password_change_required');
+  assert.equal(storedCode, null);
+  assert.deepEqual(mintedRoles, []);
+  assert.deepEqual(audits.map((record) => record.event), ['oidc_owner_sign_in_refused']);
+  assert.deepEqual(audits[0]?.metadata, { provider: 'oidc', purpose: 'login', reason: 'password_change_required' });
+  assert.deepEqual(ownerAlerts, []);
+});
+
+const withClaims = (overrides: Record<string, unknown>) => () => {
+  verifiedClaims = { sub: 'subject-synthetic', ...passkeyClaims(overrides) };
+};
+
+test('A1: opt-in and forced-change refusals redirect at once, audited with their reason only', async () => {
+  resetOwnerState();
+  ownerOptInAt = null;
+  const callback = await runCallback();
+  assert.equal(callback.headers.get('location'), '/auth/oidc/return?error=owner_must_sign_in_locally');
+  assert.equal(storedCode, null);
+  assert.deepEqual(audits.map((record) => record.event), ['oidc_owner_sign_in_refused']);
+  assert.deepEqual(audits[0]?.metadata, { provider: 'oidc', purpose: 'login', reason: 'not_opted_in' });
+});
+
+test('A1: password + security key (pwd, user, mfa) is accepted', async () => {
+  resetOwnerState(passkeyClaims({ amr: ['pwd', 'user', 'mfa'] }));
+  const callback = await runCallback();
+  assert.match(callback.headers.get('location') ?? '', /oidc_code=/);
+  assert.deepEqual(mintedRoles, ['owner']);
+});
+
+/** Runs the callback, expecting the automatic step-up interstitial; returns its new cookie and IdP URL. */
+async function expectOwnerStepUp(reason: string) {
+  const callback = await runCallback();
+  assert.equal(callback.status, 200, reason);
+  assert.match(callback.headers.get('content-type') ?? '', /text\/html/);
+  assert.equal(callback.headers.get('cache-control'), 'no-store');
+  const html = await callback.text();
+  assert.ok(html.includes('يتطلب نسّاج مفتاح المرور للمالك — سجّل بمفتاحك'));
+  assert.ok(html.includes('Nassaj requires your passkey — sign in with your key'));
+  const target = /url=([^"]+)"/.exec(html)?.[1]?.replaceAll('&#38;', '&') ?? '';
+  const idp = new URL(target);
+  assert.equal(idp.searchParams.get('prompt'), 'login', reason);
+  assert.equal(idp.searchParams.get('max_age'), '0', reason);
+  assert.equal(storedOwnerStepUp, true, 'the new entry carries the loop guard');
+  assert.equal(storedCode, null, `${reason}: no code before the step-up`);
+  assert.deepEqual(mintedRoles, []);
+  const refused = audits.find((record) => record.event === 'oidc_owner_sign_in_refused');
+  assert.deepEqual(refused?.metadata, { provider: 'oidc', purpose: 'login', reason, stepUp: 'started' });
+  return { cookie: (callback.headers.get('set-cookie') ?? '').split(';', 1)[0] ?? '', idp };
+}
+
+async function secondCallback(cookie: string) {
+  return fetch(`${baseUrl}/api/auth/oidc/callback?state=state-synthetic&code=provider-code`, {
+    headers: { cookie }, redirect: 'manual',
+  });
+}
+
+test('A1: a missing key or a stale auth_time redirects once to the IdP for the passkey, with login_hint', async () => {
+  const cases: Array<[() => void, string]> = [
+    [withClaims({ amr: ['pwd'], preferred_username: 'owner@example.org' }), 'amr_insufficient'],
+    [withClaims({ amr: ['pwd', 'otp', 'mfa'] }), 'amr_insufficient'],
+    [withClaims({ amr: undefined }), 'amr_insufficient'],
+    [withClaims({ auth_time: undefined }), 'auth_time_missing'],
+    [withClaims({ auth_time: nowSec() - 84 * 60 }), 'auth_time_stale'],
+    [withClaims({ auth_time: nowSec() + 600 }), 'auth_time_in_future'],
+  ];
+  for (const [arrange, reason] of cases) {
+    resetOwnerState();
+    storedOwnerStepUp = undefined;
+    arrange();
+    const { idp } = await expectOwnerStepUp(reason);
+    const expectedHint = (verifiedClaims as { preferred_username?: string }).preferred_username ?? null;
+    assert.equal(idp.searchParams.get('login_hint'), expectedHint, reason);
+  }
+});
+
+test('A1: after the passkey step-up, a fresh key sign-in hands off the session', async () => {
+  resetOwnerState(passkeyClaims({ amr: ['pwd'] }));
+  storedOwnerStepUp = undefined;
+  const { cookie } = await expectOwnerStepUp('amr_insufficient');
+  verifiedClaims = { sub: 'subject-synthetic', ...passkeyClaims() };
+  const second = await secondCallback(cookie);
+  assert.match(second.headers.get('location') ?? '', /oidc_code=/);
+  assert.deepEqual(mintedRoles, ['owner']);
+});
+
+test('A1 loop guard: pwd-only and otp are refused owner_sso_key_required after one step-up', async () => {
+  for (const amr of [['pwd'], ['pwd', 'otp', 'mfa']]) {
+    resetOwnerState(passkeyClaims({ amr }));
+    storedOwnerStepUp = undefined;
+    const { cookie } = await expectOwnerStepUp('amr_insufficient');
+    audits.length = 0;
+    const second = await secondCallback(cookie);
+    assert.equal(second.headers.get('location'), '/auth/oidc/return?error=owner_sso_key_required', JSON.stringify(amr));
+    assert.equal(storedOwnerStepUp, true, 'no third authorization was started');
+    assert.equal(storedCode, null);
+    assert.deepEqual(mintedRoles, []);
+    assert.deepEqual(audits.map((record) => record.metadata), [
+      { provider: 'oidc', purpose: 'login', reason: 'amr_insufficient', stepUp: 'exhausted' },
+    ]);
+  }
+});
+
+test('A1 loop guard: a still-stale auth_time after the step-up is refused owner_sso_reauth_required', async () => {
+  resetOwnerState(passkeyClaims({ auth_time: nowSec() - 3600 }));
+  storedOwnerStepUp = undefined;
+  const { cookie } = await expectOwnerStepUp('auth_time_stale');
+  const second = await secondCallback(cookie);
+  assert.equal(second.headers.get('location'), '/auth/oidc/return?error=owner_sso_reauth_required');
+});
+
+test('A1: a failed strict sign-in audit drops the code and refuses', async (t) => {
+  t.mock.method(process.stderr, 'write', () => true);
+  resetOwnerState();
+  strictAuditFailure = new Error('database is locked');
+  const callback = await runCallback();
+  assert.equal(callback.headers.get('location'), '/auth/oidc/return?error=temporarily_unavailable');
+  assert.equal(storedCode, null, 'the one-time code is discarded');
+  assert.ok(!audits.some((record) => record.event === 'oidc_login'));
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(ownerAlerts, [], 'no alert for a sign-in that did not happen');
+});
+
+test('A1: an apply between start and callback still refuses an opted-in owner with oidc_config_changed', async () => {
+  resetOwnerState();
+  const login = await fetch(`${baseUrl}/api/auth/oidc/login`, { redirect: 'manual' });
+  const cookiePair = (login.headers.get('set-cookie') ?? '').split(';', 1)[0] ?? '';
+  ssoRuntime.runtime.version = 8;
+  try {
+    const callback = await fetch(`${baseUrl}/api/auth/oidc/callback?state=state-synthetic&code=provider-code`, {
+      headers: { cookie: cookiePair }, redirect: 'manual',
+    });
+    assert.equal(callback.headers.get('location'), '/auth/oidc/return?error=oidc_config_changed');
+    assert.equal(storedCode, null);
+    assert.ok(!audits.some((record) => record.event === 'oidc_owner_sign_in'));
+  } finally {
+    ssoRuntime.runtime.version = 7;
+  }
+});
+
+test('A1: an apply after the code is minted drops it before the owner sign-in is audited', async () => {
+  resetOwnerState();
+  ssoRuntime.runtime.postMintVersion = 9;
+  try {
+    const callback = await runCallback();
+    assert.equal(callback.headers.get('location'), '/auth/oidc/return?error=oidc_config_changed');
+    assert.equal(storedCode, null);
+    assert.ok(!audits.some((record) => ['oidc_owner_sign_in', 'oidc_login'].includes(String(record.event))));
+  } finally {
+    ssoRuntime.runtime.postMintVersion = null;
+  }
+});
+
+test('A1: wallet mode hands off a device-session code for an opted-in owner (no JWT)', async () => {
+  const keys = ['MULTI_ACCOUNT_SWITCHING', 'NASSAJ_PUBLIC_ORIGIN', 'ALLOWED_ORIGINS'] as const;
+  const saved = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+  process.env.MULTI_ACCOUNT_SWITCHING = 'true';
+  process.env.NASSAJ_PUBLIC_ORIGIN = 'https://nassaj.test';
+  process.env.ALLOWED_ORIGINS = 'https://nassaj.test';
+  try {
+    resetOwnerState();
+    const callback = await runCallback();
+    assert.match(callback.headers.get('location') ?? '', /oidc_code=/);
+    assert.deepEqual(mintedRoles, [], 'no JWT in wallet mode');
+    assert.equal(storedCode?.userId, 12);
+    assert.equal(storedCode?.configVersion, 7);
+    assert.ok(audits.some((record) => record.event === 'oidc_owner_sign_in'));
+    assert.ok(!audits.some((record) => record.event === 'oidc_login'), 'recorded at /exchange instead');
+  } finally {
+    for (const key of keys) {
+      if (saved[key] === undefined) delete process.env[key];
+      else process.env[key] = saved[key];
+    }
+  }
+});
+
+test('A1: reauth=1 adds prompt=login and max_age=0; any other value is ignored', async () => {
+  const authorizeUrl = async (query: string) => {
+    const login = await fetch(`${baseUrl}/api/auth/oidc/login${query}`, { redirect: 'manual' });
+    assert.equal(login.status, 302, query);
+    return new URL(login.headers.get('location') ?? '');
+  };
+  const reauth = await authorizeUrl('?reauth=1');
+  assert.equal(reauth.searchParams.get('prompt'), 'login');
+  assert.equal(reauth.searchParams.get('max_age'), '0');
+  for (const query of ['', '?reauth=true', '?reauth=0', '?reauth=1&reauth=1', '?reauth=']) {
+    const plain = await authorizeUrl(query);
+    assert.equal(plain.searchParams.get('prompt'), null, query);
+    assert.equal(plain.searchParams.get('max_age'), null, query);
   }
 });

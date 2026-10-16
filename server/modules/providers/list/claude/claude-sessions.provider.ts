@@ -54,6 +54,18 @@ type ClaudeHistoryMessagesResult =
   };
 
 /**
+ * B-1629: true when a raw row's `message` is a conversation turn. Transcript
+ * rows and SDK events carry it under `type: 'user' | 'assistant'`. Claude Code
+ * 2.1.300+ also writes the API request it sends as `api-request-blob` rows: a
+ * `message` with a role but no uuid and no timestamp. Normalizing those as
+ * turns minted a fresh id and the read time on every history load, so earlier
+ * prompts reappeared below each reply. A row without `type` stays accepted.
+ */
+export function isClaudeConversationRow(raw: AnyRecord): boolean {
+  return raw.type === undefined || raw.type === 'user' || raw.type === 'assistant';
+}
+
+/**
  * Lists the subagent transcript file names of a session (`agent-*.jsonl`).
  *
  * Returns an empty array when the directory does not exist yet — a session with
@@ -93,6 +105,7 @@ async function parseAgentTools(
 
       try {
         const entry = (lease ? lease.parse(line) : JSON.parse(line)) as AnyRecord;
+        if (!isClaudeConversationRow(entry)) continue;
 
         if (entry.message?.role === 'assistant' && Array.isArray(entry.message?.content)) {
           for (const part of entry.message.content as AnyRecord[]) {
@@ -499,7 +512,9 @@ export class ClaudeSessionsProvider implements IProviderSessions {
     const ts = raw.timestamp || new Date().toISOString();
     const baseId = raw.uuid || generateMessageId('claude');
 
-    const skillLoad = raw.message?.content ? detectClaudeSkillLoad(raw) : null;
+    // B-1629: only conversation rows carry turns; other row types keep their own branches.
+    const conversation = isClaudeConversationRow(raw);
+    const skillLoad = conversation && raw.message?.content ? detectClaudeSkillLoad(raw) : null;
     if (skillLoad) {
       // Not a human turn: an assistant-side row so user-turn scans skip it.
       return [createNormalizedMessage({
@@ -515,7 +530,7 @@ export class ClaudeSessionsProvider implements IProviderSessions {
       })];
     }
 
-    if (raw.message?.role === 'user' && raw.message?.content && raw.isMeta !== true) {
+    if (conversation && raw.message?.role === 'user' && raw.message?.content && raw.isMeta !== true) {
       /**
        * Provenance of the user-role message (SDKMessageOrigin): absent or
        * 'human' means keyboard input from the user; any other kind
@@ -702,7 +717,7 @@ export class ClaudeSessionsProvider implements IProviderSessions {
         toolName: raw.toolName,
         toolInput: raw.toolInput,
         toolId: raw.toolCallId || baseId,
-        ...claudeToolUseProgress(raw.toolName, raw.toolCallId || baseId, raw.toolInput, claudeParentToolUseId(raw)),
+        ...claudeToolUseProgress(raw.toolName, raw.toolCallId || baseId, raw.toolInput, claudeParentToolUseId(raw), raw.model ?? raw.message?.model),
       }));
       return messages;
     }
@@ -721,7 +736,7 @@ export class ClaudeSessionsProvider implements IProviderSessions {
       return messages;
     }
 
-    if (raw.message?.role === 'assistant' && raw.message?.content) {
+    if (conversation && raw.message?.role === 'assistant' && raw.message?.content) {
       /**
        * B-352: the model that produced THIS turn, verbatim. The SDK writes it on
        * every assistant entry (live event and JSONL row alike) and it changes
@@ -769,7 +784,7 @@ export class ClaudeSessionsProvider implements IProviderSessions {
               toolName: part.name,
               toolInput: part.input,
               toolId: part.id,
-              ...claudeToolUseProgress(part.name, part.id, part.input, claudeParentToolUseId(raw)),
+              ...claudeToolUseProgress(part.name, part.id, part.input, claudeParentToolUseId(raw), raw.message?.model),
             }));
           } else if (part.type === 'thinking' && part.thinking) {
             messages.push(createNormalizedMessage({
@@ -832,7 +847,7 @@ export class ClaudeSessionsProvider implements IProviderSessions {
 
     const toolResultMap = new Map<string, ClaudeToolResult>();
     for (const raw of rawMessages) {
-      if (raw.message?.role === 'user' && Array.isArray(raw.message?.content)) {
+      if (isClaudeConversationRow(raw) && raw.message?.role === 'user' && Array.isArray(raw.message?.content)) {
         for (const part of raw.message.content) {
           if (part.type === 'tool_result' && part.tool_use_id) {
             toolResultMap.set(part.tool_use_id, {

@@ -42,11 +42,16 @@ function protectedProjectRoot(root) {
         || fs.realpathSync(root) !== path.resolve(root)) fail('local_update_unsafe_candidate_directory');
 }
 
-function assertBuildResources(root) {
-    if (fs.realpathSync(root) !== root || fs.statfsSync(root).type === 0x01021994) fail('local_update_disk_required');
-    if (os.loadavg()[0] / Math.max(1, os.cpus().length) >= 0.8) fail('local_update_resources_busy');
+/** True when host CPU load or memory use is at or above 80%, or memory cannot be measured. */
+function hostResourcesBusy() {
+    if (os.loadavg()[0] / Math.max(1, os.cpus().length) >= 0.8) return true;
     const available = fs.readFileSync('/proc/meminfo', 'utf8').match(/^MemAvailable:\s+(\d+) kB$/m);
-    if (!available || 1 - Number(available[1]) * 1024 / os.totalmem() >= 0.8) fail('local_update_resources_busy');
+    return !available || 1 - Number(available[1]) * 1024 / os.totalmem() >= 0.8;
+}
+
+function assertBuildResources(root, resourcesBusy = hostResourcesBusy) {
+    if (fs.realpathSync(root) !== root || fs.statfsSync(root).type === 0x01021994) fail('local_update_disk_required');
+    if (resourcesBusy()) fail('local_update_resources_busy');
 }
 
 function prepareScratch(root, oid) {
@@ -177,7 +182,8 @@ export async function buildOidTripleCandidate(input, injected = {}) {
         const request = readLocalUpdate(root, event.sequence);
         if (request?.phase !== 'preparing' || request.oid !== event.oid || request.group !== event.group) fail('local_update_not_preparing');
         const inventory = readOidSourceInventory(root, event.oid);
-        assertBuildResources(root);
+        // Tests inject the host sampler; the CLI entry below never does.
+        assertBuildResources(root, injected.resourcesBusy);
         const profile = (injected.readBuildProfile || readLocalBuildProfile)(root, event.oid);
         if (profile) assertLocalBuildCapacity(root, profile, 'prepare');
         const claim = { schema: 'nassaj-local-update-build-attempt/v1', phase: 'building',

@@ -751,7 +751,6 @@ async function getCodexSessionMessages(
                 timestamp: entry.timestamp,
                 toolName: 'Task',
                 toolInput: stringify({
-                  subagent_type: 'Codex',
                   description: label,
                 }),
                 toolCallId: fallbackCallId,
@@ -808,7 +807,6 @@ async function getCodexSessionMessages(
               timestamp: entry.timestamp,
               toolName: 'Task',
               toolInput: stringify({
-                subagent_type: 'Codex',
                 description: label,
                 ...(prompt ? { prompt } : {}),
               }),

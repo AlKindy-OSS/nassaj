@@ -11,6 +11,7 @@ import {
   memberTreeKey,
   sourceTreeKeys,
 } from '@/modules/database/repositories/session-source-tree.js';
+import { isForeignTempRootPath } from '@/modules/database/temp-root-guard.js';
 import { isForeignTestRunPath } from '@/modules/database/test-run-root-guard.js';
 import { parseStoredTimestampMs } from '@/modules/database/utils/timestamps.js';
 import { logicalProjectPathForWorkspace } from '@/modules/session-workspaces/index.js';
@@ -37,7 +38,16 @@ import { normalizeProjectPath } from '@/shared/utils.js';
  *   - otherwise only timestamps and the name are written.
  * Conflicts are logged once per (session, candidate) per process; no table, no
  * repair. Explicit migration/transfer paths (e, f) do not come through here.
+ * Synchronizers pass `origin: 'watcher'` and are refused temp-root cwds that no
+ * user registered (B-1620); launch writers keep the default 'launch'.
  */
+
+/**
+ * Who is recording the session. 'watcher' = a provider synchronizer indexing a
+ * transcript it found on disk; 'launch' = a writer that started (or authorizes)
+ * the run itself. Only 'watcher' is subject to the B-1620 temp-root rule.
+ */
+export type DiscoveryOrigin = 'watcher' | 'launch';
 
 export type DiscoveredSession = {
   sessionId: string;
@@ -48,6 +58,8 @@ export type DiscoveredSession = {
   updatedAt?: string;
   /** Transcript path; null/undefined means "unknown here" and never clears a stored path. */
   jsonlPath?: string | null;
+  /** Defaults to 'launch' so launch writers are never affected by the temp-root rule. */
+  origin?: DiscoveryOrigin;
 };
 
 export type InsertOutcome = 'inserted' | 'exists' | 'skipped';
@@ -81,6 +93,8 @@ export function normalizeProjectPathForProvider(provider: string, projectPath: s
 
 const warnedForeignTestRunPaths = new Set<string>();
 const warnedForbiddenProjectRoots = new Set<string>();
+const warnedTempRootPaths = new Set<string>();
+const MAX_WARNED_TEMP_ROOT_PATHS = 10_000;
 const warnedConflicts = new Set<string>();
 const MAX_WARNED_CONFLICTS = 10_000;
 
@@ -97,12 +111,48 @@ function warnSourceConflict(sessionId: string, provider: string, reason: string,
   console.warn('Refused session source change (ADR-201)', { sessionId, provider, reason });
 }
 
+/** True when a user explicitly registered `projectPath` (archived rows included). */
+function isUserRegisteredProject(projectPath: string): boolean {
+  return Boolean(getConnection()
+    .prepare('SELECT 1 FROM projects WHERE project_path = ? AND created_by IS NOT NULL')
+    .get(projectPath));
+}
+
+/**
+ * B-1620: true when synchronizers must not write for a session at the canonical
+ * `projectPath` — it lies under a temp root foreign to the active database and
+ * no user registered it as a project. Rows already stored there are frozen.
+ */
+export function isWatcherFrozenProjectPath(projectPath: string | null): boolean {
+  if (!projectPath) return false;
+  return isForeignTempRootPath(projectPath) && !isUserRegisteredProject(projectPath);
+}
+
+/**
+ * B-1620: a synchronizer ('watcher') never records — inserts or refreshes — a
+ * session whose cwd is under a temp root foreign to the active database, unless
+ * a user registered that path as a project. Launch writers are exempt. Existing
+ * rows under such paths are frozen, not deleted; the skipped run's cost lands
+ * as unattributed in the cost ledger. Warned once per path, without the path.
+ */
+function isRefusedTempRootPath(input: DiscoveredSession, normalized: string): boolean {
+  if ((input.origin ?? 'launch') !== 'watcher' || !isWatcherFrozenProjectPath(normalized)) return false;
+  if (!warnedTempRootPaths.has(normalized)) {
+    if (warnedTempRootPaths.size >= MAX_WARNED_TEMP_ROOT_PATHS) warnedTempRootPaths.clear();
+    warnedTempRootPaths.add(normalized);
+    console.warn('Skipped session discovered under a temporary root', { provider: input.provider });
+  }
+  return true;
+}
+
 /**
  * The canonical project path for `input`, or null when the path must not be
- * registered at all (B-1420 foreign test root, B-1373 protected root).
+ * registered at all: B-1420 foreign test root, B-1373 protected root, or
+ * (synchronizers only) a B-1620 unregistered temp root.
  */
 function admissibleProjectPath(input: DiscoveredSession): string | null {
   const normalized = normalizeProjectPathForProvider(input.provider, input.projectPath);
+  if (isRefusedTempRootPath(input, normalized)) return null;
   if (isForeignTestRunPath(normalized)) {
     if (!warnedForeignTestRunPaths.has(normalized)) {
       warnedForeignTestRunPaths.add(normalized);
@@ -269,7 +319,7 @@ function isCrossMemberCandidate(input: DiscoveredSession): boolean {
 
 /**
  * Inserts a session row for an id that has none. An existing row is left
- * untouched ('exists'); a foreign-test or protected project path is skipped.
+ * untouched ('exists'); a foreign-test, protected or (watcher) temp path is skipped.
  */
 export function insertDiscoveredSession(input: DiscoveredSession): InsertOutcome {
   const projectPath = admissibleProjectPath(input);

@@ -57,9 +57,9 @@
     "close": "关闭",
     "alerts": {
       "pressure": "已达到建议压缩阈值",
-      "close": "已达到25万 token，建议考虑在新对话中继续。",
+      "close": "已达到 {{value}} token，建议考虑在新对话中继续。",
       "hour": "会话已超过一小时，建议保存摘要以便继续。",
-      "compact": "已达到15万 token，建议考虑执行 /compact。"
+      "compact": "已达到 {{value}} token，建议考虑执行 /compact。"
     },
     "unavailable": "当前上下文使用量未知"
   },
@@ -513,6 +513,10 @@
   },
   "agentActivity": {
     "title": "智能体活动",
+    "name": "智能体名称",
+    "model": "模型",
+    "effort": "推理级别",
+    "inherited": "继承",
     "summary": "{{running}}/{{total}} 运行中",
     "running": "运行中",
     "done": "已完成",
@@ -523,6 +527,7 @@
     "detailsPlaceholder": "工具历史即将推出。",
     "noTools": "暂无工具调用记录。",
     "toolSuccess": "已完成",
+    "toolFailed": "失败",
     "toolRunning": "运行中"
   },
   "projectSelection": {

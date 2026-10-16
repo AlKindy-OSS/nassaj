@@ -1,3 +1,21 @@
+// Claude's operator policy (owner 2026-10-15): fixed counts, capped to a fraction of a known
+// smaller window so a 200K model still alerts before its native auto-compact.
+export const COMPACT_ALERT_TOKENS = 400_000;
+export const CLOSE_ALERT_TOKENS = 600_000;
+const COMPACT_WINDOW_FRACTION = 0.75;
+const CLOSE_WINDOW_FRACTION = 0.9;
+
+/** Effective Claude compact/close alert thresholds; an unknown window keeps the fixed counts. */
+export function claudeAlertThresholds(windowTokens: number | null = null): { compact: number; close: number } {
+  if (windowTokens === null || !Number.isFinite(windowTokens) || windowTokens <= 0) {
+    return { compact: COMPACT_ALERT_TOKENS, close: CLOSE_ALERT_TOKENS };
+  }
+  return {
+    compact: Math.min(COMPACT_ALERT_TOKENS, Math.floor(windowTokens * COMPACT_WINDOW_FRACTION)),
+    close: Math.min(CLOSE_ALERT_TOKENS, Math.floor(windowTokens * CLOSE_WINDOW_FRACTION)),
+  };
+}
+
 /** Validated display values; transcript input is surfaced as a ring estimate when no live
  *  observation is available, but is never presented as current native-context occupancy. */
 export function contextUsagePresentation(usage: Record<string, unknown> | null, provider: string, sessionId: string | null, modelId: string | null) {
@@ -16,13 +34,14 @@ export function contextUsagePresentation(usage: Record<string, unknown> | null, 
   const window = valid || transcriptEstimate ? positiveCount(snapshot?.windowTokens) : null;
   const native = valid ? positiveCount(snapshot?.nativeCompactTokens) : null;
   const suppliedProposed = valid ? positiveCount(snapshot?.proposedCompactTokens) : null;
-  const proposed = provider === 'claude' && valid ? 150_000
+  const claude = provider === 'claude' && valid ? claudeAlertThresholds(window) : null;
+  const proposed = claude ? claude.compact
     : native !== null && suppliedProposed === Math.floor(native * 0.6) ? suppliedProposed : null;
   return {
     used, window, native, proposed,
     lastInput: valid && snapshot?.usageKind === 'last_request_input' ? finiteCount(snapshot?.usedTokens) : null,
     cumulative: finiteCount(usage?.cumulativeUsed),
-    newSession: provider === 'claude' && valid ? 250_000 : null,
+    newSession: claude ? claude.close : null,
     source: valid ? snapshot?.source as string : null,
   };
 }

@@ -508,3 +508,38 @@ test('B-1585: an older target refused by the updater settles superseded with its
     assert.equal(jobs.job.state, 'superseded');
     assert.equal(jobs.job.error_message, 'The requested release is older than the running version.');
 });
+
+// ---------------------------------------------------------------------------
+// T-2024 S0 (ADR-207) — the restart_queued wake hint.
+// ---------------------------------------------------------------------------
+
+test('T-2024 S0: reaching restart_queued signals once, after the lease is released', async () => {
+    const jobs = fakeJobs();
+    jobs.job.auto_activate = 1;
+    const signals = [];
+    const worker = createSourceUpdateWorker({
+        jobs, identity, resolveRelease: async () => ({ release }), runUpdate: async () => updateResult,
+        afterRestartQueued: (input) => signals.push({ ...input, released: jobs.calls.some(([kind]) => kind === 'release') }),
+    });
+    assert.equal(await worker.processOne(), true);
+    assert.deepEqual(signals, [{ jobId: 'job-1', autoActivate: true, released: true }]);
+});
+
+test('T-2024 S0: no signal without restart_queued; a throwing hook never fails the job', async () => {
+    const failing = fakeJobs();
+    const quiet = [];
+    const failed = createSourceUpdateWorker({
+        jobs: failing, identity, resolveRelease: async () => ({ release }),
+        runUpdate: async () => { throw Object.assign(new Error('boom'), { code: 'boom' }); },
+        afterRestartQueued: (input) => quiet.push(input),
+    });
+    assert.equal(await failed.processOne(), false);
+    assert.deepEqual(quiet, []);
+    const jobs = fakeJobs();
+    const worker = createSourceUpdateWorker({
+        jobs, identity, resolveRelease: async () => ({ release }), runUpdate: async () => updateResult,
+        afterRestartQueued: () => { throw new Error('wake failed'); },
+    });
+    assert.equal(await worker.processOne(), true);
+    assert.equal(jobs.job.state, 'restart_queued');
+});

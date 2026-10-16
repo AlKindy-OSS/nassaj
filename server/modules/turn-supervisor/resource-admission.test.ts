@@ -7,10 +7,14 @@ import { SystemResourceSampler } from '@/services/system-resource-sampler.servic
 
 import {
   AdapterTerminalProofAuthority,
+  CODEX_LEASE_MAX_AGE_MS,
   activeLeaseCount,
   admitResources,
+  codexLeaseMemoryContribution,
   heartbeatOwner,
+  isCodexSdkLeaseOwner,
   releaseWithExitProof,
+  sumCodexSdkLeaseMemory,
 } from './resource-admission.js';
 import { ResourceLeaseWatchdog } from './watchdog.js';
 
@@ -271,6 +275,92 @@ test('a released pre-dispatch reservation can be admitted again', async () => {
     assert.equal((db.prepare(
       "SELECT COUNT(*) AS count FROM turn_resource_leases WHERE turn_id = 'retryable'",
     ).get() as { count: number }).count, 2);
+  } finally {
+    db.close();
+  }
+});
+
+// ADR-206 S2 (§3.2 M1, §3.3): Codex SDK leases live in the same table, owner class in owner_id.
+function insertCodexLease(
+  db: Database.Database,
+  input: { leaseId: string; memory: number; createdAtMs: number; heartbeatAtMs?: number; ownerPid?: number; userId?: number },
+): void {
+  db.prepare(
+    `INSERT INTO turn_resource_leases (lease_id, turn_id, user_id, owner_id, owner_pid, cpu_reserved,
+       memory_reserved, status, created_at_ms, heartbeat_at_ms) VALUES (?, ?, ?, ?, ?, 0, ?, 'active', ?, ?)`,
+  ).run(
+    input.leaseId, `codex:pe-${input.leaseId}`, input.userId ?? 1, 'codex-sdk:boot:42:777', input.ownerPid ?? 42,
+    input.memory, input.createdAtMs, input.heartbeatAtMs ?? input.createdAtMs,
+  );
+}
+
+test('codexLeaseMemoryContribution: stored value under 120 s, 0 from 120 s, non-codex rows unchanged', () => {
+  const row = { ownerId: 'codex-sdk:boot:1:2', memoryReserved: 9, createdAtMs: 1_000 };
+  assert.equal(codexLeaseMemoryContribution(row, 1_000), 9);
+  assert.equal(codexLeaseMemoryContribution(row, 1_000 + CODEX_LEASE_MAX_AGE_MS - 1), 9);
+  assert.equal(codexLeaseMemoryContribution(row, 1_000 + CODEX_LEASE_MAX_AGE_MS), 0);
+  assert.equal(codexLeaseMemoryContribution({ ...row, createdAtMs: 5_000 }, 1_000), 0, 'future row holds nothing');
+  assert.equal(codexLeaseMemoryContribution({ ...row, memoryReserved: Number.NaN }, 1_000), 0);
+  assert.equal(codexLeaseMemoryContribution({ ...row, memoryReserved: -3 }, 1_000), 0);
+  assert.equal(codexLeaseMemoryContribution({ ...row, ownerId: 'supervisor:hosted' }, 10_000_000), 9);
+  assert.equal(isCodexSdkLeaseOwner('codex-sdk:a:1:2'), true);
+  assert.equal(isCodexSdkLeaseOwner('xcodex-sdk:a'), false);
+});
+
+test('M1: an orphan codex-sdk lease older than 120 s with 9% stored counts 0 in the supervisor sum', async () => {
+  const db = database();
+  try {
+    const now = 1_000_000;
+    insertCodexLease(db, { leaseId: 'orphan', memory: 9, createdAtMs: now - CODEX_LEASE_MAX_AGE_MS - 1 });
+    assert.equal(sumCodexSdkLeaseMemory(db, now), 0);
+    const admitted = await admitResources(db, request('runner-1'), {}, { sample: sample(1, 75, now), now: () => now });
+    assert.equal(admitted.admitted, true, '75 + 0 (orphan) + 0.5 < 80');
+
+    insertCodexLease(db, { leaseId: 'fresh', memory: 9, createdAtMs: now - 1_000 });
+    assert.equal(sumCodexSdkLeaseMemory(db, now), 9);
+    const refused = await admitResources(db, request('runner-2'), {}, { sample: sample(1, 70, now), now: () => now });
+    assert.equal(refused.admitted, false, '70 + 0.5 (runner-1) + 9 (fresh codex) + 0.5 >= 80');
+    if (!refused.admitted) assert.equal(refused.code, 'capacity');
+  } finally {
+    db.close();
+  }
+});
+
+test('supervisor count caps ignore codex-sdk rows; runner admission is otherwise unchanged', async () => {
+  const db = database();
+  try {
+    const now = 2_000_000;
+    for (let i = 0; i < 9; i += 1) {
+      insertCodexLease(db, { leaseId: `c${i}`, memory: 0, createdAtMs: now - 500_000, userId: 1 });
+    }
+    const first = await admitResources(db, request('runner-a', 1), { globalCap: 1, perUserCap: 1 }, {
+      sample: sample(1, 10, now), now: () => now,
+    });
+    assert.equal(first.admitted, true, '9 codex rows do not reach the 1-turn caps');
+    const second = await admitResources(db, request('runner-b', 2), { globalCap: 1 }, {
+      sample: sample(1, 10, now), now: () => now,
+    });
+    assert.equal(second.admitted, false);
+    if (!second.admitted) assert.equal(second.code, 'global_cap');
+  } finally {
+    db.close();
+  }
+});
+
+test('supervisor watchdog skips codex-sdk rows even when their owner pid is dead', async () => {
+  const db = database();
+  try {
+    insertCodexLease(db, { leaseId: 'codex-dead-pid', memory: 9, createdAtMs: 0, heartbeatAtMs: 0, ownerPid: 999_999 });
+    const probed: number[] = [];
+    const watchdog = new ResourceLeaseWatchdog(db, {
+      ownerId: 'owner-a',
+      now: () => 100_000,
+      probeProcess: (pid) => { probed.push(pid); return 'dead'; },
+    });
+    const result = await watchdog.tick();
+    assert.equal(result.examined, 0);
+    assert.deepEqual(probed, []);
+    assert.equal(activeLeaseCount(db), 1, 'reclaim of codex rows is tag-based (§3.3), not pid-based');
   } finally {
     db.close();
   }

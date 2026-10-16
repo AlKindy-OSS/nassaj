@@ -25,7 +25,7 @@ const TURN_ID = /^[0-9a-f-]{36}$/u;
 const STATUS: Record<SteerRejectCode, number> = {
   invalid_request: 400, text_empty: 400, not_writable: 403, steer_disabled: 403, steer_not_consented: 403,
   steer_unsupported: 409, turn_not_active: 409, starter_unknown: 409, plan_mode: 409, steer_unavailable: 409,
-  duplicate: 409, turn_aborted: 409, text_too_long: 413, steer_rate_limited: 429, steer_turn_limit: 429,
+  duplicate: 409, turn_aborted: 409, image_rejected: 400, text_too_long: 413, steer_rate_limited: 429, steer_turn_limit: 429,
   steer_queue_full: 429, internal_error: 500,
 };
 
@@ -34,6 +34,12 @@ export type SteerContext = {
   isWritable: (sessionId: string, userId: number) => boolean;
   getSessionProvider: (sessionId: string) => string | null;
   getDisplayName: (userId: number) => string | null;
+  /**
+   * Server-built image path note (buildChatImageNote) for images already
+   * stored by the caller. Appended to the model-facing payload only; never
+   * read from the client request.
+   */
+  imageNote?: string;
   now?: () => number;
 };
 
@@ -162,12 +168,40 @@ export function handleSessionSteer(data: unknown, ctx: SteerContext): SessionSte
     const clean = sanitizeSteerText(req.text);
     if (!clean.ok) return refuse(clean.code);
     const senderName = ctx.getDisplayName(senderId) ?? 'member';
-    const wrapped = buildSteerWrapper(senderName, clean.text, selfSteer ? 'owner' : 'member');
+    const wrapped = buildSteerWrapper(senderName, clean.text + (ctx.imageNote ?? ''), selfSteer ? 'owner' : 'member');
     if (!wrapped) return refuse('text_too_long', clean.text);
     const payloadSha256 = adapter.payloadHash(wrapped);
     if (!payloadSha256) return refuse('text_too_long', clean.text);
     return admit(req, run, { provider: provider as string, senderId, senderName, text: clean.text,
       wrapped, payloadSha256, mode, refuse, onPersisted: () => recordRate(rateKey, now) });
+  } catch {
+    return reply(req, 'internal_error');
+  }
+}
+
+/** Stores steer images; resolves the path note, or null when any image was rejected. */
+export type SteerImageStore = (images: unknown[]) => Promise<string | null>;
+
+/**
+ * Admits a steer that may carry images. Images are stored only for a well-formed
+ * request from a member who may write the session; a rejected image refuses the
+ * whole steer (never a silent text-only delivery). Stored images of a steer that
+ * admission later refuses stay in the store, as with any uploaded image. Never throws.
+ */
+export async function handleSessionSteerWithImages(data: unknown, ctx: SteerContext,
+  storeImages: SteerImageStore): Promise<SessionSteerResult> {
+  const images = (data && typeof data === 'object' ? (data as Record<string, unknown>).images : undefined);
+  if (images === undefined || (Array.isArray(images) && images.length === 0)) return handleSessionSteer(data, ctx);
+  const req = readRequest(data);
+  const sender = ctx.senderUserId;
+  if (!req || !Array.isArray(images) || !Number.isSafeInteger(sender) || (sender as number) <= 0) {
+    return reply((data ?? {}) as Partial<Request>, 'invalid_request');
+  }
+  try {
+    if (!ctx.isWritable(req.sessionId, sender as number)) return reply(req, 'not_writable');
+    const imageNote = await storeImages(images);
+    if (!imageNote) return reply(req, 'image_rejected');
+    return handleSessionSteer(data, { ...ctx, imageNote });
   } catch {
     return reply(req, 'internal_error');
   }

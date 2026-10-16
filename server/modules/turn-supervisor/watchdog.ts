@@ -5,6 +5,7 @@ import { runLocalUpdateBackground } from '../../services/update-writer-lease.js'
 
 import {
   heartbeatOwner,
+  isCodexSdkLeaseOwner,
   listStaleActiveLeases,
   releaseWithExitProof,
   type ResourceLease,
@@ -95,8 +96,9 @@ export class ResourceLeaseWatchdog {
       retainedAlive: 0,
       retainedUnknown: 0,
     };
+    // ADR-206 §3.3: codex-sdk helper leases are reclaimed by their tag scan, never by pid.
     const stale = listStaleActiveLeases(this.db, now - this.staleAfterMs)
-      .filter((lease) => lease.ownerId !== this.options.ownerId);
+      .filter((lease) => lease.ownerId !== this.options.ownerId && !isCodexSdkLeaseOwner(lease.ownerId));
     result.examined = stale.length;
     for (const lease of stale) {
       const verdict = await reconcileLease(this.db, lease, this.processProbe, now);

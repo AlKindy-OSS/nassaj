@@ -113,7 +113,7 @@ function writeRollout(
 
 describe('Codex session synchronizer — fold subagent/fork threads (B-CODEX-DEDUP)', () => {
   it('a real new conversation (thread_source user, no fork) IS registered as a row', async () => {
-    const PROJECT = '/tmp/dedup-proj-a';
+    const PROJECT = '/workspace/dedup-proj-a';
     writeRollout('root-A', PROJECT, { threadSource: 'user' });
 
     await new CodexSessionSynchronizer().synchronize();
@@ -124,7 +124,7 @@ describe('Codex session synchronizer — fold subagent/fork threads (B-CODEX-DED
   });
 
   it('a subagent thread (thread_source subagent + parent/fork = root) is NOT registered, and bumps the parent', async () => {
-    const PROJECT = '/tmp/dedup-proj-b';
+    const PROJECT = '/workspace/dedup-proj-b';
     const rootMtime = Date.parse('2026-07-16T00:00:00.000Z');
     writeRollout('root-B', PROJECT, { threadSource: 'user' }, rootMtime);
     await new CodexSessionSynchronizer().synchronize();
@@ -162,7 +162,7 @@ describe('Codex session synchronizer — fold subagent/fork threads (B-CODEX-DED
   });
 
   it('a MANUAL user fork (thread_source user + forked_from_id) surfaces as its OWN row, never folded', async () => {
-    const PROJECT = '/tmp/dedup-proj-c';
+    const PROJECT = '/workspace/dedup-proj-c';
     writeRollout('root-C', PROJECT, { threadSource: 'user' });
     await new CodexSessionSynchronizer().synchronize();
     assert.ok(sessionsDb.getSessionById('root-C'), 'root of a fork chain must exist');
@@ -185,7 +185,7 @@ describe('Codex session synchronizer — fold subagent/fork threads (B-CODEX-DED
   });
 
   it('LEGACY fallback: an old rollout with NO thread_source but a back-reference is folded (no row)', async () => {
-    const PROJECT = '/tmp/dedup-proj-legacy';
+    const PROJECT = '/workspace/dedup-proj-legacy';
     writeRollout('root-L', PROJECT, { threadSource: 'user' });
     await new CodexSessionSynchronizer().synchronize();
     assert.ok(sessionsDb.getSessionById('root-L'), 'legacy chain root must exist');
@@ -208,7 +208,7 @@ describe('Codex session synchronizer — fold subagent/fork threads (B-CODEX-DED
   });
 
   it('METADATA signal: a source-object subagent (no thread_source) is folded (283b5586)', async () => {
-    const PROJECT = '/tmp/dedup-proj-src';
+    const PROJECT = '/workspace/dedup-proj-src';
     writeRollout('root-S', PROJECT, { threadSource: 'user' });
     await new CodexSessionSynchronizer().synchronize();
     assert.ok(sessionsDb.getSessionById('root-S'), 'parent root must exist');
@@ -232,7 +232,7 @@ describe('Codex session synchronizer — fold subagent/fork threads (B-CODEX-DED
   });
 
   it('METADATA over back-ref: thread_source user WITH source subagent is still folded', async () => {
-    const PROJECT = '/tmp/dedup-proj-srcuser';
+    const PROJECT = '/workspace/dedup-proj-srcuser';
     writeRollout('root-SU', PROJECT, { threadSource: 'user' });
     await new CodexSessionSynchronizer().synchronize();
     assert.ok(sessionsDb.getSessionById('root-SU'), 'parent root must exist');
@@ -252,7 +252,7 @@ describe('Codex session synchronizer — fold subagent/fork threads (B-CODEX-DED
   });
 
   it('single-file sync (watcher path) folds a subagent thread and returns null', async () => {
-    const PROJECT = '/tmp/dedup-proj-d';
+    const PROJECT = '/workspace/dedup-proj-d';
     writeRollout('root-D', PROJECT, { threadSource: 'user' });
     await new CodexSessionSynchronizer().synchronize();
     assert.ok(sessionsDb.getSessionById('root-D'));
@@ -269,7 +269,7 @@ describe('Codex session synchronizer — fold subagent/fork threads (B-CODEX-DED
   });
 
   it('a folded child whose parent is not yet indexed is a safe no-op (no orphan row, no create)', async () => {
-    const PROJECT = '/tmp/dedup-proj-e';
+    const PROJECT = '/workspace/dedup-proj-e';
     // No root written for this id: the bump target is absent → must not create it.
     const childPath = writeRollout(
       'child-E',
@@ -288,7 +288,7 @@ describe('Codex session synchronizer — fold subagent/fork threads (B-CODEX-DED
   });
 
   it('child arrives at the watcher BEFORE its parent, THEN the parent arrives and IS registered', async () => {
-    const PROJECT = '/tmp/dedup-proj-f';
+    const PROJECT = '/workspace/dedup-proj-f';
 
     // 1) Out-of-order: the subagent rollout is written+seen first. Its parent is
     //    not indexed yet → folded, no row, and the parent is NOT conjured.

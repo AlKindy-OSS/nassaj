@@ -12,6 +12,7 @@ import {
   parseCodeHighlightScope,
   type CodeHighlightScope,
 } from '../syntax/codeHighlightScope';
+import { COORDINATION_LEVELS, type CoordinationLevel } from '../../shared/coordinationDirectives';
 
 export type TabsDisplayMode = 'full' | 'compact' | 'minimal' | 'hidden';
 
@@ -65,6 +66,18 @@ type UiPreferences = {
   // bundled), 'extended' (+10, fetched on demand) or 'full' (~300, fetched on
   // demand). Only 'core' ships in the startup bundle — see src/syntax/.
   codeHighlightScope: CodeHighlightScope;
+  /**
+   * الوكيل الذي يُفتح عليه تبويب «الوكلاء» في الإعدادات (`''` = لا تفضيل).
+   * يُخزَّن معرّفاً خاماً، والتحقّق من أنه ظاهر وغير معطَّل عالمياً يجري وقت
+   * العرض في `resolveInitialSettingsAgent` — فمعرّفٌ صار معطَّلاً بعد حفظه
+   * يُتجاهَل دون أن يُمحى.
+   */
+  defaultSettingsAgent: string;
+  /**
+   * وضع التفويض للمحادثات الجديدة ولأي محادثة بلا اختيار مثبَّت لها.
+   * الاختيار المثبَّت لكل محادثة (`coordination_level_${sessionId}`) يبقى الغالب.
+   */
+  defaultCoordinationLevel: CoordinationLevel;
 };
 
 type UiPreferenceKey = keyof UiPreferences;
@@ -75,6 +88,24 @@ const parseTabsDisplayMode = (value: unknown, fallback: TabsDisplayMode): TabsDi
   }
   return fallback;
 };
+
+/** معرّف وكيل بشكلٍ سليم أو `''`؛ العضوية في الشريط تُفحص وقت العرض لا هنا. */
+const AGENT_ID_PATTERN = /^[a-z][a-z0-9_-]{0,31}$/;
+
+const parseAgentId = (value: unknown, fallback: string): string => {
+  if (value === '') return '';
+  return typeof value === 'string' && AGENT_ID_PATTERN.test(value) ? value : fallback;
+};
+
+/** قيمة تالفة أو مجهولة تسقط على الافتراضي (`delegate`) لا على `direct`. */
+export const parseCoordinationLevel = (
+  value: unknown,
+  fallback: CoordinationLevel = 'delegate',
+): CoordinationLevel => (
+  typeof value === 'string' && (COORDINATION_LEVELS as readonly string[]).includes(value)
+    ? value as CoordinationLevel
+    : fallback
+);
 
 type SetPreferenceAction = {
   type: 'set';
@@ -111,6 +142,8 @@ const DEFAULTS: UiPreferences = {
   showSidebarSearch: true,
   showHardwareUsage: true,
   codeHighlightScope: DEFAULT_CODE_HIGHLIGHT_SCOPE,
+  defaultSettingsAgent: '',
+  defaultCoordinationLevel: 'delegate',
 };
 
 /**
@@ -122,6 +155,8 @@ const ENUM_KEYS = new Set<UiPreferenceKey>([
   'tabsDisplayMode',
   'codeHighlightScope',
   'enterBehavior',
+  'defaultSettingsAgent',
+  'defaultCoordinationLevel',
 ]);
 
 const PREFERENCE_KEYS = Object.keys(DEFAULTS) as UiPreferenceKey[];
@@ -176,6 +211,12 @@ const parsePreferenceValue = <K extends UiPreferenceKey>(
   }
   if (key === 'enterBehavior') {
     return parseEnterBehavior(value, fallback as EnterBehavior) as UiPreferences[K];
+  }
+  if (key === 'defaultSettingsAgent') {
+    return parseAgentId(value, fallback as string) as UiPreferences[K];
+  }
+  if (key === 'defaultCoordinationLevel') {
+    return parseCoordinationLevel(value, fallback as CoordinationLevel) as UiPreferences[K];
   }
   return parseBoolean(value, fallback as boolean) as UiPreferences[K];
 };

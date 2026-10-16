@@ -64,22 +64,46 @@ const OWNER_ALERT_MESSAGES = Object.freeze({
     + 'If this was not expected, remove the link in Settings → Users.',
   user_provisioned: (userId) => `A new account (user #${userId}) was created from an SSO sign-in. `
     + 'Review it in Settings → Users.',
+  owner_sso_sign_in: (userId) => `An owner account (user #${userId}) signed in through SSO with a passkey. `
+    + 'If this was not you, sign out everywhere, turn owner SSO sign-in off in Settings → SSO '
+    + 'and reset your identity provider factors.',
+  owner_sso_opt_in_changed: (userId) => `Owner SSO sign-in was turned on or off for user #${userId}. `
+    + 'If this was not you, review it in Settings → SSO.',
 });
+
+/**
+ * Dedupe key of an owner SSO alert: `oidc:<kind>:<userId>[:<suffix>]`.
+ * @param {string} kind
+ * @param {number} subjectUserId
+ * @param {string} [dedupeSuffix]
+ * @returns {string}
+ */
+export function oidcAlertDedupeKey(kind, subjectUserId, dedupeSuffix) {
+  const base = `oidc:${kind}:${subjectUserId}`;
+  return typeof dedupeSuffix === 'string' && dedupeSuffix.length > 0 ? `${base}:${dedupeSuffix}` : base;
+}
 
 /**
  * Direct owner alert for an SSO account event (web push when the owner
  * enabled it), beside the WARN log / audit row the caller writes. Kinds:
  * `owner_account_linked` (the owner linked their own break-glass account),
- * `member_linked` (a member self-linked) and `user_provisioned` (a JIT
- * account). Best effort; never throws or rejects. The push module is loaded
- * on demand: it is only needed on these rare paths, and loading it eagerly
- * would pull web-push into every auth import.
+ * `member_linked` (a member self-linked), `user_provisioned` (a JIT
+ * account), `owner_sso_sign_in` and `owner_sso_opt_in_changed` (ADR-194 A1).
+ * Best effort; never throws or rejects. The push module is loaded on demand:
+ * it is only needed on these rare paths, and loading it eagerly would pull
+ * web-push into every auth import.
+ *
+ * `dedupeSuffix` makes each event its own alert: without it repeated events
+ * of one kind about one account merge into one (A1: every owner sign-in
+ * alerts on its own, keyed by its signInId).
  * @param {number} ownerId owner to alert
- * @param {'owner_account_linked' | 'member_linked' | 'user_provisioned'} kind
+ * @param {'owner_account_linked' | 'member_linked' | 'user_provisioned'
+ *   | 'owner_sso_sign_in' | 'owner_sso_opt_in_changed'} kind
  * @param {number} subjectUserId the account the event is about
+ * @param {string} [dedupeSuffix]
  * @returns {Promise<void>}
  */
-export async function notifyOwnerOfSsoEvent(ownerId, kind, subjectUserId) {
+export async function notifyOwnerOfSsoEvent(ownerId, kind, subjectUserId, dedupeSuffix) {
   try {
     const { createNotificationEvent, notifyUserIfEnabled } = await import('./notification-orchestrator.js');
     notifyUserIfEnabled({
@@ -89,7 +113,7 @@ export async function notifyOwnerOfSsoEvent(ownerId, kind, subjectUserId) {
         code: 'agent.notification',
         severity: 'warning',
         meta: { message: OWNER_ALERT_MESSAGES[kind](subjectUserId) },
-        dedupeKey: `oidc:${kind}:${subjectUserId}`,
+        dedupeKey: oidcAlertDedupeKey(kind, subjectUserId, dedupeSuffix),
       }),
     });
   } catch {

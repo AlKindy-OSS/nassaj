@@ -57,9 +57,9 @@
     "close": "Chiudi",
     "alerts": {
       "pressure": "Soglia di compressione proposta raggiunta",
-      "close": "Raggiunti 250.000 token — valuta una nuova conversazione.",
+      "close": "Raggiunti {{value}} token — valuta una nuova conversazione.",
       "hour": "La sessione dura da oltre un’ora — valuta un riepilogo per continuare.",
-      "compact": "Raggiunti 150.000 token — valuta /compact."
+      "compact": "Raggiunti {{value}} token — valuta /compact."
     },
     "unavailable": "Utilizzo del contesto attuale non disponibile"
   },
@@ -513,6 +513,10 @@
   },
   "agentActivity": {
     "title": "Attività agente",
+    "name": "Nome agente",
+    "model": "Modello",
+    "effort": "Livello di ragionamento",
+    "inherited": "ereditato",
     "summary": "{{running}}/{{total}} in esecuzione",
     "running": "In esecuzione",
     "done": "Completato",
@@ -523,6 +527,7 @@
     "detailsPlaceholder": "Cronologia strumenti in arrivo.",
     "noTools": "Nessuna chiamata strumento registrata.",
     "toolSuccess": "Completato",
+    "toolFailed": "Non riuscito",
     "toolRunning": "In esecuzione"
   },
   "projectSelection": {

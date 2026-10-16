@@ -46,6 +46,42 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
+import TOML from '@iarna/toml';
+
+/**
+ * ADR-206 S5 (§4): the only top-level fields a generated delegate TOML may carry. Comments
+ * are not keys. Anything else (mcp_servers, sandbox_mode, sandbox_workspace_write, model,
+ * approval_policy …) would widen the child beyond the parent's ceiling, so the generator
+ * refuses to write it.
+ */
+export const COORDINATOR_AGENT_TOML_FIELDS = Object.freeze(['name', 'description', 'developer_instructions']);
+
+/**
+ * Field guard for a generated delegate TOML: parses it with a real TOML parser and lists
+ * every violation (`field:<key>` for a key outside the allow-list, `missing:<key>`,
+ * `type:<key>` for a non-string value, or `unparsable`). Empty means the TOML is safe to
+ * write. Pure; never throws.
+ *
+ * @param {string} toml generated TOML text
+ * @returns {string[]} violations, empty when none
+ */
+export function coordinatorAgentTomlViolations(toml) {
+  let parsed;
+  try {
+    if (typeof toml !== 'string') return ['unparsable'];
+    parsed = TOML.parse(toml);
+  } catch {
+    return ['unparsable'];
+  }
+  const allowed = new Set(COORDINATOR_AGENT_TOML_FIELDS);
+  const violations = Object.keys(parsed).filter((key) => !allowed.has(key)).map((key) => `field:${key}`);
+  for (const key of COORDINATOR_AGENT_TOML_FIELDS) {
+    if (!Object.hasOwn(parsed, key)) violations.push(`missing:${key}`);
+    else if (typeof parsed[key] !== 'string') violations.push(`type:${key}`);
+  }
+  return violations;
+}
+
 /** Subdir under $CODEX_HOME from which Codex ingests custom-agent TOMLs. */
 export const CODEX_AGENTS_SUBDIR = 'agents';
 
@@ -237,7 +273,16 @@ export function buildAgentToml(name) {
     tomlMultiline(developerInstructions),
     '"""',
   ];
-  return { toml: lines.join('\n') + '\n', hash, name: identityName };
+  const toml = lines.join('\n') + '\n';
+  // ADR-206 S5: never write a delegate whose fields leave the allow-list (no mcp_servers,
+  // no sandbox widening) or that would not parse; the card is then unavailable (fail-open
+  // upstream: the launch proceeds without this delegate set).
+  const violations = coordinatorAgentTomlViolations(toml);
+  if (violations.length > 0) {
+    console.error('[Codex] coordinator delegate TOML failed the field guard', { name, violations });
+    return null;
+  }
+  return { toml, hash, name: identityName };
 }
 
 /** Reads the embedded agentDefinitionHash from an existing TOML, or null. */

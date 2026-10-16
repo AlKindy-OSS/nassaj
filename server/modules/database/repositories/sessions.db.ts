@@ -5,6 +5,7 @@ import {
   type RefreshOutcome,
   insertDiscoveredSession,
   isChildInParentTree,
+  isWatcherFrozenProjectPath,
   normalizeDiscoveryTimestamp,
   recordDiscoveredSession,
   refreshDiscoveredSession,
@@ -115,6 +116,14 @@ export const sessionsDb = {
   },
 
   /**
+   * B-1620: true when synchronizers must not write for a row stored at
+   * `projectPath` (an unregistered temp root foreign to the active database).
+   */
+  isWatcherFrozenProjectPath(projectPath: string | null): boolean {
+    return isWatcherFrozenProjectPath(projectPath);
+  },
+
+  /**
    * Best-effort freshness bump used when a Codex CHILD thread (a subagent spawn
    * or a fork) is FOLDED under its parent conversation instead of being indexed
    * as its own session row (codex-session-synchronizer). It advances the parent's
@@ -123,7 +132,8 @@ export const sessionsDb = {
    *   - a missing parent is a no-op (no INSERT, no project upsert) — it can never
    *     create or resurrect a row, unlike recordDiscoveredSession;
    *   - a background rescan of an OLD child never rewinds a parent that has since
-   *     moved on.
+   *     moved on;
+   *   - a parent frozen under an unregistered temp root (B-1620) is not bumped.
    * Returns nothing; callers treat it as fire-and-forget.
    */
   bumpSessionUpdatedAt(sessionId: string, updatedAt?: string): void {
@@ -132,6 +142,9 @@ export const sessionsDb = {
       return;
     }
     const db = getConnection();
+    const parent = db.prepare('SELECT project_path FROM sessions WHERE session_id = ?')
+      .get(sessionId) as { project_path: string | null } | undefined;
+    if (!parent || isWatcherFrozenProjectPath(parent.project_path)) return;
     db.prepare(
       `UPDATE sessions
          SET updated_at = ?

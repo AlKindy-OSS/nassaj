@@ -1,5 +1,5 @@
 /**
- * AbandonUpdateAction — owner-only "stop stuck update": visibility rules,
+ * AbandonUpdateAction — owner-only "cancel update": visibility rules,
  * confirm flow, success refresh and server-error mapping. The API is mocked;
  * i18n is real so the Arabic copy is asserted as the owner will read it.
  */
@@ -36,7 +36,7 @@ await i18n.use(initReactI18next).init({
   react: { useSuspense: false },
 });
 
-const CONFIRM_TEXT = 'سيوقف هذا محاولة التحديث العالقة دون إعادة تشغيل الخادم، وبعدها تستطيع بدء تحديث جديد. هل تريد المتابعة؟';
+const CONFIRM_TEXT = 'سيُلغى هذا التحديث دون إعادة تشغيل الخادم، وبعدها تستطيع بدء تحديث جديد. هل تريد المتابعة؟';
 const reply = (status: number, body: unknown) => ({ ok: status < 300, status, json: async () => body }) as Response;
 const job = (extra: Partial<UpdateJobSnapshot> = {}): UpdateJobSnapshot => ({ state: 'staging', abandonable: true, ...extra });
 
@@ -59,7 +59,7 @@ afterEach(() => cleanup());
 describe('visibility rules', () => {
   it('shows the button for an owner when abandonable', () => {
     renderAction(job());
-    expect(screen.getByRole('button', { name: 'إيقاف التحديث العالق' })).not.toBeNull();
+    expect(screen.getByRole('button', { name: 'إلغاء التحديث' })).not.toBeNull();
   });
 
   it('hides it from an admin (the endpoint is owner-only)', () => {
@@ -118,15 +118,15 @@ describe('visibility rules', () => {
 describe('confirm flow', () => {
   it('asks in plain Arabic and sends nothing until confirmed', () => {
     renderAction(job());
-    fireEvent.click(screen.getByRole('button', { name: 'إيقاف التحديث العالق' }));
+    fireEvent.click(screen.getByRole('button', { name: 'إلغاء التحديث' }));
     expect(screen.getByText(CONFIRM_TEXT)).not.toBeNull();
     expect(authenticatedFetch).not.toHaveBeenCalled();
   });
 
   it('cancelling closes the dialog without a request', async () => {
     renderAction(job());
-    fireEvent.click(screen.getByRole('button', { name: 'إيقاف التحديث العالق' }));
-    fireEvent.click(screen.getByRole('button', { name: 'إلغاء' }));
+    fireEvent.click(screen.getByRole('button', { name: 'إلغاء التحديث' }));
+    fireEvent.click(screen.getByRole('button', { name: 'إبقاء التحديث' }));
     await waitFor(() => expect(screen.queryByText(CONFIRM_TEXT)).toBeNull());
     expect(authenticatedFetch).not.toHaveBeenCalled();
   });
@@ -134,7 +134,7 @@ describe('confirm flow', () => {
   it('serves the English copy too', () => {
     i18n.changeLanguage('en');
     renderAction(job());
-    fireEvent.click(screen.getByRole('button', { name: 'Stop stuck update' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel update' }));
     expect(screen.getByText(/without restarting the server/)).not.toBeNull();
   });
 });
@@ -144,14 +144,14 @@ describe('success', () => {
     const fresh = { job: { state: 'failed', abandonable: false }, abandoned: true };
     authenticatedFetch.mockResolvedValue(reply(200, fresh));
     const onAbandoned = renderAction(job());
-    fireEvent.click(screen.getByRole('button', { name: 'إيقاف التحديث العالق' }));
-    fireEvent.click(screen.getByRole('button', { name: 'نعم، أوقف التحديث' }));
+    fireEvent.click(screen.getByRole('button', { name: 'إلغاء التحديث' }));
+    fireEvent.click(screen.getByRole('button', { name: 'نعم، ألغِ التحديث' }));
     await waitFor(() => expect(onAbandoned).toHaveBeenCalledWith(fresh.job));
     const [url, init] = authenticatedFetch.mock.calls[0];
     expect(url).toBe('/api/system/update/jobs/job-1/abandon');
     expect(init.method).toBe('POST');
     expect(JSON.parse(init.body)).toEqual({ confirm: true });
-    expect((await screen.findByRole('status')).textContent).toContain('أُوقفت محاولة التحديث العالقة');
+    expect((await screen.findByRole('status')).textContent).toContain('أُلغي التحديث');
     expect(screen.queryByText(CONFIRM_TEXT)).toBeNull();
   });
 });
@@ -161,8 +161,8 @@ describe('error mapping', () => {
     if (response instanceof Error) authenticatedFetch.mockRejectedValue(response);
     else authenticatedFetch.mockResolvedValue(response);
     const onAbandoned = renderAction(job());
-    fireEvent.click(screen.getByRole('button', { name: 'إيقاف التحديث العالق' }));
-    fireEvent.click(screen.getByRole('button', { name: 'نعم، أوقف التحديث' }));
+    fireEvent.click(screen.getByRole('button', { name: 'إلغاء التحديث' }));
+    fireEvent.click(screen.getByRole('button', { name: 'نعم، ألغِ التحديث' }));
     const alert = await screen.findByRole('alert');
     return { alert, onAbandoned };
   }
@@ -198,7 +198,7 @@ describe('error mapping', () => {
 
   it('keeps the button available to retry after an error', async () => {
     await confirmWith(reply(403, { error: { code: 'forbidden', message: 'x' } }));
-    expect(screen.getByRole('button', { name: 'إيقاف التحديث العالق' })).not.toBeNull();
+    expect(screen.getByRole('button', { name: 'إلغاء التحديث' })).not.toBeNull();
   });
 });
 

@@ -40,5 +40,30 @@
     "message": "文件 \"{{fileName}}\" 无法在文本编辑器中显示，因为它是二进制文件。",
     "download": "下载",
     "downloadError": "无法下载文件。"
+  },
+  "officePreview": {
+    "readOnly": "Read-only preview",
+    "loading": "Preparing preview…",
+    "unavailableTitle": "Preview unavailable",
+    "tooLarge": "The file \"{{fileName}}\" is too large to preview (maximum {{limit}} MB). You can download it instead.",
+    "failed": "Couldn't preview \"{{fileName}}\". The file may be damaged or in an unsupported format. You can download it instead.",
+    "documentFrameTitle": "Preview of {{fileName}}",
+    "sheetTabs": "Sheets",
+    "untitledSheet": "Sheet {{number}}",
+    "emptySheet": "This sheet is empty.",
+    "truncated": "Only the first {{rows}} rows and {{columns}} columns are shown.",
+    "slide": "Slide {{number}}",
+    "emptySlide": "No text on this slide.",
+    "slidesNotice": "Text only: layout, images and formatting are not shown.",
+    "slidesTruncated": "Only the first {{count}} slides are shown.",
+    "legacyTitle": "旧版 Office 格式",
+    "legacyMessage": "“{{fileName}}”是无法预览的旧版 Office 格式（.doc、.xls 或 .ppt）。请下载后查看。",
+    "rowsShown": "显示 {{total}} 行中的 {{shown}} 行。",
+    "showMoreRows": "显示更多行",
+    "noSlides": "此演示文稿没有幻灯片。",
+    "textNotice": "仅文本：不显示布局、图片和格式。",
+    "emptyDocument": "此文档没有文本。",
+    "textTruncated": "仅显示文档开头部分。",
+    "secretNotPreviewed": "“{{fileName}}”是机密文件，因此不显示预览。"
   }
 }

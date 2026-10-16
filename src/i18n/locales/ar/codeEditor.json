@@ -54,5 +54,30 @@
     "save": "حفظ",
     "discard": "تجاهل التعديلات",
     "keepEditing": "متابعة التحرير"
+  },
+  "officePreview": {
+    "readOnly": "معاينة للقراءة فقط",
+    "loading": "جارٍ تجهيز المعاينة…",
+    "unavailableTitle": "المعاينة غير متاحة",
+    "tooLarge": "الملف «{{fileName}}» أكبر من أن يُعايَن (الحد الأقصى {{limit}} ميغابايت). يمكنك تحميله بدلاً من ذلك.",
+    "failed": "تعذّرت معاينة الملف «{{fileName}}»؛ قد يكون تالفاً أو بصيغة غير مدعومة. يمكنك تحميله بدلاً من ذلك.",
+    "documentFrameTitle": "معاينة {{fileName}}",
+    "sheetTabs": "الأوراق",
+    "untitledSheet": "ورقة {{number}}",
+    "emptySheet": "هذه الورقة فارغة.",
+    "truncated": "تُعرض أول {{rows}} صف وأول {{columns}} عمود فقط.",
+    "slide": "الشريحة {{number}}",
+    "emptySlide": "لا يوجد نص في هذه الشريحة.",
+    "slidesNotice": "نصوص فقط؛ لا يُعرض التخطيط ولا الصور ولا التنسيق.",
+    "slidesTruncated": "تُعرض أول {{count}} شريحة فقط.",
+    "legacyTitle": "صيغة Office قديمة",
+    "legacyMessage": "الملف «{{fileName}}» بصيغة Office قديمة (‎.doc أو ‎.xls أو ‎.ppt) لا يمكن معاينتها. حمّله لعرضه.",
+    "rowsShown": "يُعرض {{shown}} من {{total}} صف.",
+    "showMoreRows": "عرض صفوف أكثر",
+    "noSlides": "لا توجد شرائح في هذا العرض.",
+    "textNotice": "نصوص فقط؛ لا يُعرض التخطيط ولا الصور ولا التنسيق.",
+    "emptyDocument": "لا يوجد نص في هذا المستند.",
+    "textTruncated": "يُعرض بداية المستند فقط.",
+    "secretNotPreviewed": "الملف «{{fileName}}» ملف أسرار، لذا لا تُعرض معاينته."
   }
 }

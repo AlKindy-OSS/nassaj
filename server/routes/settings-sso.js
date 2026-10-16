@@ -14,6 +14,11 @@
  *   curl -X POST -H "Authorization: Bearer <owner-jwt>" -H 'Content-Type: application/json' \
  *        -d '{"draftVersion":4,"configHash":"<64 hex>","stepUp":{"method":"password","password":"…"}}' \
  *        http://localhost:3004/api/settings/sso/apply
+ *
+ * ADR-194 A1, the caller's own owner SSO sign-in opt-in (step-up to turn on only):
+ *   curl -X PUT -H "Authorization: Bearer <owner-jwt>" -H 'Content-Type: application/json' \
+ *        -d '{"enabled":true,"stepUp":{"method":"password","password":"…"}}' \
+ *        http://localhost:3004/api/settings/sso/owner-sign-in
  */
 import express from 'express';
 
@@ -35,6 +40,7 @@ import { importLegacyEnvToDraft, SsoImportError } from '../services/sso-import-e
 import { disableSso, SsoDisableStepUpRequiredError } from '../services/sso-lifecycle.service.js';
 import { SsoSettingsError } from '../services/sso-settings-error.js';
 import { ssoConfigView, ssoSettingsStatus } from '../services/sso-settings-status.js';
+import { ownLinkForOptIn, setOwnerSsoOptIn } from '../services/sso-owner-sign-in.service.js';
 import { readTestResult } from '../services/sso-test-signin.service.js';
 import { StepUpError, verifyStepUpEvidence } from '../services/step-up.service.js';
 
@@ -202,6 +208,18 @@ router.put('/installation-origin', writeLimiter, currentIdentity, handle('origin
   }
   await verifySsoStepUp(req);
   res.json({ origin: confirmInstallationOrigin({ origin, actorUserId: req.user.id }) });
+}));
+
+/**
+ * ADR-194 A1: the caller's own SSO sign-in opt-in on their link to the active
+ * issuer. On needs `sso_config` step-up (local evidence only); off does not.
+ */
+router.put('/owner-sign-in', writeLimiter, currentIdentity, handle('owner_sign_in', async (req, res) => {
+  const enabled = req.body?.enabled;
+  if (typeof enabled !== 'boolean') throw new SsoSettingsError('owner_sso_invalid', 400);
+  const link = ownLinkForOptIn(req.user.id);
+  if (enabled) await verifySsoStepUp(req);
+  res.json({ ownerSignIn: setOwnerSsoOptIn({ userId: req.user.id, link, enabled }) });
 }));
 
 export default router;

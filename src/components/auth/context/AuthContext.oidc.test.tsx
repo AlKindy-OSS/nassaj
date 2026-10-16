@@ -129,6 +129,19 @@ describe('AuthContext.loginWithOidcCode', () => {
     expect(auth!.isMultiUser).toBe(true);
   });
 
+  it.each([
+    ['owner', '1'],
+    ['user', null],
+  ])('ADR-194 A1: an SSO session for role %s sets the re-authentication hint: %s', async (role, expected) => {
+    apiMock.exchange.mockResolvedValue(json({ token: 'jwt-synthetic', userId: 1 }));
+    identityFetch.mockResolvedValue(json({ user: { id: 1, username: 'someone', role }, isMultiUser: true }));
+    await mountProvider();
+    await act(async () => {
+      await auth!.loginWithOidcCode('one-time');
+    });
+    expect(localStorage.getItem('nassaj.sso.reauthHint')).toBe(expected);
+  });
+
   it('leaves storage untouched when the code is rejected', async () => {
     apiMock.exchange.mockResolvedValue(json({ error: 'Invalid or expired code' }, 401));
     await mountProvider();

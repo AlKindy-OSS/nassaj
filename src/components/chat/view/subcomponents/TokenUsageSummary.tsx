@@ -3,7 +3,11 @@ import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import { XIcon } from 'lucide-react';
 
-import { cacheUsagePresentation, contextUsagePresentation } from '../../hooks/contextUsagePresentation';
+import {
+  cacheUsagePresentation,
+  claudeAlertThresholds,
+  contextUsagePresentation,
+} from '../../hooks/contextUsagePresentation';
 
 import { PromptInputButton } from '../../../../shared/view/ui';
 
@@ -22,19 +26,25 @@ type TokenUsageSummaryProps = {
   onlyWhenAlerting?: boolean;
 };
 
-// Claude's fixed policy is scoped to the actual carrier, never the model name.
-export const COMPACT_ALERT_TOKENS = 150_000;
-export const CLOSE_ALERT_TOKENS = 250_000;
+// Claude's policy is scoped to the actual carrier, never the model name (single source:
+// claudeAlertThresholds). Below the threshold the token axis raises nothing at all.
 export const SESSION_AGE_ALERT_MS = 60 * 60 * 1000;
 const AGE_TICK_MS = 60 * 1000;
 type OperatorAlert = 'compact' | 'close' | 'hour' | 'pressure';
 
 /** Display recommendations only from validated current-context readings. */
-export const operatorAlertsFor = (usedTokens: number | null, ageMs: number | null, provider: string, proposed: number | null = null): OperatorAlert[] => {
+export const operatorAlertsFor = (
+  usedTokens: number | null,
+  ageMs: number | null,
+  provider: string,
+  proposed: number | null = null,
+  windowTokens: number | null = null,
+): OperatorAlert[] => {
   const alerts: OperatorAlert[] = [];
   if (usedTokens !== null && Number.isFinite(usedTokens) && usedTokens >= 0) {
-    if (provider === 'claude' && usedTokens >= CLOSE_ALERT_TOKENS) alerts.push('close');
-    else if (provider === 'claude' && usedTokens >= COMPACT_ALERT_TOKENS) alerts.push('compact');
+    const claude = provider === 'claude' ? claudeAlertThresholds(windowTokens) : null;
+    if (claude && usedTokens >= claude.close) alerts.push('close');
+    else if (claude && usedTokens >= claude.compact) alerts.push('compact');
     else if (provider !== 'claude' && proposed !== null && proposed > 0 && usedTokens >= proposed) alerts.push('pressure');
   }
   if (ageMs !== null && ageMs >= SESSION_AGE_ALERT_MS) alerts.push('hour');
@@ -386,7 +396,8 @@ export default function TokenUsageSummary({ usage, provider = '', modelId = null
 
   // --- Operator alerts: blink the ring and open the card once per threshold ----
   const ageMs = useSessionAgeMs(sessionStartedAt);
-  const alerts = operatorAlertsFor(usedTokens, ageMs, provider, reading.proposed);
+  const alerts = operatorAlertsFor(usedTokens, ageMs, provider, reading.proposed, totalTokens);
+  const claudeThresholds = claudeAlertThresholds(totalTokens);
   const alertKey = alerts.join('+');
   const announcedRef = useRef<string>('');
   useEffect(() => {
@@ -400,11 +411,12 @@ export default function TokenUsageSummary({ usage, provider = '', modelId = null
   }, [alertKey, sessionId, provider, modelId]);
   const alertLines = alerts.map((alert) =>
     t(`contextRot.alerts.${alert}`, {
+      value: formatTokenCount(alert === 'close' ? claudeThresholds.close : claudeThresholds.compact),
       defaultValue:
         alert === 'close'
-          ? 'At 250K tokens — consider continuing in a new conversation.'
+          ? 'At {{value}} tokens — consider continuing in a new conversation.'
           : alert === 'compact'
-            ? 'Over 150K tokens — run /compact now.'
+            ? 'At {{value}} tokens — consider running /compact.'
             : alert === 'pressure' ? 'Proposed compaction threshold reached.' : 'This session is over an hour old — consider saving a continuation summary.',
     }),
   );

@@ -57,9 +57,9 @@
     "close": "Kapat",
     "alerts": {
       "pressure": "Önerilen sıkıştırma eşiğine ulaşıldı",
-      "close": "250 bin tokena ulaşıldı — yeni bir sohbette devam etmeyi değerlendirin.",
+      "close": "{{value}} tokena ulaşıldı — yeni bir sohbette devam etmeyi değerlendirin.",
       "hour": "Oturum bir saati geçti — devam etmek için bir özet kaydetmeyi değerlendirin.",
-      "compact": "150 bin tokena ulaşıldı — /compact çalıştırmayı değerlendirin."
+      "compact": "{{value}} tokena ulaşıldı — /compact çalıştırmayı değerlendirin."
     },
     "unavailable": "Güncel bağlam kullanımı bilinmiyor"
   },
@@ -513,6 +513,10 @@
   },
   "agentActivity": {
     "title": "Ajan etkinliği",
+    "name": "Ajan adı",
+    "model": "Model",
+    "effort": "Akıl yürütme düzeyi",
+    "inherited": "devralındı",
     "summary": "{{total}} içinde {{running}} çalışıyor",
     "running": "Çalışıyor",
     "done": "Bitti",
@@ -523,6 +527,7 @@
     "detailsPlaceholder": "Araç geçmişi yakında.",
     "noTools": "Henüz araç çağrısı kaydedilmedi.",
     "toolSuccess": "Bitti",
+    "toolFailed": "Başarısız",
     "toolRunning": "Çalışıyor"
   },
   "projectSelection": {

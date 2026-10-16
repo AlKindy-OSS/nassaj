@@ -137,6 +137,22 @@
     "closeMenu": "إغلاق القائمة",
     "unavailable": "الإجراءات الجماعية غير متاحة حتى يكتمل تحديث الخادم."
   },
+  "archived": {
+    "loadingTitle": "جارٍ تحميل الأرشيف...",
+    "loadingDescription": "نجلب المشاريع والمحادثات المخفية التي يمكنك استعادتها لاحقاً.",
+    "noMatchingSessions": "لا عناصر مؤرشفة مطابقة",
+    "emptyTitle": "لا عناصر مؤرشفة",
+    "tryDifferentSearch": "جرّب عبارة بحث أخرى.",
+    "emptyDescription": "تظهر هنا المشاريع والمحادثات التي تخفيها من القائمة النشطة.",
+    "sessionCountOne": "عنصر مؤرشف",
+    "sessionCountOther": "عناصر مؤرشفة",
+    "projectArchived": "مؤرشف",
+    "projectArchivedLabel": "مشروع مؤرشف",
+    "restoreProject": "استعادة المشروع",
+    "restore": "استعادة المحادثة",
+    "deletePermanently": "حذف نهائي",
+    "noSessions": "لا محادثات مؤرشفة"
+  },
   "tooltips": {
     "viewEnvironments": "عرض البيئات",
     "hideSidebar": "إخفاء الشريط الجانبي",
@@ -310,7 +326,8 @@
     "updatePrepared": "مُحضَّر — بانتظار التفعيل",
     "updatePreparedTitle": "إصدار مُحضَّر",
     "currentVersionLabel": "نسّاج v{{version}}",
-    "updateToLabel": "تحديث إلى"
+    "updateToLabel": "تحديث إلى",
+    "prestageReady": "محضَّر مسبقاً"
   },
   "restart": {
     "modalTitle": "إعادة تشغيل الخادم",

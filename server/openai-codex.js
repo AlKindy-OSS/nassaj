@@ -61,6 +61,21 @@ import {
   resolveCodexMultiAgentEngine,
 } from './modules/providers/list/codex/codex-multi-agent.js';
 import {
+  codexHelpersOffUserNotice,
+  codexTurnDeveloperInstructions,
+  decideCodexHelpers,
+} from './modules/providers/list/codex/codex-helpers-switch.js';
+import { findCodexProjectRoles } from './modules/providers/list/codex/codex-project-roles.js';
+import { codexTurnProcessRuntime } from './modules/providers/list/codex/codex-memory-breaker.js';
+import { codexHelpersLeaseRuntime } from './modules/providers/list/codex/codex-helpers-lease.js';
+import {
+  codexFallbackRunTag,
+  codexStoppedProcessesNotice,
+  codexTurnLaunchMs,
+  decideCodexTurnCleanup,
+  mapCodexStartedOutcome,
+} from './modules/providers/list/codex/codex-turn-cleanup.js';
+import {
   accumulateCodexCoordinatorUsage,
   extractCodexTokenBudget,
   selectCodexPostTurnUsage,
@@ -75,6 +90,7 @@ import { materializeCodexSkillsForLaunch } from './services/isolation/codex-skil
 import { materializePersonaCopy } from './services/isolation/codex-governance-material.js';
 import {
   codexHomeForSessionFile,
+  operatorCodexHome,
   resolveCodexHomeForUser,
 } from './modules/providers/list/codex/codex-home.js';
 import {
@@ -91,9 +107,8 @@ import { captureCodexReceiptWindow, resolveCodexUserProof, codexReceiptPayloadHa
 
 // Track active sessions
 const activeCodexSessions = new Map();
-// B-1616 (ADR-206 containment): `features.multi_agent=false` (ADR-134 v1) only keeps v1
-// models single-agent. On v2-engine models (most of the current catalog) Codex delegates
-// regardless. Owner decision 2026-10-13: Nassaj applies no sub-agent count cap; Codex's own
+// B-1616 / ADR-206: `features.multi_agent` governs v1 models only (true for a helpers-on
+// turn since S9, false when B = 0). On v2-engine models the per-turn slot key is the switch. Owner decision 2026-10-13: Nassaj applies no sub-agent count cap; Codex's own
 // default (or the user's config) decides. codexMultiAgentConfig pins the thread-cap keys only
 // when the operator sets NASSAJ_CODEX_AGENT_CAP. The ADR-199 P4b tail is gated per run on
 // the model's engine (codexRunMayDelegate), not on this flag.
@@ -575,6 +590,8 @@ async function queryCodexOwned(invocation) {
   let codex, thread, preparedInput, streamedTurn, streamIterator;
   let transferEffectEntered = false, iteratorDone = false;
   let receiptWindow = null, reservedNewReceiptSession = null, receiptPayloadHash = null;
+  // ADR-206 S2: the run tag of a helpers lease this turn still has to finish (B = 1 only).
+  let helpersLeaseTag = null;
   try {
   const clientMsgIdField = typeof options.clientMsgId === 'string' && options.clientMsgId
     ? { clientMsgId: options.clientMsgId }
@@ -771,6 +788,12 @@ async function queryCodexOwned(invocation) {
   let sessionCreatedSent = false;
   let terminalFailure = null;
   let turnAborted = false;
+  // ADR-206 §6: an error cleans up only before the turn's first completed agent reply.
+  let sawCompletedReply = false;
+  // ADR-206 S3: the breaker registration of this turn (from the SDK effect seam on).
+  let breakerTurn = null;
+  let launchMs = null;
+  let execChildProtectTried = false;
   let participantRecorded = false;
   let imagesTempDir = null;
   let turnBaseline = capturedSessionId
@@ -778,10 +801,30 @@ async function queryCodexOwned(invocation) {
     : null;
   // ADR-199 P4b: one parent-rollout tail per run, rooted at the principal CODEX_HOME the
   // spawn env uses; started at thread.started, stopped after the stream and in finally.
-  const multiAgentConfig = codexMultiAgentConfig(resolveCodexAgentCap(process.env));
-  const multiAgentEngine = await resolveCodexMultiAgentEngine(
-    resolveCodexHomeForUser(requesterUserId), resolvedModel,
-  );
+  // ADR-206 S1: the per-turn helpers switch B (on/off, never a count, never a refusal).
+  // B = 0 for `direct`, smoothed CPU >= 80%, a failed memory check (S2), project-layer
+  // roles (C3; $CODEX_HOME and the operator ~/.codex are user layers) or the operator
+  // switch; it pins root-only slots for this launch only and puts a notice in the slot.
+  const runCodexHome = resolveCodexHomeForUser(requesterUserId);
+  // ADR-206 §6: a tag is never reused across launches (the decision is consumed once; the
+  // fallback is a random UUID), which is what makes the 1 s start-time slack of cleanup safe.
+  // ADR-206 S2: it also names this turn's helpers lease (turn_id `codex:<tag>`).
+  const processRunTag = permissionProcessTag(permissionExecution?.decisionId) ?? codexFallbackRunTag();
+  let roleHit = null;
+  const helpersDecision = await decideCodexHelpers({
+    level: options?.coordinationLevel,
+    memoryContext: { tag: processRunTag, userId: requesterUserId },
+    projectRoles: async () => {
+      roleHit = await findCodexProjectRoles(workingDirectory, {
+        excludedCodexHomes: [runCodexHome, operatorCodexHome()],
+      });
+      return roleHit;
+    },
+  });
+  // B = 1 means the S2 memory check passed and holds an accounting lease for this turn.
+  if (helpersDecision.helpers) helpersLeaseTag = processRunTag;
+  const multiAgentConfig = codexMultiAgentConfig(resolveCodexAgentCap(process.env), helpersDecision.helpers);
+  const multiAgentEngine = await resolveCodexMultiAgentEngine(runCodexHome, resolvedModel);
   const subagentTailEnabled = codexRunMayDelegate(multiAgentEngine, multiAgentConfig);
   // B-1616: one structured line per launch; model id and engine only, never a path.
   console.log('[Codex] multi-agent engine', {
@@ -789,6 +832,11 @@ async function queryCodexOwned(invocation) {
     model: resolvedModel || null,
     childCap: multiAgentConfig['agents.max_concurrent_threads_per_session'] ?? null,
     tail: subagentTailEnabled,
+    helpers: helpersDecision.helpers,
+    helpersOffReason: helpersDecision.reason,
+    cpuPercent: helpersDecision.cpu ? Math.round(helpersDecision.cpu.percent) : null,
+    cpuSource: helpersDecision.cpu?.source ?? null,
+    projectRoleKind: roleHit?.kind ?? null,
   });
   const subagentTail = createCodexRunSubagentTail({
     enabled: subagentTailEnabled,
@@ -811,8 +859,7 @@ async function queryCodexOwned(invocation) {
   // its descendants). No child identity is recorded for Codex in this slice: codex-sdk hides the
   // pid, the sdk_turn footprint is external (identity would not change fencing), and an attach
   // failure would block the generation. Without identity the fence stays (fail-safe).
-  const processRunTag = permissionProcessTag(permissionExecution?.decisionId)
-    ?? `codex-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+  // The run tag itself is minted above, before the helpers decision (ADR-206 S2).
   const runPresence = beginProviderRun({
     provider: 'codex',
     writer: ws,
@@ -899,10 +946,9 @@ async function queryCodexOwned(invocation) {
         ...resolveProviderEnv(ws?.userId ?? null, 'codex', process.env),
         [PROCESS_TAG_ENV_VAR]: processRunTag,
       }, launchIdentity),
-      // ADR-134 v1 supersedes the earlier depth-1 delegation allowance. Note (B-1616): no
-      // depth key is set here, and `agents.max_depth` would bind v1 models only; on v2
-      // models the only mechanical bound is Codex's own thread limit (Nassaj sets none by
-      // default, owner decision 2026-10-13; an operator override pins it below).
+      // ADR-206 S1: `agents.max_depth = 10` (T-1601) rides every launch but binds v1 models
+      // only; on v2 the only mechanical bound is the slot count: Codex's own limit for
+      // B = 1 (Nassaj sets none, owner decision 2026-10-13), root-only for B = 0.
       //
       // T-1315 (الموجة الثانية) — **لم يُرفع عمداً.** كان المطلوب أن يتبع مستوى
       // التنسيق صعوداً (1 → 2) عند `delegate_review`، وهذا بالضبط نقضٌ لضابط أمني
@@ -917,9 +963,13 @@ async function queryCodexOwned(invocation) {
         // in the user's config before the CLI starts.
         // B-1616: no thread-cap key by default (owner decision 2026-10-13); both keys only
         // under an operator NASSAJ_CODEX_AGENT_CAP override (see codex-multi-agent.ts).
+        // ADR-206 S1: a B = 0 turn pins root-only slots here, for this launch only.
         ...multiAgentConfig,
         mcp_servers: {},
-        developer_instructions: getRuntimeInstructions(options?.coordinationLevel),
+        // T-1315 slot; ADR-206 §2.2: when B = 0 the notice replaces the level directive.
+        developer_instructions: codexTurnDeveloperInstructions(
+          options?.coordinationLevel, helpersDecision, getRuntimeInstructions,
+        ),
         ...(sandboxMode === 'workspace-write' && docsWritableRoots.length > 0
           ? { 'sandbox_workspace_write.writable_roots': docsWritableRoots }
           : {}),
@@ -995,8 +1045,8 @@ async function queryCodexOwned(invocation) {
     // وأي مسٍّ بها يُفشل بصمة T-1283 fail-closed)، وهذا قرارٌ يتغيّر بين رسالة
     // وأخرى فلا موضع له إلا مُدخَل الجولة. `direct` لا يضيف حرفاً.
     //
-    // ADR-134 v1: يبقى `features.multi_agent=false`، لكنه لا يمنع التفويض إلا على نماذج
-    // محرّك v1؛ نماذج v2 تفوّض رغمه، فالضابط الفعلي سقف الخيوط المثبّت أعلاه (B-1616).
+    // ADR-206 S9: `features.multi_agent` يحكم نماذج محرّك v1 وحدها (true حين B = 1)؛ أمّا v2
+    // فمفتاح الخانات لكل جولة هو المفتاح الفعلي، ويُثبَّت على 1 حين B = 0.
     preparedInput = await prepareCodexInput(branchContext ? branchContext.input : command, images);
     imagesTempDir = preparedInput.tempDir;
     // Identity selection is native; this bounded hash only verifies all submitted/displayed parts.
@@ -1018,15 +1068,36 @@ async function queryCodexOwned(invocation) {
     // Only after the start fence: a refused start never entered the SDK, so its transfer is not stuck.
     permissionEffectAttempted = true;
     transferEffectEntered = Boolean(transferHandle);
+    launchMs = codexTurnLaunchMs();
+    breakerTurn = registerCodexBreakerTurn(processRunTag, launchMs, helpersDecision.helpers, abortController);
     streamedTurn = await thread.runStreamed(preparedInput.input, {
       signal: abortController.signal
     });
     streamIterator = streamedTurn.events[Symbol.asyncIterator]();
+    // ADR-206 §2.2: the user sees why this turn runs without helpers (one status line,
+    // the T-1665 pattern). Sent once the turn is underway, never in place of it.
+    if (!helpersDecision.helpers && helpersDecision.reason) {
+      sendMessage(ws, createNormalizedMessage({
+        kind: 'status',
+        text: codexHelpersOffUserNotice(helpersDecision.reason),
+        sessionId: capturedSessionId || sessionId || null,
+        provider: 'codex',
+        canInterrupt: true,
+      }));
+    }
 
     while (true) {
       const step = transferHandle ? await nextCodexHistoryEvent(streamIterator, abortController.signal) : await streamIterator.next();
       if (step.done) { iteratorDone = true; break; }
       const event = step.value;
+      // ADR-206 §3.4: oom_score_adj 1000 on the codex exec at the first stream event (one
+      // /proc pass); the breaker sampler covers it and every tagged descendant afterwards.
+      if (!execChildProtectTried) {
+        execChildProtectTried = true;
+        protectCodexExecChild(processRunTag);
+        // ADR-206 §3.2: the tree RSS now is the lease's growth baseline.
+        if (helpersLeaseTag) markCodexLeaseFirstEvent(processRunTag, launchMs);
+      }
       // Capture thread/session id lazily from the stream (Codex emits this asynchronously).
       if (event.type === 'thread.started') {
         const discoveredSessionId = event.thread_id || event.id || null;
@@ -1121,6 +1192,7 @@ async function queryCodexOwned(invocation) {
       ) {
         turnStartedAt = new Date().toISOString();
       }
+      if (event.type === 'item.completed' && event.item?.type === 'agent_message') sawCompletedReply = true;
       // Plan and subagent items also forward their start and updates so the
       // live percent moves before the turn ends (ADR-199 P4a); others do not.
       if ((event.type === 'item.started' || event.type === 'item.updated') && !isCodexProgressItem(event.item)) {
@@ -1305,9 +1377,15 @@ async function queryCodexOwned(invocation) {
     permissionCaughtFailure = true;
     const session = capturedSessionId ? activeCodexSessions.get(capturedSessionId) : null;
     const wasAborted =
+      abortController.signal.aborted ||
       session?.status === 'aborted' ||
       error?.name === 'AbortError' ||
       String(error?.message || '').toLowerCase().includes('aborted');
+    // ADR-206 §3.4: a stop (user or breaker) is a known terminal, not a failure. Only a proven
+    // stop counts (our abort signal or the session marked aborted): a provider error whose text
+    // says "aborted", or an AbortError we did not cause, must not run cleanup after a completed
+    // reply and kill a server the user asked for (C1).
+    if (abortController.signal.aborted || session?.status === 'aborted') turnAborted = true;
 
     if (!wasAborted) {
       console.error('[Codex] Error:', error);
@@ -1365,9 +1443,34 @@ async function queryCodexOwned(invocation) {
     }
 
   } finally {
+    breakerTurn?.unregister();
+    // ADR-206 §6 order: stop and drain the tail → cleanup → settle → presence.
+    // ADR-199 P4b: the rollout fd never outlives the run (idempotent after the drain above).
+    try { await subagentTail.stop(); } catch (tailError) {
+      console.warn('[Codex] rollout tail stop failed', { reason: tailError?.message || String(tailError) });
+    }
+    const leaseTag = helpersLeaseTag;
+    helpersLeaseTag = null;
+    const cleanup = await endCodexTurnProcesses(ws, {
+      tag: processRunTag,
+      launchMs,
+      leaseTag,
+      effectAttempted: permissionEffectAttempted,
+      succeeded: iteratorDone && !turnAborted && !terminalFailure && !permissionCaughtFailure,
+      aborted: turnAborted || abortController.signal.aborted,
+      abortReason: abortController.signal.reason,
+      errored: permissionCaughtFailure || Boolean(terminalFailure),
+      completedReply: sawCompletedReply,
+      breach: breakerTurn?.breach() ?? null,
+      fields: { sessionId: capturedSessionId || sessionId || null, ...clientMsgIdField },
+    });
     if (permissionExecution && permissionConsumed) {
       const permissionOutcome = permissionStarted
-        ? (turnAborted ? 'cancelled' : (permissionCaughtFailure || terminalFailure ? 'failed' : 'succeeded'))
+        ? mapCodexStartedOutcome({
+          aborted: turnAborted,
+          failed: permissionCaughtFailure || Boolean(terminalFailure),
+          cleanup,
+        })
         : (permissionEffectAttempted ? 'reconciled_unknown' : 'spawn_failed');
       try {
         permissionExecution.settle(permissionOutcome);
@@ -1382,8 +1485,6 @@ async function queryCodexOwned(invocation) {
     // B-395: clear the badge on EVERY exit path (success, turn.failed, thrown
     // spawn error, abort) — this finally is the only one all of them share.
     runPresence.end();
-    // ADR-199 P4b: the rollout fd never outlives the run (idempotent after the drain above).
-    await subagentTail.stop();
     if (imagesTempDir) {
       await fs.rm(imagesTempDir, { recursive: true, force: true }).catch((error) => {
         console.warn('[Codex] Failed to clean temporary images:', error?.message || error);
@@ -1395,6 +1496,12 @@ async function queryCodexOwned(invocation) {
     }
   }
   } finally {
+    // ADR-206 S2: a throw between the helpers decision and the turn body never ran the
+    // finish above. runStreamed was never entered, so the lease is released at once.
+    if (helpersLeaseTag) {
+      finishCodexHelpersLease(helpersLeaseTag, { started: false, succeeded: false, cleanup: null, notBeforeMs: null });
+      helpersLeaseTag = null;
+    }
     // Async generator completion/return owns SDK input until teardown actually settles.
     let teardownConfirmed = !transferEffectEntered || iteratorDone;
     if (!iteratorDone && streamIterator && typeof streamIterator.return === 'function') {
@@ -1414,6 +1521,106 @@ async function queryCodexOwned(invocation) {
     transferHandle?.release(); transferHandle = undefined;
     if (reservedNewReceiptSession) activeCodexTurnLocks.delete(reservedNewReceiptSession);
   }
+}
+
+/**
+ * ADR-206 S3: registers a live turn with the memory breaker. The breaker aborts through the
+ * turn's own abortController. A registration failure leaves the turn running unprotected.
+ */
+function registerCodexBreakerTurn(tag, launchMs, helpers, abortController) {
+  try {
+    return codexTurnProcessRuntime.breaker.register({
+      tag,
+      launchMs,
+      helpers,
+      isAborted: () => abortController.signal.aborted,
+      abort: (reason) => abortController.abort(reason),
+    });
+  } catch (error) {
+    console.warn('[Codex] memory breaker registration failed', { reason: error?.message || String(error) });
+    return null;
+  }
+}
+
+/**
+ * ADR-206 §6 then §3.3, at the end of every Codex SDK turn, in order: cleanup (user stop,
+ * breaker, or an error before the first completed reply only) → the user notice → release of
+ * the helpers lease with the cleanup result as proof (`started` = runStreamed was entered).
+ * Returns the cleanup result, or null when none ran, for the permission outcome. Never throws.
+ */
+async function endCodexTurnProcesses(ws, turn) {
+  const cleanupReason = decideCodexTurnCleanup({
+    effectAttempted: turn.effectAttempted,
+    succeeded: turn.succeeded,
+    aborted: turn.aborted,
+    abortReason: turn.abortReason,
+    errored: turn.errored,
+    completedReply: turn.completedReply,
+  });
+  const cleanup = cleanupReason
+    ? await runCodexTurnCleanup(cleanupReason, turn.tag, turn.launchMs ?? codexTurnLaunchMs()) : null;
+  if (cleanup) reportCodexTurnCleanup(ws, cleanupReason, cleanup, turn.breach, turn.fields);
+  if (turn.leaseTag) {
+    finishCodexHelpersLease(turn.leaseTag, {
+      started: turn.effectAttempted, succeeded: turn.succeeded, cleanup, notBeforeMs: turn.launchMs,
+    });
+  }
+  return cleanup;
+}
+
+/** ADR-206 §3.2: the lease's growth baseline at the first stream event. Never throws. */
+function markCodexLeaseFirstEvent(tag, launchMs) {
+  try {
+    codexHelpersLeaseRuntime.leases.firstStreamEvent(tag, launchMs ?? 0);
+  } catch (error) {
+    console.warn('[Codex] helpers lease baseline failed', { reason: error?.message || String(error) });
+  }
+}
+
+/**
+ * ADR-206 §3.3: ends the turn's helpers lease (process_exit on success, process_dead on a
+ * proven-absent tag); anything unproven stays for the reclaimer. Never throws.
+ */
+function finishCodexHelpersLease(tag, end) {
+  try {
+    return codexHelpersLeaseRuntime.leases.finish(tag, end);
+  } catch (error) {
+    console.warn('[Codex] helpers lease finish failed', { reason: error?.message || String(error) });
+    return 'retained';
+  }
+}
+
+/** ADR-206 §3.4: true once the codex exec pid carries oom_score_adj 1000. */
+function protectCodexExecChild(tag) {
+  try { return codexTurnProcessRuntime.protectExecChild(tag) === true; } catch { return false; }
+}
+
+/** ADR-206 §6: never throws; a failed cleanup is `uncertain`, never `absent`. */
+async function runCodexTurnCleanup(reason, tag, launchMs) {
+  let result;
+  try {
+    result = await codexTurnProcessRuntime.cleanup({ tag, launchMs });
+  } catch {
+    result = { outcome: 'uncertain', stopped: [] };
+  }
+  console.log('[Codex] turn cleanup', { reason, outcome: result.outcome, stopped: result.stopped.length });
+  return result;
+}
+
+/**
+ * User stop and breaker show the user which processes were stopped (§6). Both stay `error`
+ * frames: a live `status` frame with text re-arms the chat spinner, and this notice arrives
+ * after the abort route has already sent the turn's `complete`.
+ */
+function reportCodexTurnCleanup(ws, reason, cleanup, breach, fields) {
+  if (reason === 'error' || (reason === 'user_abort' && cleanup.stopped.length === 0)) return;
+  sendMessage(ws, createNormalizedMessage({
+    kind: 'error',
+    code: reason === 'breaker' ? 'codex_resource_breach' : 'codex_processes_stopped',
+    content: codexStoppedProcessesNotice(reason, cleanup, breach),
+    provider: 'codex',
+    ...fields,
+  }));
 }
 
 /**

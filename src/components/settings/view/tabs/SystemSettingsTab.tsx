@@ -5,6 +5,7 @@ import { useAuth } from '../../../auth';
 import SettingsSection from '../SettingsSection';
 
 import HarnessAutoUpdateSection from './agents-settings/sections/HarnessAutoUpdateSection';
+import PrestageSettingsSection from './PrestageSettingsSection';
 import TmpfsCapSection from './TmpfsCapSection';
 import StoragePolicySection from './StoragePolicySection';
 import PermissionFencesSection from './PermissionFencesSection';
@@ -44,6 +45,7 @@ export default function SystemSettingsTab({ fenceFilter }: SystemSettingsTabProp
     >
       <div className="space-y-8">
         <HarnessAutoUpdateSection viewerRole={user?.role} />
+        <PrestageSettingsSection viewerRole={user?.role} />
         <TmpfsCapSection />
         <StoragePolicySection />
         <PermissionFencesSection fenceFilter={fenceFilter} />

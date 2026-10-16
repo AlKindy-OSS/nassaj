@@ -149,7 +149,7 @@ describe('/steer interception (steerAvailable=false)', () => {
     act(() => view.result.current.setInput('/steer focus on the bug'));
     await act(async () => view.result.current.handleSubmit(fakeSubmitEvent));
 
-    expect(view.onSteerSend).toHaveBeenCalledWith('focus on the bug');
+    expect(view.onSteerSend).toHaveBeenCalledWith('focus on the bug', []);
     expect(view.sent).toHaveLength(0);
     expect(apiCalls.find((c) => c.url === '/api/commands/execute')).toBeUndefined();
     expect(view.result.current.input).toBe('');
@@ -161,7 +161,7 @@ describe('/steer interception (steerAvailable=false)', () => {
     act(() => view.result.current.setInput('/steer stop doing that'));
     await act(async () => view.result.current.handleSubmit(fakeSubmitEvent));
 
-    expect(view.onSteerSend).toHaveBeenCalledWith('stop doing that');
+    expect(view.onSteerSend).toHaveBeenCalledWith('stop doing that', []);
     expect(view.sent).toHaveLength(0);
   });
 
@@ -209,7 +209,7 @@ describe('submit guard while isLoading (B-1469)', () => {
     act(() => view.result.current.setInput('/steer stop doing that'));
     await act(async () => view.result.current.handleSubmit(fakeSubmitEvent));
 
-    expect(view.onSteerSend).toHaveBeenCalledWith('stop doing that');
+    expect(view.onSteerSend).toHaveBeenCalledWith('stop doing that', []);
     expect(view.sent).toHaveLength(0);
     expect(view.result.current.sendError).toBeNull();
   });

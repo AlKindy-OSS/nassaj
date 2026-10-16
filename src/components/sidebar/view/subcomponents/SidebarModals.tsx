@@ -6,6 +6,7 @@ import VersionUpgradeModal from '../../../version-upgrade/view';
 import type { Project } from '../../../../types/app';
 import type { ReleaseInfo } from '../../../../types/sharedTypes';
 import type { InstallMode } from '../../../../hooks/useVersionCheck';
+import type { PrestageStatus } from '../../../version-upgrade/prestageStatus';
 import type { ArchiveProjectConfirmation, DeleteProjectConfirmation, SessionDeleteConfirmation } from '../../types/types';
 import ProjectCreationWizard from '../../../project-creation-wizard';
 
@@ -26,6 +27,8 @@ type SidebarModalsProps = {
   showVersionModal: boolean;
   /** B-1055: a build is staged/promoted and only its activation is owed. */
   updatePrepared?: boolean;
+  /** ADR-207: owner-only background prestage of the offered release. */
+  prestage?: PrestageStatus | null;
   onCloseVersionModal: () => void;
   releaseInfo: ReleaseInfo | null;
   currentVersion: string;
@@ -52,6 +55,7 @@ export default function SidebarModals({
   onConfirmDeleteSession,
   showVersionModal,
   updatePrepared = false,
+  prestage = null,
   onCloseVersionModal,
   releaseInfo,
   currentVersion,
@@ -230,6 +234,7 @@ export default function SidebarModals({
       <VersionUpgradeModal
         isOpen={showVersionModal}
         updatePrepared={updatePrepared}
+        prestage={prestage}
         onClose={onCloseVersionModal}
         releaseInfo={releaseInfo}
         currentVersion={currentVersion}

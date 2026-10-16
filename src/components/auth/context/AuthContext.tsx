@@ -4,7 +4,7 @@ import { IS_PLATFORM } from '../../../constants/config';
 import { shareLoginPath } from '../../document-sharing/share-navigation';
 import { api, setCookieSessionKind } from '../../../utils/api';
 import { AUTH_ERROR_MESSAGES, AUTH_TOKEN_STORAGE_KEY } from '../constants';
-import { exchangeOidcCode, fetchOidcIdentity } from '../oidc';
+import { exchangeOidcCode, fetchOidcIdentity, setSsoReauthHint } from '../oidc';
 import {
   consumeSsoReauthNotice, isSsoRedirectInFlight, requestSsoReauth, SSO_REAUTH_EVENT,
 } from '../ssoReauth';
@@ -849,6 +849,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
       }
 
       adoptPrimarySession(identity.user, exchange);
+      // ADR-194 A1: an owner SSO session makes the next SSO start re-authenticate.
+      if (identity.user.role === 'owner') setSsoReauthHint();
       // A completed SSO sign-in answers any pending re-attestation notice.
       consumeSsoReauthNotice();
       setIsMultiUser(identity.isMultiUser);

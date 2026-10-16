@@ -86,7 +86,7 @@ export default function QuickSettingsContent({
             ) : (
               <Sun className="h-4 w-4 text-muted-foreground" />
             )}
-            {t('quickSettings.darkMode')}
+            {t('appearanceSettings.themeMode.label')}
           </span>
           <DarkModeToggle />
         </div>

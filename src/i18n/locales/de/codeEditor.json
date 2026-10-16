@@ -40,5 +40,30 @@
     "message": "Die Datei \"{{fileName}}\" kann im Texteditor nicht angezeigt werden, da es sich um eine Binärdatei handelt.",
     "download": "Herunterladen",
     "downloadError": "Die Datei konnte nicht heruntergeladen werden."
+  },
+  "officePreview": {
+    "readOnly": "Read-only preview",
+    "loading": "Preparing preview…",
+    "unavailableTitle": "Preview unavailable",
+    "tooLarge": "The file \"{{fileName}}\" is too large to preview (maximum {{limit}} MB). You can download it instead.",
+    "failed": "Couldn't preview \"{{fileName}}\". The file may be damaged or in an unsupported format. You can download it instead.",
+    "documentFrameTitle": "Preview of {{fileName}}",
+    "sheetTabs": "Sheets",
+    "untitledSheet": "Sheet {{number}}",
+    "emptySheet": "This sheet is empty.",
+    "truncated": "Only the first {{rows}} rows and {{columns}} columns are shown.",
+    "slide": "Slide {{number}}",
+    "emptySlide": "No text on this slide.",
+    "slidesNotice": "Text only: layout, images and formatting are not shown.",
+    "slidesTruncated": "Only the first {{count}} slides are shown.",
+    "legacyTitle": "Älteres Office-Format",
+    "legacyMessage": "„{{fileName}}“ verwendet ein älteres Office-Format (.doc, .xls oder .ppt), das nicht in der Vorschau angezeigt werden kann. Laden Sie die Datei herunter, um sie anzusehen.",
+    "rowsShown": "{{shown}} von {{total}} Zeilen angezeigt.",
+    "showMoreRows": "Weitere Zeilen anzeigen",
+    "noSlides": "Diese Präsentation enthält keine Folien.",
+    "textNotice": "Nur Text: Layout, Bilder und Formatierung werden nicht angezeigt.",
+    "emptyDocument": "Dieses Dokument enthält keinen Text.",
+    "textTruncated": "Nur der Anfang des Dokuments wird angezeigt.",
+    "secretNotPreviewed": "„{{fileName}}“ ist eine Geheimnisdatei und wird daher nicht in der Vorschau angezeigt."
   }
 }

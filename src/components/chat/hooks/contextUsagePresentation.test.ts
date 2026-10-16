@@ -36,8 +36,14 @@ describe('context usage presentation provenance', () => {
     expect(read(nativeSnapshot({ proposedCompactTokens: 72_000 })).proposed).toBeNull();
     expect(read(nativeSnapshot({ nativeCompactTokens: null })).proposed).toBeNull();
   });
-  it('applies the fixed exception to the carrier even with another model', () => {
-    expect(read(nativeSnapshot({ provider: 'claude', nativeCompactTokens: null, proposedCompactTokens: null }), 'claude')).toMatchObject({ proposed: 150_000, newSession: 250_000 });
+  it('applies the Claude policy to the carrier even with another model', () => {
+    const claude = (windowTokens: unknown) => read(nativeSnapshot({
+      provider: 'claude', nativeCompactTokens: null, proposedCompactTokens: null, windowTokens,
+    }), 'claude');
+    expect(claude(1_000_000)).toMatchObject({ proposed: 400_000, newSession: 600_000 });
+    expect(claude(200_000)).toMatchObject({ proposed: 150_000, newSession: 180_000 });
+    expect(claude(240_000)).toMatchObject({ proposed: 180_000, newSession: 216_000 });
+    expect(claude(null)).toMatchObject({ window: null, proposed: 400_000, newSession: 600_000 });
   });
 });
 

@@ -52,6 +52,8 @@ function Sidebar({
     updatePrepared: updatePreparedFromHealth,
     preparedSignals,
     latestVersion,
+    prestage,
+    prestageReady: prestageReadyFromCheck,
     currentVersion,
     sourceVersion,
     releaseInfo,
@@ -80,6 +82,9 @@ function Sidebar({
   const updatePrepared = updatePreparedFromHealth
     || isUpdatePrepared(preparedSignals, queuedRestartBuildIds);
   const updateAvailable = updateAvailableFromHealth || updatePrepared;
+  // ADR-207: a staged build awaiting activation is the stronger news; the
+  // background-prepared mark applies only to a release not yet started.
+  const prestageReady = prestageReadyFromCheck && !updatePrepared;
   const { preferences, setPreference } = useUiPreferences();
   const { sidebarVisible, showSidebarSearch } = preferences;
   const paletteOps = usePaletteOps();
@@ -294,6 +299,7 @@ function Sidebar({
         onConfirmDeleteSession={confirmDeleteSession}
         showVersionModal={showVersionModal}
         updatePrepared={updatePrepared}
+        prestage={prestage}
         onCloseVersionModal={() => setShowVersionModal(false)}
         releaseInfo={releaseInfo}
         currentVersion={currentVersion}
@@ -315,6 +321,7 @@ function Sidebar({
           terminalsActive={activeSection === 'terminals'}
           updateAvailable={updateAvailable}
           updatePrepared={updatePrepared}
+          prestageReady={prestageReady}
           restartRequired={restartRequired}
           pendingActionsCount={countPendingServerActions(actions)}
           onShowVersionModal={() => setShowVersionModal(true)}
@@ -367,6 +374,7 @@ function Sidebar({
             onProjectSelect={handleProjectSelect}
             updateAvailable={updateAvailable}
             updatePrepared={updatePrepared}
+            prestageReady={prestageReady}
             degradedReason={degradedReason}
             restartRequired={restartRequired}
             actions={actions}

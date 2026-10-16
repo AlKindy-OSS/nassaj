@@ -11,10 +11,16 @@ import type { AgentContext, AgentsSettingsTabProps } from './types';
 import AgentCategoryContentSection from './sections/AgentCategoryContentSection';
 import AgentCategoryTabsSection from './sections/AgentCategoryTabsSection';
 import AgentSelectorSection from './sections/AgentSelectorSection';
+import AgentDefaultsSection from './sections/AgentDefaultsSection';
 import { visibleCategoriesFor } from './agentCategories';
 import { normalizeHarnessProvider } from '../../../../../hooks/harnessVersionMapping';
 import { useHarnessUpdateAvailability } from '../../../../../hooks/useHarnessUpdateAvailability';
-import { visibleSettingsAgents } from './visibleAgents';
+import { useUiPreferences } from '../../../../../hooks/useUiPreferences';
+import {
+  isUsableDefaultSettingsAgent,
+  resolveInitialSettingsAgent,
+  visibleSettingsAgents,
+} from './visibleAgents';
 
 export default function AgentsSettingsTab({
   providerAuthStatus,
@@ -38,7 +44,15 @@ export default function AgentsSettingsTab({
   // «المورّدين». ولا يُصفّى بقائمة الشريط عمداً: مزوّدٌ معطَّل عالمياً (‏`glm`)
   // بلا بلاطة في الشريط تبقى صفحته قابلة للفتح بالرابط، وفيها اعتماد Z.AI —
   // وحجبُه كان سيحوّل زرّ «أضِف مفتاحاً» في منتقي النماذج إلى طريق مسدود.
-  const [selectedAgent, setSelectedAgent] = useState<AgentProvider>(initialAgent ?? 'claude');
+  //
+  // بلا رابط عميق يُفتح التبويب على الوكيل الافتراضي الذي اختاره المستخدم إن
+  // بقي صالحاً (ظاهراً وغير معطَّل)، وإلّا على `claude` كما كان.
+  const { preferences, setPreference } = useUiPreferences();
+  const storedDefaultAgent = preferences.defaultSettingsAgent;
+  const [selectedAgent, setSelectedAgent] = useState<AgentProvider>(
+    () => resolveInitialSettingsAgent(initialAgent, storedDefaultAgent),
+  );
+  const defaultAgent = isUsableDefaultSettingsAgent(storedDefaultAgent) ? storedDefaultAgent : null;
   const [selectedCategory, setSelectedCategory] = useState<AgentCategory>(initialCategory ?? 'account');
   // بطاقة «النماذج المحلية» منفصلة عن selectedAgent: اختيارها يُخفي الفئات
   // ويعرض LocalModelsSettingsTab بدلاً من لوح الوكيل.
@@ -204,6 +218,16 @@ export default function AgentsSettingsTab({
             localModelsSelected={localModelsSelected}
             localModelsLabel={t('mainTabs.localModels')}
             onSelectLocalModels={selectLocalModels}
+            defaultAgent={defaultAgent}
+            defaultLabel={t('agents.defaults.agent.indicator')}
+          />
+          <AgentDefaultsSection
+            selectedAgent={localModelsSelected ? null : selectedAgent}
+            canMakeDefault={isUsableDefaultSettingsAgent(selectedAgent)}
+            isDefault={defaultAgent === selectedAgent}
+            onMakeDefault={() => setPreference('defaultSettingsAgent', selectedAgent)}
+            coordinationLevel={preferences.defaultCoordinationLevel}
+            onCoordinationLevelChange={(level) => setPreference('defaultCoordinationLevel', level)}
           />
         </SettingsSection>
       </div>

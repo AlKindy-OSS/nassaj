@@ -626,6 +626,18 @@ export const pendingServerActionsDb = {
     ).all(jobId) as PendingServerActionDbRow[]).map(mapRow);
   },
 
+  /**
+   * T-2024 S3 (B-1626): source-update transactions named by a safe-command row
+   * that is waiting or running. Candidate retention never removes them: the
+   * row's restart activates exactly that candidate.
+   */
+  listOpenSourceUpdateTransactions(): string[] {
+    return (getConnection().prepare(
+      `SELECT DISTINCT source_update_transaction_id AS transactionId FROM pending_server_actions
+       WHERE status IN ('pending', 'executing') AND source_update_transaction_id IS NOT NULL`,
+    ).all() as Array<{ transactionId: string }>).map((row) => row.transactionId);
+  },
+
   /** Marks an action failed with a bounded error string (kept for visibility). */
   markFailed(id: string, error: string): number {
     const db = getConnection();

@@ -121,6 +121,22 @@
     "closeMenu": "Close menu",
     "unavailable": "Bulk changes are unavailable until the server update completes."
   },
+  "archived": {
+    "loadingTitle": "Loading archive...",
+    "loadingDescription": "Fetching hidden workspaces and sessions you can restore later.",
+    "noMatchingSessions": "No matching archived items",
+    "emptyTitle": "No archived items",
+    "tryDifferentSearch": "Try a different search term.",
+    "emptyDescription": "Archived workspaces and sessions will appear here when you hide them from the active list.",
+    "sessionCountOne": "archived item",
+    "sessionCountOther": "archived items",
+    "projectArchived": "Archived",
+    "projectArchivedLabel": "Archived project",
+    "restoreProject": "Restore workspace",
+    "restore": "Restore session",
+    "deletePermanently": "Delete permanently",
+    "noSessions": "No archived conversations"
+  },
   "tooltips": {
     "viewEnvironments": "View Environments",
     "hideSidebar": "Hide sidebar",
@@ -294,7 +310,8 @@
     "updatePrepared": "Prepared — awaiting activation",
     "updatePreparedTitle": "Prepared release",
     "currentVersionLabel": "Nassaj v{{version}}",
-    "updateToLabel": "Update to"
+    "updateToLabel": "Update to",
+    "prestageReady": "Prepared in advance"
   },
   "restart": {
     "modalTitle": "Server Restart",

@@ -14,8 +14,10 @@ if (!['server', 'src'].includes(scope)) {
 }
 
 const requestedFiles = process.argv.slice(3);
+// shared/*.test.ts are node:test files that no other script ran (T-2027). Only .ts:
+// shared/release-version-policy.test.js already runs under test:scripts.
 const patterns = scope === 'server'
-  ? ['server/**/*.test.ts', 'server/**/*.test.js']
+  ? ['server/**/*.test.ts', 'server/**/*.test.js', 'shared/**/*.test.ts']
   : ['src/**/*.test.ts', 'src/**/*.test.tsx'];
 const files = (requestedFiles.length > 0 ? requestedFiles : globSync(patterns)).sort().filter(file => (
   scope === 'server' || /from\s+['"]node:test['"]/.test(readFileSync(file, 'utf8'))

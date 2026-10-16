@@ -1,4 +1,4 @@
-import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { ChevronDown, Copy, SquareTerminal } from "lucide-react";
 
@@ -76,13 +76,15 @@ interface UpdateTerminalLogProps {
     statusUrl?: string;
     /** The job is still running, so the log may still grow. */
     live: boolean;
+    /** Secondary actions placed at the end of the toggle row (e.g. cancel the update). */
+    actions?: ReactNode;
 }
 
 /**
  * A collapsible console under the update stepper, like a Linux installer's
  * "show details": every command the updater runs and its output, live.
  */
-export function UpdateTerminalLog({ statusUrl, live }: UpdateTerminalLogProps) {
+export function UpdateTerminalLog({ statusUrl, live, actions }: UpdateTerminalLogProps) {
     const { t } = useTranslation('common');
     const [open, setOpen] = useState(false);
     const panelId = useId();
@@ -106,7 +108,7 @@ export function UpdateTerminalLog({ statusUrl, live }: UpdateTerminalLogProps) {
 
     return (
         <div className="space-y-2">
-            <div className="flex items-center justify-between gap-2">
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-2">
                 <button
                     type="button"
                     onClick={() => setOpen(value => !value)}
@@ -128,6 +130,7 @@ export function UpdateTerminalLog({ statusUrl, live }: UpdateTerminalLogProps) {
                         {t('versionUpdate.terminal.copy')}
                     </button>
                 )}
+                {actions}
             </div>
             {open && (
                 <div id={panelId} className="overflow-hidden rounded-md border border-zinc-800 bg-zinc-950">

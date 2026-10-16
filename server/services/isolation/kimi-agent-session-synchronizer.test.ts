@@ -105,7 +105,7 @@ describe('Kimi agent synchronizer — indexing + subagent folding (B-172)', () =
   const HOME = operatorKimiHome();
 
   it('indexes a single-agent conversation as ONE row (keyed on <id>)', async () => {
-    writeWire(HOME, 'conv-single', 'main', { cwd: '/tmp/proj-single', title: 'Single Agent Chat' });
+    writeWire(HOME, 'conv-single', 'main', { cwd: '/workspace/proj-single', title: 'Single Agent Chat' });
 
     const processed = await new KimiAgentSessionSynchronizer().synchronize();
     assert.ok(processed >= 1, 'at least the single conversation is indexed');
@@ -117,9 +117,9 @@ describe('Kimi agent synchronizer — indexing + subagent folding (B-172)', () =
   });
 
   it('a conversation with a MAIN agent + N subagents surfaces exactly ONE row', async () => {
-    writeWire(HOME, 'conv-multi', 'main', { cwd: '/tmp/proj-multi', title: 'Root Turn' });
-    writeWire(HOME, 'conv-multi', 'sub-1', { cwd: '/tmp/proj-multi', title: 'Delegate 1' });
-    writeWire(HOME, 'conv-multi', 'sub-2', { cwd: '/tmp/proj-multi', title: 'Delegate 2' });
+    writeWire(HOME, 'conv-multi', 'main', { cwd: '/workspace/proj-multi', title: 'Root Turn' });
+    writeWire(HOME, 'conv-multi', 'sub-1', { cwd: '/workspace/proj-multi', title: 'Delegate 1' });
+    writeWire(HOME, 'conv-multi', 'sub-2', { cwd: '/workspace/proj-multi', title: 'Delegate 2' });
 
     await new KimiAgentSessionSynchronizer().synchronize();
 
@@ -132,8 +132,8 @@ describe('Kimi agent synchronizer — indexing + subagent folding (B-172)', () =
   });
 
   it('value-agnostic dedup: no "main" folder → smallest agentId is primary, still ONE row', async () => {
-    writeWire(HOME, 'conv-nomain', 'zzz', { cwd: '/tmp/proj-nomain', title: 'Z agent' });
-    writeWire(HOME, 'conv-nomain', 'aaa', { cwd: '/tmp/proj-nomain', title: 'A agent' });
+    writeWire(HOME, 'conv-nomain', 'zzz', { cwd: '/workspace/proj-nomain', title: 'Z agent' });
+    writeWire(HOME, 'conv-nomain', 'aaa', { cwd: '/workspace/proj-nomain', title: 'A agent' });
 
     await new KimiAgentSessionSynchronizer().synchronize();
 
@@ -144,7 +144,7 @@ describe('Kimi agent synchronizer — indexing + subagent folding (B-172)', () =
 
   it('watcher single-file path folds a subagent and bumps the parent (never a new row)', async () => {
     const rootMtime = Date.parse('2026-07-18T00:00:00.000Z');
-    writeWire(HOME, 'conv-watch', 'main', { cwd: '/tmp/proj-watch', title: 'Watched' }, rootMtime);
+    writeWire(HOME, 'conv-watch', 'main', { cwd: '/workspace/proj-watch', title: 'Watched' }, rootMtime);
     await new KimiAgentSessionSynchronizer().synchronize();
     const before = sessionsDb.getSessionById('conv-watch');
     assert.ok(before, 'parent must exist before the subagent spawn is watched');
@@ -154,7 +154,7 @@ describe('Kimi agent synchronizer — indexing + subagent folding (B-172)', () =
       HOME,
       'conv-watch',
       'sub-late',
-      { cwd: '/tmp/proj-watch', title: 'Late Delegate' },
+      { cwd: '/workspace/proj-watch', title: 'Late Delegate' },
       childMtime,
     );
     const indexed = await new KimiAgentSessionSynchronizer().synchronizeFile(childPath);
@@ -171,7 +171,7 @@ describe('Kimi agent synchronizer — indexing + subagent folding (B-172)', () =
 
   it('an orphan subagent whose parent row is absent is a safe no-op (no row conjured)', async () => {
     // Only a subagent folder for a conversation whose primary was never indexed.
-    const childPath = writeWire(HOME, 'conv-orphan', 'sub-only', { cwd: '/tmp/proj-orphan' });
+    const childPath = writeWire(HOME, 'conv-orphan', 'sub-only', { cwd: '/workspace/proj-orphan' });
     // Force a sibling "main" folder to exist so this file classifies as a subagent,
     // but never index the main (simulate an out-of-order/incremental miss).
     fs.mkdirSync(path.join(HOME, 'sessions', 'conv-orphan', 'agents', 'main'), { recursive: true });
@@ -206,8 +206,8 @@ describe('Kimi agent synchronizer — per-user isolation (no B-152 gap)', () => 
     assert.notEqual(homeA, homeB, 'each isolated user gets a distinct KIMI_CODE_HOME');
     assert.ok(homeA.includes(String(userA)), 'user A home lives under their isolated tree');
 
-    const fileA = writeWire(homeA, 'conv-user-a', 'main', { cwd: '/tmp/proj-a', title: 'A conv' });
-    writeWire(homeB, 'conv-user-b', 'main', { cwd: '/tmp/proj-b', title: 'B conv' });
+    const fileA = writeWire(homeA, 'conv-user-a', 'main', { cwd: '/workspace/proj-a', title: 'A conv' });
+    writeWire(homeB, 'conv-user-b', 'main', { cwd: '/workspace/proj-b', title: 'B conv' });
 
     await new KimiAgentSessionSynchronizer().synchronize();
 

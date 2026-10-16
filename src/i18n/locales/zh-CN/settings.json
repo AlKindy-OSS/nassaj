@@ -109,7 +109,6 @@
       "viewOptions": "视图选项",
       "inputSettings": "输入设置"
     },
-    "darkMode": "深色模式",
     "autoExpandTools": "自动展开工具",
     "showRawParameters": "显示原始参数",
     "showThinking": "显示思考过程",
@@ -459,7 +458,8 @@
       "description": "选择浅色、深色，或自动跟随系统设置",
       "light": "浅色",
       "dark": "深色",
-      "system": "跟随系统"
+      "system": "跟随系统",
+      "cycleLabel": "主题：{{current}}。切换到{{next}}"
     },
     "themePresets": {
       "title": "主题",

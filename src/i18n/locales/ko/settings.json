@@ -109,7 +109,6 @@
       "viewOptions": "보기 옵션",
       "inputSettings": "입력 설정"
     },
-    "darkMode": "다크 모드",
     "autoExpandTools": "도구 자동 펼치기",
     "showRawParameters": "Raw 파라미터 표시",
     "showThinking": "생각 과정 표시",
@@ -459,7 +458,8 @@
       "description": "라이트 또는 다크를 선택하거나 시스템 설정을 자동으로 따르도록 설정하세요",
       "light": "라이트",
       "dark": "다크",
-      "system": "시스템"
+      "system": "시스템",
+      "cycleLabel": "테마: {{current}}. {{next}}(으)로 전환"
     },
     "themePresets": {
       "title": "테마",

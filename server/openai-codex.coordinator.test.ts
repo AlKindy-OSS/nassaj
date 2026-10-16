@@ -32,6 +32,7 @@ import os from 'os';
 import path from 'path';
 import { acceptFixtureRuntimeCompat, createCodexMachineFixture } from './shared/tests/codex-release-fixture.js';
 import { codexMultiAgentConfig, resolveCodexAgentCap } from './modules/providers/list/codex/codex-multi-agent.js';
+import { codexHelpersRuntime } from './modules/providers/list/codex/codex-helpers-switch.js';
 
 // ---------------------------------------------------------------------------
 // Bootstrap — before importing any project module (mirrors the ceiling test): the DB
@@ -142,6 +143,14 @@ const { queryCodex, mapPermissionModeToCodexOptions } = codexModule as unknown a
   ) => { sandboxMode: string; approvalPolicy: string };
 };
 const { COORDINATOR_ROOT_CONTRACT } = await import('@/services/isolation/codex-coordinator-agents.js');
+// ADR-206 S1: pin the host signals so the helpers switch is deterministic here (a busy CI
+// host must not flip B). Each S1 test below overrides only the input it exercises.
+const realHelpersRuntime = { ...codexHelpersRuntime };
+const pinHostQuiet = (): void => {
+  codexHelpersRuntime.cpu = () => ({ percent: 10, source: 'window' });
+  codexHelpersRuntime.memoryOk = () => true;
+};
+pinHostQuiet();
 
 // Restore the real setInterval now that the import graph's timers are unref'd.
 globalThis.setInterval = realSetInterval;
@@ -149,6 +158,7 @@ globalThis.setInterval = realSetInterval;
 await initializeDatabase();
 
 after(() => {
+  Object.assign(codexHelpersRuntime, realHelpersRuntime);
   globalThis.setInterval = realSetInterval;
   closeConnection();
   if (ORIGINAL_HOME === undefined) delete process.env.HOME;
@@ -242,10 +252,10 @@ describe('queryCodex — always-on coordinator layer across all modes (T-886 red
       assert.equal(opts?.sandboxMode, sandboxMode);
       assert.equal(opts?.approvalPolicy, approvalPolicy);
 
-      // ADR-134 v1 mechanically removes the native delegation surface on every mode.
+      // ADR-206 S9: a helpers-on turn (quiet host here) has v1 native delegation on, on every mode.
       const construct = codexConstructions[codexConstructions.length - 1];
-      assert.equal(construct.config?.['features.multi_agent'], false,
-        'ADR-134: native multi-agent must be disabled on every launch');
+      assert.equal(construct.config?.['features.multi_agent'], true,
+        'ADR-206 S9: v1 native multi-agent is on for a B = 1 turn on every mode');
       assert.equal('project_doc_max_bytes' in (construct.config ?? {}), false,
         'project AGENTS.md must use Codex defaults');
 
@@ -316,15 +326,17 @@ describe('delegation block — single Codex construction disables native multi-a
     );
   });
 
-  it('that construction pins features.multi_agent=false on every launch (thread caps only by override)', () => {
+  it('that construction carries the per-turn multi-agent config (thread caps only by override)', () => {
     // B-1616: the config object of the single construction spreads the per-launch
     // multi-agent config (features.multi_agent=false + both thread-cap keys).
-    assert.match(codexSrc, /const multiAgentConfig = codexMultiAgentConfig\(resolveCodexAgentCap\(process\.env\)\);/);
+    assert.match(codexSrc,
+      /const multiAgentConfig = codexMultiAgentConfig\(resolveCodexAgentCap\(process\.env\), helpersDecision\.helpers\);/);
     assert.match(codexSrc, /config: \{[\s\S]{0,600}\.\.\.multiAgentConfig,/,
       'the Codex config must carry the pinned multi-agent config');
     // Owner decision 2026-10-13: no thread-cap key by default; Codex decides the count.
     const config = codexMultiAgentConfig(resolveCodexAgentCap({}));
-    assert.deepEqual({ ...config }, { 'features.multi_agent': false }, 'the v1 delegation feature stays disabled');
+    assert.deepEqual({ ...config }, { 'features.multi_agent': true, 'agents.max_depth': 10 },
+      'ADR-206 S9: v1 delegation on for a B = 1 turn');
   });
 
   it('both live callers route through queryCodex (no direct SDK spawn)', () => {
@@ -392,6 +404,111 @@ describe('queryCodex — fail-open when delegates cannot be materialized (T-886 
     } finally {
       console.warn = realWarn;
       for (const c of saved) fs.writeFileSync(c.p, c.body);
+    }
+  });
+});
+
+// ===========================================================================
+// Part 4 — ADR-206 S1: the per-turn helpers switch B on the real launch path. B = 0
+// pins root-only slots for that launch, injects the notice into the T-1315 slot and
+// shows it to the user; B = 1 sends no count key and no notice. No path refuses a turn.
+// ===========================================================================
+describe('queryCodex — ADR-206 S1 helpers switch per turn', () => {
+  const OFF_KEYS = {
+    'features.multi_agent': false,
+    'agents.max_concurrent_threads_per_session': 1,
+    'features.multi_agent_v2.max_concurrent_threads_per_session': 1,
+    'agents.max_depth': 10,
+  };
+  const CAP_KEYS = ['agents.max_concurrent_threads_per_session', 'features.multi_agent_v2.max_concurrent_threads_per_session'];
+  const frames = (ws: ReturnType<typeof makeWs>): SentMsg[] => ws.sent.map((m) => (
+    typeof m === 'string' ? JSON.parse(m) as SentMsg : m));
+
+  async function launch(cwd: string, options: Record<string, unknown> = {}) {
+    const ws = makeWs(null);
+    const before = threadStarts.length;
+    await queryCodex('ping', { cwd, model: 'gpt-5-codex', ...options }, ws);
+    const config = codexConstructions.at(-1)?.config ?? {};
+    const notices = frames(ws).filter((m) => m.kind === 'status' && String(m.text ?? '').startsWith('التفويض غير متاح'));
+    const errors = frames(ws).filter((m) => m.kind === 'error');
+    return { config, notices, errors, started: threadStarts.length - before };
+  }
+
+  function assertOff(result: Awaited<ReturnType<typeof launch>>, reasonEn: string): void {
+    assert.equal(result.started, 1, `${reasonEn}: the turn still runs (never refused)`);
+    assert.deepEqual(result.errors, [], `${reasonEn}: no error frame`);
+    for (const [key, value] of Object.entries(OFF_KEYS)) assert.equal(result.config[key], value, `${reasonEn}: ${key}`);
+    const instructions = String(result.config.developer_instructions);
+    assert.match(instructions, new RegExp(`Delegation is unavailable this turn \\(${reasonEn}\\)`));
+    assert.match(instructions, /التفويض غير متاح هذه الجولة؛ نفّذ العمل مباشرة/);
+    assert.doesNotMatch(instructions, /Coordination level for this turn/);
+    assert.equal(result.notices.length, 1, `${reasonEn}: one visible notice`);
+  }
+
+  it('B = 1 (delegate, quiet host, no roles): no count key, depth 10, no notice', async () => {
+    pinHostQuiet();
+    const result = await launch(sandboxCwd, { coordinationLevel: 'delegate' });
+    assert.equal(result.started, 1);
+    for (const key of CAP_KEYS) assert.equal(Object.hasOwn(result.config, key), false, key);
+    assert.equal(result.config['agents.max_depth'], 10);
+    assert.equal(result.config['features.multi_agent'], true, 'ADR-206 S9: v1 on for B = 1');
+    assert.equal(Object.hasOwn(result.config, 'agents.job_max_runtime_seconds'), false, 'D1: unset');
+    assert.match(String(result.config.developer_instructions), /Coordination level for this turn: delegated/);
+    assert.doesNotMatch(String(result.config.developer_instructions), /Delegation is unavailable/);
+    assert.deepEqual(result.notices, []);
+  });
+
+  it('«direct» gives B = 0 with the notice; the next delegate turn is decided afresh', async () => {
+    pinHostQuiet();
+    assertOff(await launch(sandboxCwd, { coordinationLevel: 'direct' }), 'coordination level direct');
+    const next = await launch(sandboxCwd, { coordinationLevel: 'delegate' });
+    for (const key of CAP_KEYS) assert.equal(Object.hasOwn(next.config, key), false, `next turn ${key}`);
+  });
+
+  it('sustained busy CPU gives B = 0; a failed measurement gives B = 0; neither refuses', async () => {
+    try {
+      codexHelpersRuntime.cpu = () => ({ percent: 92, source: 'window' });
+      assertOff(await launch(sandboxCwd), 'host CPU busy');
+      codexHelpersRuntime.cpu = () => { throw new Error('no counters'); };
+      assertOff(await launch(sandboxCwd), 'measurement unavailable');
+      codexHelpersRuntime.cpu = () => ({ percent: 10, source: 'window' });
+      codexHelpersRuntime.memoryOk = () => false;
+      assertOff(await launch(sandboxCwd), 'host memory high');
+    } finally {
+      pinHostQuiet();
+    }
+  });
+
+  it('project roles (agents dir, inline table, unreadable config) give B = 0, never a refusal', async () => {
+    pinHostQuiet();
+    const cases: Array<[string, (codexDir: string) => void]> = [
+      ['agents dir', (dir) => { fs.mkdirSync(path.join(dir, 'agents'), { recursive: true });
+        fs.writeFileSync(path.join(dir, 'agents', 'x.toml'), 'description = "x"\n'); }],
+      ['inline table', (dir) => { fs.mkdirSync(dir, { recursive: true });
+        fs.writeFileSync(path.join(dir, 'config.toml'), '[agents.x]\ndescription = "x"\n'); }],
+      ['unparsable', (dir) => { fs.mkdirSync(dir, { recursive: true });
+        fs.writeFileSync(path.join(dir, 'config.toml'), '[agents\n'); }],
+    ];
+    for (const [label, plant] of cases) {
+      const cwd = fs.mkdtempSync(path.join(sandbox, 'roles-'));
+      try {
+        plant(path.join(cwd, '.codex'));
+        assertOff(await launch(cwd), 'project roles present');
+      } catch (error) {
+        throw new Error(`${label}: ${(error as Error).message}`);
+      } finally {
+        fs.rmSync(cwd, { recursive: true, force: true });
+      }
+    }
+  });
+
+  it('the operator switch NASSAJ_CODEX_MULTI_AGENT=off gives B = 0 with the notice', async () => {
+    pinHostQuiet();
+    process.env.NASSAJ_CODEX_MULTI_AGENT = 'off';
+    try {
+      assertOff(await launch(sandboxCwd), 'disabled by operator');
+    } finally {
+      delete process.env.NASSAJ_CODEX_MULTI_AGENT;
     }
   });
 });

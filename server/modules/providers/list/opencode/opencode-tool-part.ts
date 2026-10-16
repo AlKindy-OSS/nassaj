@@ -70,11 +70,16 @@ export function openCodeTaskSubagent(callId: string | undefined, state: AnyRecor
   const status = asString(state.status);
   if (status !== 'completed' && status !== 'error') return null;
   const input = asRecord(state.input) ?? {};
+  // OpenCode's real task part includes metadata.model.modelID for the child
+  // session. It does not expose a reasoning/effort field on this event shape.
+  const model = asString(asRecord(state.metadata)?.model?.modelID);
   return buildProgressSubagent({
     id: callId ?? asString(asRecord(state.metadata)?.sessionId),
     parentId: null,
     label: asString(input.description) ?? input.subagent_type,
     state: status === 'error' ? 'failed' : 'completed',
+    agentName: input.subagent_type,
+    model,
   });
 }
 

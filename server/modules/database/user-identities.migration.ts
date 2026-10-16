@@ -17,6 +17,11 @@ const DUPLICATE_USER_ISSUER_COUNT_SQL = `SELECT COUNT(*) AS n FROM (SELECT user_
  * transaction so two admitted processes cannot both add the column. The
  * user_id index (idempotent) serves the per-request attestation lookup.
  *
+ * ADR-194 A1: `owner_sso_opt_in_at` (epoch ms, nullable) is the owner's own
+ * opt-in to SSO sign-in on that link. Additive and NULL by default, so every
+ * existing owner link stays refused until its owner acts; an older build
+ * ignores it.
+ *
  * T-1939 slice 5: UNIQUE(user_id, issuer) is added only when no user already
  * holds two links for one issuer. Duplicates are never deleted or merged here:
  * the index is skipped, a count-only warning is written, and the SSO login of
@@ -31,6 +36,9 @@ export function migrateUserIdentities(db: Database): number {
     const columns = db.prepare('PRAGMA table_info(user_identities)').all() as Array<{ name: string }>;
     if (!columns.some((column) => column.name === 'last_attested_at')) {
       db.exec('ALTER TABLE user_identities ADD COLUMN last_attested_at INTEGER');
+    }
+    if (!columns.some((column) => column.name === 'owner_sso_opt_in_at')) {
+      db.exec('ALTER TABLE user_identities ADD COLUMN owner_sso_opt_in_at INTEGER');
     }
     db.exec(USER_IDENTITIES_USER_ID_INDEX_SQL);
     const { n } = db.prepare(DUPLICATE_USER_ISSUER_COUNT_SQL).get() as { n: number };
@@ -52,6 +60,14 @@ export function rollbackUserIdentitiesAttestation(db: Database): void {
   const columns = db.prepare('PRAGMA table_info(user_identities)').all() as Array<{ name: string }>;
   if (columns.some((column) => column.name === 'last_attested_at')) {
     db.exec('ALTER TABLE user_identities DROP COLUMN last_attested_at');
+  }
+}
+
+/** Explicit rollback of the ADR-194 A1 owner opt-in column; never invoked automatically. */
+export function rollbackUserIdentitiesOwnerSsoOptIn(db: Database): void {
+  const columns = db.prepare('PRAGMA table_info(user_identities)').all() as Array<{ name: string }>;
+  if (columns.some((column) => column.name === 'owner_sso_opt_in_at')) {
+    db.exec('ALTER TABLE user_identities DROP COLUMN owner_sso_opt_in_at');
   }
 }
 
