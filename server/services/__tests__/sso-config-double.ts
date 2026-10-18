@@ -67,6 +67,8 @@ export function createSsoConfigDouble(initial: Partial<SsoDoubleState> = {}) {
     }),
     ssoJitEnabled: () => state.loginAvailable && state.jitEnabled,
     activeSsoMapping: () => (state.loginAvailable ? state.mapping : null),
+    ssoBlocksWallet: () => ssoState() !== 'off',
+    invalidateSsoWalletBlockCache: () => {},
     resetSsoConfigCacheForTests: () => {},
   };
   /** SSO fully on (`true`) or fully off (`false`), the two states most route tests need. */

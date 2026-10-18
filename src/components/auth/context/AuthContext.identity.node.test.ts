@@ -35,11 +35,12 @@ class MockAccountWalletError extends Error {
   get wallet() { return this.walletValue; }
 }
 mock.module('../../../constants/config', { namedExports: { IS_PLATFORM: false } });
-mock.module('../../../utils/api', { namedExports: { SSO_REAUTH_EVENT: 'auth:sso-reauth-required', OWNER_STEP_UP_REQUIRED_CODE: 'owner_step_up_required', dispatchOwnerStepUp: () => {}, authenticatedFetch: async () => Response.json({}), setCookieSessionKind: () => {}, api: {
+mock.module('../../../utils/api', { namedExports: { SSO_REAUTH_EVENT: 'auth:sso-reauth-required', authenticatedFetch: async () => Response.json({}), setCookieSessionKind: () => {}, api: {
   auth: {
     status: async () => Response.json({ needsSetup: false, deviceAccountSessionsEnabled: walletEnabled }),
     user: () => initialUser(),
     userForIdentityReconciliation: () => hydrate(),
+    logout: async () => new Response(null, { status: 204 }),
     login: () => loginResponse(),
     acceptInvite: () => inviteResponse(),
     changePassword: (_current: string, _next: string, options: unknown) => {
@@ -676,4 +677,72 @@ test('B-1534: an invite join in wallet mode adopts the device session, not a bea
   assert.equal(view.result.current.token, null);
   assert.equal(localStorage.getItem('auth-token'), null);
   assert.equal(view.result.current.deviceAccountSessionsEnabled, true);
+});
+
+test('a bearer tab whose deployment has no wallet (404) re-proves its token instead of locking', async () => {
+  walletEnabled = false;
+  localStorage.setItem('auth-token', 'jwt-a');
+  readWallet = async () => { throw { status: 404 }; };
+  hydrate = async () => Response.json({ user: { id: 1, username: 'A' } });
+  let purges = 0;
+  purge = async () => { purges++; };
+  const view = await mount();
+  await act(async () => { barrier.reconcileRevokedIdentity(); });
+  await act(async () => {});
+  assert.equal(barrier.getIdentityBarrierSnapshot().phase, 'stable');
+  assert.equal(view.result.current.user?.username, 'A');
+  assert.equal(view.result.current.deviceAccountSessionsEnabled, false);
+  assert.equal(purges, 0);
+  assert.equal(localStorage.getItem('nassaj_identity_barrier_v1'), null);
+});
+
+test('a dead bearer token with no wallet (404) ends on a clean login, not the lock', async () => {
+  walletEnabled = false;
+  localStorage.setItem('auth-token', 'jwt-a');
+  readWallet = async () => { throw { status: 404 }; };
+  hydrate = async () => Response.json({}, { status: 401 });
+  const view = await mount();
+  initialUser = async () => Response.json({}, { status: 401 });
+  await act(async () => { barrier.reconcileRevokedIdentity(); });
+  await act(async () => {});
+  assert.equal(barrier.getIdentityBarrierSnapshot().phase, 'stable');
+  assert.equal(view.result.current.user, null);
+  assert.equal(localStorage.getItem('auth-token'), null);
+});
+
+test('sign-out from a locked tab without a wallet (404) always reaches login', async () => {
+  walletEnabled = false;
+  localStorage.setItem('auth-token', 'jwt-a');
+  const view = await mount();
+  readWallet = async () => { throw { status: 404 }; };
+  hydrate = async () => { throw new Error('offline'); };
+  await act(async () => { barrier.reconcileRevokedIdentity(); });
+  await act(async () => {});
+  assert.equal(barrier.getIdentityBarrierSnapshot().phase, 'locked');
+  purge = async () => { throw new Error('indexeddb_delete_blocked'); };
+  initialUser = async () => Response.json({}, { status: 401 });
+  const signOut = [...document.querySelectorAll('button')].find((button) => button.textContent === 'Sign out');
+  await act(async () => { signOut!.click(); });
+  await act(async () => {});
+  assert.equal(view.result.current.user, null);
+  assert.equal(barrier.getIdentityBarrierSnapshot().phase, 'stable');
+  assert.equal(localStorage.getItem('auth-token'), null);
+  assert.equal(localStorage.getItem('nassaj_identity_barrier_v1'), null);
+});
+
+test('a stale persisted fence on a deployment without wallets is cleared on load', async () => {
+  walletEnabled = false;
+  const first = await mount();
+  first.unmount();
+  const version = barrier.beginIdentityTransition('identity_revoked');
+  barrier.commitIdentityTransition(version, 'identity_revoked');
+  assert.notEqual(localStorage.getItem('nassaj_identity_barrier_v1'), null);
+  readWallet = async () => { throw { status: 404 }; };
+  initialUser = async () => Response.json({}, { status: 401 });
+  const reloaded = render(createElement(AuthProvider, null,
+    createElement(ProtectedRoute, null, createElement('div', null, 'private'))));
+  await act(async () => {});
+  assert.equal(barrier.getIdentityBarrierSnapshot().phase, 'stable');
+  assert.equal(localStorage.getItem('nassaj_identity_barrier_v1'), null);
+  assert.equal(reloaded.container.textContent, 'login');
 });

@@ -68,7 +68,7 @@ describe('CommandMenu execute lock', () => {
       />,
     );
 
-    expect(screen.getByRole('listbox').getAttribute('dir')).toBe('rtl');
+    expect(screen.getByRole('listbox').closest('[dir]')?.getAttribute('dir')).toBe('rtl');
     expect(screen.getByText('/models').getAttribute('dir')).toBe('ltr');
   });
 

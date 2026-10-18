@@ -9,10 +9,10 @@
  *     renewed by use, throttled to one write per 5 minutes;
  *   - the silent re-check clock (D9-1): every N hours (12 by default, at most
  *     24) the SPA re-asks the IdP with prompt=none at the next page load;
- *   - the owner tier (N2): an owner who entered with no click from an IdP
- *     session holds full read access, but privileged actions need a fresh
- *     passkey step-up whose grant (about 60 minutes) lives on THIS row only, so
- *     it never crosses to another browser and ends with the session;
+ *   - the owner tier: whether the session was an owner sign-in (the N5 kill
+ *     switch decides whether an IdP sign-out ends it). The owner passkey
+ *     step-up (N2) was withdrawn by owner decision 2026-10-18: an owner SSO
+ *     session has full access with no extra prompt;
  *   - the login hint of the session's own user, for the re-check (V10a).
  *
  * Password sessions are never bound and are out of reach of the linked
@@ -24,8 +24,6 @@ import { revokeTokenSession } from '../modules/account-wallet/token-session.js';
 
 /** One idle-clock write per device session per this interval. */
 export const SSO_SESSION_TOUCH_THROTTLE_MS = 5 * 60_000;
-/** Lifetime of an owner's privileged step-up grant (ADR-H20 D6 A1: "about 60 minutes"). */
-export const OWNER_PRIVILEGE_TTL_MS = 60 * 60_000;
 /**
  * Longest a token of one device session can outlive its last use: the JWT
  * lifetime (7 d, middleware/auth.js TOKEN_TTL_MS) plus the largest refresh
@@ -62,7 +60,7 @@ export function idpSidOf(claims) {
 }
 
 /**
- * The login name to send as `login_hint` on a re-check or step-up: the
+ * The login name to send as `login_hint` on a re-check: the
  * session's own user (never a "last user" cookie, ADR-H20 D3/V10a).
  * @param {Record<string, unknown> | null | undefined} claims
  * @returns {string | null}
@@ -77,10 +75,10 @@ export function sessionLoginHintOf(claims) {
  * Binds a new SSO device session. A write failure throws: the caller refuses
  * the sign-in rather than hand out a session the linked sign-out cannot reach.
  * @param {{ refreshSid: string, userId: number, issuer: string, claims: Record<string, unknown>,
- *   ownerTier: boolean, privilegedUntil?: number | null, nowMs?: number }} input
+ *   ownerTier: boolean, nowMs?: number }} input
  */
 export function bindSsoDeviceSession({
-  refreshSid, userId, issuer, claims, ownerTier, privilegedUntil = null, nowMs = Date.now(),
+  refreshSid, userId, issuer, claims, ownerTier, nowMs = Date.now(),
 }) {
   // A barrel without the repository (a mocked test store) binds nothing,
   // exactly as token-session.ts treats revocations.
@@ -92,7 +90,6 @@ export function bindSsoDeviceSession({
     idpSid: idpSidOf(claims),
     loginHint: sessionLoginHintOf(claims),
     ownerTier: ownerTier === true,
-    privilegedUntil: ownerTier === true && Number.isFinite(privilegedUntil) ? privilegedUntil : null,
     nowMs,
     pruneAfter: pruneAfter(nowMs),
   });
@@ -136,51 +133,8 @@ export function ssoRecheckDue(row, intervalHours, nowMs = Date.now()) {
 }
 
 /**
- * Whether an owner's request in this device session must first pass the
- * passkey step-up: true for an owner-tier SSO session without a live grant
- * and for an SSO session bound before its user became owner (the step-up then
- * answers session_ended, forcing a fresh owner sign-in). Fails closed (true)
- * when the binding cannot be read for an owner.
- * @param {{ role?: string, refreshSid?: string | null } | null | undefined} principal
- * @param {number} [nowMs]
- * @returns {boolean}
- */
-export function ownerStepUpRequired(principal, nowMs = Date.now()) {
-  if (principal?.role !== 'owner') return false;
-  if (typeof principal.refreshSid !== 'string' || !principal.refreshSid) return false;
-  let row;
-  try {
-    row = ssoDeviceSessionOf(principal.refreshSid);
-  } catch {
-    logSessionFailure('privilege_read_failed');
-    return true;
-  }
-  if (!row) return false;
-  // A member promoted to owner keeps a member-tier binding (owner_tier is set
-  // at sign-in, the role is read live): refuse until a fresh owner sign-in.
-  if (row.owner_tier !== 1) return true;
-  return !(Number.isFinite(row.privileged_until) && row.privileged_until > nowMs);
-}
-
-/**
- * Grants this browser's owner session the privileged tier for
- * OWNER_PRIVILEGE_TTL_MS. Returns the expiry, or null when the session is not
- * an owner-tier SSO session (nothing written).
- * @param {string} refreshSid
- * @param {number} [nowMs]
- * @returns {number | null}
- */
-export function grantOwnerPrivilege(refreshSid, nowMs = Date.now()) {
-  const row = ssoDeviceSessionOf(refreshSid);
-  if (!row || row.owner_tier !== 1) return null;
-  const until = nowMs + OWNER_PRIVILEGE_TTL_MS;
-  return databaseModule.ssoDeviceSessionsDb.grantPrivilege(refreshSid, until) ? until : null;
-}
-
-/**
  * Ends one device session: stores its revocation (every token of it is then
- * refused and its sockets close with 4401), then forgets its binding, which
- * also ends any privileged grant. Running agent turns and API keys are not
+ * refused and its sockets close with 4401), then forgets its binding. Running agent turns and API keys are not
  * touched. A revocation failure throws before anything is reported.
  * @param {{ userId: number, refreshSid: string, nowMs?: number }} input
  * @returns {number} sockets closed
@@ -221,7 +175,7 @@ export function markSsoRechecked(refreshSid, nowMs = Date.now()) {
 }
 
 /**
- * Records another IdP sid for this device session (a step-up or re-check may
+ * Records another IdP sid for this device session (a re-check may
  * open a new IdP session). Best effort: the earlier sid stays bound.
  * @param {string} refreshSid
  * @param {string} idpSid

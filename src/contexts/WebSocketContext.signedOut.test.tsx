@@ -72,7 +72,7 @@ describe('WebSocketProvider after sign-out (ADR-H20 N6)', () => {
     expect(FakeSocket.instances.at(-1)!.url).toContain('token=');
   });
 
-  it('a turn refused for the owner step-up opens the prompt', async () => {
+  it('N2 withdrawn: a legacy owner_step_up_required frame opens no prompt', async () => {
     render(<Wrapper />);
     const socket = FakeSocket.instances[0];
     const onStepUp = vi.fn();
@@ -85,6 +85,6 @@ describe('WebSocketProvider after sign-out (ADR-H20 N6)', () => {
     } finally {
       window.removeEventListener('auth:owner-step-up-required', onStepUp);
     }
-    expect(onStepUp).toHaveBeenCalledTimes(1);
+    expect(onStepUp).not.toHaveBeenCalled();
   });
 });

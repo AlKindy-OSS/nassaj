@@ -28,9 +28,11 @@ import { clearSsoConfig, FIXTURE_CLIENT_ID, FIXTURE_ISSUER, writeSsoRow } from '
 import { runSsoAttestationSweep, resetSsoAttestationSweepState } from './sso-attestation-sweep.js';
 import { userSsoAttestationFresh } from './sso-attestation.js';
 import {
-  activeSsoMapping, legacyEnvPresent, resetSsoConfigCacheForTests, ssoJitEnabled, ssoLoginAvailable, ssoPolicyEnforced,
-  ssoState,
+  activeSsoMapping, invalidateSsoWalletBlockCache, legacyEnvPresent, resetSsoConfigCacheForTests, ssoBlocksWallet,
+  ssoJitEnabled, ssoLoginAvailable, ssoPolicyEnforced, ssoState,
 } from './sso-config.service.js';
+import { enableSso } from './sso-apply.service.js';
+import { deviceAccountSessionsDb } from '@/modules/database/repositories/device-account-sessions.js';
 import { evaluateSsoClaims } from './sso-role-mapping.js';
 import { applySsoBootPolicy, disableSso } from './sso-lifecycle.service.js';
 import { localAccountCreationClosed, requiresSsoLogin } from './sso-only-policy.js';
@@ -107,6 +109,8 @@ function assertEntries(label: string, expected: Expected) {
   assert.equal(ssoPolicyEnforced(), expected.enforced, `${label}: enforced`);
   assert.equal(ssoLoginAvailable(), expected.available, `${label}: login available`);
   assert.equal(ssoState(), expected.state, `${label}: state`);
+  invalidateSsoWalletBlockCache();
+  assert.equal(ssoBlocksWallet(), expected.state !== 'off', `${label}: wallet blocked (ADR-194 A3)`);
   const governed = expected.enforced && expected.memberLinked !== false;
   assert.equal(requiresSsoLogin(member), governed, `${label}: member password/passkey/wallet refused`);
   assert.equal(localAccountCreationClosed(), expected.enforced, `${label}: invites closed`);
@@ -379,4 +383,54 @@ test('boot policy failure is logged and never thrown', (t) => {
   assert.ok(writes.some((line) => line.includes('sso_boot_policy_failed')));
   assert.equal(disabledRecordPresent(), false, 'the failed transition left no record');
   assert.equal(ssoPolicyEnforced(), true, 'so the policy stays enforced');
+});
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+const liveDevice = () => deviceAccountSessionsDb.create(member.id, DAY_MS);
+const deviceAlive = (secret: string) => deviceAccountSessionsDb.resolve(secret) !== null;
+
+test('ADR-194 A3: ssoBlocksWallet is cached between SSO writes and dropped by invalidation', () => {
+  assert.equal(ssoBlocksWallet(), false);
+  writeSsoRow(getConnection());
+  assert.equal(ssoBlocksWallet(), false, 'a direct row write is not seen inside the cache lifetime');
+  assert.equal(ssoBlocksWallet(Date.now() + 60_000), true, 'the lifetime bounds staleness');
+  writeDisabledRecordOn(getConnection(), 'owner', Date.now());
+  invalidateSsoWalletBlockCache();
+  assert.equal(ssoBlocksWallet(), false);
+});
+
+test('ADR-194 A3: a read failure blocks the wallet (fail safe)', () => {
+  getConnection().exec('DROP TABLE sso_oidc_config');
+  assert.equal(ssoBlocksWallet(), true);
+});
+
+test('ADR-194 A3: owner disable invalidates the cached wallet block at once', () => {
+  writeSsoRow(getConnection());
+  assert.equal(ssoBlocksWallet(), true);
+  disableSso({ actorUserId: owner.id, afterCommit: quiet });
+  assert.equal(ssoBlocksWallet(), false);
+});
+
+test('ADR-194 A3: enabling SSO revokes every live device session in the same transaction', () => {
+  writeSsoRow(getConnection(), { enabled: 0 });
+  const device = liveDevice();
+  assert.equal(ssoBlocksWallet(), false);
+  assert.equal(deviceAlive(device.secret), true);
+  enableSso({ actorUserId: owner.id });
+  assert.equal(deviceAlive(device.secret), false, 'the wallet cookie is dead');
+  assert.equal(ssoBlocksWallet(), true, 'the cache was invalidated by the enable');
+  disableSso({ actorUserId: owner.id, afterCommit: quiet });
+  assert.equal(ssoBlocksWallet(), false);
+  assert.equal(deviceAlive(device.secret), false, 'turning SSO off does not revive the old device session');
+});
+
+test('ADR-194 A3: boot revokes device sessions only when SSO is not off; idempotent', () => {
+  const offDevice = liveDevice();
+  applySsoBootPolicy({ afterCommit: quiet });
+  assert.equal(deviceAlive(offDevice.secret), true, 'SSO off: the wallet survives a reboot');
+  writeSsoRow(getConnection());
+  applySsoBootPolicy({ afterCommit: quiet });
+  assert.equal(deviceAlive(offDevice.secret), false, 'SSO on at boot (upgrade): the wallet session ends');
+  assert.equal(ssoBlocksWallet(), true);
+  assert.deepEqual(applySsoBootPolicy({ afterCommit: quiet }), { action: 'none' });
 });

@@ -15,8 +15,10 @@ vi.mock('../../utils/api', () => ({ api: {
   addProjectMember: (...args: unknown[]) => addProjectMember(...args),
   removeProjectMember: (...args: unknown[]) => removeProjectMember(...args),
 } }));
+vi.mock('../auth/bearerRevocation', () => ({
+  handleIdentityRevocation: () => reconcileRevokedIdentity(),
+}));
 vi.mock('../auth/accountIdentityBarrier', () => ({
-  reconcileRevokedIdentity: () => reconcileRevokedIdentity(),
   getIdentityBarrierSnapshot: () => identity,
   subscribeIdentityBarrier: (listener: () => void) => { identityListener = listener; return () => { identityListener = null; }; },
 }));

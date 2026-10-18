@@ -242,7 +242,7 @@ test('wallet mode: a passkey login for a forced rotation is refused, not issued'
   assert.equal(audits(user.id, 'login_success').length, 0);
 });
 
-test('flag off: password and passkey logins answer the legacy JWT and touch no device', async () => {
+test('flag off: password and passkey logins answer the legacy JWT and revoke no device', async () => {
   const user = account();
   const existing = deviceAccountSessionsDb.create(user.id, DEVICE_IDLE_TTL_MS);
   const cookie = { Cookie: `__Host-nassaj_device=${encodeURIComponent(existing.secret)}` };
@@ -253,7 +253,8 @@ test('flag off: password and passkey logins answer the legacy JWT and touch no d
       const body = await response.json();
       assert.equal(typeof body.token, 'string');
       assert.equal(body.wallet, undefined);
-      assert.equal(deviceCookieOf(response), undefined);
+      // ADR-194 A3: a bearer answer clears the device cookie; the device row itself is untouched.
+      assert.match(deviceCookieOf(response) ?? '', /^__Host-nassaj_device=;/u);
     }
     const noOrigin = await fetch(`${origin}/api/auth/webauthn/login/verify`, {
       method: 'POST', body: JSON.stringify({ response: {} }), headers: { 'Content-Type': 'application/json' },

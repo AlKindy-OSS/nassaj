@@ -1,23 +1,23 @@
 /**
  * Node settings for linked SSO sign-in and sign-out (ADR-H20 S6).
  *
- *   autoSignIn              N1: an unauthenticated visit goes straight to the IdP (default off)
+ *   autoSignIn              N1: an unauthenticated visit goes straight to the IdP (default on;
+ *                           an explicitly stored off is respected)
  *   ownerLoginHint          N3: static `login_hint` on an owner node (no "last user" cookie)
  *   postLogoutRedirectUri   N4: allow-listed return after the IdP end_session
  *   recheckIntervalHours    N8 / D9-1: silent prompt=none re-check, 1..24 h (default 12)
  *   idpSignOutAffectsOwner  N5 kill switch: an IdP sign-out ends the owner's browser session
  *                           (default on)
  *
- * The owner entry cap is a code constant (oidc-owner-sign-in.js), never here.
+ * There is no owner entry cap (ADR-194 A1 withdrawn 2026-10-18).
  * Writes are owner-only, behind step-up (the caller proves it), audited
- * strictly in the same transaction; changing the kill switch also ends every
- * outstanding owner privileged grant (D6 A1).
+ * strictly in the same transaction.
  */
 // Namespace import: route tests replace the database barrel with partial mocks.
 import * as databaseModule from '../modules/database/index.js';
 
 const DEFAULTS = Object.freeze({
-  autoSignIn: false,
+  autoSignIn: true,
   ownerLoginHint: null,
   postLogoutRedirectUri: null,
   recheckIntervalHours: 12,
@@ -32,7 +32,7 @@ function logSettingsFailure(code) {
 
 /**
  * The effective settings. On a read failure the safe defaults apply (auto
- * sign-in off, no hint, no return URI, 12 h, kill switch on) and it is logged.
+ * sign-in on, no hint, no return URI, 12 h, kill switch on) and it is logged.
  * @returns {{ autoSignIn: boolean, ownerLoginHint: string | null, postLogoutRedirectUri: string | null,
  *   recheckIntervalHours: number, idpSignOutAffectsOwner: boolean }}
  */
@@ -75,8 +75,7 @@ export function mergeSsoLinkedSettings(patch, current) {
 }
 
 /**
- * Validates and stores an update; the write, the strict audit and (on a kill
- * switch change) the end of every privileged grant commit together.
+ * Validates and stores an update; the write and the strict audit commit together.
  * @param {unknown} patch
  * @param {{ userId: number, ipAddress?: string | null, userAgent?: string | null }} actor
  * @returns {{ ok: true, settings: ReturnType<typeof readSsoLinkedSettings> } | { ok: false, code: string }}
@@ -90,14 +89,13 @@ export function updateSsoLinkedSettings(patch, actor) {
     if (!next) return;
     databaseModule.ssoLinkedSettingsDb.write(next);
     const killSwitchChanged = next.idpSignOutAffectsOwner !== current.idpSignOutAffectsOwner;
-    const endedGrants = killSwitchChanged ? databaseModule.ssoDeviceSessionsDb.clearAllPrivileges() : 0;
     const changed = Object.keys(next).filter((field) => next[field] !== current[field]);
     if (changed.length > 0) {
       databaseModule.auditLogDb.recordStrict('sso_linked_settings_changed', {
         userId: actor.userId,
         metadata: {
           changed,
-          ...(killSwitchChanged ? { idpSignOutAffectsOwner: next.idpSignOutAffectsOwner, endedGrants } : {}),
+          ...(killSwitchChanged ? { idpSignOutAffectsOwner: next.idpSignOutAffectsOwner } : {}),
         },
         ipAddress: actor.ipAddress ?? null,
         userAgent: actor.userAgent ?? null,

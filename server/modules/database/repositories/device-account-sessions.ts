@@ -2,6 +2,8 @@ import crypto from 'node:crypto';
 
 import { getConnection } from '@/modules/database/connection.js';
 
+type DatabaseHandle = ReturnType<typeof getConnection>;
+
 export const DEVICE_COOKIE = '__Host-nassaj_device';
 export const MAX_ACCOUNT_SLOTS = 5;
 /** Idle window of a device session; renewed by sliding renewal (ADR-163 amendment 1, M6). */
@@ -167,6 +169,28 @@ function insertDevice(
     ) VALUES(?, ?, ?, ?, ?, ?)
   `).run(slotId, sessionId, slot.userId, slot.now, slot.now, slot.passwordStamp);
   db.prepare('UPDATE device_sessions SET active_slot_id = ? WHERE id = ?').run(slotId, sessionId);
+}
+
+/**
+ * Revokes every live device session with all of its slots on `db`, inside the
+ * caller's transaction (SSO enable, ADR-194 A3): a wallet cookie that
+ * existed while SSO was off must not revive when SSO is later turned off.
+ * Same order as logout(all): the active-slot trigger forbids revoking a slot a
+ * live session still points at. Returns the revoked device session ids.
+ */
+export function revokeAllLiveDeviceSessionsOn(db: DatabaseHandle, now: number): string[] {
+  const live = db.prepare('SELECT id FROM device_sessions WHERE revoked_at IS NULL')
+    .all() as Array<{ id: string }>;
+  if (live.length === 0) return [];
+  db.prepare('UPDATE device_sessions SET active_slot_id = NULL WHERE revoked_at IS NULL').run();
+  db.prepare(`
+    UPDATE device_account_slots SET revoked_at = ?
+    WHERE revoked_at IS NULL AND device_session_id IN (SELECT id FROM device_sessions WHERE revoked_at IS NULL)
+  `).run(now);
+  db.prepare(`
+    UPDATE device_sessions SET revoked_at = ?, generation = generation + 1 WHERE revoked_at IS NULL
+  `).run(now);
+  return live.map((row) => row.id);
 }
 
 /** Parameterized persistence boundary for device-bound account wallets. */

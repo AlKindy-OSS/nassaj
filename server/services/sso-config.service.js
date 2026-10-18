@@ -225,9 +225,40 @@ export function activeSsoMapping() {
   return state.loginAvailable ? state.snapshot.mapping : null;
 }
 
+/**
+ * Cached answer of ssoBlocksWallet(). Writes that change the SSO state
+ * (apply, enable, disable, FORCE_OFF, boot) invalidate it at once; the short
+ * lifetime only bounds staleness for state that moves outside those writes
+ * (a first member link), so a request does not pay SQLite reads every time.
+ */
+const WALLET_BLOCK_TTL_MS = 5_000;
+let walletBlock = null;
+
+/**
+ * Owner decision 2026-10-18: multi-account switching (the device-session
+ * wallet) is unavailable whenever SSO is configured or enforced — every state
+ * except 'off'. 'unavailable' and 'paused' block too, so an IdP outage never
+ * flips the node between modes; a read failure blocks (fail safe, evaluate()
+ * already reports it as enforced).
+ * @param {number} [nowMs]
+ * @returns {boolean}
+ */
+export function ssoBlocksWallet(nowMs = Date.now()) {
+  if (walletBlock !== null && walletBlock.expiresAt > nowMs) return walletBlock.blocks;
+  const blocks = ssoState() !== 'off';
+  walletBlock = { blocks, expiresAt: nowMs + WALLET_BLOCK_TTL_MS };
+  return blocks;
+}
+
+/** Drops the cached ssoBlocksWallet() answer; called after every SSO state write. */
+export function invalidateSsoWalletBlockCache() {
+  walletBlock = null;
+}
+
 /** Test seam: forget the cached snapshot, decryptability and one-shot warnings. */
 export function resetSsoConfigCacheForTests() {
   snapshot = null;
   decryptability = { key: null, ok: false };
+  walletBlock = null;
   loggedCodes.clear();
 }

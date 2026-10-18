@@ -619,6 +619,49 @@ export function AuthProvider({ children }: AuthProviderProps) {
     const reason = identityBarrier.reason;
     const isCurrent = () => isCurrentIdentityReconciliation(reconciliationVersion);
     const paintedUser = user;
+    const finishSignedOut = () => {
+      clearSession(); setIsMultiUser(false);
+      setNeedsSetup(false); setError(null); setIsLoading(false);
+      stabilizeIdentityBarrier(reconciliationVersion);
+    };
+    // A deployment without device sessions answers /accounts with 404, and a
+    // bearer tab has no wallet either. The wallet path would lock such a tab
+    // forever (every retry and sign-out reads the same 404), so the bearer
+    // token alone decides: a valid one is re-proven, anything else signs out.
+    const reconcileWithoutWallet = async () => {
+      setDeviceAccountSessionsEnabled(false);
+      clearIdentityCompletionReceipt();
+      const bearer = reason === 'signed_out' ? null : readStoredToken();
+      const response = bearer ? await api.auth.userForIdentityReconciliation() : null;
+      if (!isCurrent()) return;
+      if (response && !response.ok && response.status !== 401 && response.status !== 403) {
+        throw new Error('identity_hydration_failed');
+      }
+      const payload = response?.ok ? await parseJsonSafely<AuthUserPayload>(response) : null;
+      if (!isCurrent()) return;
+      if (!payload?.user) {
+        try {
+          await purgeAccountIdentityState();
+        } catch (caughtError) {
+          // Signing out must always reach the login screen; a blocked local
+          // cache delete is retried by the next identity change.
+          console.error('[Auth] Identity cleanup failed during sign-out:', caughtError);
+        }
+        if (isCurrent()) finishSignedOut();
+        return;
+      }
+      if (!paintedUser || authUserKey(payload.user) !== authUserKey(paintedUser)) {
+        await purgeAccountIdentityState();
+        if (!isCurrent()) return;
+      }
+      setPreferenceIdentityAuthenticated(true);
+      setUser(payload.user); setToken(bearer);
+      setIsMultiUser(Boolean(payload.isMultiUser));
+      await hydratePreferences();
+      if (!isCurrent()) return;
+      setNeedsSetup(false); setError(null); setIsLoading(false);
+      stabilizeIdentityBarrier(reconciliationVersion);
+    };
     const reconcile = async () => {
       try {
         // A persisted revocation resumes on reload without emitting a fresh
@@ -634,6 +677,10 @@ export function AuthProvider({ children }: AuthProviderProps) {
         } catch (caughtError) {
           const status = caughtError && typeof caughtError === 'object'
             && 'status' in caughtError ? caughtError.status : null;
+          if (status === 404 || (status === 401 && readStoredToken())) {
+            await reconcileWithoutWallet();
+            return;
+          }
           if (status !== 401 || !SIGNED_OUT_REASONS.has(reason)) throw caughtError;
 
           // Removing the final slot makes /accounts itself unauthorized. In an
@@ -642,9 +689,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
           clearIdentityCompletionReceipt();
           await purgeAccountIdentityState();
           if (!isCurrent()) return;
-          clearSession(); setIsMultiUser(false);
-          setNeedsSetup(false); setError(null); setIsLoading(false);
-          stabilizeIdentityBarrier(reconciliationVersion);
+          finishSignedOut();
           return;
         }
         if (!isCurrent()) return;
@@ -743,6 +788,13 @@ export function AuthProvider({ children }: AuthProviderProps) {
   // Locked-screen recovery: revoke this device's sessions when the server can
   // still be reached, then let a fresh reconciliation clean up and show login.
   const signOutLockedIdentity = useCallback(async () => {
+    // ADR-H20 N1: an explicit sign-out never auto-signs straight back in.
+    markExplicitSignOut();
+    const bearer = readStoredToken();
+    if (bearer) {
+      // A bearer tab has no wallet; end its server session best-effort.
+      void Promise.resolve().then(() => api.auth.logout(bearer)).catch(() => {});
+    }
     try {
       const wallet = await readAccountWallet(undefined, true);
       await mutateAccountWallet('/api/auth/logout-all', 'POST', 'logout_all',
@@ -1031,7 +1083,10 @@ export function AuthProvider({ children }: AuthProviderProps) {
   }, []);
 
   const logout = useCallback(() => {
-    const tokenToInvalidate = token;
+    // A stored bearer outranks the device cookie on every request, so a bearer
+    // tab signs out its bearer session even when wallet mode is on (ADR-194
+    // A3): the freshest stored token first, then the React copy.
+    const tokenToInvalidate = readStoredToken() ?? token;
     if (tokenToInvalidate) {
       // T-2035: the request is started with the captured token BEFORE the
       // session is cleared, and carries it explicitly, so the server can end

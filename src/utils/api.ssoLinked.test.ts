@@ -1,13 +1,11 @@
 // ADR-H20: an idle SSO session (401 sso_session_expired) restarts SSO like an
-// aged-out attestation; a 403 owner_step_up_required asks for the passkey
-// step-up and is never a sign-out.
+// aged-out attestation. A 403 is never a sign-out and opens no passkey prompt
+// (the N2 owner step-up was withdrawn 2026-10-18).
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   authenticatedFetch,
-  isOwnerStepUpRejection,
   isSsoReauthRejection,
-  OWNER_STEP_UP_EVENT,
   SSO_REAUTH_EVENT,
 } from './api';
 
@@ -20,12 +18,9 @@ afterEach(() => {
 });
 
 describe('ADR-H20 codes in the API client', () => {
-  it('classifies sso_session_expired as an SSO restart and owner_step_up_required as a step-up', async () => {
+  it('classifies sso_session_expired as an SSO restart', async () => {
     expect(await isSsoReauthRejection(respond(401, { code: 'sso_session_expired' }))).toBe(true);
     expect(await isSsoReauthRejection(respond(403, { code: 'sso_session_expired' }))).toBe(false);
-    expect(await isOwnerStepUpRejection(respond(403, { code: 'owner_step_up_required' }))).toBe(true);
-    expect(await isOwnerStepUpRejection(respond(403, { code: 'insufficient' }))).toBe(false);
-    expect(await isOwnerStepUpRejection(new Response('not json', { status: 403 }))).toBe(false);
   });
 
   it('an idle SSO session restarts SSO (no plain logout)', async () => {
@@ -44,17 +39,17 @@ describe('ADR-H20 codes in the API client', () => {
     expect(unauthorized).not.toHaveBeenCalled();
   });
 
-  it('a refused privileged action opens the step-up prompt and keeps the session', async () => {
+  it('a 403 keeps the session and raises no passkey prompt event', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => respond(403, { code: 'owner_step_up_required' })));
     const stepUp = vi.fn();
-    window.addEventListener(OWNER_STEP_UP_EVENT, stepUp);
+    window.addEventListener('auth:owner-step-up-required', stepUp);
     try {
       const response = await authenticatedFetch('/api/settings/x', { method: 'PUT', body: '{}' });
       expect(response.status).toBe(403);
     } finally {
-      window.removeEventListener(OWNER_STEP_UP_EVENT, stepUp);
+      window.removeEventListener('auth:owner-step-up-required', stepUp);
     }
-    expect(stepUp).toHaveBeenCalledTimes(1);
+    expect(stepUp).not.toHaveBeenCalled();
     expect(localStorage.getItem('auth-token')).toBe('token-synthetic');
   });
 });

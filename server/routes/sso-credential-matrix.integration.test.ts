@@ -1,7 +1,8 @@
 /**
  * ADR-194 D1 state matrix (C1) through the REAL credential entry points, with
  * the real state model and a real database: password login, passkey login (a
- * software authenticator signing genuine assertions), wallet add, invite
+ * software authenticator signing genuine assertions), wallet add (gone, 404,
+ * in every state except off since ADR-194 A3), invite
  * create and accept, the JWT REST verifier, the WebSocket verifier and the API
  * key resolver, plus the owner column, in every matrix state.
  *
@@ -217,7 +218,8 @@ for (const row of ROWS) {
       if (row.governed) {
         assert.deepEqual(password, refused, 'member password');
         assert.deepEqual(passkey, refused, 'member passkey');
-        assert.deepEqual(wallet, refused, 'wallet add of the member');
+        // ADR-194 A3: any SSO state except off removes the wallet routes altogether.
+        assert.deepEqual(wallet, { status: 404, code: undefined }, 'wallet routes gone under SSO');
       } else {
         assert.equal(password.status, 200, 'member password allowed');
         assert.equal(passkey.status, 200, 'member passkey allowed');

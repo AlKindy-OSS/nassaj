@@ -10,7 +10,9 @@ import { beforeEach, test } from 'node:test';
 import {
   api, db, draftBody, liveRevocations, owner, proveDraft, resetSsoFixture, STEP_UP, stamp, useProvider,
 } from './__tests__/settings-sso-harness.js';
+import { connectionRevocationRegistry } from '../modules/account-wallet/connection-revocation-registry.js';
 import { apiKeysDb } from '../modules/database/repositories/api-keys.js';
+import { deviceAccountSessionsDb } from '../modules/database/repositories/device-account-sessions.js';
 import { userIdentitiesDb } from '../modules/database/repositories/user-identities.js';
 import { userDb } from '../modules/database/repositories/users.js';
 import { decryptSsoClientSecret } from '../modules/database/sso-secret-envelope.js';
@@ -66,6 +68,19 @@ test('I3: apply works after the display result was read; enable:true activates S
   assert.deepEqual(status.body.ignoredEnv, []);
 });
 
+test('ADR-194 A3: an enabling apply revokes live device sessions and closes their connections', async () => {
+  const device = deviceAccountSessionsDb.create(owner.id, 24 * HOUR_MS);
+  const closed: Array<[number | undefined, string | undefined]> = [];
+  connectionRevocationRegistry.register({ close: (code, reason) => closed.push([code, reason]) },
+    device.principal);
+  const binding = await proveDraft();
+  const res = await api('POST', '/apply', { ...binding, enable: true, stepUp: STEP_UP });
+  assert.equal(res.status, 200, res.text);
+  assert.equal((res.body.applied as Record<string, unknown>).walletSessionsRevoked, 1);
+  assert.equal(deviceAccountSessionsDb.resolve(device.secret), null, 'the device session is dead');
+  assert.deepEqual(closed, [[4401, 'identity_revoked']], 'its live connection was closed after commit');
+});
+
 test('apply refuses missing, foreign, stale or failed proofs and a missing step-up', async () => {
   await api('PUT', '/draft', draftBody());
   await api('POST', '/draft/test-discovery');
@@ -119,7 +134,8 @@ test('I7: an issuer change forces JIT off and revokes orphaned non-owners by def
   assert.equal(res.status, 200, res.text);
   const summary = res.body.applied as Record<string, unknown>;
   assert.deepEqual(summary, { version: Number(summary.version), enabled: true, mappingChanged: true,
-    reattestRequired: 2, issuerChanged: true, orphaned: 1, revoked: true, keysRevoked: 1, jitForcedOff: true });
+    reattestRequired: 2, issuerChanged: true, orphaned: 1, revoked: true, keysRevoked: 1, jitForcedOff: true,
+    walletSessionsRevoked: 0 });
   const active = activeRow();
   assert.equal(active?.issuer, NEW_ISSUER);
   assert.equal(active?.jit_enabled, 0, 'JIT forced off on the new active row');

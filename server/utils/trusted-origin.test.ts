@@ -2,17 +2,27 @@
  * trusted-origin — ADR-163 amendment 1 (D1/A1): one env-derived allowlist, a
  * fail-closed MULTI_ACCOUNT_SWITCHING predicate, and the forced password-change
  * cookie guard (C2) that works behind the tunnel with the flag off.
- * Covers T1, T1b, T2, T3, T4, T4b, T4c, T4d, T5 (guard parity), T5b, T5c.
+ * Covers T1, T1b, T2, T3, T4, T4b, T4c, T4d, T5 (guard parity), T5b, T5c, and
+ * ADR-194 A3: on by default, `false` turns it off, SSO (any state but 'off')
+ * turns it off per call.
  */
 
 import assert from 'node:assert/strict';
-import { afterEach, test } from 'node:test';
+import path from 'node:path';
+import { afterEach, mock, test } from 'node:test';
+import { pathToFileURL } from 'node:url';
 
-import { enforceCookieMutationGuard, mintMutationCsrfToken } from '../modules/account-wallet/request-csrf.js';
+import { createSsoConfigDouble } from '../services/__tests__/sso-config-double.js';
 
-import {
+const url = (spec: string) => pathToFileURL(path.resolve(import.meta.dirname, spec)).href;
+// SSO off unless a test says otherwise; the real state model has its own tests.
+const sso = createSsoConfigDouble({ enforced: false, loginAvailable: false });
+mock.module(url('../services/sso-config.service.js'), { namedExports: sso.exports });
+
+const { enforceCookieMutationGuard, mintMutationCsrfToken } = await import('../modules/account-wallet/request-csrf.js');
+const {
   buildTrustedOriginPolicy, isTrustedOrigin, multiAccountSwitchingEnabled, walletOriginConfigured,
-} from './trusted-origin.js';
+} = await import('./trusted-origin.js');
 
 const PUBLIC = 'https://nassaj.example';
 const KEYS = ['APP_ORIGINS', 'APP_ORIGIN', 'NASSAJ_PUBLIC_ORIGIN', 'SERVER_PORT', 'ALLOWED_ORIGINS',
@@ -20,6 +30,8 @@ const KEYS = ['APP_ORIGINS', 'APP_ORIGIN', 'NASSAJ_PUBLIC_ORIGIN', 'SERVER_PORT'
 const saved = Object.fromEntries(KEYS.map((key) => [key, process.env[key]]));
 
 afterEach(() => {
+  sso.setActive(false);
+  sso.state.legacy = false;
   for (const key of KEYS) {
     if (saved[key] === undefined) delete process.env[key];
     else process.env[key] = saved[key];
@@ -63,10 +75,50 @@ test('T2: an explicit origin missing from ALLOWED_ORIGINS disables the wallet', 
     .multiAccountSwitching, true);
 });
 
-test('platform mode and a flag other than "true" never enable the wallet', () => {
+test('platform mode never enables the wallet; only an explicit "false" turns the flag off', () => {
   const env = { MULTI_ACCOUNT_SWITCHING: 'true', NASSAJ_PUBLIC_ORIGIN: PUBLIC, ALLOWED_ORIGINS: PUBLIC };
   assert.equal(buildTrustedOriginPolicy(env, true).multiAccountSwitching, false);
-  assert.equal(buildTrustedOriginPolicy({ ...env, MULTI_ACCOUNT_SWITCHING: '1' }, false).multiAccountSwitching, false);
+  assert.equal(buildTrustedOriginPolicy(env, true).offReason, 'platform');
+  assert.equal(buildTrustedOriginPolicy({ ...env, MULTI_ACCOUNT_SWITCHING: 'false' }, false).multiAccountSwitching,
+    false);
+  assert.equal(buildTrustedOriginPolicy({ ...env, MULTI_ACCOUNT_SWITCHING: 'false' }, false).offReason, 'flag');
+  assert.equal(buildTrustedOriginPolicy({ ...env, MULTI_ACCOUNT_SWITCHING: '1' }, false).multiAccountSwitching, true);
+});
+
+test('ADR-194 A3: unset flag enables the wallet when the origin preconditions hold', () => {
+  setEnv({ NASSAJ_PUBLIC_ORIGIN: PUBLIC, ALLOWED_ORIGINS: PUBLIC });
+  assert.equal(multiAccountSwitchingEnabled(), true);
+  assert.equal(buildTrustedOriginPolicy({ NASSAJ_PUBLIC_ORIGIN: PUBLIC, ALLOWED_ORIGINS: PUBLIC }, false).offReason,
+    null);
+  setEnv({ NASSAJ_PUBLIC_ORIGIN: PUBLIC, ALLOWED_ORIGINS: PUBLIC, MULTI_ACCOUNT_SWITCHING: 'false' });
+  assert.equal(multiAccountSwitchingEnabled(), false);
+});
+
+test('ADR-194 A3: unset flag stays off without origin, with a CORS gap, and in platform mode — no warning', () => {
+  const noOrigin = buildTrustedOriginPolicy({}, false);
+  assert.equal(noOrigin.multiAccountSwitching, false);
+  assert.equal(noOrigin.offReason, 'origin');
+  assert.ok(!noOrigin.warnings.some((warning) => warning.code === 'multi_account_switching_disabled'));
+  const corsGap = buildTrustedOriginPolicy({ NASSAJ_PUBLIC_ORIGIN: PUBLIC }, false);
+  assert.equal(corsGap.offReason, 'cors');
+  assert.ok(!corsGap.warnings.some((warning) => warning.code === 'multi_account_switching_disabled'));
+  const platform = buildTrustedOriginPolicy({ NASSAJ_PUBLIC_ORIGIN: PUBLIC, ALLOWED_ORIGINS: PUBLIC }, true);
+  assert.equal(platform.offReason, 'platform');
+  assert.equal(platform.multiAccountSwitching, false);
+});
+
+test('ADR-194 A3: any SSO state except off disables the wallet per call, without touching the env cache', () => {
+  setEnv({ NASSAJ_PUBLIC_ORIGIN: PUBLIC, ALLOWED_ORIGINS: PUBLIC });
+  assert.equal(multiAccountSwitchingEnabled(), true);
+  sso.setActive(true); // 'active'
+  assert.equal(multiAccountSwitchingEnabled(), false);
+  sso.state.loginAvailable = false; // 'unavailable' (IdP outage): still off, no mode flip
+  assert.equal(multiAccountSwitchingEnabled(), false);
+  sso.state.legacy = true; // 'paused'
+  assert.equal(multiAccountSwitchingEnabled(), false);
+  sso.setActive(false);
+  sso.state.legacy = false; // 'off'
+  assert.equal(multiAccountSwitchingEnabled(), true);
 });
 
 test('T3: a trailing slash or host case in Origin is normalized; http for the public host is not', () => {

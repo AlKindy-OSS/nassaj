@@ -1,5 +1,5 @@
 /**
- * ADR-H20 S6 unit tests: the privileged-action classification (N2), the
+ * ADR-H20 S6 unit tests: the
  * back-channel request limits, timeout and failure classification (N7), the
  * device-session helpers and their fail-closed paths, the new PKCE purposes,
  * the settings merge, and the repositories' prune and touch throttle.
@@ -13,7 +13,6 @@ import {
   ssoDeviceSessionIdleExpired,
 } from '../modules/database/index.js';
 
-import { isOwnerPrivilegedRequest } from './owner-privileged-actions.js';
 import {
   BACKCHANNEL_MAX_BODY_BYTES,
   isRetryableVerifierFailure,
@@ -23,9 +22,7 @@ import {
 } from './oidc-backchannel-logout.service.js';
 import {
   addSsoIdpSid,
-  grantOwnerPrivilege,
   idpSidOf,
-  ownerStepUpRequired,
   sessionLoginHintOf,
   ssoRecheckDue,
   touchSsoDeviceSession,
@@ -44,75 +41,15 @@ function bind(overrides: Partial<Parameters<typeof ssoDeviceSessionsDb.bind>[0]>
   const refreshSid = crypto.randomBytes(16).toString('base64url');
   ssoDeviceSessionsDb.bind({
     refreshSid, userId: 7, issuer: 'https://idp.example', idpSid: `V1_${refreshSid}`, loginHint: null,
-    ownerTier: false, privilegedUntil: null, nowMs: Date.now(), pruneAfter: Date.now() + HOUR_MS, ...overrides,
+    ownerTier: false, nowMs: Date.now(), pruneAfter: Date.now() + HOUR_MS, ...overrides,
   });
   return refreshSid;
 }
 
-// ---------------------------------------------------------------------------
-// N2 classification
-// ---------------------------------------------------------------------------
-
-test('N2: privileged REST actions — settings, keys, users, server actions, terminal, agent commands', () => {
-  const privileged: Array<[string, string]> = [
-    ['PUT', '/api/settings/api-key-sso-window'], ['POST', '/api/settings/api-keys'], ['DELETE', '/api/settings/api-keys/3'],
-    ['POST', '/api/settings/sso/apply'], ['PUT', '/api/settings/sso/linked-sessions'],
-    ['POST', '/api/credential-grants'], ['PUT', '/api/providers/claude/key'], ['POST', '/api/connectors/x/install'],
-    ['POST', '/api/system/pending/9/execute'], ['POST', '/api/system/update'],
-    ['PATCH', '/api/auth/users/4/role'], ['DELETE', '/api/auth/users/4'], ['POST', '/api/auth/invites'], ['POST', '/api/admin/x'],
-    ['GET', '/api/terminals'], ['POST', '/api/terminals'], ['POST', '/API/Terminals/1?x=1'],
-    ['POST', '/api/commands/execute'], ['POST', '/api/session-steer'], ['POST', '/api/scheduled-messages'],
-    ['POST', '/api/workflow-supervisor/launch'], ['POST', '/api/sessions/s1/permission-fence/acknowledge'],
-    ['PUT', '/api/governance/x'], ['PUT', '/api/harness-files/x'],
-    // M1: unlinking another user's SSO identity; M2: renaming or deleting a passkey.
-    ['DELETE', '/api/auth/oidc/link/12'], ['DELETE', '/api/auth/oidc/link/selfish'],
-    ['PATCH', '/api/auth/webauthn/credentials/3'], ['DELETE', '/api/auth/webauthn/credentials/3'],
-    ['DELETE', '/api/auth/webauthn/credentials/3?x=1'],
-  ];
-  for (const [method, originalUrl] of privileged) {
-    assert.equal(isOwnerPrivilegedRequest({ method, originalUrl }), true, `${method} ${originalUrl}`);
-  }
-  const open: Array<[string, string]> = [
-    ['GET', '/api/settings/api-keys'], ['GET', '/api/settings/sso'], ['GET', '/api/auth/users'], ['GET', '/api/system/status'],
-    ['POST', '/api/auth/logout'], ['POST', '/api/auth/refresh'], ['POST', '/api/auth/oidc/owner-step-up/start'],
-    ['POST', '/api/projects/p/files'], ['POST', '/api/sessions/s1/messages'], ['HEAD', '/api/settings/x'],
-    ['OPTIONS', '/api/system/x'], ['POST', '/api/settingsx'], ['POST', '/api/agent'],
-    ['DELETE', '/api/auth/oidc/link/self'], ['DELETE', '/api/auth/oidc/link/self/'], ['GET', '/api/auth/oidc/link/12'],
-    ['GET', '/api/auth/webauthn/credentials'], ['POST', '/api/auth/webauthn/register/options'],
-    ['POST', '/api/auth/webauthn/register/verify'], ['POST', '/api/auth/webauthn/step-up/options'],
-    ['POST', '/api/auth/webauthn/login/options'], ['POST', '/api/auth/webauthn/login/verify'],
-  ];
-  for (const [method, originalUrl] of open) {
-    assert.equal(isOwnerPrivilegedRequest({ method, originalUrl }), false, `${method} ${originalUrl}`);
-  }
-});
-
-test('N2: ownerStepUpRequired fails closed (true) for an owner when the binding cannot be read', (t) => {
-  t.mock.method(process.stderr, 'write', () => true);
-  const sid = bind({ ownerTier: true });
-  assert.equal(ownerStepUpRequired({ role: 'owner', refreshSid: sid }), true);
-  t.mock.method(ssoDeviceSessionsDb, 'get', () => { throw new Error('database is locked'); });
-  assert.equal(ownerStepUpRequired({ role: 'owner', refreshSid: sid }), true, 'fail closed');
-  assert.equal(ownerStepUpRequired({ role: 'user', refreshSid: sid }), false, 'members are never gated here');
-  assert.equal(ownerStepUpRequired({ role: 'owner', refreshSid: null }), false);
-  assert.equal(ownerStepUpRequired(undefined), false);
-});
-
-test('H2: a member-tier SSO binding of a user now holding the owner role is gated', () => {
-  const promoted = bind({ ownerTier: false });
-  assert.equal(ownerStepUpRequired({ role: 'user', refreshSid: promoted }), false, 'still a member: never gated');
-  assert.equal(ownerStepUpRequired({ role: 'owner', refreshSid: promoted }), true, 'promoted: fresh owner sign-in');
-  assert.equal(ownerStepUpRequired({ role: 'owner', refreshSid: 'password-session-without-row' }), false);
-});
-
-test('N2: a grant is only for an owner-tier row; a member binding gets none', () => {
-  const member = bind();
-  assert.equal(grantOwnerPrivilege(member), null);
-  assert.equal(ssoDeviceSessionsDb.get(member)?.privileged_until, null);
-  const owner = bind({ ownerTier: true });
-  const until = grantOwnerPrivilege(owner, 1_000);
-  assert.equal(until, 1_000 + 60 * 60_000);
-  assert.equal(grantOwnerPrivilege('missing-sid-xxxxxxxxxx'), null);
+test('N2 withdrawn (2026-10-18): a bind never writes a privileged grant, owner tier or not', () => {
+  assert.equal(ssoDeviceSessionsDb.get(bind())?.privileged_until, null);
+  assert.equal(ssoDeviceSessionsDb.get(bind({ ownerTier: true }))?.privileged_until, null);
+  assert.equal(ssoDeviceSessionsDb.get(bind({ ownerTier: true }))?.owner_tier, 1);
 });
 
 // ---------------------------------------------------------------------------
@@ -224,12 +161,12 @@ test('D5: processing past 5 s answers 503 so the IdP retries', async () => {
 // PKCE purposes and settings
 // ---------------------------------------------------------------------------
 
-test('PKCE: owner_step_up and recheck bind user, request time and a device-session id; login may carry requestedAtMs', () => {
+test('PKCE: recheck binds user, request time and a device-session id; owner_step_up is gone; login may carry requestedAtMs', () => {
   const store = createOidcPkceStore();
   const browser = `${'b'.repeat(42)}A`;
   const secrets = { nonce: 'n', codeVerifier: 'v', browserTransaction: browser, configVersion: 3 };
   const refreshSid = 'R'.repeat(22);
-  for (const purpose of ['owner_step_up', 'recheck'] as const) {
+  for (const purpose of ['recheck'] as const) {
     assert.equal(store.store(purpose, { ...secrets, purpose, userId: 4, requestedAtMs: 9, refreshSid } as never), true);
     assert.deepEqual(store.consume(purpose, browser), {
       nonce: 'n', codeVerifier: 'v', purpose, userId: 4, requestedAtMs: 9, refreshSid, configVersion: 3,
@@ -240,7 +177,7 @@ test('PKCE: owner_step_up and recheck bind user, request time and a device-sessi
   const invalid: Array<Record<string, unknown>> = [
     { purpose: 'recheck', userId: 4, requestedAtMs: 9 },
     { purpose: 'recheck', userId: 4, requestedAtMs: 9, refreshSid: 'short' },
-    { purpose: 'owner_step_up', userId: 4, requestedAtMs: 9, refreshSid, audience: 'connector_owner' },
+    { purpose: 'owner_step_up', userId: 4, requestedAtMs: 9, refreshSid },
     { purpose: 'link', userId: 4, requestedAtMs: 9, refreshSid },
     { purpose: 'step_up', userId: 4, requestedAtMs: 9, audience: 'connector_owner', refreshSid },
     { purpose: 'login', refreshSid },

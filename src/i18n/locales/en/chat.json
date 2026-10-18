@@ -1132,6 +1132,8 @@
     }
   },
   "commandMenu": {
+    "title": "Commands",
+    "close": "Close commands",
     "none": "No commands available",
     "ariaLabel": "Available commands",
     "groups": {
@@ -1218,7 +1220,33 @@
     "placeholder": "Write to the team… use @ to mention a member",
     "notSentNote": "This message is not sent to the model.",
     "send": "Send to team",
-    "sendFailed": "Could not send the internal message."
+    "sendFailed": "Could not send the internal message.",
+    "reactivate": "Re-activate room",
+    "reactivateHint": "If the session moved to another project, its creator can re-activate the room and then add members again.",
+    "reactivateFailed": "The room could not be re-activated; only the session's creator can do this.",
+    "members": {
+      "toggle": "Members ({{count}})",
+      "heading": "Room members",
+      "roles": {
+        "owner": "Owner",
+        "member": "Member",
+        "viewer": "Read-only"
+      },
+      "roleFor": "Role for {{name}}",
+      "remove": "Remove",
+      "removeNamed": "Remove {{name}}",
+      "confirmRemove": "Confirm removal",
+      "cancel": "Cancel",
+      "addLabel": "Add a project member",
+      "roleLabel": "Role",
+      "choose": "Choose a member…",
+      "loading": "Loading…",
+      "noCandidates": "No other project members",
+      "candidatesFailed": "Project members could not be loaded",
+      "add": "Add",
+      "changeFailed": "The server refused the change; you may not have permission, or the member is no longer eligible.",
+      "refreshFailed": "The change was saved, but the list couldn't refresh; reopen Members later."
+    }
   },
   "steer": {
     "command": {

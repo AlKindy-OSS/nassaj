@@ -4,9 +4,9 @@ import { api } from '../../../utils/api';
 import type { LLMProvider } from '../../../types/app';
 import {
   getIdentityBarrierSnapshot,
-  reconcileRevokedIdentity,
   subscribeIdentityBarrier,
 } from '../../auth/accountIdentityBarrier';
+import { handleIdentityRevocation } from '../../auth/bearerRevocation';
 
 export type SessionMessageMatch = {
   sessionId: string;
@@ -96,7 +96,7 @@ export function useSessionMessageSearch(
       es.addEventListener('identity_revoked', () => {
         es.close();
         esRef.current = null;
-        reconcileRevokedIdentity();
+        handleIdentityRevocation();
       });
     }, DEBOUNCE_MS);
 

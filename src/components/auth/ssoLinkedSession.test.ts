@@ -1,13 +1,12 @@
 // ADR-H20 S6, client side: N1 auto sign-in (local path, one-time suppression
 // after an explicit sign-out, 3-bounce loop guard), N4 end_session, D9-1
-// silent re-check once per page load, N2 owner step-up start, and the return
-// classification.
+// silent re-check once per page load, and the return classification (the N2
+// owner step-up was withdrawn 2026-10-18).
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const apiMock = vi.hoisted(() => ({
   session: vi.fn(),
   startRecheck: vi.fn(),
-  startOwnerStepUp: vi.fn(),
 }));
 vi.mock('../../utils/api', () => ({
   api: { auth: { oidc: apiMock } },
@@ -27,7 +26,6 @@ import {
   resetAutoSignInGuard,
   resetRecheckPageGuard,
   runSsoRecheckIfDue,
-  startOwnerStepUp,
 } from './ssoLinkedSession';
 
 function memoryStorage() {
@@ -150,26 +148,9 @@ describe('D9-1 silent re-check', () => {
   });
 });
 
-describe('N2 owner step-up', () => {
-  it('navigates to the IdP URL, or reports that it could not start', async () => {
-    const assign = vi.fn();
-    apiMock.startOwnerStepUp.mockResolvedValueOnce(json({ authorizationUrl: 'https://id.example/authorize?prompt=login' }));
-    expect(await startOwnerStepUp(assign)).toBe(true);
-    expect(assign).toHaveBeenCalledWith('https://id.example/authorize?prompt=login');
-    apiMock.startOwnerStepUp.mockResolvedValueOnce(json({ code: 'step_up_rate_limited' }, 429));
-    expect(await startOwnerStepUp(assign)).toBe(false);
-    apiMock.startOwnerStepUp.mockRejectedValueOnce(new Error('offline'));
-    expect(await startOwnerStepUp(assign)).toBe(false);
-  });
-});
-
 describe('return classification', () => {
-  it('reads the owner step-up and re-check outcomes; anything else is not ours', () => {
-    expect(readSsoSessionReturn(new URLSearchParams('owner_step_up=ok'))).toEqual({ kind: 'owner_step_up', ok: true });
-    expect(readSsoSessionReturn(new URLSearchParams('owner_step_up_error=owner_sso_key_required')))
-      .toEqual({ kind: 'owner_step_up', ok: false, code: 'owner_sso_key_required' });
-    expect(readSsoSessionReturn(new URLSearchParams('owner_step_up_error=<script>')))
-      .toEqual({ kind: 'owner_step_up', ok: false, code: 'temporarily_unavailable' });
+  it('reads the re-check outcomes; anything else (a retired owner_step_up included) is not ours', () => {
+    expect(readSsoSessionReturn(new URLSearchParams('owner_step_up=ok'))).toBeNull();
     for (const outcome of ['ok', 'kept', 'signed_out'] as const) {
       expect(readSsoSessionReturn(new URLSearchParams(`oidc_recheck=${outcome}`))).toEqual({ kind: 'recheck', outcome });
     }

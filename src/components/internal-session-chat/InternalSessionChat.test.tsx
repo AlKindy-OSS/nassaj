@@ -151,4 +151,19 @@ describe('InternalSessionChat', () => {
     authenticatedFetch.mockResolvedValue(response({}, false));
     await expect(markInternalRead('s1', 3)).resolves.toBe(false);
   });
+
+  it('offers re-activation after a refused room open and posts the caller as sole owner', async () => {
+    const room = { members: [{ userId: 1, username: 'owner', role: 'owner' }], unreadMentionCount: 0, lastReadSequence: 0, role: 'owner' };
+    authenticatedFetch.mockImplementation(async (url: string) => {
+      if (url.endsWith('/revalidate')) return response(room);
+      if (url.startsWith('/api/projects/')) return response({ data: { members: [] } });
+      return response({ error: 'Not found' }, false);
+    });
+    render(<InternalSessionChat sessionId="s1" enabled projectId="p1" />);
+    fireEvent.click(screen.getByRole('button', { name: /محادثة الفريق$/ }));
+    fireEvent.click(await screen.findByRole('button', { name: 'إعادة تفعيل الغرفة' }));
+    expect(await screen.findByText('أعضاء الغرفة')).toBeTruthy();
+    const call = authenticatedFetch.mock.calls.find(([url]) => String(url).endsWith('/revalidate'))!;
+    expect(JSON.parse(String((call[1] as RequestInit).body))).toEqual({ members: [{ userId: 1, role: 'owner' }] });
+  });
 });

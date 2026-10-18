@@ -1,7 +1,7 @@
 /**
  * ADR-H20 S6 end to end (ADR-194 amendment A2): the REAL router, verifier,
  * pinned fetch, stores and database against the in-process mock OpenID
- * Provider. Covers N2 (owner tier and passkey step-up), N3 (login_hint), N5
+ * Provider. Covers the owner tier (N2's passkey step-up withdrawn 2026-10-18), N3 (login_hint), N5
  * (sid binding and the D6 matrix, kill switch), N7 (the D5 back-channel
  * standard) and N8 (silent re-check semantics). Only authentication of the
  * caller (headers stand in for a verified bearer) and rate limits are faked.
@@ -72,7 +72,7 @@ const { setSsoNetworkOverridesForTests } = await import('../services/sso-oidc-ru
 const { registerTokenSessionSocket } = await import('../modules/account-wallet/token-session.js');
 const { LOGOUT_JTI_MAX_ENTRIES } = await import('../services/oidc-backchannel-logout.service.js');
 const { updateSsoLinkedSettings } = await import('../services/sso-linked-settings.service.js');
-const { ownerStepUpRequired, forgetSsoDeviceSession } = await import('../services/sso-device-session.service.js');
+const { forgetSsoDeviceSession } = await import('../services/sso-device-session.service.js');
 await initializeDatabase();
 stopReconcileScheduler();
 
@@ -154,7 +154,7 @@ async function postJson(pathname: string, headers: Record<string, string>) {
   return { res, body: await res.json() as Record<string, unknown> };
 }
 
-/** Starts a device-session purpose (owner step-up or re-check) and returns its IdP URL + cookie. */
+/** Starts a device-session purpose (the re-check) and returns its IdP URL + cookie. */
 async function startBound(pathname: string, headers: Record<string, string>): Promise<Started> {
   const res = await fetch(`${baseUrl}/api/auth/oidc${pathname}`, { method: 'POST', headers, body: '{}' });
   assert.equal(res.status, 200, pathname);
@@ -197,23 +197,22 @@ test('N3: an owner node login_hint rides on /login; none when unset (no last-use
 });
 
 // ---------------------------------------------------------------------------
-// N2: owner tiers
+// Owner tier (N2 step-up withdrawn 2026-10-18: no grant is ever written)
 // ---------------------------------------------------------------------------
 
-test('N2: owner entry from a reused IdP session (3 days) is no-click, without privilege, audited stale', async () => {
+test('owner entry from a reused IdP session (3 days) is direct and audited with its age; no grant', async () => {
   const refreshSid = await signIn({ ...OWNER, sid: 'V1_owner-a', auth_time: nowSec() - 3 * 86_400 });
   assert.equal(row(refreshSid)?.owner_tier, 1);
   assert.equal(row(refreshSid)?.privileged_until, null);
-  assert.equal(ownerStepUpRequired({ role: 'owner', refreshSid }), true);
   const [signInAudit] = auditActions('oidc_owner_sign_in').slice(-1);
-  assert.equal(signInAudit.authStale, true);
-  assert.equal(signInAudit.privileged, false);
+  assert.ok(Number(signInAudit.authAgeSec) >= 3 * 86_400 - 5);
+  assert.equal('authStale' in signInAudit || 'privileged' in signInAudit, false, 'no tier fields');
 });
 
-test('N2: an owner sign-in that is itself a fresh passkey touch carries the privileged tier', async () => {
+test('a fresh-touch owner sign-in binds the owner tier and no grant (nothing left to grant)', async () => {
   const refreshSid = await signIn({ ...OWNER, sid: 'V1_owner-fresh' });
-  assert.ok(Number(row(refreshSid)?.privileged_until) > Date.now());
-  assert.equal(ownerStepUpRequired({ role: 'owner', refreshSid }), false);
+  assert.equal(row(refreshSid)?.owner_tier, 1);
+  assert.equal(row(refreshSid)?.privileged_until, null);
 });
 
 /** Turns wallet mode (MULTI_ACCOUNT_SWITCHING) on for one test. */
@@ -229,99 +228,44 @@ function walletMode(t: { after: (fn: () => void) => void }) {
   }));
 }
 
-/** The interstitial's IdP URL and the new transaction cookie of the automatic owner step-up. */
-async function ownerStepUpFrom(res: Response): Promise<Started> {
-  assert.equal(res.status, 200, 'the passkey interstitial');
-  const html = await res.text();
-  const target = (/url=([^"]+)"/.exec(html)?.[1] ?? '').replaceAll('&#38;', '&');
-  return { authorizationUrl: target, cookie: cookieOf(res) };
-}
-
-test('H1 wallet mode: an owner sign-in that is a fresh passkey touch is handed out', async (t) => {
+test('H1 + A3: with the wallet flag on, an SSO owner sign-in is still a bound bearer session', async (t) => {
   walletMode(t);
-  const res = await complete(await startLogin(), { ...OWNER, sid: 'V1_wallet-fresh' });
-  assert.match(res.headers.get('location') ?? '', /oidc_code=/);
-  assert.equal(mintedSids.length, 0, 'wallet mode mints no JWT here');
-  assert.equal(auditActions('oidc_owner_sign_in').at(-1)?.privileged, true);
-});
-
-test('H1 wallet mode: a reused IdP session steps up once, a stale one after it is refused', async (t) => {
-  walletMode(t);
-  const signInsBefore = auditActions('oidc_owner_sign_in').length;
-  const stale = { ...OWNER, sid: 'V1_wallet-stale', auth_time: nowSec() - 3 * 86_400 };
-  const stepUp = await ownerStepUpFrom(await complete(await startLogin(), stale));
-  const idp = new URL(stepUp.authorizationUrl);
-  assert.equal(idp.searchParams.get('prompt'), 'login');
-  assert.equal(idp.searchParams.get('max_age'), '0');
-  assert.equal(auditActions('oidc_owner_sign_in_refused').at(-1)?.reason, 'fresh_touch_required');
-  const second = await complete(stepUp, stale);
-  assert.equal(second.headers.get('location'), '/auth/oidc/return?error=owner_sso_reauth_required');
-  assert.equal(auditActions('oidc_owner_sign_in').length, signInsBefore, 'no owner session handed out');
-
-  const retried = await ownerStepUpFrom(await complete(await startLogin(), stale));
-  const touched = await complete(retried, { ...OWNER, sid: 'V1_wallet-stale' });
-  assert.match(touched.headers.get('location') ?? '', /oidc_code=/, 'the fresh touch after the step-up signs in');
-});
-
-test('N2: a password-session owner (no binding) is never asked for the SSO step-up', async () => {
-  assert.equal(ownerStepUpRequired({ role: 'owner', refreshSid: 'P'.repeat(22) }), false);
-  const { res, body } = await postJson('/owner-step-up/start', asUser(owner.id, 'owner', 'P'.repeat(22)));
-  assert.equal(res.status, 409);
-  assert.equal(body.code, 'owner_step_up_not_applicable');
-  const member403 = await postJson('/owner-step-up/start', asUser(member.id, 'user', 'P'.repeat(22)));
-  assert.equal(member403.res.status, 403);
-});
-
-test('N2: the owner step-up asks for prompt=login, max_age=0 and the login_hint, then grants THIS browser only', async () => {
-  const browserA = await signIn({ ...OWNER, sid: 'V1_owner-a', auth_time: nowSec() - 86_400, preferred_username: 'owner@idp' });
-  const browserB = await signIn({ ...OWNER, sid: 'V1_owner-b', auth_time: nowSec() - 86_400, preferred_username: 'owner@idp' });
-  const started = await startBound('/owner-step-up/start', asUser(owner.id, 'owner', browserA));
-  const idp = new URL(started.authorizationUrl);
-  assert.equal(idp.searchParams.get('prompt'), 'login');
-  assert.equal(idp.searchParams.get('max_age'), '0');
-  assert.equal(idp.searchParams.get('login_hint'), 'owner@idp');
-  const res = await complete(started, { ...OWNER, sid: 'V1_owner-a2' });
-  assert.equal(res.headers.get('location'), '/auth/oidc/return?owner_step_up=ok');
-  assert.equal(ownerStepUpRequired({ role: 'owner', refreshSid: browserA }), false, 'browser A is privileged');
-  assert.equal(ownerStepUpRequired({ role: 'owner', refreshSid: browserB }), true, 'browser B is not');
-  assert.equal(mintedSids.length, 2, 'a step-up never signs anyone in');
-  assert.deepEqual(ssoDeviceSessionsDb.findByIdpSid(FIXTURE_ISSUER, 'V1_owner-a2').map((r) => r.refresh_sid), [browserA],
-    'the new IdP sid is bound too');
-});
-
-test('D9-4: a step-up whose auth_time is 31 min old is refused even though prompt=login was sent; non-passkey amr too', async () => {
-  const refreshSid = await signIn({ ...OWNER, sid: 'V1_owner-a', auth_time: nowSec() - 86_400 });
-  const cases: Array<[Record<string, unknown>, string]> = [
-    [{ ...OWNER, auth_time: nowSec() - 31 * 60 }, 'owner_sso_reauth_required'],
-    [{ ...OWNER, amr: ['pwd', 'user', 'mfa'] }, 'owner_sso_key_required'],
-    [{ ...OWNER, amr: ['pwd', 'otp', 'mfa'] }, 'owner_sso_key_required'],
-    [{ ...MEMBER, amr: ['user', 'mfa'] }, 'oidc_step_up_identity_mismatch'],
-  ];
-  for (const [claims, code] of cases) {
-    const started = await startBound('/owner-step-up/start', asUser(owner.id, 'owner', refreshSid));
-    const res = await complete(started, claims);
-    assert.equal(res.headers.get('location'), `/auth/oidc/return?owner_step_up_error=${code}`, code);
-    assert.equal(ownerStepUpRequired({ role: 'owner', refreshSid }), true, `${code}: no grant`);
+  for (const claims of [
+    { ...OWNER, sid: 'V1_wallet-fresh' },
+    { ...OWNER, sid: 'V1_wallet-stale', auth_time: nowSec() - 3 * 86_400, amr: ['pwd'] },
+  ]) {
+    const res = await complete(await startLogin(), claims);
+    assert.equal(res.status, 302, claims.sid);
+    assert.match(res.headers.get('location') ?? '', /oidc_code=/, claims.sid);
   }
+  // ADR-194 A3: SSO excludes wallet mode, so every SSO sign-in is a bearer JWT bound to its IdP sid.
+  assert.equal(mintedSids.length, 2, 'a bearer JWT per sign-in');
+  for (const sid of mintedSids) assert.equal(row(sid)?.owner_tier, 1, 'bound to the IdP session');
+  assert.ok(!auditActions('oidc_owner_sign_in_refused').some((entry) => entry.reason === 'fresh_touch_required'));
 });
 
-test('N2: the grant ends on sign-out, on back-channel logout and on a kill-switch change', async () => {
+test('N2 withdrawn: POST /owner-step-up/start no longer exists', async () => {
+  const refreshSid = await signIn({ ...OWNER, sid: 'V1_owner-gone', auth_time: nowSec() - 86_400 });
+  const res = await fetch(`${baseUrl}/api/auth/oidc/owner-step-up/start`, {
+    method: 'POST', headers: asUser(owner.id, 'owner', refreshSid), body: '{}',
+  });
+  assert.equal(res.status, 404);
+});
+
+test('an owner session ends on sign-out and on back-channel logout; a kill-switch change is audited plainly', async () => {
   const signedOut = await signIn({ ...OWNER, sid: 'V1_owner-1' });
   forgetSsoDeviceSession(signedOut);
-  assert.equal(row(signedOut), undefined, 'sign-out forgets the binding and its grant');
+  assert.equal(row(signedOut), undefined, 'sign-out forgets the binding');
 
   const backchanneled = await signIn({ ...OWNER, sid: 'V1_owner-2' });
   assert.equal((await backchannel(op.logoutToken('sub-owner', { sid: 'V1_owner-2' }))).status, 200);
   assert.equal(row(backchanneled), undefined);
   assert.equal(revoked(backchanneled), true);
 
-  const killSwitch = await signIn({ ...OWNER, sid: 'V1_owner-3' });
-  assert.equal(ownerStepUpRequired({ role: 'owner', refreshSid: killSwitch }), false);
   const result = updateSsoLinkedSettings({ idpSignOutAffectsOwner: false }, { userId: owner.id });
   assert.equal(result.ok, true);
-  assert.equal(ownerStepUpRequired({ role: 'owner', refreshSid: killSwitch }), true, 'kill-switch change ends grants');
   const [audit] = auditActions('sso_linked_settings_changed').slice(-1);
-  assert.deepEqual(audit, { changed: ['idpSignOutAffectsOwner'], idpSignOutAffectsOwner: false, endedGrants: 1 });
+  assert.deepEqual(audit, { changed: ['idpSignOutAffectsOwner'], idpSignOutAffectsOwner: false });
 });
 
 // ---------------------------------------------------------------------------
@@ -541,10 +485,10 @@ test('D9-1: a successful re-check renews the clock and binds the sid; another su
   assert.equal(revoked(refreshSid), true);
 });
 
-test('GET /session reports the tier, the grant expiry and recheckDue after the interval', async () => {
+test('GET /session reports the tier and recheckDue after the interval', async () => {
   const refreshSid = await signIn({ ...OWNER, sid: 'V1_status', auth_time: nowSec() - 86_400 });
   const read = async () => (await fetch(`${baseUrl}/api/auth/oidc/session`, { headers: asUser(owner.id, 'owner', refreshSid) })).json();
-  assert.deepEqual(await read(), { sso: true, recheckDue: false, ownerTier: true, privilegedUntil: null });
+  assert.deepEqual(await read(), { sso: true, recheckDue: false, ownerTier: true });
   db.prepare('UPDATE sso_device_sessions SET last_recheck_at = ? WHERE refresh_sid = ?').run(Date.now() - 13 * 3_600_000, refreshSid);
   assert.equal((await read()).recheckDue, true, 'default 12 h interval');
   updateSsoLinkedSettings({ recheckIntervalHours: 24 }, { userId: owner.id });

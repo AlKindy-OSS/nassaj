@@ -217,22 +217,20 @@ test('grace refresh: a recently expired token renews only while the attestation 
   assert.equal(stale.body.token, undefined);
 });
 
-test('device session: the active slot is refused once its attestation is stale', async () => {
+test('device session: refused outright while SSO is enforced, even with a fresh attestation (ADR-194 A3)', async () => {
   process.env.MULTI_ACCOUNT_SWITCHING = 'true';
   const cookie = { cookie: '__Host-nassaj_device=device-secret' };
-  assert.equal((await call('GET', '/api/auth/me', cookie)).status, 200);
-
-  attestedAgoMs = STALE_EDGE;
-  const stale = await call('GET', '/api/auth/me', cookie);
-  assert.equal(stale.status, 401);
-  assert.equal(stale.body.code, 'sso_reauth_required');
+  for (const enforcedState of [{ enforced: true, loginAvailable: true }, { enforced: true, loginAvailable: false }]) {
+    Object.assign(sso.state, enforcedState);
+    assert.equal((await call('GET', '/api/auth/me', cookie)).status, 401, JSON.stringify(enforcedState));
+  }
 });
 
-test('WebSocket: bearer and device verifiers refuse a stale member and admit a fresh one', () => {
+test('WebSocket: the bearer verifier refuses a stale member; the device verifier is off under SSO', () => {
   process.env.MULTI_ACCOUNT_SWITCHING = 'true';
   const token = tokenIssuedAgo(60);
   assert.equal(authenticateWebSocket(token)?.id, row.id);
-  assert.equal(authenticateDeviceWebSocket('device-secret')?.id, row.id);
+  assert.equal(authenticateDeviceWebSocket('device-secret'), null, 'ADR-194 A3: no device sockets under SSO');
 
   attestedAgoMs = STALE_EDGE;
   assert.equal(authenticateWebSocket(token), null);

@@ -1,3 +1,21 @@
+## 2.3.1.10 — 2026-10-19
+
+سُحب تأكيد المالك بمفتاح المرور بقرار المالك في 2026-10-18، عند الدخول وبعده: المالك المربوط يدخل بالدخول الموحّد مباشرة بلا صفحة «يتطلب نسّاج مفتاح المرور للمالك» وبلا شرط عامل دخول أو عمر جلسة (ADR-194 A1)، ويملك نسّاج كاملاً فلا تطلب المحادثة والطرفية والإدارة أي تأكيد إضافي (ADR-H20 N2). يبقى التحقق من رمز الهوية وربطها، ويبقى تأكيد إعداد الدخول الموحّد وجلسة مالك الموصلات لعشر دقائق.
+
+The owner passkey requirement is withdrawn by owner decision on 2026-10-18, at sign-in and after it: a linked owner signs in through SSO directly, with no "Nassaj requires your passkey" page and no factor or session-age rule (ADR-194 A1), and has full Nassaj, so chat, terminal and administration ask for no further confirmation (ADR-H20 N2). id_token verification and identity binding stay, as do the SSO configuration confirmation and the 10-minute connector owner session.
+
+محادثة الفريق داخل الجلسة مفعّلة الآن افتراضياً بقرار المالك (ADR-187): حوار جانبي بين الأعضاء لا يُرسل إلى الوكيل، يفتحه زر في رأس الجلسة، ومعه واجهة إدارة الأعضاء (إضافة عضو بدور، وإزالته، وإعادة التحقق بعد نقل الجلسة). تُنشأ جداولها تلقائياً عند أول إقلاع. لإطفائها اضبط `NASSAJ_INTERNAL_SESSION_CHAT_ENABLED=0` في الخادم؛ تبقى الجداول وبياناتها.
+
+Internal session team chat is now on by default by owner decision (ADR-187): a members-only side conversation inside a session that is never sent to the agent, opened from the session header, with a member-management UI (add a member with a role, remove, revalidate after a session move). Its tables are created automatically on first boot. To turn it off, set `NASSAJ_INTERNAL_SESSION_CHAT_ENABLED=0` on the server; tables and data are kept.
+
+تبديل الحسابات على الجهاز نفسه صار مفعّلاً افتراضياً بقرار المالك (ADR-194 A3)، ويحتاج أصلاً موثوقاً بـhttps مدرجاً في ALLOWED_ORIGINS. ويُطفأ تلقائياً ما دام الدخول الموحّد مضبوطاً أو مفروضاً، حتى أثناء تعذّر المزوّد. تفعيل الدخول الموحّد يُخرج كل جلسات تبديل الحسابات على العقدة فيدخل الأعضاء من جديد. لإطفائه اضبط `MULTI_ACCOUNT_SWITCHING=false` في الخادم.
+
+Multi-account switching on the same device is now on by default by owner decision (ADR-194 A3); it needs an https trusted origin listed in ALLOWED_ORIGINS. It turns off automatically while SSO is configured or enforced, including during an IdP outage. Enabling SSO signs out every account-switching session on the node, so members sign in again. To turn it off, set `MULTI_ACCOUNT_SWITCHING=false` on the server.
+
+الدخول التلقائي بالدخول الموحّد صار الافتراضي، وانتهت حلقة قفل الهوية التي كانت تُقفل الشاشة مع كل إعادة محاولة على العقد بلا تبديل حسابات. قائمة الأوامر لها زر إغلاق وتُغلق بالنقر خارجها أو بـEscape، وبطاقات الوكلاء في الإعدادات بعرض كامل. خطر متبقٍّ مقبول بقرار المالك: اختراق حساب المالك لدى مزوّد الهوية يمنح وصولاً كاملاً إلى نسّاج.
+
+SSO auto sign-in is now the default, and the identity-lock loop that re-locked the screen on every retry on nodes without account switching is fixed. The commands menu has a close button and closes on an outside tap or Escape, and agent tiles in Settings span the full width. Accepted residual risk by owner decision: compromising the owner's identity-provider account gives full access to Nassaj.
+
 ## 2.3.1.9 — 2026-10-18
 
 دخول موحّد مرتبط بالجلسة وخروج مرتبط، مع مستوى مالك متدرّج (ADR-H20 S6، ADR-194 Amendment A2)، والإجراءات المتميّزة للمالك تطلب تحقّقاً إضافياً بمفتاح المرور، مع سدّ ثغرات التحقّق (فصل هوية مستخدم آخر، وإعادة تسمية مفاتيح المرور أو حذفها). عرض المحادثة يبقى مرتبطاً بالجلسة المعروضة (B-1666)، والتمرير إلى الأسفل ثابت، وبطاقات الأدوات والوكلاء أوضح، والكود الطويل مُعزول LTR، وتكبير Mermaid وتذكّر الأمر السابق في المؤلِّف. أمان: حجب الصور البعيدة في Markdown المحادثة، ومقارنة مفتاح الـAPI ثابتة الزمن، وتثبيت قناة التوجيه على مالكها. الشريط الجانبي مرتّب حسب النشاط، والقائمة الجزئية للملفات أخفّ بدل خطأ 413، وتُعاد تهيئة الطرفية المشتركة عند العودة إليها، وسجل جلسات OpenCode يُقرأ من قاعدة العضو الصحيحة، ولا يُطلب حصة المزوّد لنماذج Anthropic على claude (B-1669)، والطرفيات مخفية عن من لا يملك دورها.

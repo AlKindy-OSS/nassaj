@@ -14,6 +14,11 @@
  *
  * The policy is computed once per distinct environment and frozen; in
  * production the environment never changes, so it is computed once at boot.
+ *
+ * MULTI_ACCOUNT_SWITCHING is on by default (owner decision 2026-10-18); only
+ * the explicit value `false` turns it off. SSO is NOT part of the env-keyed
+ * policy: multiAccountSwitchingEnabled() composes it per call, because the SSO
+ * state lives in the database and moves at runtime.
  */
 
 import type { IncomingMessage } from 'node:http';
@@ -22,6 +27,7 @@ import { corsAllowedOrigins } from '../config/cors-origins.js';
 import { serverPort } from '../config/server-port.js';
 import { IS_PLATFORM } from '../constants/config.js';
 import { canonicalInstallationOrigin } from '../modules/connectors/connector-installation-origin-resolver.js';
+import { ssoBlocksWallet } from '../services/sso-config.service.js';
 
 type OriginEnv = Readonly<Record<string, string | undefined>>;
 
@@ -30,8 +36,10 @@ export type TrustedOriginPolicy = Readonly<{
   origins: ReadonlySet<string>;
   /** At least one explicit https origin is configured (loopback alone never enables the wallet). */
   walletOriginConfigured: boolean;
-  /** The single predicate for MULTI_ACCOUNT_SWITCHING (fail-closed). */
+  /** The env half of the MULTI_ACCOUNT_SWITCHING predicate (fail-closed); SSO is composed per call. */
   multiAccountSwitching: boolean;
+  /** Why the env half is off, or null when it is on. Safe to log. */
+  offReason: MultiAccountOffReason | null;
   /** Stable warning codes, safe to log (no origin values). */
   warnings: readonly Readonly<{ code: string; source?: string }>[];
 }>;
@@ -42,6 +50,19 @@ const POLICY_ENV_KEYS = [
 ] as const;
 
 type Warning = { code: string; source?: string };
+
+/** Stable, value-free reasons the wallet is off; `sso` is added by the per-call composition. */
+export type MultiAccountOffReason = 'flag' | 'platform' | 'origin' | 'cors' | 'sso';
+
+/** First precondition that keeps the wallet off, in a fixed order. */
+function offReasonFor(input: { flagOn: boolean; platform: boolean; explicit: number; corsAligned: boolean }):
+  MultiAccountOffReason | null {
+  if (!input.flagOn) return 'flag';
+  if (input.platform) return 'platform';
+  if (input.explicit === 0) return 'origin';
+  if (!input.corsAligned) return 'cors';
+  return null;
+}
 
 /** Parses one explicit value with the strict ADR-193 validator; null when unusable. */
 function strictOrigin(raw: string): string | null {
@@ -95,18 +116,36 @@ export function buildTrustedOriginPolicy(env: OriginEnv, platform: boolean = IS_
   const cors = canonicalCorsOrigins(env);
   const corsAligned = [...explicit].every((origin) => cors.has(origin));
   if (!corsAligned) warnings.push({ code: 'trusted_origin_not_in_cors' });
-  const flagOn = env.MULTI_ACCOUNT_SWITCHING === 'true';
-  const multiAccountSwitching = flagOn && !platform && explicit.size > 0 && corsAligned;
-  if (flagOn && !multiAccountSwitching) warnings.push({ code: 'multi_account_switching_disabled' });
+  const flagOn = env.MULTI_ACCOUNT_SWITCHING !== 'false';
+  const offReason = offReasonFor({ flagOn, platform, explicit: explicit.size, corsAligned });
+  const multiAccountSwitching = offReason === null;
+  // Only an operator who explicitly asked for the wallet is warned; the default
+  // falls back to legacy login with one info line (logged by multiAccountSwitchingEnabled).
+  if (env.MULTI_ACCOUNT_SWITCHING === 'true' && !multiAccountSwitching) {
+    warnings.push({ code: 'multi_account_switching_disabled' });
+  }
   return Object.freeze({
     origins: Object.freeze(new Set([...explicit, ...implicitOrigins(env)])),
     walletOriginConfigured: explicit.size > 0,
     multiAccountSwitching,
+    offReason,
     warnings: Object.freeze(warnings.map((warning) => Object.freeze(warning))),
   });
 }
 
 let cached: Readonly<{ key: string; policy: TrustedOriginPolicy }> | null = null;
+/** Last off reason written to the log, so a mode change is logged once. */
+let loggedOffReason: MultiAccountOffReason | null | undefined;
+
+/** One structured info line naming why multi-account switching is off (never origin values). */
+function logOffReason(reason: MultiAccountOffReason | null): void {
+  if (reason === loggedOffReason) return;
+  loggedOffReason = reason;
+  if (reason === null) return;
+  process.stderr.write(`${JSON.stringify({
+    level: 'info', scope: 'trusted-origin', code: 'multi_account_switching_off', reason,
+  })}\n`);
+}
 
 /** Returns the frozen policy for the current process environment, logging warnings once. */
 export function trustedOriginPolicy(env: OriginEnv = process.env): TrustedOriginPolicy {
@@ -129,12 +168,17 @@ export function walletOriginConfigured(): boolean {
 }
 
 /**
- * The single MULTI_ACCOUNT_SWITCHING predicate: the flag is on, not platform
- * mode, an explicit https origin exists and every explicit origin is a CORS
- * origin. Otherwise legacy JWT login continues.
+ * The single MULTI_ACCOUNT_SWITCHING predicate, evaluated per call: the flag
+ * is not `false`, not platform mode, an explicit https origin exists, every
+ * explicit origin is a CORS origin, and SSO is off (ssoBlocksWallet: any
+ * configured or enforced SSO state, or a read failure, blocks). Otherwise
+ * legacy JWT login continues.
  */
 export function multiAccountSwitchingEnabled(): boolean {
-  return trustedOriginPolicy().multiAccountSwitching;
+  const policy = trustedOriginPolicy();
+  const reason = policy.offReason ?? (ssoBlocksWallet() ? 'sso' : null);
+  logOffReason(reason);
+  return reason === null;
 }
 
 /** Normalizes an Origin header to `scheme://host[:port]`, or null when absent/opaque/invalid. */

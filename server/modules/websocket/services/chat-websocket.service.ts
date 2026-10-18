@@ -85,10 +85,6 @@ import { buildChatImageNote, saveChatImages } from '../../../services/chat-image
 // eslint-disable-next-line boundaries/no-unknown -- ADR-210: display masking is a leaf service shared by every viewer egress.
 import { createBtwDisplaySink, createDisplayReplaySink, maskPendingPermissionsFor } from '../../../services/display-secret-mask.js';
 import { reportWriterLeaseRefusal, withLocalUpdateWriterLease } from '../../../services/update-writer-lease.js';
-// eslint-disable-next-line boundaries/no-unknown -- ADR-H20 N2: the owner tier gate is one shared service for REST and realtime.
-import { ownerStepUpRequired } from '../../../services/sso-device-session.service.js';
-// eslint-disable-next-line boundaries/no-unknown -- ADR-H20 N2: the owner tier gate is one shared service for REST and realtime.
-import { OWNER_PRIVILEGED_CHAT_MESSAGES, OWNER_STEP_UP_REQUIRED_CODE } from '../../../services/owner-privileged-actions.js';
 // Top-level shared/ (compiled into dist-server/shared/) — the single source of
 // truth for globally disabled providers (T-864). Relative on purpose: the `@/`
 // alias maps to server/* only.
@@ -625,48 +621,6 @@ const COMMAND_TYPE_TO_PROVIDER: Record<string, LLMProvider> = {
   'qwen-command': 'qwen',
   'opencode-command': 'opencode',
 };
-
-/**
- * ADR-H20 N2: the refusal for a chat message that would start or continue an
- * agent turn from an owner's no-click SSO session without this browser's
- * passkey step-up, or null when the message may proceed. `unicast` replies go
- * to the requesting socket only (the /btw side channel).
- */
-export function ownerStepUpChatRefusal(
-  messageType: string,
-  data: ChatIncomingMessage,
-  user: unknown,
-): { unicast: boolean; payload: unknown } | null {
-  if (!OWNER_PRIVILEGED_CHAT_MESSAGES.has(messageType)) return null;
-  const principal = user as { role?: string; tokenSid?: unknown } | undefined;
-  const refreshSid = typeof principal?.tokenSid === 'string' ? principal.tokenSid : null;
-  if (!ownerStepUpRequired({ role: principal?.role, refreshSid })) return null;
-  if (messageType === 'btw-query' || messageType === 'btw-fork') {
-    return {
-      unicast: true,
-      payload: {
-        type: 'btw-error',
-        btwId: typeof data.btwId === 'string' ? data.btwId : '',
-        code: OWNER_STEP_UP_REQUIRED_CODE,
-        message: 'Confirm with your passkey to continue.',
-      },
-    };
-  }
-  return {
-    unicast: false,
-    payload: createNormalizedMessage({
-      kind: 'complete',
-      provider: COMMAND_TYPE_TO_PROVIDER[messageType]
-        ?? (messageType === 'opencode-command' ? 'opencode' : 'cursor'),
-      exitCode: 1,
-      success: false,
-      code: OWNER_STEP_UP_REQUIRED_CODE,
-      error: 'Confirm with your passkey to continue.',
-      notStarted: true,
-      ...clientMsgIdEcho(data),
-    }),
-  };
-}
 
 /**
  * Reads the resume session id carried by a chat command payload. The client
@@ -2892,15 +2846,6 @@ export function handleChatConnection(
             ...clientMsgIdEcho(data),
           }));
         }
-        return;
-      }
-
-      // ADR-H20 N2: an owner's no-click SSO session starts or continues a turn
-      // only after this browser's passkey step-up. Nothing running is touched.
-      const ownerRefusal = ownerStepUpChatRefusal(messageType, data, request.user);
-      if (ownerRefusal) {
-        if (ownerRefusal.unicast) sendRawToThisSocket(ownerRefusal.payload);
-        else writer.send(ownerRefusal.payload);
         return;
       }
 

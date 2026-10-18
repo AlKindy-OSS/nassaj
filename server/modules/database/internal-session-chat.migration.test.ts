@@ -31,7 +31,9 @@ const EXPECTED = [
   'table:session_internal_rooms',
 ];
 const ON = { NASSAJ_INTERNAL_SESSION_CHAT_ENABLED: '1' } as NodeJS.ProcessEnv;
-const OFF = {} as NodeJS.ProcessEnv;
+/** Unset = the default, which is ON since 2026-10-18. */
+const UNSET = {} as NodeJS.ProcessEnv;
+const KILLED = { NASSAJ_INTERNAL_SESSION_CHAT_ENABLED: '0' } as NodeJS.ProcessEnv;
 
 async function withStartupDatabase(flag: string | undefined, run: (db: Database.Database) => void) {
   const previous = { path: process.env.DATABASE_PATH, flag: process.env.NASSAJ_INTERNAL_SESSION_CHAT_ENABLED };
@@ -64,14 +66,34 @@ const legacyDatabase = () => {
   return db;
 };
 
-test('flag off at startup: no chat table is created, so an older binary can still delete', async () => {
-  await withStartupDatabase(undefined, (db) => {
+test('kill switch =0 at startup: no chat table is created and the feature is unavailable', async () => {
+  await withStartupDatabase('0', (db) => {
     assert.deepEqual(snapshot(db), []);
-    migrateInternalSessionChat(db, { NASSAJ_INTERNAL_SESSION_CHAT_ENABLED: 'true' } as NodeJS.ProcessEnv);
-    assert.deepEqual(snapshot(db), [], "only the exact value '1' enables it");
+    assert.equal(isInternalChatReady(), false);
+    for (const value of ['0', 'false', 'FALSE', ' false ']) {
+      migrateInternalSessionChat(db, { NASSAJ_INTERNAL_SESSION_CHAT_ENABLED: value } as NodeJS.ProcessEnv);
+      assert.deepEqual(snapshot(db), [], `'${value}' is a kill switch`);
+    }
     sessionsDb.createSession('moved', 'claude', '/tmp/project-a');
     assert.doesNotThrow(() => sessionsDb.createSession('moved', 'claude', '/tmp/project-b'),
       'a project transfer must not touch the absent room table');
+  });
+});
+
+test('flag unset at startup: ON by default, tables created and the feature ready', async () => {
+  await withStartupDatabase(undefined, (db) => {
+    assert.deepEqual(snapshot(db).map((row: any) => `${row.type}:${row.name}`), EXPECTED);
+    assert.equal(isInternalChatReady(), true);
+  });
+});
+
+test('an existing database booted with the kill switch gains the tables on the next default boot', async () => {
+  await withStartupDatabase('0', (db) => {
+    assert.deepEqual(snapshot(db), []);
+    migrateInternalSessionChat(db, UNSET);
+    assert.deepEqual(snapshot(db).map((row: any) => `${row.type}:${row.name}`), EXPECTED);
+    migrateInternalSessionChat(db, { NASSAJ_INTERNAL_SESSION_CHAT_ENABLED: 'true' } as NodeJS.ProcessEnv);
+    assert.deepEqual(snapshot(db).map((row: any) => `${row.type}:${row.name}`), EXPECTED);
   });
 });
 
@@ -80,9 +102,9 @@ test('flag on at startup: four tables and three indexes, and reruns are a no-op'
     const before = snapshot(db);
     assert.deepEqual(before.map((row: any) => `${row.type}:${row.name}`), EXPECTED);
     migrateInternalSessionChat(db, ON);
-    migrateInternalSessionChat(db, ON);
-    migrateInternalSessionChat(db, OFF);
-    assert.deepEqual(snapshot(db), before);
+    migrateInternalSessionChat(db, UNSET);
+    migrateInternalSessionChat(db, KILLED);
+    assert.deepEqual(snapshot(db), before, 'reruns, default boot and the kill switch never drop tables');
   });
 });
 

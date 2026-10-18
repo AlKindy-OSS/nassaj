@@ -21,7 +21,9 @@ let ssoStateResult = 'off';
 // Mock only the heavy transitive deps of auth.js. The SSO state model has its
 // own matrix tests (sso-config.service.test.ts); here only the field wiring.
 mock.module(url('../services/sso-config.service.js'), {
-  namedExports: { ...sso.exports, ssoState: () => ssoStateResult },
+  namedExports: {
+    ...sso.exports, ssoState: () => ssoStateResult, ssoBlocksWallet: () => ssoStateResult !== 'off',
+  },
 });
 mock.module(url('../modules/database/index.js'), {
   namedExports: {
@@ -105,7 +107,7 @@ test('/status preserves its generic error response', async () => {
   hasUsersError = false;
 });
 
-test('/status reports SSO off with the login button hidden', async () => {
+test('/status reports SSO off with the login button hidden (wallet on by default, ADR-194 A3)', async () => {
   ssoStateResult = 'off';
   assert.deepEqual(await status(), {
     needsSetup: false,
@@ -113,7 +115,7 @@ test('/status reports SSO off with the login button hidden', async () => {
     ssoState: 'off',
     ssoLoginAvailable: false,
     ssoAutoSignIn: false,
-    deviceAccountSessionsEnabled: false,
+    deviceAccountSessionsEnabled: true,
   });
 });
 
@@ -124,9 +126,19 @@ test('/status exposes the exact device-account-session route gate', async () => 
   process.env.MULTI_ACCOUNT_SWITCHING = 'false';
   assert.equal((await status()).deviceAccountSessionsEnabled, false);
 
+  // ADR-194 A3: only the exact value "false" turns it off.
   process.env.MULTI_ACCOUNT_SWITCHING = '1';
-  assert.equal((await status()).deviceAccountSessionsEnabled, false);
+  assert.equal((await status()).deviceAccountSessionsEnabled, true);
   delete process.env.MULTI_ACCOUNT_SWITCHING;
+  assert.equal((await status()).deviceAccountSessionsEnabled, true);
+});
+
+test('/status: any SSO state except off turns device sessions off (ADR-194 A3)', async () => {
+  for (const [state, enabled] of [['active', false], ['unavailable', false], ['paused', false], ['off', true]] as const) {
+    ssoStateResult = state;
+    assert.equal((await status()).deviceAccountSessionsEnabled, enabled, state);
+  }
+  ssoStateResult = 'off';
 });
 
 test('/status keeps device sessions off when the flag has no usable origin (T1/T2)', async () => {
@@ -162,9 +174,10 @@ test('/status still reflects needsSetup and leaks no other SSO config', async ()
     isAuthenticated: false,
     ssoState: 'active',
     ssoLoginAvailable: true,
-    // ADR-H20 N1: the node's auto sign-in setting, off unless the owner enables it.
-    ssoAutoSignIn: false,
-    deviceAccountSessionsEnabled: true,
+    // ADR-H20 N1: with SSO active the node signs in directly unless the owner turned it off.
+    ssoAutoSignIn: true,
+    // ADR-194 A3: SSO active excludes the wallet even with the flag set to "true".
+    deviceAccountSessionsEnabled: false,
   });
   assert.deepEqual(Object.keys(body).sort(), [
     'deviceAccountSessionsEnabled', 'isAuthenticated', 'needsSetup', 'ssoAutoSignIn', 'ssoLoginAvailable',

@@ -1,5 +1,7 @@
 /**
- * SSO device sessions and their IdP session ids (ADR-H20 S6, N5/N8/N2).
+ * SSO device sessions and their IdP session ids (ADR-H20 S6, N5/N8).
+ * `privileged_until` is a retired column (the N2 owner step-up was withdrawn
+ * 2026-10-18); it stays in the schema and is always written NULL.
  *
  * One row per Nassaj device session (`refresh_sid`) started through SSO; see
  * sso-linked-sessions.migration.ts for the columns. Every read is a primary-key
@@ -43,7 +45,6 @@ export type SsoDeviceSessionBinding = {
   idpSid: string | null;
   loginHint: string | null;
   ownerTier: boolean;
-  privilegedUntil: number | null;
   nowMs: number;
   pruneAfter: number;
 };
@@ -69,7 +70,7 @@ export const ssoDeviceSessionsDb = {
       db.prepare(`INSERT OR REPLACE INTO sso_device_sessions (${SELECT_COLUMNS})
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
         binding.refreshSid, binding.userId, binding.issuer, binding.loginHint, binding.ownerTier ? 1 : 0,
-        binding.nowMs, binding.nowMs, binding.nowMs, binding.privilegedUntil, binding.pruneAfter,
+        binding.nowMs, binding.nowMs, binding.nowMs, null, binding.pruneAfter,
       );
       if (binding.idpSid) insertIdpSid(binding.issuer, binding.idpSid, binding.refreshSid, binding.nowMs);
     }).immediate();
@@ -90,7 +91,7 @@ export const ssoDeviceSessionsDb = {
       WHERE m.issuer = ? AND m.idp_sid = ?`).all(issuer, idpSid) as SsoDeviceSessionRow[];
   },
 
-  /** Records another IdP sid for an existing device session (step-up, re-check). */
+  /** Records another IdP sid for an existing device session (re-check). */
   addIdpSid(refreshSid: string, idpSid: string, nowMs: number): boolean {
     const row = this.get(refreshSid);
     if (!row) return false;
@@ -111,19 +112,6 @@ export const ssoDeviceSessionsDb = {
   markRechecked(refreshSid: string, nowMs: number): boolean {
     return getConnection().prepare('UPDATE sso_device_sessions SET last_recheck_at = ? WHERE refresh_sid = ?')
       .run(nowMs, refreshSid).changes > 0;
-  },
-
-  /** Sets this browser's privileged grant (owner step-up). */
-  grantPrivilege(refreshSid: string, untilMs: number): boolean {
-    return getConnection().prepare('UPDATE sso_device_sessions SET privileged_until = ? WHERE refresh_sid = ?')
-      .run(untilMs, refreshSid).changes > 0;
-  },
-
-  /** Ends every outstanding privileged grant (kill-switch change). Returns the count. */
-  clearAllPrivileges(): number {
-    return getConnection().prepare(
-      'UPDATE sso_device_sessions SET privileged_until = NULL WHERE privileged_until IS NOT NULL',
-    ).run().changes;
   },
 
   /** Forgets one device session and its IdP sids (after its revocation is stored). */

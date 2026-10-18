@@ -287,7 +287,7 @@ import { ensureOwnerBootstrapped } from './services/bootstrap-owner.service.js';
 import { enforcePlatformIsolationGuard } from './services/platform-isolation-guard.service.js';
 import { enforceDockerSockBootGuard } from './services/isolation/docker-sock-boot-guard.js';
 import { resolveSecurityPosture } from './services/isolation/security-posture.js';
-import { validateApiKey, authenticateToken, authenticateDeviceCookieIfPresent, authenticateWebSocket, authenticateDeviceWebSocket, requireRole, JWT_SECRET } from './middleware/auth.js';
+import { validateApiKey, authenticateToken, authenticateDeviceCookieIfPresent, authenticateWebSocket, authenticateDeviceWebSocket, liveDeviceSession, requireRole, JWT_SECRET } from './middleware/auth.js';
 import { recordAuthRejection } from './middleware/auth-rejection-audit.js';
 import { IS_PLATFORM } from './constants/config.js';
 import { c } from './utils/colors.js';
@@ -943,6 +943,7 @@ const wss = createWebSocketServer(server, {
         authenticateWebSocket,
         authenticateDeviceWebSocket,
         deviceSessionsEnabled: multiAccountSwitchingEnabled,
+        deviceSessionLive: liveDeviceSession,
         // Cross-boundary collaborators injected from the composition root so the
         // websocket module never imports middleware/utils across the boundary
         // (eslint-plugin-boundaries). T-182 auth_rejected auditing on the WS path.

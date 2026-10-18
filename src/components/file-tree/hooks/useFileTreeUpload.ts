@@ -7,10 +7,8 @@ import {
   isSessionRejection,
   requestMutationCsrf,
 } from '../../../utils/api';
-import {
-  identityRequestSignal,
-  reconcileRevokedIdentity,
-} from '../../auth/accountIdentityBarrier';
+import { identityRequestSignal } from '../../auth/accountIdentityBarrier';
+import { handleIdentityRevocation } from '../../auth/bearerRevocation';
 import type { Project } from '../../../types/app';
 import {
   MAX_FILE_UPLOAD_COUNT,
@@ -181,7 +179,7 @@ export const uploadFormDataWithProgress = async (
           headers: { 'Content-Type': xhr.getResponseHeader('Content-Type') || 'application/json' },
         });
         const rejectedSession = await isSessionRejection(rejection);
-        if (!signal.aborted && rejectedSession) reconcileRevokedIdentity();
+        if (!signal.aborted && rejectedSession) handleIdentityRevocation();
       }
 
       finish(() => reject(new Error(payload.error || payload.message || `Upload failed with status ${xhr.status}`)));
