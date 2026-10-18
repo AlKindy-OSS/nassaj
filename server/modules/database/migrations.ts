@@ -8,6 +8,7 @@ import type { Database } from 'better-sqlite3';
 import { migrateUserHarnessFilesMode } from '@/modules/database/harness-files-mode.migration.js';
 import { migrateAuthTokenEpoch } from '@/modules/database/auth-token-epoch.migration.js';
 import { migrateShellOneShotRuns } from '@/modules/database/shell-oneshot-runs.migration.js';
+import { migrateSsoLinkedSessions } from '@/modules/database/sso-linked-sessions.migration.js';
 import { migratePermissionExecution } from '@/modules/database/permission-execution.migration.js';
 import { isForeignTempRootPath } from '@/modules/database/temp-root-guard.js';
 import { createUsageStatisticsV3Fresh } from '@/modules/database/usage-statistics-v3.migration.js';
@@ -3112,6 +3113,9 @@ export const runMigrations = (db: Database) => {
 
     // Durable one-shot runId ledger (ADR-213, T-2037). Idempotent, additive.
     migrateShellOneShotRuns(db);
+
+    // Linked SSO sign-in and sign-out tables (ADR-H20 S6). Idempotent, additive.
+    migrateSsoLinkedSessions(db);
 
     // FK CASCADE on session_agents tables — must run after sessions exist so
     // the REFERENCES sessions(session_id) constraint is satisfiable. (B-38.)

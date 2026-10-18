@@ -48,17 +48,20 @@ function hashBrowserTransaction(transaction) {
   return crypto.createHash('sha256').update(transaction).digest();
 }
 
-const PURPOSES = new Set(['login', 'link', 'step_up', 'test']);
+const PURPOSES = new Set(['login', 'link', 'step_up', 'test', 'owner_step_up', 'recheck']);
 const STEP_UP_AUDIENCES = new Set(['connector_owner']);
 const CONFIG_HASH = /^[0-9a-f]{64}$/;
+/** A Nassaj device-session id (token-session.ts: 22 base64url characters). */
+const REFRESH_SID = /^[A-Za-z0-9_-]{22}$/;
+/**
+ * ADR-H20 S6: purposes bound to one signed-in device session. `owner_step_up`
+ * grants that browser's owner session the privileged tier; `recheck` is the
+ * silent prompt=none re-check. Neither ever signs anyone in.
+ */
+const DEVICE_SESSION_PURPOSES = new Set(['owner_step_up', 'recheck']);
 
 const isVersion = (value) => Number.isSafeInteger(value) && value >= 0;
 
-/**
- * ADR-194 D2 `test` binding: the owner who started it, the draft hash and the
- * draft_version at start. It never carries a sign-in user, audience or
- * active-config version, so it cannot be mistaken for any other purpose.
- */
 function testBinding({ ownerUserId, configHash, draftVersion, ...rest }) {
   const extra = Object.values(rest).some((value) => value !== undefined);
   if (extra || !Number.isInteger(ownerUserId) || ownerUserId <= 0 || typeof configHash !== 'string'
@@ -68,28 +71,34 @@ function testBinding({ ownerUserId, configHash, draftVersion, ...rest }) {
   return { purpose: 'test', ownerUserId, configHash, draftVersion };
 }
 
-/**
- * Normalizes the purpose-specific binding, or null when invalid. Every
- * non-test entry carries the active `configVersion` at start (ADR-194 D9
- * fence). 'link' and 'step_up' entries must name a positive integer user id
- * and a finite request instant; only 'step_up' carries (and requires) an
- * audience; a 'login' entry binds no user.
- */
+function loginBinding({ userId, requestedAtMs, audience, refreshSid, configVersion, ownerStepUp }) {
+  if (userId !== undefined || audience !== undefined || refreshSid !== undefined) return null;
+  if (requestedAtMs !== undefined && !Number.isFinite(requestedAtMs)) return null;
+  return {
+    purpose: 'login',
+    configVersion,
+    ...(requestedAtMs !== undefined ? { requestedAtMs } : {}),
+    ...(ownerStepUp ? { ownerStepUp: true } : {}),
+  };
+}
+
 function purposeBinding({ purpose = 'login', ...binding }) {
   if (!PURPOSES.has(purpose)) return null;
   if (purpose === 'test') return testBinding(binding);
-  const { userId, requestedAtMs, audience, configVersion, ownerStepUp, ...rest } = binding;
+  const { userId, requestedAtMs, audience, configVersion, ownerStepUp, refreshSid, ...rest } = binding;
   if (!isVersion(configVersion) || Object.values(rest).some((value) => value !== undefined)) return null;
   // ADR-194 A1: `ownerStepUp` marks the one automatic owner passkey step-up of a
   // login (the loop guard); only `true` on a login entry is accepted.
   if (ownerStepUp !== undefined && (purpose !== 'login' || ownerStepUp !== true)) return null;
-  if (purpose === 'login') {
-    return userId === undefined && requestedAtMs === undefined && audience === undefined
-      ? { purpose, configVersion, ...(ownerStepUp ? { ownerStepUp: true } : {}) } : null;
-  }
+  if (purpose === 'login') return loginBinding(binding);
   if (!Number.isInteger(userId) || userId <= 0 || !Number.isFinite(requestedAtMs)) {
     return null;
   }
+  if (DEVICE_SESSION_PURPOSES.has(purpose)) {
+    return audience === undefined && typeof refreshSid === 'string' && REFRESH_SID.test(refreshSid)
+      ? { purpose, userId, requestedAtMs, refreshSid, configVersion } : null;
+  }
+  if (refreshSid !== undefined) return null;
   if (purpose === 'link') {
     return audience === undefined ? { purpose, userId, requestedAtMs, configVersion } : null;
   }

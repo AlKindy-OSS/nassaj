@@ -184,6 +184,42 @@ const baseline = [
   },
   {
     "phase": "security_startup_authorized",
+    "method": "exec",
+    "sql": "CREATE TABLE IF NOT EXISTS sso_device_sessions (\n  refresh_sid TEXT PRIMARY KEY,\n  user_id INTEGER NOT NULL,\n  issuer TEXT NOT NULL,\n  login_hint TEXT,\n  owner_tier INTEGER NOT NULL DEFAULT 0 CHECK (owner_tier IN (0, 1)),\n  created_at INTEGER NOT NULL,\n  last_seen_at INTEGER NOT NULL,\n  last_recheck_at INTEGER NOT NULL,\n  privileged_until INTEGER,\n  prune_after INTEGER NOT NULL\n)",
+    "shadow": null
+  },
+  {
+    "phase": "security_startup_authorized",
+    "method": "exec",
+    "sql": "CREATE INDEX IF NOT EXISTS idx_sso_device_sessions_prune_after ON sso_device_sessions(prune_after)",
+    "shadow": null
+  },
+  {
+    "phase": "security_startup_authorized",
+    "method": "exec",
+    "sql": "CREATE TABLE IF NOT EXISTS sso_device_session_idp_sids (\n  issuer TEXT NOT NULL,\n  idp_sid TEXT NOT NULL,\n  refresh_sid TEXT NOT NULL,\n  added_at INTEGER NOT NULL,\n  PRIMARY KEY (issuer, idp_sid, refresh_sid)\n)",
+    "shadow": null
+  },
+  {
+    "phase": "security_startup_authorized",
+    "method": "exec",
+    "sql": "CREATE INDEX IF NOT EXISTS idx_sso_device_session_idp_sids_refresh_sid ON sso_device_session_idp_sids(refresh_sid)",
+    "shadow": null
+  },
+  {
+    "phase": "security_startup_authorized",
+    "method": "exec",
+    "sql": "CREATE TABLE IF NOT EXISTS oidc_logout_jtis (\n  issuer TEXT NOT NULL,\n  jti TEXT NOT NULL,\n  expires_at INTEGER NOT NULL,\n  PRIMARY KEY (issuer, jti)\n)",
+    "shadow": null
+  },
+  {
+    "phase": "security_startup_authorized",
+    "method": "exec",
+    "sql": "CREATE INDEX IF NOT EXISTS idx_oidc_logout_jtis_expires_at ON oidc_logout_jtis(expires_at)",
+    "shadow": null
+  },
+  {
+    "phase": "security_startup_authorized",
     "method": "run",
     "sql": "UPDATE connector_runtime_anchor SET\n    maximum_fencing_token = ?, maximum_writer_epoch = ?, clock_high_water_ms = ?, authority_mac = ?\n    WHERE singleton = 1 AND authority_mac = ?",
     "shadow": null

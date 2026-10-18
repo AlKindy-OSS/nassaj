@@ -14,6 +14,12 @@ import {
 } from '@/shared/utils.js';
 
 import {
+  isPlaceholderSessionTitle,
+  isReplaceableStoredTitle,
+  promptTitleText,
+} from '../../shared/session-title-source.js';
+
+import {
   openCodeDataHomeForSessionFile,
   resolveOpenCodeDataHomeOwner,
   resolveOpenCodeDataHomes,
@@ -173,19 +179,14 @@ export class OpenCodeSessionSynchronizer implements IProviderSessionSynchronizer
     }
 
     const fallbackTitle = 'Untitled OpenCode Session';
-    const existingSession = sessionsDb.getSessionById(sessionId);
-    const existingName = existingSession?.custom_name;
+    const existingName = sessionsDb.getSessionById(sessionId)?.custom_name;
     // T-1906 / ADR-200 §8: a title/first prompt read from opencode.db never
     // carries a key of any sender in the session or of the data dir's owner.
-    const nextName = existingName && existingName !== fallbackTitle
-      ? existingName
-      : redactLiteralSecrets(
-        readOptionalString(row.title) ?? this.readFirstUserText(db, sessionId),
-        collectOpenCodeSessionSecrets(sessionId, {
-          dataHome: path.dirname(db.name),
-          extraUserIds: [ownerUserId],
-        }),
-      );
+    const redact = (text: string | undefined) => redactLiteralSecrets(
+      text,
+      collectOpenCodeSessionSecrets(sessionId, { dataHome: path.dirname(db.name), extraUserIds: [ownerUserId] }),
+    );
+    const nextName = this.resolveSessionName(db, sessionId, row.title, existingName, redact);
 
     // OpenCode stores every session in one shared sqlite database, so jsonl_path
     // must stay null to avoid deleting opencode.db when one app session is removed.
@@ -254,9 +255,38 @@ export class OpenCodeSessionSynchronizer implements IProviderSessionSynchronizer
     );
   }
 
-  private readFirstUserText(db: Database.Database, sessionId: string): string | undefined {
+  /**
+   * B-1668: the session's name. OpenCode's default `New session - <ISO>` title
+   * is a placeholder, never a name. A stored name is kept — a rename included —
+   * unless it is replaceable, or it is only the derived first prompt and
+   * OpenCode has since generated a real title, which then wins.
+   */
+  private resolveSessionName(
+    db: Database.Database,
+    sessionId: string,
+    rawRowTitle: string | null,
+    existingName: string | null | undefined,
+    redact: (text: string | undefined) => string | undefined,
+  ): string | undefined {
+    const rowTitle = readOptionalString(rawRowTitle);
+    const realRowTitle = rowTitle && !isPlaceholderSessionTitle(rowTitle) ? redact(rowTitle) : undefined;
+    const firstPrompt = () => this.readFirstPromptTitle(db, sessionId, redact);
+
+    if (existingName && !isReplaceableStoredTitle(existingName)) {
+      const derivedFromPrompt = existingName === normalizeSessionName(firstPrompt(), '');
+      if (!realRowTitle || !derivedFromPrompt) return existingName;
+    }
+    return realRowTitle ?? firstPrompt();
+  }
+
+  /** Title text of the first user text part that survives cleaning (bounded scan). */
+  private readFirstPromptTitle(
+    db: Database.Database,
+    sessionId: string,
+    redact: (text: string | undefined) => string | undefined,
+  ): string | undefined {
     try {
-      const row = db.prepare(`
+      const rows = db.prepare(`
         SELECT p.data AS data
         FROM message m
         INNER JOIN part p
@@ -266,13 +296,16 @@ export class OpenCodeSessionSynchronizer implements IProviderSessionSynchronizer
           AND json_extract(m.data, '$.role') = 'user'
           AND json_extract(p.data, '$.type') = 'text'
         ORDER BY COALESCE(m.time_created, 0), COALESCE(p.time_created, 0)
-        LIMIT 1
-      `).get(sessionId) as { data: string | null } | undefined;
+        LIMIT 8
+      `).all(sessionId) as Array<{ data: string | null }>;
 
-      const data = readJsonRecord(row?.data);
-      return readOptionalString(data?.text);
+      for (const row of rows) {
+        const title = promptTitleText(redact(readOptionalString(readJsonRecord(row.data)?.text)));
+        if (title) return title;
+      }
     } catch {
-      return undefined;
+      // An unreadable opencode.db leaves the session untitled.
     }
+    return undefined;
   }
 }

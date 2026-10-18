@@ -338,5 +338,10 @@
     "tooltip": {
       "none": "このセッションは Nassaj のガバナンス外で実行されています — プロバイダー設定をご確認ください"
     }
+  },
+  "mermaidZoom": {
+    "zoom": "図を拡大",
+    "zoomedAria": "拡大された Mermaid 図",
+    "close": "閉じる"
   }
 }

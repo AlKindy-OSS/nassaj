@@ -110,7 +110,7 @@ function makeStore(calls: FetchCall[]) {
         slot.historyRevision = snapshot.revision;
         return slot;
       },
-      applyLightHistoryExpansion: (_id: string, snapshot: any) => {
+      applyLightHistoryRebase: (_id: string, snapshot: any) => {
         slot.serverMessages = snapshot.messages;
         slot.hasMore = snapshot.hasMore;
         slot.total = snapshot.total;

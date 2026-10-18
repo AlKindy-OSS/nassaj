@@ -25,8 +25,8 @@ export async function getInternalRoom(sessionId: string, signal?: AbortSignal): 
   return bodyOrNull(response);
 }
 
-export async function createInternalRoom(sessionId: string): Promise<InternalRoom | null> {
-  const response = await authenticatedFetch(roomPath(sessionId), { method: 'POST', headers: json });
+export async function createInternalRoom(sessionId: string, signal?: AbortSignal): Promise<InternalRoom | null> {
+  const response = await authenticatedFetch(roomPath(sessionId), { method: 'POST', headers: json, signal });
   if (!response.ok) return null;
   return bodyOrNull(response);
 }
@@ -38,17 +38,20 @@ export async function getInternalMessages(sessionId: string, signal?: AbortSigna
   return Array.isArray(payload) ? payload : Array.isArray(payload?.messages) ? payload.messages : [];
 }
 
-export async function sendInternalMessage(sessionId: string, body: string, mentionUserIds: Array<string | number>): Promise<InternalMessage | null> {
+/** An abort only stops waiting for the answer; the server may still store the message. */
+export async function sendInternalMessage(
+  sessionId: string, body: string, mentionUserIds: Array<string | number>, signal?: AbortSignal,
+): Promise<InternalMessage | null> {
   const response = await authenticatedFetch(messagesPath(sessionId), {
-    method: 'POST', headers: json,
+    method: 'POST', headers: json, signal,
     body: JSON.stringify({ body, mentionUserIds, clientMessageId: crypto.randomUUID() }),
   });
   return response.ok ? bodyOrNull(response) : null;
 }
 
-export async function markInternalRead(sessionId: string, sequence: number): Promise<boolean> {
+export async function markInternalRead(sessionId: string, sequence: number, signal?: AbortSignal): Promise<boolean> {
   const response = await authenticatedFetch(`/api/sessions/${encodeURIComponent(sessionId)}/internal-read`, {
-    method: 'POST', headers: json, body: JSON.stringify({ sequence }),
+    method: 'POST', headers: json, body: JSON.stringify({ sequence }), signal,
   });
   return response.ok;
 }

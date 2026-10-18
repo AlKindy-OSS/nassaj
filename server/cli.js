@@ -20,6 +20,9 @@ import path from 'path';
 
 import { compareNassajReleaseVersions, isNassajReleaseVersion } from '../shared/release-version-policy.js';
 
+// Shared with load-env.js so "status" reports the default the backend really uses.
+import { DEFAULT_DATABASE_PATH } from './modules/database/database-path.js';
+import { applyEnvContent } from './utils/env-file.js';
 import { findAppRoot, getModuleDir } from './utils/runtime-paths.js';
 
 const __dirname = getModuleDir(import.meta.url);
@@ -57,24 +60,13 @@ const c = {
 // Load package.json for version info
 const packageJsonPath = path.join(APP_ROOT, 'package.json');
 const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
-// Match the runtime fallback in load-env.js so "cloudcli status" reports the same default
-// database location that the backend will actually use when no DATABASE_PATH is configured.
-const DEFAULT_DATABASE_PATH = path.join(os.homedir(), '.cloudcli', 'auth.db');
 
 // Load environment variables from .env file if it exists
 function loadEnvFile() {
     try {
         const envPath = path.join(APP_ROOT, '.env');
         const envFile = fs.readFileSync(envPath, 'utf8');
-        envFile.split('\n').forEach(line => {
-            const trimmedLine = line.trim();
-            if (trimmedLine && !trimmedLine.startsWith('#')) {
-                const [key, ...valueParts] = trimmedLine.split('=');
-                if (key && valueParts.length > 0 && !process.env[key]) {
-                    process.env[key] = valueParts.join('=').trim();
-                }
-            }
-        });
+        applyEnvContent(envFile);
     } catch (e) {
         // .env file is optional
     }

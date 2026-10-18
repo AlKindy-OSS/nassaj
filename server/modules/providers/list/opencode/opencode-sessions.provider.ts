@@ -12,14 +12,17 @@ import { buildProgressSubagent } from '@/shared/progress-normalize.js';
 import {
   createNormalizedMessage,
   generateMessageId,
-  getOpenCodeDatabasePath,
   normalizeProviderTimestamp,
   readObjectRecord,
   readJsonRecord,
   readOptionalString,
 } from '@/shared/utils.js';
 
-import { resolveOpenCodeDataHomeOwner } from './opencode-home.js';
+import {
+  findOpenCodeDatabaseForSession,
+  operatorOpenCodeDatabasePath,
+  resolveOpenCodeDataHomeOwner,
+} from './opencode-home.js';
 import { collectOpenCodeSessionSecrets } from './opencode-redaction-secrets.js';
 
 const PROVIDER = 'opencode';
@@ -71,13 +74,20 @@ type OpenCodeTokenTotals = {
   cacheWriteTokens: number;
 };
 
-const openOpenCodeDatabase = (): Database.Database | null => {
-  const dbPath = getOpenCodeDatabasePath();
+type OpenedOpenCodeDatabase = { db: Database.Database; dbPath: string };
+
+/**
+ * B-1669: opens the opencode.db that holds `sessionId` — the operator DB or a
+ * member's own DB — falling back to the operator DB (empty history) when no
+ * DB has the id. Null only when that fallback file is absent too.
+ */
+const openOpenCodeDatabase = (sessionId: string): OpenedOpenCodeDatabase | null => {
+  const dbPath = findOpenCodeDatabaseForSession(sessionId) ?? operatorOpenCodeDatabasePath();
   if (!fsSync.existsSync(dbPath)) {
     return null;
   }
 
-  return new Database(dbPath, { readonly: true, fileMustExist: true });
+  return { db: new Database(dbPath, { readonly: true, fileMustExist: true }), dbPath };
 };
 
 /**
@@ -435,17 +445,21 @@ export class OpenCodeSessionsProvider implements IProviderSessions {
   }
 
   /**
-   * Loads OpenCode history from the shared SQLite session database.
+   * Loads OpenCode history from the opencode.db that holds the session (the
+   * operator DB or a member's own DB). The caller must already have authorised
+   * the session row: sessionsService.fetchHistory runs isSessionAccessibleByUser
+   * first, and any new direct caller must keep that gate.
    */
   async fetchHistory(
     sessionId: string,
     options: FetchHistoryOptions = {},
   ): Promise<FetchHistoryResult> {
     const { limit = null, offset = 0 } = options;
-    const db = openOpenCodeDatabase();
-    if (!db) {
+    const opened = openOpenCodeDatabase(sessionId);
+    if (!opened) {
       return { messages: [], total: 0, hasMore: false, offset: 0, limit: null, readFailed: true };
     }
+    const { db, dbPath } = opened;
 
     try {
       const rows = db.prepare(`
@@ -468,7 +482,8 @@ export class OpenCodeSessionsProvider implements IProviderSessions {
           p.id
       `).all(sessionId) as OpenCodeHistoryRow[];
 
-      const dataHome = path.dirname(getOpenCodeDatabasePath());
+      // M-6: redact for the owner (and auth.json) of the DB actually read.
+      const dataHome = path.dirname(dbPath);
       const secrets = collectOpenCodeSessionSecrets(sessionId, {
         dataHome,
         extraUserIds: [resolveOpenCodeDataHomeOwner(dataHome)],

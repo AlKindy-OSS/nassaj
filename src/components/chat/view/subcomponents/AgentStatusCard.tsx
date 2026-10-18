@@ -37,6 +37,7 @@ import type { RunAgent, RunProgress } from '../../hooks/useRunProgress';
 import type { WorkflowUiDescriptor } from '../../../../stores/workflowStatus';
 
 import ClaudeStatus from './ClaudeStatus';
+import { shortModelLabel } from './MessageModelBadge';
 import PercentMeter, { formatPercent } from './PercentMeter';
 import { RunStatusActions, RunStatusIdentityLabel, RunStatusSteerHint } from './RunStatusViewerActions';
 
@@ -144,7 +145,7 @@ function AgentRow({ agent, frozen }: { agent: RunAgent; frozen: boolean }) {
   const pulse = running && !frozen;
   const contentId = useId();
   const typeLabel = agent.agentName || agent.type || '—';
-  const modelLabel = agent.model || '—';
+  const modelLabel = agent.model ? shortModelLabel(agent.model, 32) : '—';
   const effortLabel = agent.effort || '—';
   const toolRows = new Map<
     string,
@@ -242,7 +243,13 @@ function AgentRow({ agent, frozen }: { agent: RunAgent; frozen: boolean }) {
           >
             <bdi>{typeLabel}</bdi>
           </span>
+          {/* B-1665: a Latin model id truncated inside an RTL row lost its head
+              ("…-5-5"). The truncating element itself is LTR, so the ellipsis
+              lands at the end, and the label is the short form with the full id
+              in the tooltip. */}
           <span
+            dir="ltr"
+            title={agent.model || undefined}
             className={[
               'max-w-48 truncate rounded border border-border px-1.5 py-0.5 text-[10px]',
               'text-muted-foreground',

@@ -45,35 +45,34 @@ beforeEach(() => {
 });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
-describe('T-1862: onScroll path keeps isUserScrolledUp in sync with real position', () => {
-  it('sets isUserScrolledUp=true for scrollbar/keyboard scroll away from bottom (no wheel/touch involved)', async () => {
+const messageFetches = () => authenticatedFetch.mock.calls.filter(([url]) => String(url).includes('/messages')).length;
+
+describe('B-1665: the session hook keeps pagination, the stick hook owns pinning', () => {
+  it('handleScroll near the top still fetches the older page', async () => {
+    authenticatedFetch.mockImplementation((url: string) => url.includes('/messages')
+      ? Promise.resolve({ ok: true, json: async () => ({ messages: [row('m2')], total: 2, hasMore: true }) })
+      : Promise.resolve({ ok: false, status: 404, json: async () => ({}) }));
     const { result } = mount();
-    await waitFor(() => expect(result.current.isLoadingSessionMessages).toBe(false));
+    await waitFor(() => expect(result.current.hasMoreMessages).toBe(true));
+    const before = messageFetches();
     act(() => { (result.current.scrollContainerRef as any).current = makeContainer(1000, 400, 0); });
-    // Exactly what ChatMessagesPane's `onScroll={handleScroll}` invokes — not
-    // the wheel/touch-only handleUserScrollIntent.
     await act(async () => { await result.current.handleScroll(); });
-    expect(result.current.isUserScrolledUp).toBe(true);
+    expect(messageFetches()).toBe(before + 1);
   });
 
-  it('clears isUserScrolledUp once that same path reports a near-bottom position again', async () => {
+  it('no frame loop or timer writes scrollTop when messages arrive (no competing writer)', async () => {
     const { result } = mount();
-    await waitFor(() => expect(result.current.isLoadingSessionMessages).toBe(false));
     const container = makeContainer(1000, 400, 0);
     act(() => { (result.current.scrollContainerRef as any).current = container; });
-    await act(async () => { await result.current.handleScroll(); });
-    expect(result.current.isUserScrolledUp).toBe(true);
-
-    // Scrollbar drag (or Home/End/PageDown) back to the bottom — still no
-    // wheel/touchmove event, only a scrollTop change + native 'scroll'.
-    Object.defineProperty(container, 'scrollTop', { value: 610, configurable: true, writable: true });
-    await act(async () => { await result.current.handleScroll(); });
-    expect(result.current.isUserScrolledUp).toBe(false);
+    await waitFor(() => expect(result.current.isLoadingSessionMessages).toBe(false));
+    await waitFor(() => expect(result.current.chatMessages.length).toBe(1));
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 150)); });
+    expect(container.scrollTop).toBe(0);
   });
 
-  it('does not force isUserScrolledUp back to stale true after a fresh mount', async () => {
+  it('exposes the search-navigation flag so pinning can be suppressed during a search hit', async () => {
     const { result } = mount();
     await waitFor(() => expect(result.current.isLoadingSessionMessages).toBe(false));
-    expect(result.current.isUserScrolledUp).toBe(false);
+    expect(result.current.searchScrollActiveRef.current).toBe(false);
   });
 });

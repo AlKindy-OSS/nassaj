@@ -35,7 +35,8 @@ const TAG_NAME_CHAR = /[A-Za-z0-9_-]/;
 const MAX_TAG_NAME = 64;
 const MAX_TAG_ATTRS = 256;
 
-function isStrippedTag(name: string): boolean {
+/** True for a harness/governance tag the sanitizers remove (also the session title text, B-1668). */
+export function isStrippedTag(name: string): boolean {
   return STRIPPED_TAGS.has(name) || SUFFIX_TAG.test(name);
 }
 

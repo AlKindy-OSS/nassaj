@@ -10,6 +10,7 @@ import { decodeHtmlEntities, unescapeWithMathProtection, formatUsageLimitText } 
 import { stripChatImageNote } from '../utils/chatImageNote';
 import { readServerErrorCode } from '../utils/serverErrorMessage';
 import { userMessageImages } from '../utils/userMessageImages';
+import { isAsyncLaunchAck, isAsyncLaunchAckResult } from '../utils/asyncLaunchAck';
 
 function formatToolResultContent(content: unknown): string {
   const text =
@@ -44,34 +45,6 @@ export function attachTurnDurations(messages: ChatMessage[]): ChatMessage[] {
     ) return message;
     return { ...message, turnDurationMs: durationMs };
   });
-}
-
-/**
- * True when a sub-agent container's `tool_result` is a background-launch
- * ACKNOWLEDGMENT, not the real completion (B-63/T-143 root cause).
- *
- * Background delegation has a distinct, documented result shape: its
- * container's tool_result is an acknowledgment with `toolUseResult` shaped
- * `{ isAsync: true, status: 'async_launched', agentId, outputFile, ... }` —
- * the delegated work has barely started and continues out-of-process for the
- * rest of the turn, reporting final completion later via a
- * separate task-notification message, never a second tool_result on this same
- * toolId. Treating that acknowledgment as `isComplete` (as the container
- * branch below used to, unconditionally) flipped the sub-agent to "done"
- * immediately after delegation, so useRunProgress's activeSubagent /
- * agentsDone and the per-agent strip row showed it finished for the rest of
- * the run even though it was still working — foreclosing any chance of the
- * live "still working" signal (or a later plan snapshot) ever being attributed to
- * a container the UI hadn't already written off as resolved.
- *
- * Foreground (blocking) delegations are unaffected: their tool_result has no
- * `isAsync`/`status:'async_launched'` marker and still resolves isComplete
- * exactly as before.
- */
-function isAsyncLaunchAck(toolUseResult: unknown): boolean {
-  if (typeof toolUseResult !== 'object' || toolUseResult === null) return false;
-  const tur = toolUseResult as Record<string, unknown>;
-  return tur.isAsync === true && tur.status === 'async_launched';
 }
 
 /**
@@ -378,6 +351,7 @@ export function normalizedToChatMessages(messages: NormalizedMessage[]): ChatMes
       // which the session-level chip cannot say once a conversation changes
       // model mid-way.
       model: msg.model,
+      provider: msg.provider,
       coordinationLevel: msg.coordinationLevel,
       responseTurnMetric: msg.responseTurnMetric,
       responseToMessageId: msg.responseToMessageId,
@@ -546,7 +520,11 @@ export function normalizedToChatMessages(messages: NormalizedMessage[]): ChatMes
           timestamp: msg.timestamp,
           isToolUse: true,
           toolName: msg.toolName,
-          toolInput: typeof msg.toolInput === 'string' ? msg.toolInput : JSON.stringify(msg.toolInput ?? '', null, 2),
+          // B-1665: a deferred input (light history) stays empty — not '""', which
+          // was truthy and rendered fake defaults ("Agent: Running task", "$ ").
+          toolInput: msg.toolInput == null
+            ? ''
+            : typeof msg.toolInput === 'string' ? msg.toolInput : JSON.stringify(msg.toolInput, null, 2),
           toolId: msg.toolId,
           toolResult,
           isSubagentContainer,
@@ -715,6 +693,9 @@ export function normalizedToChatMessages(messages: NormalizedMessage[]): ChatMes
           toolName: 'ToolResult',
           toolInput: '',
           toolId: msg.toolId,
+          ...(isAsyncLaunchAckResult({ content, toolUseResult: (msg as { toolUseResult?: unknown }).toolUseResult })
+            ? { backgroundAgentAck: true }
+            : {}),
           toolResult: {
             content,
             isError: Boolean(msg.isError),

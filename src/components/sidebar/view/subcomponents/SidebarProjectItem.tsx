@@ -29,6 +29,7 @@ import ProjectBusyDot from '../../../../shared/view/ProjectBusyDot';
 import { Tooltip } from '../../../../shared/view/ui';
 import { prefersReducedMotion } from '../../../../lib/motion';
 import { cn } from '../../../../lib/utils';
+import { useMediaQuery } from '../../../../hooks/useMediaQuery';
 import { api } from '../../../../utils/api';
 import type { Project, ProjectSession, LLMProvider } from '../../../../types/app';
 import type { ProjectToolbarProps, SessionWithProvider } from '../../types/types';
@@ -105,6 +106,10 @@ type SidebarProjectItemProps = ProjectToolbarProps & {
   editingProject: string | null;
   editingName: string;
   sessions: SessionWithProvider[];
+  /** Trailing path shown after the name when another project shares it (B-1668). */
+  nameSuffix?: string;
+  /** Conversations the active search shows here; null when the search does not narrow this project. */
+  searchMatchCount?: number | null;
   /** T-1951: the "+N" surfaced-hint count for this project, from the controller. */
   surfacedHiddenCount?: number;
   initialSessionsLoaded: boolean;
@@ -114,7 +119,6 @@ type SidebarProjectItemProps = ProjectToolbarProps & {
   editingSessionName: string;
   onEditingNameChange: (name: string) => void;
   onToggleProject: (projectName: string) => void;
-  onProjectSelect: (project: Project) => void;
   onToggleStarProject: (projectName: string) => void;
   onStartEditingProject: (project: Project) => void;
   onCancelEditingProject: () => void;
@@ -156,6 +160,8 @@ export default function SidebarProjectItem({
   editingProject,
   editingName,
   sessions,
+  nameSuffix,
+  searchMatchCount = null,
   surfacedHiddenCount = 0,
   initialSessionsLoaded,
   isLoadingMoreSessions,
@@ -164,7 +170,6 @@ export default function SidebarProjectItem({
   editingSessionName,
   onEditingNameChange,
   onToggleProject,
-  onProjectSelect,
   onToggleStarProject,
   onStartEditingProject,
   onCancelEditingProject,
@@ -224,18 +229,32 @@ export default function SidebarProjectItem({
   // attribute to `project.projectId`, so a session outside this loaded page
   // still lights the header.
   const loadedSessionIds = sessions.map((session) => session.id);
-  const totalSessionCount = Number(project.sessionMeta?.total ?? sessions.length);
+  // B-1668: while a search narrows this project the counter is the number of
+  // matches shown under it, not the project's total.
+  const isSearchNarrowed = searchMatchCount !== null;
+  const totalSessionCount = isSearchNarrowed
+    ? searchMatchCount
+    : Number(project.sessionMeta?.total ?? sessions.length);
   // كان النصّ إنجليزياً مثبَّتاً في الكود (`N sessions`) فظهر كذلك في واجهة
   // عربية. الآن من ملفّ الترجمة بصيغ الجمع العربية الستّ.
-  const sessionCountLabel = t('projects.conversationsCount', {
+  const conversationsCountLabel = t('projects.conversationsCount', {
     count: totalSessionCount,
     defaultValue: '{{count}} conversations',
   });
+  const sessionCountLabel = isSearchNarrowed
+    ? `${t('projects.matchedSessions', { defaultValue: 'Matching conversations' })}: ${conversationsCountLabel}`
+    : conversationsCountLabel;
+  // The name the row is announced by: the path suffix tells same-named projects apart.
+  const projectLabel = nameSuffix ? `${project.displayName} (${nameSuffix})` : project.displayName;
+  // Hover-only path card: on touch, the compatibility mouseenter that follows a
+  // tap opened it with no mouseleave ever coming, so it stuck over the first
+  // rows. The path stays in the sr-only description and the expanded header.
+  const canHover = useMediaQuery('(hover: hover)');
   const projectSessionsId = `project-sessions-${project.projectId}`;
-  const projectMenuLabel = `${t('tooltips.projectContextMenu', { defaultValue: 'Project options' })}: ${project.displayName}`;
+  const projectMenuLabel = `${t('tooltips.projectContextMenu', { defaultValue: 'Project options' })}: ${projectLabel}`;
   const projectPinLabel = `${isStarred
     ? t('tooltips.unpinProject', { defaultValue: 'Unpin project' })
-    : t('tooltips.pinProject', { defaultValue: 'Pin project' })}: ${project.displayName}`;
+    : t('tooltips.pinProject', { defaultValue: 'Pin project' })}: ${projectLabel}`;
 
   const toggleProject = () => onToggleProject(project.projectId);
   const toggleStarProject = () => onToggleStarProject(project.projectId);
@@ -589,7 +608,7 @@ export default function SidebarProjectItem({
               aria-controls={projectSessionsId}
               aria-label={`${isExpanded
                 ? t('tooltips.collapseProject', { defaultValue: 'Collapse project' })
-                : t('tooltips.expandProject', { defaultValue: 'Expand project' })}: ${project.displayName}`}
+                : t('tooltips.expandProject', { defaultValue: 'Expand project' })}: ${projectLabel}`}
               className="absolute inset-0 z-0 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--project-accent,hsl(var(--ring)))] focus-visible:ring-offset-1 active:scale-[0.98]"
               onClick={toggleProject}
               onContextMenu={handleContextMenu}
@@ -623,7 +642,7 @@ export default function SidebarProjectItem({
                   للمشاريع بلا شعار كي لا يدفع كل صفّ عرضاً لا يحمل معلومة. */}
               {logoUrl && (
                 <Tooltip
-                  content={projectPathTooltip}
+                  content={canHover ? projectPathTooltip : null}
                   position="bottom"
                   multiline
                   wrapperClassName="pointer-events-auto flex-shrink-0"
@@ -708,7 +727,7 @@ export default function SidebarProjectItem({
                       {/* يسبق الزر الاسم في اتجاه RTL، فيظهر مباشرةً على يمين
                           العنوان. يبقى في هذا السطر كي لا يهبط إلى المسار. */}
                       <Tooltip
-                        content={projectPathTooltip}
+                        content={canHover ? projectPathTooltip : null}
                         position="bottom"
                         multiline
                         wrapperClassName="min-w-0 pointer-events-auto"
@@ -720,6 +739,16 @@ export default function SidebarProjectItem({
                           {project.displayName}
                         </div>
                       </Tooltip>
+                      {nameSuffix && (
+                        <span
+                          data-project-name-suffix
+                          dir="ltr"
+                          aria-hidden="true"
+                          className="min-w-0 max-w-[45%] flex-shrink truncate text-[11px] text-[color:var(--project-muted-foreground,hsl(var(--muted-foreground)))]"
+                        >
+                          {nameSuffix}
+                        </span>
+                      )}
                       <ProjectBusyDot
                         projectId={project.projectId}
                         loadedIds={loadedSessionIds}
@@ -980,7 +1009,7 @@ export default function SidebarProjectItem({
           isSessionStarred={isSessionStarred}
           onToggleStarSession={onToggleStarSession}
           initialSessionsLoaded={initialSessionsLoaded}
-          hasMoreSessions={Boolean(project.sessionMeta?.hasMore)}
+          hasMoreSessions={Boolean(project.sessionMeta?.hasMore) && !isSearchNarrowed}
           isLoadingMoreSessions={isLoadingMoreSessions}
           currentTime={currentTime}
           editingSession={editingSession}
@@ -989,7 +1018,6 @@ export default function SidebarProjectItem({
           onStartEditingSession={onStartEditingSession}
           onCancelEditingSession={onCancelEditingSession}
           onSaveEditingSession={onSaveEditingSession}
-          onProjectSelect={onProjectSelect}
           onSessionSelect={onSessionSelect}
           onDeleteSession={onDeleteSession}
           onLoadMoreSessions={onLoadMoreSessions}

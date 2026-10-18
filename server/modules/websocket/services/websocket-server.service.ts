@@ -27,6 +27,11 @@ import { handleTerminalConnection } from '@/modules/websocket/services/terminal-
 import type { AuthenticatedWebSocketRequest } from '@/shared/types.js';
 import { handleInternalChatConnection } from '@/modules/internal-session-chat/index.js';
 
+// eslint-disable-next-line boundaries/no-unknown -- ADR-H20 N2: the owner tier gate is one shared service for REST and realtime.
+import { ownerStepUpRequired } from '../../../services/sso-device-session.service.js';
+// eslint-disable-next-line boundaries/no-unknown -- ADR-H20 N2: the owner tier gate is one shared service for REST and realtime.
+import { OWNER_STEP_UP_REQUIRED_CODE } from '../../../services/owner-privileged-actions.js';
+
 type WebSocketServerDependencies = {
   verifyClient: Parameters<typeof verifyWebSocketClient>[1];
   chat: Parameters<typeof handleChatConnection>[2];
@@ -49,6 +54,28 @@ type AliveWebSocket = WebSocket & {
  */
 export function closeWebSocketForIdentityRevocation(ws: AliveWebSocket): void {
   ws.close(4401, 'identity_revoked');
+}
+
+/** Close code for a terminal socket refused until the owner's passkey step-up (ADR-H20 N2). */
+export const OWNER_STEP_UP_CLOSE_CODE = 4403;
+
+/**
+ * ADR-H20 N2: the terminal is a privileged owner action. An owner's no-click
+ * SSO session opens /shell or /terminal only after this browser's passkey
+ * step-up; otherwise the socket closes with the final 4403 (no reconnect
+ * loop). True when the socket was refused.
+ */
+export function refuseOwnerTerminalWithoutStepUp(
+  ws: { close: (code: number, reason: string) => void },
+  pathname: string,
+  user: unknown,
+): boolean {
+  if (pathname !== '/shell' && pathname !== '/terminal') return false;
+  const principal = user as { role?: string; tokenSid?: unknown } | undefined;
+  const refreshSid = typeof principal?.tokenSid === 'string' ? principal.tokenSid : null;
+  if (!ownerStepUpRequired({ role: principal?.role, refreshSid })) return false;
+  ws.close(OWNER_STEP_UP_CLOSE_CODE, OWNER_STEP_UP_REQUIRED_CODE);
+  return true;
 }
 
 /** Ping interval in ms — must stay below Cloudflare Tunnel's 90s idle timeout. */
@@ -187,6 +214,8 @@ export function createWebSocketServer(
         return;
       }
     }
+
+    if (refuseOwnerTerminalWithoutStepUp(aliveWs, pathname, incomingRequest.user)) return;
 
     if (pathname === '/shell') {
       handleShellConnection(ws, incomingRequest, dependencies.shell);

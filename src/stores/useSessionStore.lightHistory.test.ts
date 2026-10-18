@@ -129,7 +129,7 @@ describe('light history client contract', () => {
     expect(result.current.getMessages('s1')[0].toolInput).toEqual({ path: 'README.md' });
   });
 
-  it('light window expansion preserves already enriched rows at the same revision', () => {
+  it('light window rebase preserves already enriched rows by id', () => {
     const { result } = renderHook(() => useSessionStore());
     act(() => {
       result.current.applyHistorySnapshot('s1', {
@@ -138,7 +138,7 @@ describe('light history client contract', () => {
         responseTurnDurationTotalMs: null, historySchema: 1,
         payloadMode: 'full', revision: 'rev-a',
       });
-      result.current.applyLightHistoryExpansion('s1', {
+      result.current.applyLightHistoryRebase('s1', {
         messages: [
           row('m1', { deferredPayload: { fields: ['toolInput'] } }),
           row('m2', { deferredPayload: { fields: ['images'] } }),

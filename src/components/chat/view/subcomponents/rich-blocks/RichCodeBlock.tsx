@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { AlertTriangle, Code2, Eye, Play, RotateCcw } from 'lucide-react';
 
-import MermaidDiagram from '../../../../../shared/view/MermaidDiagram';
+import ZoomableMermaidDiagram from '../../../../../shared/view/ZoomableMermaidDiagram';
 
 import { useFrameSlot } from './frameSlots';
 import { MAX_RICH_BLOCK_BYTES, parseSpec, type RichBlockLang } from './richBlockLangs';
@@ -180,7 +180,7 @@ export default function RichCodeBlock({ lang, source }: RichCodeBlockProps) {
   if (failure || showSource || awaitingRun || (lang === 'mermaid' && !seen)) {
     body = <SourceView source={source} />;
   } else if (lang === 'mermaid') {
-    body = <MermaidDiagram code={source} framed={false} />;
+    body = <ZoomableMermaidDiagram code={source} framed={false} />;
   } else if (slotGranted) {
     body = (
       <VizSandbox

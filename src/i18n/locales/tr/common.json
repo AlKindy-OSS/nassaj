@@ -338,5 +338,10 @@
     "tooltip": {
       "none": "Bu oturum Nassaj yönetişiminin dışında çalışıyor — sağlayıcı ayarlarını denetle"
     }
+  },
+  "mermaidZoom": {
+    "zoom": "Diyagramı büyüt",
+    "zoomedAria": "Büyütülmüş Mermaid diyagramı",
+    "close": "Kapat"
   }
 }

@@ -100,6 +100,33 @@ describe('AuthProvider sign-out (T-2035)', () => {
   });
 });
 
+describe('AuthProvider SSO sign-out (ADR-H20 N1/N4)', () => {
+  it('an SSO sign-out goes on to the IdP end_session URL and marks the explicit sign-out', async () => {
+    localStorage.setItem(AUTH_TOKEN_STORAGE_KEY, 'token-synthetic');
+    const assign = vi.fn();
+    vi.stubGlobal('location', { ...window.location, assign });
+    installFetch((url) => (url.endsWith('/api/auth/logout')
+      ? json({ success: true, scope: 'device', endSessionUrl: 'https://id.example/oidc/v1/end_session?client_id=c' })
+      : json({})));
+    await renderProvider();
+    await act(async () => { auth!.logout(); });
+    await waitFor(() => expect(assign).toHaveBeenCalledWith('https://id.example/oidc/v1/end_session?client_id=c'));
+    expect(localStorage.getItem(AUTH_TOKEN_STORAGE_KEY)).toBeNull();
+    expect(localStorage.getItem('nassaj:sso-explicit-sign-out')).not.toBeNull();
+  });
+
+  it('a password sign-out (no endSessionUrl) stays local', async () => {
+    localStorage.setItem(AUTH_TOKEN_STORAGE_KEY, 'token-synthetic');
+    const assign = vi.fn();
+    vi.stubGlobal('location', { ...window.location, assign });
+    installFetch((url) => (url.endsWith('/api/auth/logout') ? json({ success: true, scope: 'device' }) : json({})));
+    await renderProvider();
+    await act(async () => { auth!.logout(); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(assign).not.toHaveBeenCalled();
+  });
+});
+
 describe('AuthProvider login lock (T-2035)', () => {
   it('maps a 429 login_temporarily_locked to a coded result with the wait, without signing out', async () => {
     installFetch((url) => (url.endsWith('/api/auth/login')

@@ -57,7 +57,6 @@ function renderExpanded(project: Record<string, unknown>) {
       editingSessionName=""
       onEditingNameChange={() => {}}
       onToggleProject={() => {}}
-      onProjectSelect={() => {}}
       onToggleStarProject={() => {}}
       onStartEditingProject={() => {}}
       onCancelEditingProject={() => {}}

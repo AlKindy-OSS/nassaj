@@ -31,6 +31,8 @@ import type {
 import type { SessionWithProvider } from '../../types/types';
 import type { BulkSelectionKind } from '../../hooks/useSidebarController';
 import { createSessionViewModel } from '../../utils/utils';
+import { formatAbsoluteSessionTime, formatCompactAge } from '../../utils/sessionAge';
+import { consumeSessionReveal } from '../../utils/sessionReveal';
 import {
   markOutcomeUnread,
   useCanMarkOutcomeUnread,
@@ -64,6 +66,8 @@ const buildSessionUrl = (sessionId: string): string => {
 };
 
 const SESSION_CONTEXT_MENU_WIDTH = 156;
+/** AnimatedRow's enter transition is 300 ms; a reveal waits it out (B-1668). */
+const REVEAL_AFTER_ENTER_MS = 350;
 const SESSION_CONTEXT_MENU_VIEWPORT_PADDING = 10;
 
 function calcSafeContextMenuPosition(clientX: number, clientY: number) {
@@ -91,7 +95,6 @@ type SidebarSessionItemProps = {
   onStartEditingSession: (sessionId: string, initialName: string) => void;
   onCancelEditingSession: () => void;
   onSaveEditingSession: (projectName: string, sessionId: string, summary: string, provider: LLMProvider) => void;
-  onProjectSelect: (project: Project) => void;
   onSessionSelect: (session: SessionWithProvider, projectName: string) => void;
   onDeleteSession: (
     projectName: string,
@@ -137,34 +140,6 @@ const toStackParticipants = (
   }));
 };
 
-/**
- * Compact relative time for sidebar rows:
- * <1m, Xm, Xhr, Xd.
- */
-const formatCompactSessionAge = (dateString: string, currentTime: Date): string => {
-  const date = new Date(dateString);
-  if (Number.isNaN(date.getTime())) {
-    return '';
-  }
-
-  const diffInMinutes = Math.floor(Math.max(0, currentTime.getTime() - date.getTime()) / (1000 * 60));
-  if (diffInMinutes < 1) {
-    return '<1m';
-  }
-
-  if (diffInMinutes < 60) {
-    return `${diffInMinutes}m`;
-  }
-
-  const diffInHours = Math.floor(diffInMinutes / 60);
-  if (diffInHours < 24) {
-    return `${diffInHours}hr`;
-  }
-
-  const diffInDays = Math.floor(diffInHours / 24);
-  return `${diffInDays}d`;
-};
-
 export default function SidebarSessionItem({
   project,
   session,
@@ -179,7 +154,6 @@ export default function SidebarSessionItem({
   onStartEditingSession,
   onCancelEditingSession,
   onSaveEditingSession,
-  onProjectSelect,
   onSessionSelect,
   onDeleteSession,
   bulkSelectionKind = null,
@@ -197,7 +171,8 @@ export default function SidebarSessionItem({
   const isEditing = editingSession === session.id;
   const isBulkSessionSelection = bulkSelectionKind === 'sessions';
   const hasSelectedSurface = isSelected || (isBulkSessionSelection && isBulkSelected);
-  const compactSessionAge = formatCompactSessionAge(sessionView.sessionTime, currentTime);
+  const compactSessionAge = formatCompactAge(sessionView.sessionTime, currentTime.getTime(), t);
+  const absoluteSessionTime = formatAbsoluteSessionTime(sessionView.sessionTime, i18n.language);
   const internalMentionCount = useInternalMentionCount(session.id);
   const visibleProcessState = useSessionProcessState(session.id);
   const processStateAuthoritative = useSessionProcessStateAuthority(session.id);
@@ -218,6 +193,19 @@ export default function SidebarSessionItem({
   const editingContainerRef = useRef<HTMLDivElement>(null);
   const contextMenuRef = useRef<HTMLDivElement>(null);
   const endRailRef = useRef<HTMLDivElement>(null);
+  const rowRef = useRef<HTMLDivElement>(null);
+  /* B-1668: a row the URL selected (deep link, Back/Forward) scrolls into view
+     once, after the project's auto-expand has mounted it. The one-shot token
+     keeps clicks and later remounts from jumping the list. It waits out the
+     AnimatedRow enter transition: while the row still sits in its collapsed,
+     overflow-hidden grid track, scrollIntoView scrolls that track and leaves
+     the list where it is (measured in the browser). The timer is not cleared
+     on cleanup: under StrictMode the token is already consumed by the first
+     run, and a late call on an unmounted row only reads a null ref. */
+  useEffect(() => {
+    if (!isSelected || !consumeSessionReveal(session.id)) return;
+    window.setTimeout(() => rowRef.current?.scrollIntoView({ block: 'center' }), REVEAL_AFTER_ENTER_MS);
+  }, [isSelected, session.id]);
   /* B-touch: علامة تتبّع أن اللمسة الحالية كانت كشفاً للطبقة (لا فعلاً). نُعيّنها في
      onTouchStart ونصطادها في onClickCapture لنبتلع النقرة المُركَّبة قبل وصولها
      إلى أي زرّ. مرجع (لا حالة) حتى لا يُؤدي التغيير إلى إعادة رسم. */
@@ -447,7 +435,8 @@ export default function SidebarSessionItem({
       return;
     }
     event.preventDefault();
-    onProjectSelect(project);
+    // One history entry per switch (B-1668): the session select also selects
+    // the owning project; a project select first would push `/` as well.
     onSessionSelect(session, project.projectId);
   };
 
@@ -460,6 +449,7 @@ export default function SidebarSessionItem({
   return (
     <>
     <div
+      ref={rowRef}
       data-session-card
       data-session-selected={isSelected || (isBulkSessionSelection && isBulkSelected) || undefined}
       className={cn('sidebar-project-session-row group relative', isBulkSessionSelection && 'cursor-pointer select-none')}
@@ -629,67 +619,49 @@ export default function SidebarSessionItem({
                 <div className="flex min-w-0 items-center gap-0.5">
                   {/* يسبق الزر الاسم في اتجاه RTL، فلا يختلط بالشعار أو بالأفعال
                       المطلقة عند طرف الصف، ولا يمكنه النزول إلى السطر التالي. */}
-                  {/* dir="auto" — 8% of real session titles are all-Latin. This is
-                      a static, non-streamed label, so first-strong is exact here
-                      and keeps the clamp clipping the trailing edge.
-                      العنوان الكامل في خاصية `title` — تلميحة المتصفّح الأصلية. */}
+                  {/* dir="auto" عزلٌ لكل عنوان (8% من العناوين لاتينية كلها)، وهو
+                      نصّ ثابت لا يُبثّ فيصيب «أول حرف قوي».
+                      القصّ بسطرٍ واحد (line-clamp) لا بـ`truncate` (B-1668): القصّ
+                      البصري عند حافة السطر كان يحذف بداية المقطع اللاتيني داخل
+                      عنوان عربي، لأنه يُرسَم يسار العربي. كسر الأسطر يجري بالترتيب
+                      المنطقي قبل إعادة الترتيب ثنائي الاتجاه، فالسطر الظاهر بداية
+                      العنوان دائماً. العنوان الكامل في خاصية `title`. */}
                   <div
                     dir="auto"
                     title={sessionView.sessionName}
+                    data-session-title
                     className={cn(
-                      'truncate min-w-0 text-xs font-medium',
+                      'line-clamp-1 min-w-0 break-words text-xs font-medium',
                       isClosed ? 'text-foreground/60' : 'text-[color:var(--project-foreground,hsl(var(--foreground)))]',
                     )}
                   >
                     {sessionView.sessionName}
                   </div>
-                  {/* عدّاد الرسائل: كان شارةً على سطرٍ خاصّ به تحت العنوان، فكلّف
-                      كل صفٍّ فيه رسالةٌ واحدة 18px من الارتفاع مقابل رقم. هنا رقمٌ
-                      مجرّد بجوار العنوان: يقرأ أسرع، ويُعيد السطر الثاني إلى مَن
-                      يستحقّه — شارة عمليةٍ تعمل أو حالة ورشة. */}
-                  {sessionView.messageCount > 0 && (
-                    <span
+                  {/* العمر منذ آخر نشاط (B-1668): على كل صفّ، بالفأرة واللمس، ومع
+                      صور المشاركين أيضاً — الترتيب بآخر نشاط ولا يُقرأ بلا وقت.
+                      مكانه آخر سطر العنوان داخل عمود المحتوى، قبل سكة النهاية،
+                      فلا تغطيه طبقة الأفعال (تلك محصورة في خانتَي التثبيت
+                      والمشاركين) ولا تزيحه الصور. `time` يحمل التاريخ الكامل. */}
+                  {compactSessionAge && (
+                    <time
+                      data-session-age
+                      dateTime={sessionView.sessionTime}
+                      aria-label={absoluteSessionTime}
                       className={cn(
-                        'flex-shrink-0 text-[11px] tabular-nums',
-                        isClosed ? 'text-muted-foreground/60' : hasSelectedSurface ? 'text-[color:var(--project-foreground,hsl(var(--foreground)))]' : 'text-[color:var(--project-muted-foreground,hsl(var(--muted-foreground)/0.8))]',
+                        'ms-auto flex-shrink-0 ps-1 text-[11px] tabular-nums',
+                        isClosed ? 'text-muted-foreground/70' : hasSelectedSurface ? 'text-[color:var(--project-foreground,hsl(var(--foreground)))]' : 'text-[color:var(--project-muted-foreground,hsl(var(--muted-foreground)))]',
                       )}
-                      title={t('sessions.messageCount', {
-                        count: sessionView.messageCount,
-                        defaultValue: '{{count}} messages',
-                      })}
                     >
-                      {sessionView.messageCount}
-                    </span>
-                  )}
-                  {/* مؤشّر النهاية: العمر. مخصَّص للفأرة فقط — على اللمس
-                      تشغل أزرار الأفعال المطلقة هذه المنطقة، فلا ازدحام.
-                      يذوب بالتحويم ليُخلي مكان زرّ الإغلاق. */}
-                  {rowParticipants.length === 0 && (
-                    <span
-                      className={cn(
-                        'ms-auto flex h-4 w-8 flex-shrink-0 items-center justify-end transition-opacity duration-200 [@media(hover:none)]:hidden',
-                        isEditing ? 'opacity-0' : '[@media(hover:hover)]:group-hover:opacity-0',
-                      )}
-                      aria-hidden="true"
-                    >
-                      {compactSessionAge && (
-                        <span
-                          className={cn(
-                            'text-[11px]',
-                            isClosed ? 'text-muted-foreground/70' : hasSelectedSurface ? 'text-[color:var(--project-foreground,hsl(var(--foreground)))]' : 'text-[color:var(--project-muted-foreground,hsl(var(--muted-foreground)))]',
-                          )}
-                        >
-                          {compactSessionAge}
-                        </span>
-                      )}
-                    </span>
+                      {compactSessionAge}
+                    </time>
                   )}
                 </div>
                 {messageSnippet && (
                   <p
                     dir="auto"
+                    data-session-snippet
                     className={cn(
-                      'mt-0.5 truncate text-[11px]',
+                      'mt-0.5 line-clamp-1 break-words text-[11px]',
                       isClosed ? 'text-muted-foreground/70' : hasSelectedSurface ? 'text-[color:var(--project-foreground,hsl(var(--foreground)))]' : 'text-[color:var(--project-muted-foreground,hsl(var(--muted-foreground)))]',
                     )}
                   >

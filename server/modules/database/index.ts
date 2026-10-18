@@ -243,6 +243,15 @@ export { userDb } from '@/modules/database/repositories/users.js';
 export { loginThrottleDb } from '@/modules/database/repositories/login-throttle.db.js';
 export type { LoginThrottleRow } from '@/modules/database/repositories/login-throttle.db.js';
 export { revokedTokenSidsDb } from '@/modules/database/repositories/revoked-token-sids.db.js';
+export {
+  oidcLogoutJtisDb, SSO_SESSION_IDLE_MS, ssoDeviceSessionIdleExpired, ssoDeviceSessionsDb,
+} from '@/modules/database/repositories/sso-device-sessions.db.js';
+export {
+  parseLoginHint, parsePostLogoutRedirectUri, parseRecheckIntervalHours, RECHECK_MAX_HOURS, RECHECK_MIN_HOURS,
+  SSO_LINKED_DEFAULTS, ssoLinkedSettingsDb,
+} from '@/modules/database/repositories/sso-linked-settings.js';
+export type { SsoLinkedSettings } from '@/modules/database/repositories/sso-linked-settings.js';
+export type { SsoDeviceSessionRow } from '@/modules/database/repositories/sso-device-sessions.db.js';
 export { shellOneShotRunsDb, SHELL_ONESHOT_RUN_RETENTION_MS } from '@/modules/database/repositories/shell-oneshot-runs.db.js';
 export type { ShellOneShotRunRow, ShellOneShotRunState } from '@/modules/database/repositories/shell-oneshot-runs.db.js';
 export type { RevokedTokenSidRow } from '@/modules/database/repositories/revoked-token-sids.db.js';

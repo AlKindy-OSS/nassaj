@@ -92,7 +92,7 @@ type UseSidebarControllerArgs = {
   t: TFunction;
   onRefresh: () => Promise<void> | void;
   onProjectSelect: (project: Project) => void;
-  onSessionSelect: (session: ProjectSession) => void;
+  onSessionSelect: (session: ProjectSession, ownerProject?: Project) => void;
   onSessionDelete?: (sessionId: string) => void;
   onLoadMoreSessions?: (projectId: string) => Promise<void> | void;
   // `projectId` is the DB-assigned identifier; callbacks use that post-migration.
@@ -893,6 +893,26 @@ export function useSidebarController({
     ],
   );
 
+  /**
+   * How many conversations of a project the active search shows, or null when
+   * the search does not narrow it (no query, or the project matched by name).
+   * Drives the project counter and hides "load more" under results (B-1668).
+   */
+  const getSearchMatchCount = useCallback(
+    (project: Project): number | null => {
+      const normalizedSearch = normalizeForSearch(debouncedSearchQuery.trim());
+      if (!normalizedSearch) return null;
+      const sessions = getProjectSessionsWithSurfaced(project);
+      const visible = selectSearchVisibleSessions(project, sessions, {
+        normalizedSearch,
+        scope: searchScope,
+        matchBySessionId: messageSearch.matchBySessionId,
+      });
+      return visible === sessions ? null : visible.length;
+    },
+    [debouncedSearchQuery, getProjectSessionsWithSurfaced, messageSearch.matchBySessionId, searchScope],
+  );
+
   const loadMoreSessionsForProject = useCallback(async (projectId: string) => {
     if (!onLoadMoreSessions) {
       return;
@@ -1283,13 +1303,11 @@ export function useSidebarController({
 
     // Archived sessions still need a selected project context. Active projects
     // come from the normal sidebar list, while archived-project sessions resolve
-    // through the archive payload loaded by this controller.
-    if (matchingProject) {
-      handleProjectSelect(matchingProject);
-    }
-
-    onSessionSelect(sessionPayload);
-  }, [archivedProjects, handleProjectSelect, onSessionSelect, projects]);
+    // through the archive payload loaded by this controller. It is handed to the
+    // session select itself, which selects it without a second history entry
+    // (B-1668) — the project select would push `/` first.
+    onSessionSelect(sessionPayload, matchingProject ?? undefined);
+  }, [archivedProjects, onSessionSelect, projects]);
 
   const restoreArchivedProject = useCallback(async (projectId: string) => {
     try {
@@ -1524,6 +1542,8 @@ export function useSidebarController({
     isSessionStarred,
     getProjectSessions,
     getSearchVisibleSessions,
+    getSearchMatchCount,
+    isSearchActive: debouncedSearchQuery.trim().length > 0,
     getSurfacedHiddenCount,
     loadMoreSessionsForProject,
     startEditing,

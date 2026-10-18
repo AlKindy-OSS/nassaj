@@ -56,6 +56,9 @@ async function fixture(t: TestContext, run: (value: Fixture) => Promise<void>): 
     INSERT INTO users VALUES (1,'synthetic','admin',1,'active',1,100,0,NULL,0);
     CREATE TABLE revoked_token_sids(sid TEXT PRIMARY KEY,user_id INTEGER NOT NULL,revoked_at INTEGER NOT NULL,
       expires_at INTEGER NOT NULL);
+    CREATE TABLE sso_device_sessions(refresh_sid TEXT PRIMARY KEY,user_id INTEGER NOT NULL,issuer TEXT NOT NULL,
+      login_hint TEXT,owner_tier INTEGER NOT NULL DEFAULT 0,created_at INTEGER NOT NULL,last_seen_at INTEGER NOT NULL,
+      last_recheck_at INTEGER NOT NULL,privileged_until INTEGER,prune_after INTEGER NOT NULL);
     CREATE TABLE api_keys(id INTEGER PRIMARY KEY,user_id INTEGER,key_digest TEXT,is_active INTEGER,last_used TEXT);
     CREATE TABLE user_identities(id INTEGER PRIMARY KEY,user_id INTEGER,issuer TEXT,subject TEXT,last_attested_at INTEGER);
     CREATE TABLE device_sessions(id TEXT PRIMARY KEY,secret_hash TEXT,active_slot_id TEXT,generation INTEGER,revoked_at INTEGER,expires_at INTEGER);

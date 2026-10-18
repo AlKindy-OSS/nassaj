@@ -1,6 +1,6 @@
 import { useTranslation } from 'react-i18next';
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { Dispatch, RefObject, SetStateAction } from 'react';
+import type { Dispatch, RefObject, SetStateAction, TouchEvent, WheelEvent } from 'react';
 import { ArrowDownIcon, RefreshCw } from 'lucide-react';
 
 import { useSessionParticipants } from '../../../participants';
@@ -31,13 +31,17 @@ function toValidDate(timestamp: string | number | Date | undefined): Date | null
 
 interface ChatMessagesPaneProps {
   scrollContainerRef: RefObject<HTMLDivElement>;
-  onWheel: () => void;
-  onTouchMove: () => void;
+  /**
+   * B-1665: غلاف الرسائل داخل منطقة التمرير (دون زرّ السهم). نموّه بعد الرسم
+   * الأول — صور، تلوين شيفرة، صفّ يتدفّق — هو ما يُعيد التثبيت عند الأسفل.
+   */
+  contentRef?: RefObject<HTMLDivElement>;
+  onWheel: (event: WheelEvent<HTMLDivElement>) => void;
+  onTouchStart?: (event: TouchEvent<HTMLDivElement>) => void;
+  onTouchMove: (event: TouchEvent<HTMLDivElement>) => void;
   /**
    * T-1862: يغطّي كل تمرير حقيقي — سحب الشريط والوحين ولوحة المفاتيح — لا
-   * فقط wheel/touchmove. لا يمسّ pendingInitialScrollRef (خلافاً لـ
-   * handleUserScrollIntent) فلا يكسر منطق التمرير الابتدائي؛ فقط يحدّث
-   * isUserScrolledUp من الموضع الفعلي فوراً بدل بقائه عالقاً.
+   * فقط wheel/touchmove، فتبقى حالة السهم مطابقة للموضع الفعلي.
    */
   onScroll?: () => void | Promise<void>;
   historyError?: HistoryError | null;
@@ -138,7 +142,9 @@ interface ChatMessagesPaneProps {
 
 export default function ChatMessagesPane({
   scrollContainerRef,
+  contentRef,
   onWheel,
+  onTouchStart,
   onTouchMove,
   onScroll,
   historyError,
@@ -251,7 +257,11 @@ export default function ChatMessagesPane({
   // Keep keys stable across prepends so existing MessageComponent instances retain local state.
   const getMessageKey = useCallback((message: ChatMessage) => {
     const existingKey = messageKeyMapRef.current.get(message);
-    if (existingKey) {
+    // B-1665: a cached key must still be claimed for this pass. Otherwise a
+    // fresh object with the same intrinsic id, keyed later in the same render,
+    // takes that key too and React reconciles two rows under one key.
+    if (existingKey && !allocatedKeysRef.current.has(existingKey)) {
+      allocatedKeysRef.current.add(existingKey);
       return existingKey;
     }
 
@@ -309,195 +319,198 @@ export default function ChatMessagesPane({
     <div
       ref={scrollContainerRef}
       onWheel={onWheel}
+      onTouchStart={onTouchStart}
       onTouchMove={onTouchMove}
       onScroll={onScroll}
-      className="relative flex-1 space-y-2 overflow-y-auto overflow-x-hidden px-0 py-1 sm:space-y-3 sm:px-4"
+      className="relative flex-1 overflow-y-auto overflow-x-hidden px-0 py-1 sm:px-4"
     >
-      {/* T-1821: حُذف زرّ التحديث من هنا — الزرّ الموحَّد (jump-down) في ChatComposer
-            يتولّى دور retryHistory عند وجود historyError. النصّ يبقى للإعلام، إلا «revision»
-            فحلّه التحديث وحده، فيكفي ظهور السهم. */}
-      {historyError && historyFailureKey !== 'revision' && (
-        <div role="alert" className="sticky top-0 z-10 mx-3 rounded-lg border border-border bg-muted p-3 text-sm sm:mx-0">
-          <p>{t(`session.historyError.${historyFailureKey}`)}</p>
-          {chatMessages.length > 0 && <p className="mt-1 text-muted-foreground">{t('session.historyError.retained')}</p>}
-        </div>
-      )}
-      {isLoadingSessionMessages && chatMessages.length === 0 ? (
-        <div className="mt-8 text-center text-muted-foreground">
-          <div className="flex items-center justify-center gap-2">
-            <div className="h-4 w-4 animate-spin rounded-full border-b-2 border-gray-400" />
-            <p>{t('session.loading.sessionMessages')}</p>
+      <div ref={contentRef} className="space-y-2 sm:space-y-3">
+        {/* T-1821: حُذف زرّ التحديث من هنا — الزرّ الموحَّد (jump-down) في ChatComposer
+              يتولّى دور retryHistory عند وجود historyError. النصّ يبقى للإعلام، إلا «revision»
+              فحلّه التحديث وحده، فيكفي ظهور السهم. */}
+        {historyError && historyFailureKey !== 'revision' && (
+          <div role="alert" className="sticky top-0 z-10 mx-3 rounded-lg border border-border bg-muted p-3 text-sm sm:mx-0">
+            <p>{t(`session.historyError.${historyFailureKey}`)}</p>
+            {chatMessages.length > 0 && <p className="mt-1 text-muted-foreground">{t('session.historyError.retained')}</p>}
           </div>
-        </div>
-      ) : chatMessages.length === 0 && historyError ? null : chatMessages.length === 0 ? (
-        <ProviderSelectionEmptyState
-          selectedSession={selectedSession}
-          currentSessionId={currentSessionId}
-          provider={provider}
-          setProvider={setProvider}
-          engineProvider={engineProvider}
-          setEngineProvider={setEngineProvider}
-          onSelectClaudeEngineProvider={onSelectClaudeEngineProvider}
-          textareaRef={textareaRef}
-          claudeModel={claudeModel}
-          setClaudeModel={setClaudeModel}
-          codexModel={codexModel}
-          setCodexModel={setCodexModel}
-          antigravityModel={antigravityModel}
-          setAntigravityModel={setAntigravityModel}
-          opencodeModel={opencodeModel}
-          setOpenCodeModel={setOpenCodeModel}
-          kimiModel={kimiModel}
-          setKimiModel={setKimiModel}
-          deepseekModel={deepseekModel}
-          setDeepSeekModel={setDeepSeekModel}
-          glmModel={glmModel}
-          setGlmModel={setGlmModel}
-          providerModelCatalog={providerModelCatalog}
-          providerModelsLoading={providerModelsLoading}
-          providerModelsRefreshing={providerModelsRefreshing}
-          providerAuthStatus={providerAuthStatus}
-          onRefreshProviderModels={onRefreshProviderModels}
-          onHardRefreshProviderModels={onHardRefreshProviderModels}
-          onRefreshAuthStatus={onRefreshAuthStatus}
-          setInput={setInput}
-          onShowSettings={onShowSettings}
-        />
-      ) : (
-        <>
-          {/* Loading indicator for older messages (hide when load-all is active) */}
-          {isLoadingMoreMessages && !isLoadingAllMessages && !allMessagesLoaded && (
-            <div className="py-3 text-center text-muted-foreground">
-              <div className="flex items-center justify-center gap-2">
-                <div className="h-4 w-4 animate-spin rounded-full border-b-2 border-gray-400" />
-                <p className="text-sm">{t('session.loading.olderMessages')}</p>
-              </div>
+        )}
+        {isLoadingSessionMessages && chatMessages.length === 0 ? (
+          <div className="mt-8 text-center text-muted-foreground">
+            <div className="flex items-center justify-center gap-2">
+              <div className="h-4 w-4 animate-spin rounded-full border-b-2 border-gray-400" />
+              <p>{t('session.loading.sessionMessages')}</p>
             </div>
-          )}
+          </div>
+        ) : chatMessages.length === 0 && historyError ? null : chatMessages.length === 0 ? (
+          <ProviderSelectionEmptyState
+            selectedSession={selectedSession}
+            currentSessionId={currentSessionId}
+            provider={provider}
+            setProvider={setProvider}
+            engineProvider={engineProvider}
+            setEngineProvider={setEngineProvider}
+            onSelectClaudeEngineProvider={onSelectClaudeEngineProvider}
+            textareaRef={textareaRef}
+            claudeModel={claudeModel}
+            setClaudeModel={setClaudeModel}
+            codexModel={codexModel}
+            setCodexModel={setCodexModel}
+            antigravityModel={antigravityModel}
+            setAntigravityModel={setAntigravityModel}
+            opencodeModel={opencodeModel}
+            setOpenCodeModel={setOpenCodeModel}
+            kimiModel={kimiModel}
+            setKimiModel={setKimiModel}
+            deepseekModel={deepseekModel}
+            setDeepSeekModel={setDeepSeekModel}
+            glmModel={glmModel}
+            setGlmModel={setGlmModel}
+            providerModelCatalog={providerModelCatalog}
+            providerModelsLoading={providerModelsLoading}
+            providerModelsRefreshing={providerModelsRefreshing}
+            providerAuthStatus={providerAuthStatus}
+            onRefreshProviderModels={onRefreshProviderModels}
+            onHardRefreshProviderModels={onHardRefreshProviderModels}
+            onRefreshAuthStatus={onRefreshAuthStatus}
+            setInput={setInput}
+            onShowSettings={onShowSettings}
+          />
+        ) : (
+          <>
+            {/* Loading indicator for older messages (hide when load-all is active) */}
+            {isLoadingMoreMessages && !isLoadingAllMessages && !allMessagesLoaded && (
+              <div className="py-3 text-center text-muted-foreground">
+                <div className="flex items-center justify-center gap-2">
+                  <div className="h-4 w-4 animate-spin rounded-full border-b-2 border-gray-400" />
+                  <p className="text-sm">{t('session.loading.olderMessages')}</p>
+                </div>
+              </div>
+            )}
 
-          {/* Indicator showing there are more messages to load (hide when all loaded) */}
-          {hasMoreMessages && !isLoadingMoreMessages && !allMessagesLoaded && (
-            <div className="border-b border-border py-2 text-center text-sm text-muted-foreground">
-              {totalMessages > 0 && (
-                <span className="flex flex-wrap items-center justify-center gap-x-2 gap-y-1">
-                  <span>
-                    {t('session.messages.showingOf', { shown: sessionMessagesCount, total: totalMessages })}
+            {/* Indicator showing there are more messages to load (hide when all loaded) */}
+            {hasMoreMessages && !isLoadingMoreMessages && !allMessagesLoaded && (
+              <div className="border-b border-border py-2 text-center text-sm text-muted-foreground">
+                {totalMessages > 0 && (
+                  <span className="flex flex-wrap items-center justify-center gap-x-2 gap-y-1">
+                    <span>
+                      {t('session.messages.showingOf', { shown: sessionMessagesCount, total: totalMessages })}
+                    </span>
+                    {/*
+                      B-431: زرّان صريحان — «مرّر لأعلى» وحده كان المخرج الوحيد،
+                      فإن تعطّل التمرير (أو تعذّر على المستخدم) لم يبقَ أي سبيل
+                      لعرض الأقدم: لوحة «تحميل الكل» العائمة لا تظهر إلا ثانيتين
+                      بعد تحميل ناجح، أي أنها غير موجودة عملياً عند فتح المحادثة.
+                    */}
+                    <button
+                      className="rounded-full border border-border px-2.5 py-0.5 text-xs text-primary transition-colors hover:bg-accent"
+                      onClick={loadMoreMessages}
+                      disabled={isLoadingMoreMessages}
+                    >
+                      {t('session.messages.loadEarlier')}
+                    </button>
+                    <button
+                      className="rounded-full border border-border px-2.5 py-0.5 text-xs text-primary transition-colors hover:bg-accent disabled:cursor-wait disabled:opacity-60"
+                      onClick={loadAllMessages}
+                      disabled={isLoadingAllMessages}
+                    >
+                      {isLoadingAllMessages
+                        ? t('session.messages.loadingAll')
+                        : `${t('session.messages.loadAll')} (${totalMessages})`}
+                    </button>
                   </span>
-                  {/*
-                    B-431: زرّان صريحان — «مرّر لأعلى» وحده كان المخرج الوحيد،
-                    فإن تعطّل التمرير (أو تعذّر على المستخدم) لم يبقَ أي سبيل
-                    لعرض الأقدم: لوحة «تحميل الكل» العائمة لا تظهر إلا ثانيتين
-                    بعد تحميل ناجح، أي أنها غير موجودة عملياً عند فتح المحادثة.
-                  */}
-                  <button
-                    className="rounded-full border border-border px-2.5 py-0.5 text-xs text-primary transition-colors hover:bg-accent"
-                    onClick={loadMoreMessages}
-                    disabled={isLoadingMoreMessages}
-                  >
-                    {t('session.messages.loadEarlier')}
-                  </button>
-                  <button
-                    className="rounded-full border border-border px-2.5 py-0.5 text-xs text-primary transition-colors hover:bg-accent disabled:cursor-wait disabled:opacity-60"
-                    onClick={loadAllMessages}
-                    disabled={isLoadingAllMessages}
-                  >
-                    {isLoadingAllMessages
-                      ? t('session.messages.loadingAll')
-                      : `${t('session.messages.loadAll')} (${totalMessages})`}
-                  </button>
-                </span>
-              )}
-            </div>
-          )}
-
-          {/*
-            "Load all" confirmation toast. The floating CTA button that used
-            to sit here duplicated the one in the "showingOf" row above (both
-            called loadAllMessages and were visible together while loading);
-            only the completion toast is kept, since the acting button
-            disappears the moment allMessagesLoaded flips true.
-          */}
-          {loadAllJustFinished && (
-            <div className="pointer-events-none sticky top-2 z-20 flex justify-center">
-              <div className="flex items-center gap-2 rounded-full bg-success px-4 py-1.5 text-xs font-medium text-primary-foreground shadow-lg">
-                <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
-                </svg>
-                <span>{t('session.messages.allLoaded')}</span>
+                )}
               </div>
-            </div>
-          )}
+            )}
 
-          {/* Legacy message count indicator (for non-paginated view) */}
-          {!hasMoreMessages && chatMessages.length > visibleMessageCount && (
-            <div className="border-b border-border py-2 text-center text-sm text-muted-foreground">
-              {t('session.messages.showingLast', { count: visibleMessageCount, total: chatMessages.length })} |
-              <button className="me-1 text-blue-600 underline hover:text-blue-700" onClick={loadEarlierMessages}>
-                {t('session.messages.loadEarlier')}
-              </button>
-              {' | '}
-              <button
-                className="text-blue-600 underline hover:text-blue-700 disabled:cursor-wait disabled:no-underline disabled:opacity-60 dark:text-blue-400 dark:hover:text-blue-300"
-                onClick={loadAllMessages}
-                disabled={isLoadingAllMessages}
-              >
-                {isLoadingAllMessages ? t('session.messages.loadingAll') : t('session.messages.loadAll')}
-              </button>
-            </div>
-          )}
+            {/*
+              "Load all" confirmation toast. The floating CTA button that used
+              to sit here duplicated the one in the "showingOf" row above (both
+              called loadAllMessages and were visible together while loading);
+              only the completion toast is kept, since the acting button
+              disappears the moment allMessagesLoaded flips true.
+            */}
+            {loadAllJustFinished && (
+              <div className="pointer-events-none sticky top-2 z-20 flex justify-center">
+                <div className="flex items-center gap-2 rounded-full bg-success px-4 py-1.5 text-xs font-medium text-primary-foreground shadow-lg">
+                  <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                  </svg>
+                  <span>{t('session.messages.allLoaded')}</span>
+                </div>
+              </div>
+            )}
 
-          {visibleMessages.map((message, index) => {
-            const prevMessage = index > 0 ? visibleMessages[index - 1] : null;
-            const messageDate = toValidDate(message.timestamp);
-            const prevDate = prevMessage ? toValidDate(prevMessage.timestamp) : null;
-            const showSeparator =
-              messageDate != null &&
-              (prevDate == null || messageDate.toDateString() !== prevDate.toDateString());
-            return (
-              <Fragment key={getMessageKey(message)}>
-                {showSeparator && messageDate && <DateSeparator date={messageDate} />}
-                <MessageComponent
-                  message={message}
-                  prevMessage={prevMessage}
-                  createDiff={createDiff}
-                  onFileOpen={onFileOpen}
-                  onShowSettings={onShowSettings}
-                  onGrantToolPermission={onGrantToolPermission}
-                  onStartNewSession={onStartNewSession}
-                  onForkFromMessage={onForkFromMessage}
-                  isForkingMessage={isForkingMessage}
-                  autoExpandTools={autoExpandTools}
-                  showRawParameters={showRawParameters}
-                  showThinking={showThinking}
-                  showToolCalls={showToolCalls}
-                  selectedProject={selectedProject}
-                  owner={selectedSession?.owner ?? null}
-                  participantsById={participantsById}
-                  provider={displayProvider}
-                  onRequestDeferredHistory={onRequestDeferredHistory}
-                  onResumeStreamRecovery={onResumeStreamRecovery}
-                  sessionId={currentSessionId ?? selectedSession?.id ?? null}
-                  quickReplyEligible={index === quickReplyIndex}
-                  onQuickReply={onQuickReply}
-                />
-              </Fragment>
-            );
-          })}
+            {/* Legacy message count indicator (for non-paginated view) */}
+            {!hasMoreMessages && chatMessages.length > visibleMessageCount && (
+              <div className="border-b border-border py-2 text-center text-sm text-muted-foreground">
+                {t('session.messages.showingLast', { count: visibleMessageCount, total: chatMessages.length })} |
+                <button className="me-1 text-blue-600 underline hover:text-blue-700" onClick={loadEarlierMessages}>
+                  {t('session.messages.loadEarlier')}
+                </button>
+                {' | '}
+                <button
+                  className="text-blue-600 underline hover:text-blue-700 disabled:cursor-wait disabled:no-underline disabled:opacity-60 dark:text-blue-400 dark:hover:text-blue-300"
+                  onClick={loadAllMessages}
+                  disabled={isLoadingAllMessages}
+                >
+                  {isLoadingAllMessages ? t('session.messages.loadingAll') : t('session.messages.loadAll')}
+                </button>
+              </div>
+            )}
 
-          {/* تنبيه الخمول — يظهر بعد مدة كاش الهارنس على آخر رسالة خارج البثّ.
-              يُعرض داخل منطقة التمرير لأنه يتبع آخر رسالة بصرياً، لا بعدها. */}
-          {onNewSession && idleThresholdMs !== null && (
-            <SessionIdleWarning
-              lastMessageTimestamp={lastMessageTimestamp}
-              isStreaming={isStreaming}
-              contextTokens={contextTokens}
-              thresholdMs={idleThresholdMs}
-              onNewSession={onNewSession}
-            />
-          )}
+            {visibleMessages.map((message, index) => {
+              const prevMessage = index > 0 ? visibleMessages[index - 1] : null;
+              const messageDate = toValidDate(message.timestamp);
+              const prevDate = prevMessage ? toValidDate(prevMessage.timestamp) : null;
+              const showSeparator =
+                messageDate != null &&
+                (prevDate == null || messageDate.toDateString() !== prevDate.toDateString());
+              return (
+                <Fragment key={getMessageKey(message)}>
+                  {showSeparator && messageDate && <DateSeparator date={messageDate} />}
+                  <MessageComponent
+                    message={message}
+                    prevMessage={prevMessage}
+                    createDiff={createDiff}
+                    onFileOpen={onFileOpen}
+                    onShowSettings={onShowSettings}
+                    onGrantToolPermission={onGrantToolPermission}
+                    onStartNewSession={onStartNewSession}
+                    onForkFromMessage={onForkFromMessage}
+                    isForkingMessage={isForkingMessage}
+                    autoExpandTools={autoExpandTools}
+                    showRawParameters={showRawParameters}
+                    showThinking={showThinking}
+                    showToolCalls={showToolCalls}
+                    selectedProject={selectedProject}
+                    owner={selectedSession?.owner ?? null}
+                    participantsById={participantsById}
+                    provider={displayProvider}
+                    onRequestDeferredHistory={onRequestDeferredHistory}
+                    onResumeStreamRecovery={onResumeStreamRecovery}
+                    sessionId={currentSessionId ?? selectedSession?.id ?? null}
+                    quickReplyEligible={index === quickReplyIndex}
+                    onQuickReply={onQuickReply}
+                  />
+                </Fragment>
+              );
+            })}
 
-        </>
-      )}
+            {/* تنبيه الخمول — يظهر بعد مدة كاش الهارنس على آخر رسالة خارج البثّ.
+                يُعرض داخل منطقة التمرير لأنه يتبع آخر رسالة بصرياً، لا بعدها. */}
+            {onNewSession && idleThresholdMs !== null && (
+              <SessionIdleWarning
+                lastMessageTimestamp={lastMessageTimestamp}
+                isStreaming={isStreaming}
+                contextTokens={contextTokens}
+                thresholdMs={idleThresholdMs}
+                onNewSession={onNewSession}
+              />
+            )}
+
+          </>
+        )}
+      </div>
 
       {/* B-1044: زرّ scroll-to-bottom sticky داخل منطقة التمرير نفسها (لا فوق
             المُؤلِّف/شريط الحالة كالسابق بإزاحة سالبة هشّة). يبقى مثبَّتاً عند

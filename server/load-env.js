@@ -2,6 +2,7 @@
 import fs from 'fs';
 import path from 'path';
 
+import { applyEnvContent } from './utils/env-file.js';
 import { findAppRoot, getModuleDir } from './utils/runtime-paths.js';
 import { DEFAULT_DATABASE_PATH } from './modules/database/database-path.js';
 
@@ -13,15 +14,7 @@ const APP_ROOT = findAppRoot(__dirname);
 try {
   const envPath = path.join(APP_ROOT, '.env');
   const envFile = fs.readFileSync(envPath, 'utf8');
-  envFile.split('\n').forEach(line => {
-    const trimmedLine = line.trim();
-    if (trimmedLine && !trimmedLine.startsWith('#')) {
-      const [key, ...valueParts] = trimmedLine.split('=');
-      if (key && valueParts.length > 0 && !process.env[key]) {
-        process.env[key] = valueParts.join('=').trim();
-      }
-    }
-  });
+  applyEnvContent(envFile);
 } catch (e) {
   // A genuinely-missing .env is an optional-config case (env vars may instead be
   // supplied by the process manager / shell) — preserve the prior behavior: log

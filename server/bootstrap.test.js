@@ -163,7 +163,8 @@ async function literalLoaderFixture({ release = false, reject = false, fail = fa
             path.join(libraryDirectory, 'local-reviewed-build-identity.mjs'));
         const entry = path.join(serverDirectory, release ? 'index.js' : 'bootstrap.js');
         copyFileSync(new URL('./bootstrap.js', import.meta.url), entry);
-        for (const dependency of ['bootstrap-startup-context.js', 'bootstrap-release-profile.js']) {
+        mkdirSync(path.join(serverDirectory, 'utils'));
+        for (const dependency of ['bootstrap-startup-context.js', 'bootstrap-release-profile.js', 'utils/env-file.js']) {
             copyFileSync(new URL(`./${dependency}`, import.meta.url), path.join(serverDirectory, dependency));
         }
         const application = path.join(serverDirectory, release ? 'application.js' : 'index.js');

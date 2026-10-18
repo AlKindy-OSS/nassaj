@@ -79,6 +79,7 @@ import { resolveStickyEffortMode } from './stickyEffortMode';
 import { readSessionEngineProvider, writePendingEngineStamp } from './useChatProviderState';
 import { writePendingModelStamp } from './pendingModelStamp';
 import { useFileMentions } from './useFileMentions';
+import { usePromptRecall } from './usePromptRecall';
 import {
   isBtwSlashEntry,
   isOpenCodePassthroughCommand,
@@ -147,6 +148,8 @@ type PendingViewSession = {
    * (handleProjectSelect) is never mistaken for "still routing to the id we
    * just minted" by useChatSessionState's router-lag guard. */
   projectId?: string | null;
+  /** B-1666: the session on screen when a send starts a new conversation from it. */
+  originSessionId?: string | null;
 };
 
 /**
@@ -255,7 +258,11 @@ interface UseChatComposerStateArgs {
    */
   outboxHistory?: Parameters<typeof reconcileOutboxDeliveryEvidence>[1];
   verifyMessageDelivered?: (sessionId: string, clientMsgId: string, provider?: string, signal?: AbortSignal) => Promise<boolean | 'accepted' | 'unknown'>;
+  /** This session's sent prompts, newest first, for ArrowUp/ArrowDown recall (`collectUserPrompts`). */
+  userPrompts?: readonly string[];
 }
+
+const NO_PROMPTS: readonly string[] = [];
 
 interface MentionableFile {
   name: string;
@@ -464,6 +471,7 @@ export function useChatComposerState({
   withdrawOptimisticUserMessage,
   verifyMessageDelivered,
   outboxHistory,
+  userPrompts = NO_PROMPTS,
 }: UseChatComposerStateArgs) {
   const { user } = useAuth();
   const { t, i18n } = useTranslation('chat');
@@ -2104,20 +2112,28 @@ export function useChatComposerState({
       if (typeof window !== 'undefined') {
         sessionStorage.removeItem('pendingSessionId');
       }
-      pendingViewSessionRef.current = { sessionId: null, startedAt: Date.now(), projectId: selectedProject?.projectId ?? null };
+      // B-1666: the clientMsgId plus the session on screen let the realtime
+      // handler move this view onto the session the send mints.
+      const clientMsgId = createClientMsgId();
+      pendingViewSessionRef.current = {
+        sessionId: null, startedAt: Date.now(), clientMsgId,
+        projectId: selectedProject?.projectId ?? null, originSessionId: currentSessionId ?? null,
+      };
 
-      addMessage({ type: 'user', content: command, timestamp: new Date(), userId: authUserId });
+      addMessage({ id: clientMsgId, type: 'user', content: command, timestamp: new Date(), userId: authUserId });
       setIsLoading(true);
       setCanAbortSession(true);
       setClaudeStatus({ text: 'Processing', tokens: 0, can_interrupt: true });
       setIsUserScrolledUp(false);
       setTimeout(() => scrollToBottom(), 100);
 
-      dispatchProviderCommand(command, undefined);
+      if (!dispatchProviderCommand(command, undefined, [], undefined, [], { clientMsgId })) {
+        pendingViewSessionRef.current = null;
+      }
     },
     [
-      addMessage, authUserId, dispatchProviderCommand, isLoading, pendingViewSessionRef, scrollToBottom,
-      selectedProject, setCanAbortSession, setClaudeStatus, setIsLoading, setIsUserScrolledUp,
+      addMessage, authUserId, currentSessionId, dispatchProviderCommand, isLoading, pendingViewSessionRef,
+      scrollToBottom, selectedProject, setCanAbortSession, setClaudeStatus, setIsLoading, setIsUserScrolledUp,
     ],
   );
 
@@ -2296,6 +2312,13 @@ export function useChatComposerState({
         }
         if (!await stillCurrent()) return;
         resetOutboxJudgement(entryId);
+        if (!targetSessionId) {
+          // B-1666: a retry that opens a new conversation owns the view it left.
+          pendingViewSessionRef.current = {
+            sessionId: null, startedAt: Date.now(), clientMsgId: retryClientMsgId,
+            projectId: selectedProject.projectId ?? null, originSessionId: currentSessionId ?? null,
+          };
+        }
 
         const sent = dispatchProviderCommand(
           entry.text,
@@ -2307,6 +2330,7 @@ export function useChatComposerState({
         );
 
         if (!sent) {
+          if (pendingViewSessionRef.current?.clientMsgId === retryClientMsgId) pendingViewSessionRef.current = null;
           markOutboxFailed(retryClientMsgId, { code: 'transport' });
           return;
         }
@@ -2333,7 +2357,8 @@ export function useChatComposerState({
     },
     [
       addMessage, authUserId, currentSessionId, dispatchProviderCommand, forgetPendingWorkflows,
-      resetOutboxJudgement, scrollToBottom, selectedProject, selectedSession, setCanAbortSession,
+      pendingViewSessionRef, resetOutboxJudgement, scrollToBottom, selectedProject, selectedSession,
+      setCanAbortSession,
       setClaudeStatus, setIsLoading, setIsUserScrolledUp, t, provider,
     ],
   );
@@ -2716,6 +2741,20 @@ export function useChatComposerState({
     [setCursorPosition],
   );
 
+  // Recalled text replaces the draft whole; no command menu opens for a recalled
+  // "/cmd" so the next arrow keeps walking the history instead of the menu.
+  const applyRecalledPrompt = useCallback(
+    (value: string) => {
+      setInput(value);
+      inputValueRef.current = value;
+      setCursorPosition(value.length);
+      resetCommandMenuState();
+      requestAnimationFrame(() => textareaRef.current?.setSelectionRange(value.length, value.length));
+    },
+    [resetCommandMenuState, setCursorPosition],
+  );
+  const handlePromptRecallKeyDown = usePromptRecall(userPrompts, applyRecalledPrompt);
+
   const handleKeyDown = useCallback(
     (event: KeyboardEvent<HTMLTextAreaElement>) => {
       if (handleCommandMenuKeyDown(event)) {
@@ -2723,6 +2762,10 @@ export function useChatComposerState({
       }
 
       if (handleFileMentionsKeyDown(event)) {
+        return;
+      }
+
+      if (!showFileDropdown && !showCommandMenu && handlePromptRecallKeyDown(event)) {
         return;
       }
 
@@ -2817,6 +2860,7 @@ export function useChatComposerState({
       enterSendsLive,
       handleCommandMenuKeyDown,
       handleFileMentionsKeyDown,
+      handlePromptRecallKeyDown,
       handleSubmit,
       showCommandMenu,
       showFileDropdown,

@@ -93,6 +93,10 @@ mock.module(url('../modules/connectors/connector-owner-auth-session.js'), {
   namedExports: {
     recordConnectorOwnerAuthentication: () => undefined,
     clearConnectorOwnerAuthentication: () => undefined,
+    // ADR-H20 S6: auth.js -> sso-oidc-runtime.service -> database/connection pulls the
+    // connector substrate, which links these two names at import time.
+    configureConnectorOwnerAuthSessionProduction: () => undefined,
+    createRecentAuthOriginSource: () => () => null,
   },
 });
 mock.module(url('./webauthn.js'), { defaultExport: express.Router() });

@@ -135,14 +135,40 @@ const getUpdatedTimestamp = (session: SessionWithProvider): string => {
   return String(session.lastActivity || '');
 };
 
+/** SQLite `CURRENT_TIMESTAMP` form: UTC with a space and no zone suffix. */
+const SQLITE_UTC_TIMESTAMP = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?$/;
+
 /**
- * Creation date used for sidebar session ordering (newest-created first).
- * Falls back to last activity only for legacy rows that carry no creation
- * timestamp, mirroring the server-side COALESCE(created_at, updated_at).
+ * Milliseconds of a stored timestamp, with an invalid/absent value read as 0
+ * rather than NaN — NaN makes every comparison return false, which is exactly
+ * the "list reshuffles for no reason" symptom the ordering exists to prevent.
+ *
+ * A zone-less `YYYY-MM-DD HH:MM:SS` is read as UTC, as SQLite's `julianday`
+ * reads it on the server; `Date` would otherwise take it as local time and the
+ * two sides would disagree on the order of the very same rows.
  */
-export const getSessionCreationDate = (session: SessionWithProvider): Date => {
-  return new Date(getCreatedTimestamp(session) || getUpdatedTimestamp(session) || 0);
+export const parseSessionTimestamp = (value: unknown): number => {
+  const raw = typeof value === 'string' ? value : '';
+  if (!raw) return 0;
+  const iso = SQLITE_UTC_TIMESTAMP.test(raw) ? `${raw.replace(' ', 'T')}Z` : raw;
+  const time = new Date(iso).getTime();
+  return Number.isFinite(time) ? time : 0;
 };
+
+/**
+ * Creation time of a session, falling back to last activity only for legacy
+ * rows that carry no creation timestamp. Orders PROJECTS in "date" mode.
+ */
+const getSessionCreationSortTime = (session: SessionWithProvider): number =>
+  parseSessionTimestamp(getCreatedTimestamp(session) || getUpdatedTimestamp(session));
+
+/**
+ * Last activity of a session, falling back to its creation time. Orders the
+ * conversations inside a project, mirroring the server's
+ * `julianday(COALESCE(updated_at, created_at))` (sessions.db.ts).
+ */
+export const getSessionActivitySortTime = (session: SessionWithProvider): number =>
+  parseSessionTimestamp(getUpdatedTimestamp(session) || getCreatedTimestamp(session));
 
 export const getSessionName = (session: SessionWithProvider, t: TFunction): string => {
   return session.summary || session.name || t('projects.newSession');
@@ -174,35 +200,42 @@ export const createSessionViewModel = (
     isClosed: Boolean(session.closed),
     sessionName: getSessionName(session, t),
     sessionTime: getSessionTime(session),
-    messageCount: Number(session.messageCount || 0),
   };
 };
 
 /**
- * Milliseconds used to order sessions, with an invalid/absent date read as 0
- * rather than NaN — NaN makes every comparison return false, which is exactly
- * the "list reshuffles for no reason" symptom this ordering exists to prevent.
+ * Recency order of two sessions, starred state aside: most recent activity
+ * first, then session id descending.
+ *
+ * The id step is not decoration. Without it, two sessions sharing a timestamp
+ * were left in whatever order the provider buckets produced, and that order
+ * changes between payloads. It compares code units (not `localeCompare`) so it
+ * agrees with SQLite's BINARY collation behind the server's `session_id DESC`;
+ * the paging boundary in `projectSessionPaging.ts` relies on both sides placing
+ * every row identically.
  */
-const getSessionSortTime = (session: SessionWithProvider): number => {
-  const time = getSessionCreationDate(session).getTime();
-  return Number.isFinite(time) ? time : 0;
+export const compareSessionRecency = (
+  a: SessionWithProvider,
+  b: SessionWithProvider,
+): number => {
+  const timeDelta = getSessionActivitySortTime(b) - getSessionActivitySortTime(a);
+  if (timeDelta !== 0) {
+    return timeDelta;
+  }
+
+  const aId = String(a.id ?? '');
+  const bId = String(b.id ?? '');
+  if (aId === bId) return 0;
+  return aId < bId ? 1 : -1;
 };
 
 /**
  * THE session comparator for the sidebar — used by `getAllSessions` and by the
  * controller's optimistic-star re-sort, so the two can never disagree.
  *
- * Order: starred first, then newest-created first (creation date, NOT last
- * activity, so a conversation keeps its place while it is being worked on),
- * then session id descending.
- *
- * That last step is not decoration. Without it, two sessions sharing a
- * timestamp — same-second creation, a legacy row with no `created_at`, or two
- * rows that both fall back to 0 — were left in whatever order the provider
- * buckets happened to produce, and that order changes between payloads. The
- * server already breaks the same tie with `session_id DESC`
- * (sessions.db.ts `getSessionsByProjectPathPage`); this makes the client agree
- * with it instead of re-shuffling the page it was handed.
+ * Order: starred first, then most recent activity first (B-1668: the owner
+ * asked for last-activity order, which reverses 106cd7482), then session id
+ * descending — the same order as the server's sidebar page queries.
  */
 export const compareSidebarSessions = (
   a: SessionWithProvider,
@@ -214,12 +247,7 @@ export const compareSidebarSessions = (
     return aStarred ? -1 : 1;
   }
 
-  const timeDelta = getSessionSortTime(b) - getSessionSortTime(a);
-  if (timeDelta !== 0) {
-    return timeDelta;
-  }
-
-  return String(b.id ?? '').localeCompare(String(a.id ?? ''));
+  return compareSessionRecency(a, b);
 };
 
 /**
@@ -228,16 +256,26 @@ export const compareSidebarSessions = (
  *
  * Deliberately NOT "latest activity". Last activity moves on every single
  * message, so the project the user is typing in kept climbing over its
- * neighbours mid-sentence — the reordering the owner reported. Creation time of
- * the newest session only changes when a conversation is actually created.
+ * neighbours mid-sentence — the reordering the owner reported (106cd7482).
  *
- * Reading it from the LOADED sessions is safe for the same reason: the server
- * returns each project's newest-created page first, so the maximum is already
- * present in page 1 and paging in older conversations cannot change it. A
- * project with no sessions yet scores 0 and is ordered by name below the rest,
- * rather than jumping once its list arrives.
+ * The server sends the value as `sessionMeta.newestCreatedAt`: the loaded page
+ * is ordered by ACTIVITY and need not contain the newest-created conversation,
+ * so reading it from the loaded rows would let "load more" move the project.
+ * The loaded rows stay the fallback for an older server. A project with no
+ * sessions yet scores 0 and is ordered by name below the rest.
  */
 const projectSortTimeCache = new WeakMap<Project, number>();
+
+const getLoadedNewestCreationTime = (project: Project): number => {
+  let newest = 0;
+  for (const provider of SESSION_BUCKET_PROVIDERS) {
+    const bucket = (project[sessionBucketKey(provider)] as ProjectSession[] | undefined) ?? [];
+    for (const session of bucket) {
+      newest = Math.max(newest, getSessionCreationSortTime(session as SessionWithProvider));
+    }
+  }
+  return newest;
+};
 
 export const getProjectSortTime = (project: Project): number => {
   // Memoised per project OBJECT: the comparator asks for this O(n log n) times
@@ -248,24 +286,57 @@ export const getProjectSortTime = (project: Project): number => {
     return cached;
   }
 
-  let newest = 0;
-
-  for (const provider of SESSION_BUCKET_PROVIDERS) {
-    const bucket = (project[sessionBucketKey(provider)] as ProjectSession[] | undefined) ?? [];
-    for (const session of bucket) {
-      const time = getSessionSortTime(session as SessionWithProvider);
-      if (time > newest) {
-        newest = time;
-      }
-    }
-  }
-
+  const fromServer = parseSessionTimestamp(project.sessionMeta?.newestCreatedAt);
+  const newest = fromServer > 0 ? fromServer : getLoadedNewestCreationTime(project);
   projectSortTimeCache.set(project, newest);
   return newest;
 };
 
 const getProjectSortName = (project: Project): string =>
   project.displayName || project.projectId;
+
+const getProjectPathSegments = (project: Project): string[] =>
+  String(project.fullPath || project.path || '').split('/').filter(Boolean);
+
+/**
+ * The shortest trailing path that is unique within one group of same-named
+ * projects. A suffix that would only repeat the shared name ("nassaj nassaj")
+ * takes its parent folder too, so it says something the name does not.
+ */
+const uniqueTrailingPaths = (group: Project[], name: string): string[] => {
+  const segments = group.map(getProjectPathSegments);
+  const deepest = Math.max(1, ...segments.map((parts) => parts.length));
+  for (let depth = 1; depth <= deepest; depth += 1) {
+    const suffixes = segments.map((parts) => parts.slice(-depth).join('/'));
+    if (new Set(suffixes).size === suffixes.length || depth === deepest) {
+      return suffixes.map((suffix, index) =>
+        suffix === name ? segments[index].slice(-(depth + 1)).join('/') : suffix);
+    }
+  }
+  return [];
+};
+
+/**
+ * Projects that share a display name — two checkouts both named "nassaj" by
+ * their package.json — mapped to the shortest trailing path that tells them
+ * apart (B-1668). Projects with a unique name get no entry.
+ */
+export const getProjectNameDisambiguators = (projects: Project[]): Map<string, string> => {
+  const groups = new Map<string, Project[]>();
+  for (const project of projects) {
+    const name = getProjectSortName(project);
+    groups.set(name, [...(groups.get(name) ?? []), project]);
+  }
+
+  const suffixes = new Map<string, string>();
+  for (const [name, group] of groups) {
+    if (group.length < 2) continue;
+    uniqueTrailingPaths(group, name).forEach((suffix, index) => {
+      if (suffix) suffixes.set(group[index].projectId, suffix);
+    });
+  }
+  return suffixes;
+};
 
 /**
  * THE project comparator for the sidebar. Order: starred first, then either the

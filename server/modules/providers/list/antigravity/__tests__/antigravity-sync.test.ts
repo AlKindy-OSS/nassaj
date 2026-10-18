@@ -188,7 +188,7 @@ test('synchronize falls back to the default title when the request is only an <i
       assert.equal(processed, 1);
 
       const row = sessionsDb.getSessionById(SESSION_UUID);
-      assert.equal(row?.custom_name, 'New Antigravity Chat');
+      assert.equal(row?.custom_name, null, 'no placeholder is written; the client localizes it (B-1668)');
     },
   );
 });
@@ -304,7 +304,7 @@ test('synchronize falls back to "New Antigravity Chat" when no USER_REQUEST is p
       const processed = await sync.synchronize();
       assert.equal(processed, 1);
       const row = sessionsDb.getSessionById(SESSION_UUID);
-      assert.equal(row?.custom_name, 'New Antigravity Chat');
+      assert.equal(row?.custom_name, null, 'no placeholder is written; the client localizes it (B-1668)');
     },
   );
 });
@@ -485,7 +485,7 @@ test('synchronize falls back to the default title when no USER_INPUT appears in 
       assert.equal(processed, 1);
 
       const row = sessionsDb.getSessionById(SESSION_UUID);
-      assert.equal(row?.custom_name, 'New Antigravity Chat');
+      assert.equal(row?.custom_name, null, 'no placeholder is written; the client localizes it (B-1668)');
     },
   );
 });
@@ -502,7 +502,60 @@ test('synchronize falls back to the default title for a completely empty transcr
       assert.equal(processed, 1);
 
       const row = sessionsDb.getSessionById(SESSION_UUID);
-      assert.equal(row?.custom_name, 'New Antigravity Chat');
+      assert.equal(row?.custom_name, null, 'no placeholder is written; the client localizes it (B-1668)');
+    },
+  );
+});
+
+// B-1668: the shape observed on real agy transcripts — nassaj's document-sharing
+// guidance injected at the head of the USER_REQUEST body.
+const SHARING_PREFIXED_REQUEST =
+  '<USER_REQUEST>\n<nassaj_document_sharing>\nNassaj document sharing: when you produce a document…\n'
+  + '</nassaj_document_sharing>\nراجع خطة الإصدار\n</USER_REQUEST>';
+
+test('B-1668: synchronize strips injected <nassaj_document_sharing> guidance from the title', async () => {
+  await withSyncFixture(
+    async (brainDir) => {
+      await writeTranscript(brainDir, SESSION_UUID, {
+        type: 'USER_INPUT', created_at: '2026-01-01T00:00:00Z', content: SHARING_PREFIXED_REQUEST,
+      });
+    },
+    async (sync) => {
+      await sync.synchronize();
+      assert.equal(sessionsDb.getSessionById(SESSION_UUID)?.custom_name, 'راجع خطة الإصدار');
+    },
+  );
+});
+
+test('B-1668: a SYSTEM_MESSAGE-only transcript never overwrites an existing name', async () => {
+  await withSyncFixture(
+    async (brainDir) => {
+      await writeTranscriptLines(brainDir, SESSION_UUID, [{ type: 'SYSTEM_MESSAGE', content: 'system only' }]);
+    },
+    async (sync) => {
+      sessionsDb.createSession(SESSION_UUID, 'antigravity', ANTIGRAVITY_PLACEHOLDER_PROJECT_PATH, 'my chat');
+      await sync.synchronize();
+      assert.equal(sessionsDb.getSessionById(SESSION_UUID)?.custom_name, 'my chat');
+    },
+  );
+});
+
+test('B-1668: a user rename survives the next sync; a title frozen inside a block is replaced', async () => {
+  await withSyncFixture(
+    async (brainDir) => {
+      await writeTranscript(brainDir, SESSION_UUID, {
+        type: 'USER_INPUT', created_at: '2026-01-01T00:00:00Z', content: SHARING_PREFIXED_REQUEST,
+      });
+    },
+    async (sync) => {
+      sessionsDb.createSession(SESSION_UUID, 'antigravity', ANTIGRAVITY_PLACEHOLDER_PROJECT_PATH, 'renamed by me');
+      await sync.synchronize();
+      assert.equal(sessionsDb.getSessionById(SESSION_UUID)?.custom_name, 'renamed by me');
+
+      // A stored title cut at 120 characters inside the guidance block (live data shape).
+      sessionsDb.updateSessionCustomName(SESSION_UUID, '<nassaj_document_sharing> Nassaj document sharing: when you');
+      await sync.synchronize();
+      assert.equal(sessionsDb.getSessionById(SESSION_UUID)?.custom_name, 'راجع خطة الإصدار');
     },
   );
 });

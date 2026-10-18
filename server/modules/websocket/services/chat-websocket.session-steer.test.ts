@@ -50,7 +50,7 @@ mock.module('@/modules/database/index.js', {
 
 mock.module('@/modules/websocket/services/websocket-writer.service.js', {
   namedExports: {
-    addSessionMirror: () => {},
+    setSocketViewMirror: () => {},
     WebSocketWriter: class {
       ws: { readyState?: number; send?: (data: string) => void } | null;
       sessionId: string | null = null;

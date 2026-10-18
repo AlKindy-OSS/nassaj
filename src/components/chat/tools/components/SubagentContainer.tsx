@@ -1,19 +1,23 @@
 import React from 'react';
 import { useTranslation } from 'react-i18next';
-import type { SubagentChildTool } from '../../types/types';
+import type { ProgressSubagent, SubagentChildTool } from '../../types/types';
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '../../../../shared/view/ui';
 import { resolveTextDirection } from '../../../../utils/textDirection';
+import { formatSubagentTitle } from '../subagentTitle';
+import { isAsyncLaunchAckResult } from '../../utils/asyncLaunchAck';
 
 import { CollapsibleSection } from './CollapsibleSection';
 
 interface SubagentContainerProps {
   toolInput: unknown;
-  toolResult?: { content?: unknown; isError?: boolean } | null;
+  toolResult?: { content?: unknown; isError?: boolean; toolUseResult?: unknown } | null;
   subagentState: {
     childTools: SubagentChildTool[];
     currentToolIndex: number;
     isComplete: boolean;
   };
+  /** ADR-199 lifecycle record: its label/agentName name the card when the input is deferred. */
+  subagent?: ProgressSubagent;
 }
 
 const getCompactToolDisplay = (toolName: string, toolInput: unknown): string => {
@@ -34,6 +38,7 @@ const getCompactToolDisplay = (toolName: string, toolInput: unknown): string => 
       const cmd = input.command || '';
       return cmd.length > 40 ? `${cmd.slice(0, 40)}...` : cmd;
     case 'Task':
+    case 'Agent':
       return input.description || input.subagent_type || '';
     case 'WebFetch':
     case 'WebSearch':
@@ -47,19 +52,22 @@ export const SubagentContainer: React.FC<SubagentContainerProps> = ({
   toolInput,
   toolResult,
   subagentState,
+  subagent,
 }) => {
   const { t } = useTranslation('chat');
   const parsedInput = typeof toolInput === 'string' ? (() => {
     try { return JSON.parse(toolInput); } catch { return {}; }
   })() : (toolInput || {});
 
-  const subagentType = parsedInput?.subagent_type || 'Agent';
-  const description = parsedInput?.description || 'Running task';
   const prompt = parsedInput?.prompt || '';
   const { childTools, currentToolIndex, isComplete } = subagentState;
   const currentTool = currentToolIndex >= 0 ? childTools[currentToolIndex] : null;
 
-  const title = `Subagent / ${subagentType}: ${description}`;
+  const title = formatSubagentTitle(
+    t,
+    parsedInput?.subagent_type || subagent?.agentName,
+    parsedInput?.description || subagent?.label,
+  );
 
   return (
     <div className="my-1 border-s-2 border-s-purple-500 py-0.5 ps-3 dark:border-s-purple-400">
@@ -145,8 +153,13 @@ export const SubagentContainer: React.FC<SubagentContainerProps> = ({
           </Collapsible>
         )}
 
+        {/* B-1665: a background launch ack is not the agent's result. */}
+        {toolResult && isAsyncLaunchAckResult(toolResult) && (
+          <div className="mt-2 text-xs text-muted-foreground">{t('subagent.backgroundLaunched')}</div>
+        )}
+
         {/* Final result */}
-        {isComplete && toolResult && (
+        {isComplete && toolResult && !isAsyncLaunchAckResult(toolResult) && (
           <div className="mt-2 text-xs text-muted-foreground">
             {(() => {
               let content = toolResult.content;
@@ -182,7 +195,7 @@ export const SubagentContainer: React.FC<SubagentContainerProps> = ({
                   {content}
                 </div>
               ) : content ? (
-                <pre className="line-clamp-6 whitespace-pre-wrap break-words font-mono text-[11px]">
+                <pre dir="ltr" className="line-clamp-6 whitespace-pre-wrap break-words font-mono text-[11px]">
                   {JSON.stringify(content, null, 2)}
                 </pre>
               ) : null;

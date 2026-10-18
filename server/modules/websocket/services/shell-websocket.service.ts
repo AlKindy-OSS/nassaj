@@ -687,6 +687,39 @@ function readNumber(value: unknown, fallback: number): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
 }
 
+/** Upper bound for a terminal dimension (same bound as the standalone registry). */
+const MAX_TERMINAL_DIMENSION = 1024;
+
+/**
+ * Reads a terminal dimension for a reattach resize: a finite number >= 1,
+ * floored and clamped to MAX_TERMINAL_DIMENSION; anything else is null.
+ */
+function readTerminalDimension(value: unknown): number | null {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 1) {
+    return null;
+  }
+  return Math.min(MAX_TERMINAL_DIMENSION, Math.floor(value));
+}
+
+/**
+ * T-2045: on reattach the PTY keeps the size of the client that spawned it
+ * (a phone stays phone-width on desktop). Applies the init frame's cols/rows
+ * when both are valid; a PTY that already exited may throw, which is logged
+ * and otherwise ignored so the reattach still completes.
+ */
+function resizeReattachedPty(pty: { resize(cols: number, rows: number): void }, data: ShellIncomingMessage): void {
+  const cols = readTerminalDimension(data.cols);
+  const rows = readTerminalDimension(data.rows);
+  if (cols === null || rows === null) {
+    return;
+  }
+  try {
+    pty.resize(cols, rows);
+  } catch (error) {
+    console.error('[ERROR] Reattached PTY resize failed:', (error as Error).message);
+  }
+}
+
 /**
  * Parses incoming websocket shell messages and keeps processing safe when
  * malformed payloads are received.
@@ -1446,6 +1479,7 @@ export function handleShellConnection(
               );
             });
           }
+          resizeReattachedPty(existingSession.pty, data);
 
           existingSession.ws = ws;
           return;

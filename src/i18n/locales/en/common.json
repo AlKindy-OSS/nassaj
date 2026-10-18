@@ -1095,5 +1095,10 @@
     "confirm": "Confirm",
     "cancel": "Cancel",
     "ok": "OK"
+  },
+  "mermaidZoom": {
+    "zoom": "Zoom diagram",
+    "zoomedAria": "Zoomed Mermaid diagram",
+    "close": "Close"
   }
 }

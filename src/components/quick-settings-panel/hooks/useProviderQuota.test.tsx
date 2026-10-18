@@ -301,4 +301,53 @@ describe('useProviderQuota', () => {
 
     expect(calls, 'لا يعمل مؤقّت الخطأ القديم بعد refetch').toHaveLength(2);
   });
+
+  describe('B-1669: claude body on an Anthropic model sends nothing', () => {
+    it.each(['haiku', 'claude-opus-5-5', 'opus[1m]', 'sonnet', 'fable-5'])(
+      '%s → anthropic without a request',
+      async (model) => {
+        const { result } = renderHook(() => useProviderQuota('claude', model, true));
+        await act(async () => {
+          await Promise.resolve();
+        });
+        expect(calls).toHaveLength(0);
+        expect(result.current.status).toBe('anthropic');
+        expect(result.current.isAnthropic).toBe(true);
+      },
+    );
+
+    it('sets no retry timer and refetch() follows the same rule', async () => {
+      const { result } = renderHook(() => useProviderQuota('claude', 'haiku', true));
+      await act(async () => {
+        void result.current.refetch();
+        vi.advanceTimersByTime(PROVIDER_QUOTA_RETRY_MS * 2);
+      });
+      expect(calls).toHaveLength(0);
+      expect(result.current.status).toBe('anthropic');
+    });
+
+    it('switching from an engine model to an Anthropic one aborts the pending request', () => {
+      const { result, rerender } = renderHook(
+        ({ model }) => useProviderQuota('claude', model, true),
+        { initialProps: { model: 'glm-5.2' } },
+      );
+      expect(calls).toHaveLength(1);
+      rerender({ model: 'haiku' });
+      expect(calls[0].options.signal?.aborted).toBe(true);
+      expect(result.current.status).toBe('anthropic');
+    });
+
+    it.each([
+      ['claude', 'glm-5.2', 'glm-5.2'],
+      // Not recognised locally: the server resolves it (documented gap).
+      ['claude', 'default', 'default'],
+      ['opencode', 'anthropic/claude-x', 'anthropic/claude-x'],
+      ['codex', 'claude-opus-5', undefined],
+    ])('%s with %s still asks the server', (provider, model, sentModel) => {
+      renderHook(() => useProviderQuota(provider, model, true));
+      expect(calls).toHaveLength(1);
+      expect(calls[0].provider).toBe(provider);
+      expect(calls[0].options.model).toBe(sentModel);
+    });
+  });
 });

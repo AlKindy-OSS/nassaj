@@ -117,27 +117,51 @@ function InternalComposer({ draft, setDraft, members, canSend, inputRef, onFocus
   );
 }
 
+/**
+ * One session's request scope: its id and a signal aborted when the session
+ * changes. B-1666: every await re-checks it, so a late answer for room A never
+ * lands in room B.
+ */
+type RoomScope = { id: string; signal: AbortSignal };
+const isLive = (scope: RoomScope, current: { current: string | null | undefined }) =>
+  !scope.signal.aborted && current.current === scope.id;
+
 /** Room state, REST snapshot and realtime frames for one session. */
 function useInternalRoom(sessionId: string | null | undefined, enabled: boolean) {
   const [room, setRoom] = useState<InternalRoom | null>(null);
   const [messages, setMessages] = useState<InternalMessage[]>([]);
+  const sessionRef = useRef(sessionId);
+  const controllerRef = useRef<AbortController | null>(null);
   useEffect(() => {
+    sessionRef.current = sessionId;
+    const controller = new AbortController();
+    controllerRef.current = controller;
     setRoom(null); setMessages([]);
-    if (!enabled || !sessionId) return;
-    const abort = new AbortController();
-    void getInternalRoom(sessionId, abort.signal).then((next) => {
-      if (!next) return;
-      setRoom(next); setInternalMentionCount(sessionId, next.unreadMentionCount);
-    });
-    return () => abort.abort();
+    if (enabled && sessionId) {
+      void getInternalRoom(sessionId, controller.signal).then((next) => {
+        if (!next || controller.signal.aborted) return;
+        setRoom(next); setInternalMentionCount(sessionId, next.unreadMentionCount);
+      }).catch(() => undefined);
+    }
+    return () => controller.abort();
   }, [enabled, sessionId]);
+  /** The live scope for a request starting now, or null without a session. */
+  const scope = useCallback((): RoomScope | null => {
+    const id = sessionRef.current;
+    const controller = controllerRef.current;
+    return id && controller && !controller.signal.aborted ? { id, signal: controller.signal } : null;
+  }, []);
+  const live = useCallback((current: RoomScope) => isLive(current, sessionRef), []);
   const snapshot = useCallback(async () => {
-    if (!sessionId) return;
-    const [nextRoom, nextMessages] = await Promise.all([getInternalRoom(sessionId), getInternalMessages(sessionId)]);
-    if (!nextRoom) return;
+    const current = scope();
+    if (!current) return;
+    const [nextRoom, nextMessages] = await Promise.all([
+      getInternalRoom(current.id, current.signal), getInternalMessages(current.id, current.signal),
+    ]).catch(() => [null, []] as const);
+    if (!nextRoom || !live(current)) return;
     setRoom(nextRoom); setMessages(bySequence(nextMessages));
-    setInternalMentionCount(sessionId, nextRoom.unreadMentionCount);
-  }, [sessionId]);
+    setInternalMentionCount(current.id, nextRoom.unreadMentionCount);
+  }, [live, scope]);
   const onFrame = useCallback((frame: InternalChatFrame) => {
     if (!sessionId) return;
     if (frame.type === 'internal-chat.message.created') setMessages((current) => upsert(current, frame.message));
@@ -148,7 +172,7 @@ function useInternalRoom(sessionId: string | null | undefined, enabled: boolean)
   }, [sessionId]);
   // Connect only while this user holds a room; non-members never open a socket.
   useInternalSessionChatRealtime({ sessionId, enabled: enabled && room !== null, onFrame, onSnapshot: snapshot });
-  return { room, setRoom, messages, setMessages };
+  return { room, setRoom, messages, setMessages, scope, live };
 }
 
 /**
@@ -165,37 +189,48 @@ export default function InternalSessionChat({ sessionId, enabled }: Props) {
   const [error, setError] = useState<string | null>(null);
   const dialogLabel = useId();
   const inputRef = useRef<HTMLTextAreaElement>(null);
-  const { room, setRoom, messages, setMessages } = useInternalRoom(sessionId, enabled);
+  const { room, setRoom, messages, setMessages, scope, live } = useInternalRoom(sessionId, enabled);
 
-  useEffect(() => { setOpen(false); setMode('provider'); setDraft(''); setError(null); }, [sessionId]);
+  useEffect(() => {
+    setOpen(false); setMode('provider'); setDraft(''); setError(null); setSending(false);
+  }, [sessionId]);
   useEffect(() => { if (!room) setOpen(false); }, [room]);
 
   if (!sessionId || !enabled) return null;
   const members = room?.members ?? [];
   const isWriter = members.some((member) => String(member.userId) === String(auth?.user?.id) && member.role !== 'viewer');
+  // B-1666: each handler pins the room it started for and drops a late answer.
   const openRoom = async () => {
     setOpen(true); setError(null);
-    if (room) return;
-    const next = await createInternalRoom(sessionId);
+    const current = scope();
+    if (room || !current) return;
+    const next = await createInternalRoom(current.id, current.signal).catch(() => null);
+    if (!live(current)) return;
     if (!next) { setError(t('internalChat.createFailed')); return; }
-    setRoom(next); setInternalMentionCount(sessionId, next.unreadMentionCount);
+    setRoom(next); setInternalMentionCount(current.id, next.unreadMentionCount);
   };
   const loadMessages = async () => {
-    const ordered = bySequence(await getInternalMessages(sessionId));
+    const current = scope();
+    if (!current) return;
+    const ordered = bySequence(await getInternalMessages(current.id, current.signal).catch(() => []));
+    if (!live(current)) return;
     setMessages(ordered);
     const highest = ordered.reduce((max, message) => Math.max(max, message.sequence), 0);
-    if (highest && await markInternalRead(sessionId, highest)) setInternalMentionCount(sessionId, 0);
+    const read = highest > 0 && await markInternalRead(current.id, highest, current.signal).catch(() => false);
+    if (read && live(current)) setInternalMentionCount(current.id, 0);
   };
   const send = async () => {
     const body = draft.trim();
-    if (!body || !isWriter || sending) return;
+    const current = scope();
+    if (!body || !isWriter || sending || !current) return;
     const ids = [...body.matchAll(/@([^\s@]+)/g)]
       .flatMap((match) => members.filter((member) => member.username === match[1]).map((member) => member.userId));
     setSending(true); setError(null);
-    const created = await sendInternalMessage(sessionId, body, ids);
+    const created = await sendInternalMessage(current.id, body, ids, current.signal).catch(() => null);
+    if (!live(current)) return;
     setSending(false);
     if (!created) { setError(t('internalChat.sendFailed')); return; }
-    setMessages((current) => upsert(current, created)); setDraft('');
+    setMessages((existing) => upsert(existing, created)); setDraft('');
   };
   // Shown with or without a room: a failed room creation must be visible too.
   const errorAlert = error ? <p role="alert" className="px-4 pb-2 pt-3 text-sm text-destructive">{error}</p> : null;

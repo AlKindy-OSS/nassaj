@@ -57,6 +57,42 @@ describe('SidebarSearchRow', () => {
     expect(onClearSearchFilter).toHaveBeenCalledTimes(1);
   });
 
+  describe('direction (B-1668)', () => {
+    afterEach(() => {
+      document.documentElement.dir = '';
+    });
+
+    const field = () => screen.getByRole('textbox');
+    const wrapper = () => field().parentElement!;
+
+    it('an empty field in an RTL UI is RTL, so the placeholder starts at the right and the hint has its padding', () => {
+      document.documentElement.dir = 'rtl';
+      renderRow();
+      expect(field().getAttribute('dir')).toBe('rtl');
+      expect(wrapper().getAttribute('dir')).toBe('rtl');
+      expect(field().className).toContain('[@media(hover:hover)]:pe-14');
+    });
+
+    it('a Latin query flips the field only, and the reserved padding follows the controls', () => {
+      document.documentElement.dir = 'rtl';
+      renderRow({ searchFilter: 'build' });
+      expect(field().getAttribute('dir')).toBe('ltr');
+      expect(wrapper().getAttribute('dir')).toBe('rtl');
+      // Clear button is at the wrapper's end (left in RTL) = the LTR field's start.
+      expect(field().className).toContain('ps-12');
+    });
+
+    it('an Arabic query stays RTL; an LTR UI stays LTR when empty', () => {
+      document.documentElement.dir = 'rtl';
+      renderRow({ searchFilter: 'خطأ build' });
+      expect(field().getAttribute('dir')).toBe('rtl');
+      cleanup();
+      document.documentElement.dir = 'ltr';
+      renderRow();
+      expect(field().getAttribute('dir')).toBe('ltr');
+    });
+  });
+
   it('renders the command-palette hint as a span, not a kbd (RTL LTR-island stretch)', () => {
     renderRow();
 

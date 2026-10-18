@@ -6,6 +6,7 @@ import type { Terminal } from '@xterm/xterm';
 import { sanitizeTerminalText } from '../../../../shared/terminalText';
 import type { Project, ProjectSession } from '../../../types/app';
 import { isIdentityRevocationClose, reconcileRevokedIdentity } from '../../auth/accountIdentityBarrier';
+import { dispatchOwnerStepUp, OWNER_STEP_UP_REQUIRED_CODE } from '../../../utils/api';
 import type { OneShotFrame, ShellErrorInfo } from '../types/types';
 import { TERMINAL_INIT_DELAY_MS } from '../constants/constants';
 import { getShellWebSocketUrl, parseShellMessage, sendSocketMessage } from '../utils/socket';
@@ -452,6 +453,10 @@ export function useShellConnection({
             reconcileRevokedIdentity();
             return;
           }
+
+          // ADR-H20 N2: an owner's no-click SSO session opens the terminal only
+          // after the passkey step-up; 4403 stays final (no reconnect).
+          if (event.code === 4403 && event.reason === OWNER_STEP_UP_REQUIRED_CODE) dispatchOwnerStepUp();
 
           // An outright refusal (4401 auth / 4403 role / 4404 project): the
           // server states the reason in an `error` frame and closes at once.

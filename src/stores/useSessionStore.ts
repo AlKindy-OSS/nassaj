@@ -288,9 +288,39 @@ export function classifyHistoryFailure(
   return 'unavailable';
 }
 
+/** Reads the app issues on its own (open, enrichment/window, reconnect, refresh). */
+const AUTOMATIC_HISTORY_OPERATIONS: ReadonlySet<HistoryOperation> = new Set(['initial', 'deferred', 'reconnect']);
+
+/**
+ * B-1666: an automatic read that met a growing transcript. The server answers
+ * 409 HISTORY_REVISION_CHANGED for a stale `revision` and also for a torn read
+ * with no revision at all (the file grew while it was read), which is routine
+ * during an active run. It is transient: it must never park later automatic
+ * reads (reconnect merge, stream-gap recovery, external refresh), or the open
+ * session stops updating until a manual retry or a reload.
+ */
+export function isTransientRevisionConflict(
+  error: Pick<HistoryError, 'code' | 'operation'> | null | undefined,
+): boolean {
+  return error?.code === 'HISTORY_REVISION_CHANGED' && AUTOMATIC_HISTORY_OPERATIONS.has(error.operation);
+}
+
 /** Gate automatic reads without blocking independent session activity probes. */
 export function canAutomaticallyReadHistory(error: HistoryError | null | undefined, now = Date.now()): boolean {
-  return !error || (historyRetryDelay(error) !== null && now >= error.retryAt);
+  return !error || isTransientRevisionConflict(error)
+    || (historyRetryDelay(error) !== null && now >= error.retryAt);
+}
+
+/**
+ * A successful read of `operation` ends that operation's failure, and any
+ * revision conflict: the transcript was just read consistently, so the
+ * conflict is over whichever read first met it.
+ */
+function clearRecoveredHistoryError(slot: SessionSlot, operation: HistoryOperation): void {
+  const error = slot.historyError;
+  if (error && (error.operation === operation || error.code === 'HISTORY_REVISION_CHANGED')) {
+    slot.historyError = null;
+  }
 }
 
 /** Classify transport/abort failures without retaining response bodies or paths. */
@@ -341,6 +371,19 @@ export interface SessionSlot {
 }
 
 const EMPTY: NormalizedMessage[] = [];
+
+/**
+ * B-1666 #7: one monotonic clock for every slot's history generation. A
+ * per-slot counter restarted at 0 when an evicted slot was recreated, so a
+ * late response of the evicted slot could match the new slot's generation.
+ */
+let historyGenerationClock = 0;
+
+function bumpHistoryGeneration(slot: SessionSlot): number {
+  historyGenerationClock += 1;
+  slot.historyGeneration = historyGenerationClock;
+  return slot.historyGeneration;
+}
 
 function createEmptySlot(): SessionSlot {
   return {
@@ -577,11 +620,22 @@ function retainUnconfirmedRealtime(
 }
 
 /**
+ * A reply identity that exists only on this client: a finalized stream
+ * placeholder (`clientStream`, kept by `finalizeStreaming`) or a live Codex
+ * item id. Neither is ever a persisted transcript row.
+ */
+function isLiveOnlyReply(row: NormalizedMessage): boolean {
+  return row.clientStream === true || isLiveCodexReply(row);
+}
+
+/**
  * After `finalizeStreaming`, the client holds a synthetic assistant `text` row
  * while the sessions API soon returns the same reply with a different id.
  * Those sit back-to-back in merged order and look like duplicate bubbles until
- * `refreshFromServer` clears realtime. Collapse same-text assistant rows and
- * stream_placeholder → text when content matches.
+ * `refreshFromServer` clears realtime. Collapse stream_placeholder → text when
+ * content matches, and a same-text text/text pair only when exactly one of the
+ * two is a live-only echo (B-1666): two persisted (reload) or two live replies
+ * that happen to be identical are two real bubbles, live and after reload alike.
  */
 function dedupeAdjacentAssistantEchoes(merged: NormalizedMessage[]): NormalizedMessage[] {
   const out: NormalizedMessage[] = [];
@@ -602,6 +656,7 @@ function dedupeAdjacentAssistantEchoes(merged: NormalizedMessage[]): NormalizedM
         && m.kind === 'text'
         && prev.role === 'assistant'
         && m.role === 'assistant'
+        && isLiveOnlyReply(prev) !== isLiveOnlyReply(m)
       ) {
         const ms = (m.content || '').trim();
         if (ms.length > 0 && ms === (prev.content || '').trim()) {
@@ -748,6 +803,19 @@ const MAX_REALTIME_MESSAGES = 500;
 
 const MAX_SEQ_RUNS = 16;
 
+/**
+ * B-1666 #7: slots kept in memory. Beyond it the least recently used idle slot
+ * is dropped; the displayed, retained (running) and live-work slots never are.
+ */
+export const MAX_SESSION_SLOTS = 30;
+
+/** Work that exists only on this client: a live stream or an unsent prompt. */
+function slotHoldsLiveWork(slot: SessionSlot): boolean {
+  if (slot.status === 'streaming' || slot.status === 'loading') return true;
+  if (slot.realtimeMessages.some((row) => row.id.startsWith('__streaming_'))) return true;
+  return retainUnsyncedOptimisticRows(slot.realtimeMessages, slot.serverMessages).length > 0;
+}
+
 // ─── Hook ────────────────────────────────────────────────────────────────────
 
 export function useSessionStore() {
@@ -762,6 +830,10 @@ export function useSessionStore() {
   const lastSeqRef = useRef(new Map<string, number>());
   // Recently seen run ids per session (bounded): tells a restarted sequence line from a late frame.
   const seqRunsRef = useRef(new Map<string, string[]>());
+  // B-1666 #7: last access tick per slot, and the sessions the caller keeps alive.
+  const slotAccessRef = useRef(new Map<string, number>());
+  const accessClockRef = useRef(0);
+  const retainedSessionsRef = useRef(new Set<string>());
   // Bump to force re-render — only when the active session's data changes
   const [, setTick] = useState(0);
   const notify = useCallback((sessionId: string) => {
@@ -832,26 +904,68 @@ export function useSessionStore() {
     return lastSeqRef.current.get(resolvedSessionId) ?? 0;
   }, [resolveSessionId]);
 
+  const touchSlot = useCallback((resolvedSessionId: string) => {
+    accessClockRef.current += 1;
+    slotAccessRef.current.set(resolvedSessionId, accessClockRef.current);
+  }, []);
+
+  /** Drop every trace of an evicted session; a reopened id starts empty, replaying from seq 0. */
+  const forgetSession = useCallback((resolvedSessionId: string) => {
+    storeRef.current.delete(resolvedSessionId);
+    slotAccessRef.current.delete(resolvedSessionId);
+    lastSeqRef.current.delete(resolvedSessionId);
+    seqRunsRef.current.delete(resolvedSessionId);
+    for (const [alias, target] of sessionAliasesRef.current) {
+      if (target === resolvedSessionId) sessionAliasesRef.current.delete(alias);
+    }
+  }, []);
+
+  /** Evict least-recently-used idle slots above the cap; `keep` is the slot just created. */
+  const evictIdleSlots = useCallback((keep: string) => {
+    const store = storeRef.current;
+    if (store.size <= MAX_SESSION_SLOTS) return;
+    const pinned = new Set([keep, activeSessionIdRef.current, ...retainedSessionsRef.current]);
+    const lastAccess = (id: string) => slotAccessRef.current.get(id) ?? 0;
+    const candidates = [...store.entries()]
+      .filter(([id, slot]) => !pinned.has(id) && !slotHoldsLiveWork(slot))
+      .map(([id]) => id)
+      .sort((left, right) => lastAccess(left) - lastAccess(right));
+    for (const id of candidates) {
+      if (store.size <= MAX_SESSION_SLOTS) break;
+      forgetSession(id);
+    }
+  }, [forgetSession]);
+
+  /** Sessions the view keeps alive regardless of recency (e.g. every running session). */
+  const setRetainedSessions = useCallback((sessionIds: Iterable<string>) => {
+    retainedSessionsRef.current = new Set([...sessionIds].map((id) => resolveSessionId(id) ?? id));
+  }, [resolveSessionId]);
+
   const getSlot = useCallback((sessionId: string): SessionSlot => {
     const resolvedSessionId = resolveSessionId(sessionId) ?? sessionId;
     const store = storeRef.current;
+    touchSlot(resolvedSessionId);
     if (!store.has(resolvedSessionId)) {
       store.set(resolvedSessionId, createEmptySlot());
+      evictIdleSlots(resolvedSessionId);
     }
     return store.get(resolvedSessionId)!;
-  }, [resolveSessionId]);
+  }, [evictIdleSlots, resolveSessionId, touchSlot]);
 
   /** Begin a competing history operation; only its generation may subsequently commit. */
   const beginHistoryRequest = useCallback((sessionId: string): number => {
     const slot = getSlot(sessionId);
-    slot.historyGeneration += 1;
-    return slot.historyGeneration;
+    return bumpHistoryGeneration(slot);
   }, [getSlot]);
 
-  /** A view epoch alone cannot protect concurrent reads of the same session. */
+  /**
+   * A view epoch alone cannot protect concurrent reads of the same session.
+   * Reads the slot without creating it: an evicted slot's late response is
+   * simply not current (and must not resurrect the slot as a side effect).
+   */
   const isHistoryRequestCurrent = useCallback((sessionId: string, generation: number): boolean => (
-    getSlot(sessionId).historyGeneration === generation
-  ), [getSlot]);
+    storeRef.current.get(resolveSessionId(sessionId) ?? sessionId)?.historyGeneration === generation
+  ), [resolveSessionId]);
 
   type HistorySnapshot = {
     messages: NormalizedMessage[];
@@ -963,7 +1077,7 @@ export function useSessionStore() {
       });
     }
     const slot = getSlot(sessionId);
-    slot.historyGeneration += 1;
+    bumpHistoryGeneration(slot);
     slot.historyError = { ...failure, operation, retryAt: Date.now() + (failure.retryAfterMs ?? 0) };
     slot.status = 'error';
     notify(sessionId);
@@ -984,7 +1098,7 @@ export function useSessionStore() {
    * stays un-deduped next to the hole where the canonical row used to be.
    *
    * Every other caller (`fetchFromServer`, `retryHistory`'s revision/cursor
-   * recovery, `applyLightHistoryExpansion`'s own pre-merged snapshot) keeps
+   * recovery) keeps
    * the original hard replace: those calls are explicit "the previous window
    * is not trustworthy, take this one as ground truth" reads (an explicit
    * reload, or recovering from a revision/cursor error), not an incidental
@@ -1005,7 +1119,7 @@ export function useSessionStore() {
   ): SessionSlot => {
     const resolvedSessionId = resolveSessionId(sessionId) ?? sessionId;
     const slot = getSlot(resolvedSessionId);
-    slot.historyGeneration += 1;
+    bumpHistoryGeneration(slot);
     // The common first-load case (fresh slot, nothing to merge with) keeps
     // exactly the old replace behavior: no prior pagination state to protect.
     const hadExistingMessages = opts.merge === true && slot.serverMessages.length > 0;
@@ -1065,11 +1179,11 @@ export function useSessionStore() {
   const applyHistoryEnrichment = useCallback((sessionId: string, snapshot: HistorySnapshot): SessionSlot => {
     const resolvedSessionId = resolveSessionId(sessionId) ?? sessionId;
     const slot = getSlot(resolvedSessionId);
-    slot.historyGeneration += 1;
+    bumpHistoryGeneration(slot);
     mergeFullRowsIntoSlot(slot, snapshot);
     slot.responseTurnDurationTotalMs = snapshot.responseTurnDurationTotalMs;
     slot.historyPayloadMode = 'full';
-    if (slot.historyError?.operation === 'deferred') slot.historyError = null;
+    clearRecoveredHistoryError(slot, 'deferred');
     if (!slot.historyError) slot.status = 'idle';
     slot.fetchedAt = Date.now();
     if (snapshot.tokenUsage) slot.tokenUsage = snapshot.tokenUsage;
@@ -1091,7 +1205,7 @@ export function useSessionStore() {
   const applyHistoryRebase = useCallback((sessionId: string, snapshot: HistorySnapshot): SessionSlot => {
     const resolvedSessionId = resolveSessionId(sessionId) ?? sessionId;
     const slot = getSlot(resolvedSessionId);
-    slot.historyGeneration += 1;
+    bumpHistoryGeneration(slot);
     mergeFullRowsIntoSlot(slot, snapshot);
     slot.total = Math.max(slot.total, snapshot.total);
     slot.hasMore = slot.hasMore || snapshot.hasMore;
@@ -1099,7 +1213,7 @@ export function useSessionStore() {
     slot.responseTurnDurationTotalMs = snapshot.responseTurnDurationTotalMs;
     slot.historyRevision = snapshot.revision;
     slot.historyPayloadMode = 'full';
-    if (slot.historyError?.operation === 'deferred') slot.historyError = null;
+    clearRecoveredHistoryError(slot, 'deferred');
     if (!slot.historyError) slot.status = 'idle';
     slot.fetchedAt = Date.now();
     if (snapshot.tokenUsage) slot.tokenUsage = snapshot.tokenUsage;
@@ -1110,24 +1224,39 @@ export function useSessionStore() {
   }, [getSlot, notify, resolveSessionId]);
 
   /**
-   * Widen a light window without downgrading rows already enriched at the same
-   * revision. This matters when the active-run light(400) request completes
-   * after full(20): replacing the slot wholesale would otherwise discard the
-   * full image/tool fields and leave the scheduler believing enrichment done.
+   * B-1666: adopt an active-run light window (light400) read without a
+   * `revision`. The transcript grows during a run, so pinning the request to
+   * the held revision 409'd nearly every time and parked all later reads.
+   * Merge by id, so an already-widened (load-older) window never shrinks, keep
+   * rows that were already enriched (persisted rows are immutable per id), and
+   * move the revision baseline forward. The caller re-queues enrichment.
    */
-  const applyLightHistoryExpansion = useCallback((sessionId: string, snapshot: HistorySnapshot): SessionSlot => {
+  const applyLightHistoryRebase = useCallback((sessionId: string, snapshot: HistorySnapshot): SessionSlot => {
     const resolvedSessionId = resolveSessionId(sessionId) ?? sessionId;
     const slot = getSlot(resolvedSessionId);
-    const preserveEnriched = slot.historyRevision === snapshot.revision;
-    const currentById = preserveEnriched
-      ? new Map(slot.serverMessages.map((message) => [message.id, message]))
-      : new Map<string, NormalizedMessage>();
-    const messages = snapshot.messages.map((message) => {
-      const current = currentById.get(message.id);
-      return current && !current.deferredPayload ? current : message;
-    });
-    return applyHistorySnapshot(resolvedSessionId, { ...snapshot, messages });
-  }, [applyHistorySnapshot, getSlot, resolveSessionId]);
+    bumpHistoryGeneration(slot);
+    const heldOldest = slot.serverMessages[0];
+    const enrichedById = new Map(slot.serverMessages
+      .filter((message) => !message.deferredPayload).map((message) => [message.id, message]));
+    const messages = snapshot.messages.map((message) => enrichedById.get(message.id) ?? message);
+    mergeFullRowsIntoSlot(slot, { ...snapshot, messages });
+    const reachesFurther = !heldOldest || slot.serverMessages[0]?.id !== heldOldest.id;
+    if (reachesFurther) slot.historyCursor = snapshot.nextCursor;
+    slot.total = Math.max(slot.total, snapshot.total);
+    slot.hasMore = slot.hasMore && snapshot.hasMore;
+    slot.offset = slot.serverMessages.length;
+    slot.responseTurnDurationTotalMs = snapshot.responseTurnDurationTotalMs;
+    slot.historyRevision = snapshot.revision;
+    slot.historyPayloadMode = 'light';
+    clearRecoveredHistoryError(slot, 'deferred');
+    if (!slot.historyError) slot.status = 'idle';
+    slot.fetchedAt = Date.now();
+    if (snapshot.tokenUsage) slot.tokenUsage = snapshot.tokenUsage;
+    slot.realtimeMessages = retainUnconfirmedRealtime(slot.realtimeMessages, slot.serverMessages);
+    recomputeMergedIfNeeded(slot);
+    notify(resolvedSessionId);
+    return slot;
+  }, [getSlot, notify, resolveSessionId]);
 
   const has = useCallback((sessionId: string) => {
     const resolvedSessionId = resolveSessionId(sessionId) ?? sessionId;
@@ -1309,6 +1438,9 @@ export function useSessionStore() {
       slot.total = data.total ?? slot.serverMessages.length;
       slot.hasMore = Boolean(data.hasMore);
       slot.responseTurnDurationTotalMs = validResponseDurationTotal(data.responseTurnDurationTotalMs);
+      // B-1666: a whole-transcript read is the new baseline for revisioned reads.
+      slot.historyRevision = data.revision;
+      slot.historyPayloadMode = data.payloadMode;
       slot.fetchedAt = Date.now();
       // A successful read does not prove it includes pending/live content.
       // Preserve B-516 user rows and assistant rows until their counterpart is
@@ -1366,7 +1498,7 @@ export function useSessionStore() {
       if (!result.ok) { setHistoryError(resolvedSessionId, result, 'reconnect'); return false; }
       const data = result.snapshot;
       const tailMessages = data.messages;
-      if (slot.historyError?.operation === 'reconnect') slot.historyError = null;
+      clearRecoveredHistoryError(slot, 'reconnect');
       if (!slot.historyError && (slot.status === 'error' || slot.status === 'loading')) slot.status = 'idle';
       notify(resolvedSessionId);
 
@@ -1630,8 +1762,10 @@ export function useSessionStore() {
    */
   const getSessionSlot = useCallback((sessionId: string): SessionSlot | undefined => {
     const resolvedSessionId = resolveSessionId(sessionId) ?? sessionId;
-    return storeRef.current.get(resolvedSessionId);
-  }, [resolveSessionId]);
+    const slot = storeRef.current.get(resolvedSessionId);
+    if (slot) touchSlot(resolvedSessionId);
+    return slot;
+  }, [resolveSessionId, touchSlot]);
 
   const replaceSessionId = useCallback((fromSessionId: string, toSessionId: string) => {
     const resolvedFromSessionId = resolveSessionId(fromSessionId) ?? fromSessionId;
@@ -1760,7 +1894,8 @@ export function useSessionStore() {
     applyHistorySnapshot,
     applyHistoryEnrichment,
     applyHistoryRebase,
-    applyLightHistoryExpansion,
+    applyLightHistoryRebase,
+    setRetainedSessions,
   }), [
     getSlot, has, fetchFromServer, fetchMore,
     appendRealtime, appendRealtimeBatch, refreshFromServer, mergeTailFromServer,
@@ -1769,7 +1904,7 @@ export function useSessionStore() {
     branchSessionId,
     recordSeq, getLastSeq,
     requestHistorySnapshot, beginHistoryRequest, isHistoryRequestCurrent, setHistoryError, applyHistorySnapshot,
-    applyHistoryEnrichment, applyHistoryRebase, applyLightHistoryExpansion,
+    applyHistoryEnrichment, applyHistoryRebase, applyLightHistoryRebase, setRetainedSessions,
   ]);
 }
 

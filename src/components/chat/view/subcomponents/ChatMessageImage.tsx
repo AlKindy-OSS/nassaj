@@ -36,6 +36,18 @@ interface ChatMessageImageProps {
 const _defaultLoadErrorMessageFor = () => 'تعذّر تحميل الصورة';
 
 /**
+ * B-1665: `cover` thumbnails have a fixed box, so the loading placeholder and
+ * the loaded image occupy exactly the same height and no row jumps after paint.
+ * `contain` keeps the image's own aspect ratio, which is unknown until it
+ * loads; its placeholder is an approximation and the remaining shift is
+ * absorbed by useStickToBottom.
+ */
+const BOX_CLASS = {
+  cover: { placeholder: 'h-56 w-full', image: 'h-56 w-full object-cover' },
+  contain: { placeholder: 'h-40 w-full max-w-sm', image: 'h-auto max-h-80 w-auto object-contain' },
+} as const;
+
+/**
  * B-430 / T-1235 — one picture inside a sent user message.
  * T-1737 — extended for assistant inline images.
  *
@@ -129,12 +141,15 @@ const ChatMessageImage = ({
         </div>
       );
     }
-    return null;
+    if (hasFailed) return null;
+    return (
+      <div
+        data-testid="chat-image-placeholder"
+        aria-hidden="true"
+        className={`animate-pulse rounded-md bg-muted/40 ${BOX_CLASS[objectFit].placeholder}`}
+      />
+    );
   }
-
-  const fitClass = objectFit === 'contain'
-    ? 'max-h-80 w-auto object-contain'
-    : 'max-h-56 w-full object-cover';
 
   return (
     <>
@@ -147,7 +162,8 @@ const ChatMessageImage = ({
         <img
           src={resolvedSrc}
           alt={alt || ''}
-          className={`h-auto max-w-full transition-opacity hover:opacity-90 ${fitClass}`}
+          decoding="async"
+          className={`max-w-full transition-opacity hover:opacity-90 ${BOX_CLASS[objectFit].image}`}
         />
       </button>
       {isZoomed && (

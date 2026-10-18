@@ -1,7 +1,16 @@
 /**
  * Centralized tool configuration registry
- * Defines display behavior for all tool types 
+ * Defines display behavior for all tool types
+ *
+ * Titles that a reader sees are translated at render time: a title function
+ * receives the chat-namespace `t` from ToolRenderer (B-1665), never a string
+ * fixed at module load.
  */
+import type { TFunction } from 'i18next';
+
+import { formatSubagentTitle } from '../subagentTitle';
+
+type ToolTitle = string | ((data: any, t: TFunction) => string);
 
 export interface ToolDisplayConfig {
   input: {
@@ -22,7 +31,7 @@ export interface ToolDisplayConfig {
       icon?: string;
     };
     // Collapsible config
-    title?: string | ((input: any) => string);
+    title?: ToolTitle;
     defaultOpen?: boolean;
     contentType?: 'diff' | 'markdown' | 'file-list' | 'todo-list' | 'text' | 'task' | 'question-answer';
     getContentProps?: (input: any, helpers?: any) => any;
@@ -32,7 +41,7 @@ export interface ToolDisplayConfig {
     hidden?: boolean;
     hideOnSuccess?: boolean;
     type?: 'one-line' | 'collapsible' | 'plan' | 'special';
-    title?: string | ((result: any) => string);
+    title?: ToolTitle;
     defaultOpen?: boolean;
     // Special result handlers
     contentType?: 'markdown' | 'file-list' | 'todo-list' | 'text' | 'success-message' | 'task' | 'question-answer';
@@ -182,10 +191,10 @@ export const TOOL_CONFIGS: Record<string, ToolDisplayConfig> = {
     result: {
       type: 'collapsible',
       defaultOpen: false,
-      title: (result) => {
+      title: (result, t) => {
         const toolData = result.toolUseResult || {};
         const count = toolData.numFiles || toolData.filenames?.length || 0;
-        return `Found ${count} ${count === 1 ? 'file' : 'files'}`;
+        return t('tools.titles.foundFiles', { count });
       },
       contentType: 'file-list',
       getContentProps: (result) => {
@@ -215,10 +224,10 @@ export const TOOL_CONFIGS: Record<string, ToolDisplayConfig> = {
     result: {
       type: 'collapsible',
       defaultOpen: false,
-      title: (result) => {
+      title: (result, t) => {
         const toolData = result.toolUseResult || {};
         const count = toolData.numFiles || toolData.filenames?.length || 0;
-        return `Found ${count} ${count === 1 ? 'file' : 'files'}`;
+        return t('tools.titles.foundFiles', { count });
       },
       contentType: 'file-list',
       getContentProps: (result) => {
@@ -237,7 +246,7 @@ export const TOOL_CONFIGS: Record<string, ToolDisplayConfig> = {
   TodoWrite: {
     input: {
       type: 'collapsible',
-      title: 'Updating todo list',
+      title: (_input, t) => t('tools.titles.updatingTodoList'),
       defaultOpen: false,
       contentType: 'todo-list',
       getContentProps: (input) => ({
@@ -341,7 +350,7 @@ export const TOOL_CONFIGS: Record<string, ToolDisplayConfig> = {
     result: {
       type: 'collapsible',
       defaultOpen: true,
-      title: 'Task list',
+      title: (_result, t) => t('tools.titles.taskList'),
       contentType: 'task',
       getContentProps: (result) => ({
         content: String(result?.content || '')
@@ -364,7 +373,7 @@ export const TOOL_CONFIGS: Record<string, ToolDisplayConfig> = {
     result: {
       type: 'collapsible',
       defaultOpen: true,
-      title: 'Task details',
+      title: (_result, t) => t('tools.titles.taskDetails'),
       contentType: 'task',
       getContentProps: (result) => ({
         content: String(result?.content || '')
@@ -379,11 +388,7 @@ export const TOOL_CONFIGS: Record<string, ToolDisplayConfig> = {
   Task: {
     input: {
       type: 'collapsible',
-      title: (input) => {
-        const subagentType = input.subagent_type || 'Agent';
-        const description = input.description || 'Running task';
-        return `Subagent / ${subagentType}: ${description}`;
-      },
+      title: (input, t) => formatSubagentTitle(t, input?.subagent_type, input?.description),
       defaultOpen: false,
       contentType: 'markdown',
       getContentProps: (input) => {
@@ -425,7 +430,7 @@ export const TOOL_CONFIGS: Record<string, ToolDisplayConfig> = {
     },
     result: {
       type: 'collapsible',
-      title: 'Subagent result',
+      title: (_result, t) => t('tools.titles.subagentResult'),
       defaultOpen: false,
       contentType: 'markdown',
       getContentProps: (result) => {
@@ -495,7 +500,7 @@ export const TOOL_CONFIGS: Record<string, ToolDisplayConfig> = {
   exit_plan_mode: {
     input: {
       type: 'plan',
-      title: 'Implementation plan',
+      title: (_input, t) => t('tools.titles.implementationPlan'),
       defaultOpen: true,
       contentType: 'markdown',
       getContentProps: (input) => ({
@@ -511,7 +516,7 @@ export const TOOL_CONFIGS: Record<string, ToolDisplayConfig> = {
   ExitPlanMode: {
     input: {
       type: 'plan',
-      title: 'Implementation plan',
+      title: (_input, t) => t('tools.titles.implementationPlan'),
       defaultOpen: true,
       contentType: 'markdown',
       getContentProps: (input) => ({
@@ -530,7 +535,7 @@ export const TOOL_CONFIGS: Record<string, ToolDisplayConfig> = {
   Default: {
     input: {
       type: 'collapsible',
-      title: 'Parameters',
+      title: (_input, t) => t('tools.titles.parameters'),
       defaultOpen: false,
       contentType: 'text',
       getContentProps: (input) => ({
@@ -548,6 +553,10 @@ export const TOOL_CONFIGS: Record<string, ToolDisplayConfig> = {
     }
   }
 };
+
+// Claude Code renamed the delegation tool `Task` → `Agent`; both render the
+// same sub-agent card instead of falling back to the generic Default dump.
+TOOL_CONFIGS.Agent = TOOL_CONFIGS.Task;
 
 /**
  * Get configuration for a tool, with fallback to default

@@ -111,7 +111,11 @@
   "subagent": {
     "badge": "서브에이전트",
     "shortBadge": "서브에이전트",
-    "badgeLabel": "서브에이전트 작업"
+    "badgeLabel": "서브에이전트 작업",
+    "title": "하위 에이전트",
+    "titleWithType": "하위 에이전트 / {{type}}",
+    "titleWithTask": "{{prefix}}: {{description}}",
+    "backgroundLaunched": "에이전트가 백그라운드에서 시작됨"
   },
   "coordinator": {
     "label": "조율자",
@@ -148,7 +152,18 @@
     "readFile": "파일 읽기",
     "updateTodo": "Todo 리스트 업데이트",
     "readTodo": "Todo 리스트 읽기",
-    "searchResults": "결과"
+    "searchResults": "결과",
+    "titles": {
+      "parameters": "매개변수",
+      "details": "세부 정보",
+      "plan": "계획",
+      "taskDetails": "작업 세부 정보",
+      "subagentResult": "하위 에이전트 결과",
+      "updatingTodoList": "할 일 목록 업데이트 중",
+      "taskList": "작업 목록",
+      "implementationPlan": "구현 계획",
+      "foundFiles_other": "파일 {{count}}개 찾음"
+    }
   },
   "search": {
     "found": "{{count}}개의 {{type}} 발견",
@@ -674,5 +689,8 @@
   "inlineCode": {
     "copyLink": "링크 복사",
     "copyHint": "복사"
+  },
+  "agyMessage": {
+    "to": "{{name}}에게 보낸 메시지"
   }
 }

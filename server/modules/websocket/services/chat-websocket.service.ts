@@ -49,7 +49,7 @@ import { connectedClients, WS_OPEN_STATE } from '@/modules/websocket/services/we
 import { resolveQuestionRequest } from '@/modules/websocket/services/session-outcome.service.js';
 // Namespace import (not named imports) for the SAME reason as the database
 // barrel above: several unit tests module-mock this service with only the
-// members they exercise (`addSessionMirror` + `WebSocketWriter`). A static named
+// members they exercise (`setSocketViewMirror` + `WebSocketWriter`). A static named
 // import of a member such member-mocks omit fails ESM linking outright, whereas
 // a namespace binding is only dereferenced on the code path that uses it (the
 // socket-close mirror cleanup guards its call). The class is additionally
@@ -85,6 +85,10 @@ import { buildChatImageNote, saveChatImages } from '../../../services/chat-image
 // eslint-disable-next-line boundaries/no-unknown -- ADR-210: display masking is a leaf service shared by every viewer egress.
 import { createBtwDisplaySink, createDisplayReplaySink, maskPendingPermissionsFor } from '../../../services/display-secret-mask.js';
 import { reportWriterLeaseRefusal, withLocalUpdateWriterLease } from '../../../services/update-writer-lease.js';
+// eslint-disable-next-line boundaries/no-unknown -- ADR-H20 N2: the owner tier gate is one shared service for REST and realtime.
+import { ownerStepUpRequired } from '../../../services/sso-device-session.service.js';
+// eslint-disable-next-line boundaries/no-unknown -- ADR-H20 N2: the owner tier gate is one shared service for REST and realtime.
+import { OWNER_PRIVILEGED_CHAT_MESSAGES, OWNER_STEP_UP_REQUIRED_CODE } from '../../../services/owner-privileged-actions.js';
 // Top-level shared/ (compiled into dist-server/shared/) — the single source of
 // truth for globally disabled providers (T-864). Relative on purpose: the `@/`
 // alias maps to server/* only.
@@ -621,6 +625,48 @@ const COMMAND_TYPE_TO_PROVIDER: Record<string, LLMProvider> = {
   'qwen-command': 'qwen',
   'opencode-command': 'opencode',
 };
+
+/**
+ * ADR-H20 N2: the refusal for a chat message that would start or continue an
+ * agent turn from an owner's no-click SSO session without this browser's
+ * passkey step-up, or null when the message may proceed. `unicast` replies go
+ * to the requesting socket only (the /btw side channel).
+ */
+export function ownerStepUpChatRefusal(
+  messageType: string,
+  data: ChatIncomingMessage,
+  user: unknown,
+): { unicast: boolean; payload: unknown } | null {
+  if (!OWNER_PRIVILEGED_CHAT_MESSAGES.has(messageType)) return null;
+  const principal = user as { role?: string; tokenSid?: unknown } | undefined;
+  const refreshSid = typeof principal?.tokenSid === 'string' ? principal.tokenSid : null;
+  if (!ownerStepUpRequired({ role: principal?.role, refreshSid })) return null;
+  if (messageType === 'btw-query' || messageType === 'btw-fork') {
+    return {
+      unicast: true,
+      payload: {
+        type: 'btw-error',
+        btwId: typeof data.btwId === 'string' ? data.btwId : '',
+        code: OWNER_STEP_UP_REQUIRED_CODE,
+        message: 'Confirm with your passkey to continue.',
+      },
+    };
+  }
+  return {
+    unicast: false,
+    payload: createNormalizedMessage({
+      kind: 'complete',
+      provider: COMMAND_TYPE_TO_PROVIDER[messageType]
+        ?? (messageType === 'opencode-command' ? 'opencode' : 'cursor'),
+      exitCode: 1,
+      success: false,
+      code: OWNER_STEP_UP_REQUIRED_CODE,
+      error: 'Confirm with your passkey to continue.',
+      notStarted: true,
+      ...clientMsgIdEcho(data),
+    }),
+  };
+}
 
 /**
  * Reads the resume session id carried by a chat command payload. The client
@@ -2849,6 +2895,15 @@ export function handleChatConnection(
         return;
       }
 
+      // ADR-H20 N2: an owner's no-click SSO session starts or continues a turn
+      // only after this browser's passkey step-up. Nothing running is touched.
+      const ownerRefusal = ownerStepUpChatRefusal(messageType, data, request.user);
+      if (ownerRefusal) {
+        if (ownerRefusal.unicast) sendRawToThisSocket(ownerRefusal.payload);
+        else writer.send(ownerRefusal.payload);
+        return;
+      }
+
       // B-PRIV: refuse to start/resume a run inside a private project the
       // authenticated user is not a member of (404-equivalent over WS).
       const isSpawnMessage =
@@ -3788,7 +3843,9 @@ export function handleChatConnection(
           //     socket: swapping mid-run risks tool_use desync as before).
           //   isActive=true  + primarySocketAlive=false → SWAP (orphaned writer:
           //     SDK is already dropping to a dead socket; reclaiming it lets the
-          //     rest of the stream reach the reconnecting client safely).
+          //     rest of the stream reach the reconnecting client safely). B-1666:
+          //     the run owner's own sockets only — reconnectSessionWriter refuses
+          //     another member, who keeps the masked stream through its mirror.
           //   isActive=false + any                      → SWAP (idle session).
           // The orphaned-writer reclaim (the `!primarySocketAlive` extension) is
           // gated the SAME way as the replay above: isPrimarySocketAlive reports
@@ -3812,7 +3869,7 @@ export function handleChatConnection(
           // running BEFORE the writer-reclaim veto so an ACTIVE stream (the freeze
           // case) is caught up without any writer swap or run abort.
           // No-op when SESSION_REGISTRY_claude is off (returns lastSeq, sends
-          // nothing). The mirror registration below (addSessionMirror) still
+          // nothing). The mirror registration below (setSocketViewMirror) still
           // delivers FUTURE payloads; this replay closes the gap between socket
           // death and mirror registration.
           const rawLastSeq = typeof data.lastSeq === 'number' ? data.lastSeq : Number(data.lastSeq);
@@ -3852,8 +3909,14 @@ export function handleChatConnection(
         // FUTURE live payloads still fan out to every viewer exactly as before.
         // Unchanged otherwise: same predicate (`sessionId` truthy), same
         // read-only semantics, never touches the active writer (no-swap veto).
+        //
+        // B-1666 #5 contract: check-session-status names the session now ON
+        // SCREEN for this socket (the client sends it on every view change and
+        // reconnect), so this socket's mirror moves to it instead of piling up.
+        // Returning to an earlier session re-sends it: claude/agy replay
+        // seq > lastSeq above, codex/opencode recover through the history path.
         if (sessionId) {
-          websocketWriterService.addSessionMirror(sessionId, ws as RealtimeClientConnection);
+          websocketWriterService.setSocketViewMirror(sessionId, ws as RealtimeClientConnection);
         }
 
         // T-1903 (E2E): a viewer joining a LIVE run — even a brand-new session's

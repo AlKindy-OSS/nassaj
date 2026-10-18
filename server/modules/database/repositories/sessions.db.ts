@@ -390,10 +390,11 @@ export const sessionsDb = {
   getSessionsByProjectPathPage(projectPath: string, limit: number, offset: number): SessionRow[] {
     const db = getConnection();
     const normalizedProjectPath = normalizeProjectPath(projectPath);
-    // Sidebar order: newest-created first (creation date, NOT last activity).
-    // `created_at` comes from the session's first transcript timestamp /
-    // file birthtime at index time and never changes on upsert, so pagination
-    // pages stay stable while a session is active.
+    // Sidebar order: most recent activity first (B-1668, the owner's request;
+    // it reverses the creation order of 106cd7482). `julianday`, not
+    // `datetime`: datetime() drops the milliseconds the timestamps carry, and
+    // the client comparator (compareSessionRecency) orders by milliseconds —
+    // both sides must place every row identically for the paging boundary.
     return db
       .prepare(
         `SELECT ${SESSION_ROW_COLUMNS_SQL}
@@ -401,7 +402,7 @@ export const sessionsDb = {
          WHERE project_path = ?
            AND isArchived = 0
            AND ${NATIVE_SESSION_PREDICATE_SQL}
-         ORDER BY datetime(COALESCE(created_at, updated_at)) DESC, session_id DESC
+         ORDER BY julianday(COALESCE(updated_at, created_at)) DESC, session_id DESC
          LIMIT ? OFFSET ?`
       )
       .all(normalizedProjectPath, limit, offset) as SessionRow[];
@@ -425,10 +426,32 @@ export const sessionsDb = {
          WHERE sessions.project_path = ?
            AND sessions.isArchived = 0
            AND ${NATIVE_SESSION_PREDICATE_SQL}
-         ORDER BY datetime(COALESCE(sessions.created_at, sessions.updated_at)) DESC,
+         ORDER BY julianday(COALESCE(sessions.updated_at, sessions.created_at)) DESC,
                   sessions.session_id DESC`
       )
       .all(userId, normalizedProjectPath) as SessionRow[];
+  },
+
+  /**
+   * Creation time of a project's newest active, native session (project "date"
+   * order in the sidebar). The session pages are ordered by activity, so the
+   * newest-created row need not be on page one; null for an empty project.
+   */
+  getNewestSessionCreatedAtByProjectPath(projectPath: string): string | null {
+    const db = getConnection();
+    const row = db
+      .prepare(
+        `SELECT COALESCE(created_at, updated_at) AS createdAt
+         FROM sessions
+         WHERE project_path = ?
+           AND isArchived = 0
+           AND ${NATIVE_SESSION_PREDICATE_SQL}
+         ORDER BY julianday(COALESCE(created_at, updated_at)) DESC, session_id DESC
+         LIMIT 1`
+      )
+      .get(normalizeProjectPath(projectPath)) as { createdAt: string | null } | undefined;
+
+    return row?.createdAt ?? null;
   },
 
   /**
@@ -454,7 +477,7 @@ export const sessionsDb = {
            AND sessions.isArchived = 0
            AND ${NATIVE_SESSION_PREDICATE_SQL}
            AND starred_sessions.session_id IS NULL
-         ORDER BY datetime(COALESCE(sessions.created_at, sessions.updated_at)) DESC,
+         ORDER BY julianday(COALESCE(sessions.updated_at, sessions.created_at)) DESC,
                   sessions.session_id DESC
          LIMIT ? OFFSET ?`
       )

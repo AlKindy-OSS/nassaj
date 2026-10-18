@@ -50,7 +50,10 @@ import {
   clearConnectorOwnerAuthentication,
   recordConnectorOwnerAuthentication,
 } from '../modules/connectors/connector-owner-auth-session.js';
-import { ssoState } from '../services/sso-config.service.js';
+import { ssoLoginAvailable, ssoState } from '../services/sso-config.service.js';
+import { activeSsoClient } from '../services/sso-oidc-runtime.service.js';
+import { forgetSsoDeviceSession, ssoDeviceSessionOf } from '../services/sso-device-session.service.js';
+import { endSessionUrlFor, readSsoLinkedSettings } from '../services/sso-linked-settings.service.js';
 import { isUsernameAvailable } from '../services/username-policy.js';
 import {
   localAccountCreationClosed,
@@ -465,6 +468,8 @@ router.get('/status', async (req, res) => {
       isAuthenticated: false,
       ssoState: state,
       ssoLoginAvailable: state === 'active',
+      // ADR-H20 N1: send an unauthenticated visit straight to the IdP.
+      ssoAutoSignIn: state === 'active' && readSsoLinkedSettings().autoSignIn === true,
       deviceAccountSessionsEnabled: multiAccountSwitchingEnabled(),
     });
   } catch (error) {
@@ -797,6 +802,8 @@ function deviceRevocationExpiry(presentedExpiresAtMs, nowMs = Date.now()) {
 function signOutDeviceSession(userId, sid, presentedExpiresAtMs) {
   revokeTokenSession({ sid, userId, expiresAt: deviceRevocationExpiry(presentedExpiresAtMs) });
   authMiddleware.invalidateRefreshCacheForSession?.(userId, sid);
+  // ADR-H20: the SSO binding (and any owner privileged grant) ends with it.
+  forgetSsoDeviceSession(sid);
 }
 
 /** Records the sign-out in the auth timeline (T-182). Best-effort. */
@@ -817,7 +824,7 @@ function auditLogout(req, userId, scope) {
  * epoch and session) and used for nothing but its own revocation. Every other
  * request passes to the normal path untouched.
  */
-const logoutRecentlyExpiredBearer = (req, res, next) => {
+const logoutRecentlyExpiredBearer = async (req, res, next) => {
   const authHeader = req.headers.authorization;
   const token = typeof authHeader === 'string' && authHeader.startsWith('Bearer ')
     ? authHeader.slice(7) : null;
@@ -833,8 +840,10 @@ const logoutRecentlyExpiredBearer = (req, res, next) => {
       || !authMiddleware.tokenSessionCurrent(decoded, user, token)) {
     return res.status(401).json({ error: 'Token invalidated' });
   }
+  const refreshSid = authMiddleware.refreshSidOf(decoded, token);
+  const endSessionUrl = await endSessionUrlForSignOut(refreshSid);
   try {
-    signOutDeviceSession(user.id, authMiddleware.refreshSidOf(decoded, token), decoded.exp * 1000);
+    signOutDeviceSession(user.id, refreshSid, decoded.exp * 1000);
   } catch (error) {
     console.error('[ERROR] Sign-out revocation failed', {
       userId: user.id,
@@ -843,10 +852,28 @@ const logoutRecentlyExpiredBearer = (req, res, next) => {
     return res.status(500).json({ error: 'Internal server error' });
   }
   auditLogout(req, user.id, 'device');
-  return res.json({ success: true, message: 'Logged out successfully', scope: 'device' });
+  return res.json({
+    success: true, message: 'Logged out successfully', scope: 'device', ...(endSessionUrl ? { endSessionUrl } : {}),
+  });
 };
 
-router.post('/logout', logoutRecentlyExpiredBearer, authenticateToken, walletMutationGuard, (req, res) => {
+/**
+ * ADR-H20 N4: for an SSO device session, the IdP end_session URL the SPA
+ * navigates to after this sign-out (null for a password session or when SSO
+ * is unavailable). Read before the binding is forgotten.
+ */
+async function endSessionUrlForSignOut(refreshSid) {
+  let bound = false;
+  try {
+    bound = Boolean(ssoDeviceSessionOf(refreshSid));
+  } catch {
+    bound = false;
+  }
+  if (!bound) return null;
+  return endSessionUrlFor(ssoLoginAvailable() ? activeSsoClient() : null);
+}
+
+router.post('/logout', logoutRecentlyExpiredBearer, authenticateToken, walletMutationGuard, async (req, res) => {
   if (req.devicePrincipal) {
     const expectedGeneration = req.body?.expectedGeneration;
     if (!validGeneration(expectedGeneration)) return res.status(400).json({ error: 'Invalid request' });
@@ -866,6 +893,7 @@ router.post('/logout', logoutRecentlyExpiredBearer, authenticateToken, walletMut
   // never reported.
   // Platform mode authenticates no bearer, so there is no session to end.
   const session = req.tokenSession;
+  const endSessionUrl = session ? await endSessionUrlForSignOut(session.refreshSid) : null;
   if (session) {
     try {
       signOutDeviceSession(req.user.id, session.refreshSid, session.expiresAtMs);
@@ -882,7 +910,7 @@ router.post('/logout', logoutRecentlyExpiredBearer, authenticateToken, walletMut
   res.removeHeader('X-Refreshed-Token');
   auditLogout(req, req.user.id, scope);
   clearConnectorOwnerAuthentication(req, res, req.user.id);
-  res.json({ success: true, message: 'Logged out successfully', scope });
+  res.json({ success: true, message: 'Logged out successfully', scope, ...(endSessionUrl ? { endSessionUrl } : {}) });
 });
 
 router.post('/logout-all', walletAuth, walletCsrf('logout_all'), (req,res) => {

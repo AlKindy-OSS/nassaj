@@ -8,8 +8,8 @@ import { sessionSynchronizerService } from '@/modules/providers/index.js';
 import { WS_OPEN_STATE, connectedClients } from '@/modules/websocket/index.js';
 import type { RealtimeClientConnection } from '@/shared/types.js';
 import { AppError } from '@/shared/utils.js';
-// eslint-disable-next-line boundaries/no-unknown -- ADR-210: display masking is a leaf service shared by every viewer egress.
-import { maskDisplayLabel } from '@/services/display-secret-mask.js';
+// eslint-disable-next-line boundaries/no-unknown -- ADR-210/B-1668: the one display-title pipeline shared by every viewer egress.
+import { displaySessionTitle } from '@/services/session-title-text.js';
 
 import type { SessionOutcome } from '../../../../shared/session-outcome.js';
 import {
@@ -49,9 +49,9 @@ export type SessionParticipantSummary = {
 type SessionSummary = {
   id: string;
   summary: string;
-  messageCount: number;
   // Creation timestamp (first transcript timestamp / file birthtime at index
-  // time). The sidebar orders sessions by this, newest first — not by activity.
+  // time). Projects in "date" order use it; sessions are ordered by
+  // `lastActivity` (B-1668).
   createdAt: string | null;
   lastActivity: string;
   owner: SessionOwner | null;
@@ -90,6 +90,17 @@ type SessionSummary = {
  * the restating is what silently dropped hermes/kimi/glm rows (B-598).
  */
 type SessionBucketsPayload = SessionBuckets<SessionSummary>;
+
+/**
+ * Paging state of one project's session list. `hasMore` is authoritative for
+ * the client's "load more"; `newestCreatedAt` orders projects in "date" mode,
+ * because the activity-ordered pages need not hold the newest-created row.
+ */
+type SessionPageMeta = {
+  hasMore: boolean;
+  total: number;
+  newestCreatedAt?: string | null;
+};
 
 type SessionRepositoryRow = {
   provider: string;
@@ -140,10 +151,7 @@ export type ProjectListItem = {
   dirExists: boolean | null;
   /** Timestamp of the last conclusive directory probe; null while unknown. */
   metadataCheckedAt: string | null;
-  sessionMeta: {
-    hasMore: boolean;
-    total: number;
-  };
+  sessionMeta: SessionPageMeta;
 } & SessionBucketsPayload;
 
 export type ArchivedProjectListItem = ProjectListItem & {
@@ -187,14 +195,12 @@ type ProjectSessionsPageResult = {
   sessionBuckets: SessionBucketsPayload;
   total: number;
   hasMore: boolean;
+  newestCreatedAt?: string | null;
 };
 
 export type ProjectSessionsPageApiView = {
   projectId: string;
-  sessionMeta: {
-    hasMore: boolean;
-    total: number;
-  };
+  sessionMeta: SessionPageMeta;
 } & SessionBucketsPayload;
 
 /**
@@ -282,9 +288,8 @@ function mapSessionRowToSummary(
 ): SessionSummary {
   return {
     id: row.session_id,
-    // ADR-210 (T-2036): a title derived from a first message may carry a pasted credential.
-    summary: maskDisplayLabel(row.custom_name || ''),
-    messageCount: 0,
+    // ADR-210 + B-1668: injected blocks out, masked, markdown out — the one display title.
+    summary: displaySessionTitle(row.custom_name),
     createdAt: row.created_at ?? null,
     lastActivity: row.updated_at ?? row.created_at ?? new Date().toISOString(),
     owner,
@@ -500,6 +505,7 @@ function readProjectSessionsPageByPath(
       sessionBuckets: bucketSessionRowsByProvider(rows, currentUserId),
       total,
       hasMore: pagination.offset + rows.length < total,
+      newestCreatedAt: sessionsDb.getNewestSessionCreatedAtByProjectPath(projectPath),
     };
   }
 
@@ -531,6 +537,7 @@ function readProjectSessionsPageByPath(
     sessionBuckets: bucketSessionRowsByProvider(rows, currentUserId),
     total,
     hasMore: unstarredOffset + unstarredRows.length < unstarredTotal,
+    newestCreatedAt: sessionsDb.getNewestSessionCreatedAtByProjectPath(projectPath),
   };
 }
 
@@ -749,6 +756,7 @@ export async function getProjectsWithSessions(
       ...sessionsPage.sessionBuckets,
       sessionMeta: {
         hasMore: sessionsPage.hasMore,
+        newestCreatedAt: sessionsPage.newestCreatedAt ?? null,
         total: sessionsPage.total,
       },
     });
@@ -871,6 +879,7 @@ export async function getProjectSessionsPage(
     ...sessionsPage.sessionBuckets,
     sessionMeta: {
       hasMore: sessionsPage.hasMore,
+      newestCreatedAt: sessionsPage.newestCreatedAt ?? null,
       total: sessionsPage.total,
     },
   };

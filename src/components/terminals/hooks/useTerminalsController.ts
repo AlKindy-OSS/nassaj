@@ -62,6 +62,14 @@ export type UseTerminalsControllerResult = {
   deleteTerminal: (id: string) => Promise<boolean>;
 };
 
+export type UseTerminalsControllerOptions = {
+  /**
+   * B-1669: false for a user who may not use terminals (see canUseTerminals).
+   * Nothing is requested, the state is cleared, and mutations are no-ops.
+   */
+  enabled?: boolean;
+};
+
 /**
  * Owns the standalone-terminals list plus CRUD (T-939). Single source of truth:
  * one instance is mounted high in the tree (AppContent) and shared by the
@@ -69,12 +77,19 @@ export type UseTerminalsControllerResult = {
  * is refetched after every mutation and on `exited` (the connection hook calls
  * `refresh`); there are no WS list broadcasts.
  */
-export function useTerminalsController(): UseTerminalsControllerResult {
+export function useTerminalsController(
+  { enabled = true }: UseTerminalsControllerOptions = {},
+): UseTerminalsControllerResult {
   const { t } = useTranslation('terminals');
   const [terminals, setTerminals] = useState<TerminalSummary[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(enabled);
   const [error, setError] = useState<string | null>(null);
   const [createError, setCreateError] = useState<TerminalActionError | null>(null);
+  // Read after each await so a list that lands after disabling is dropped.
+  const enabledRef = useRef(enabled);
+  useEffect(() => {
+    enabledRef.current = enabled;
+  }, [enabled]);
 
   // Keep the latest list length available to createTerminal without adding it to
   // the callback deps (which would rebuild the memoized handler on every list
@@ -85,30 +100,49 @@ export function useTerminalsController(): UseTerminalsControllerResult {
   }, [terminals]);
 
   const refresh = useCallback(async () => {
+    if (!enabled) return;
     try {
       const response = await authenticatedFetch(TERMINALS_ENDPOINT);
+      if (!enabledRef.current) return;
+      if (response.status === 403) {
+        // The role changed mid-session: the server gate answered, not a fault.
+        setTerminals([]);
+        setError(t('errors.loadFailed'));
+        return;
+      }
       if (!response.ok) {
         throw new Error(`Failed to load terminals: ${response.status}`);
       }
       const payload = (await response.json()) as TerminalListResponse;
+      if (!enabledRef.current) return;
       setTerminals(Array.isArray(payload.terminals) ? payload.terminals : []);
       setError(null);
     } catch (caught) {
       console.error('[Terminals] Failed to load list:', caught);
       setError(t('errors.loadFailed'));
     } finally {
-      setIsLoading(false);
+      if (enabledRef.current) setIsLoading(false);
     }
-  }, [t]);
+  }, [enabled, t]);
 
   useEffect(() => {
-    void refresh();
-  }, [refresh]);
+    if (enabled) {
+      setIsLoading(true);
+      void refresh();
+      return;
+    }
+    // A user who lost access (sign-out, account switch) never sees the last list.
+    setTerminals([]);
+    setError(null);
+    setCreateError(null);
+    setIsLoading(false);
+  }, [enabled, refresh]);
 
   const clearCreateError = useCallback(() => setCreateError(null), []);
 
   const createTerminal = useCallback(
     async (input?: TerminalCreateInput): Promise<TerminalSummary | null> => {
+      if (!enabled) return null;
       setCreateError(null);
 
       // Localized default title so the server's English fallback is never shown.
@@ -145,13 +179,13 @@ export function useTerminalsController(): UseTerminalsControllerResult {
         return null;
       }
     },
-    [refresh, t],
+    [enabled, refresh, t],
   );
 
   const renameTerminal = useCallback(
     async (id: string, title: string): Promise<boolean> => {
       const trimmed = title.trim();
-      if (!trimmed) {
+      if (!enabled || !trimmed) {
         return false;
       }
 
@@ -173,11 +207,12 @@ export function useTerminalsController(): UseTerminalsControllerResult {
         return false;
       }
     },
-    [refresh, t],
+    [enabled, refresh, t],
   );
 
   const deleteTerminal = useCallback(
     async (id: string): Promise<boolean> => {
+      if (!enabled) return false;
       try {
         const response = await authenticatedFetch(`${TERMINALS_ENDPOINT}/${encodeURIComponent(id)}`, {
           method: 'DELETE',
@@ -195,7 +230,7 @@ export function useTerminalsController(): UseTerminalsControllerResult {
         return false;
       }
     },
-    [refresh, t],
+    [enabled, refresh, t],
   );
 
   return {

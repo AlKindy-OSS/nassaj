@@ -1,5 +1,5 @@
 import React, { Suspense, useCallback, useContext, useEffect, useId, useMemo, useRef, useState } from 'react';
-import ReactMarkdown from 'react-markdown';
+import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
@@ -11,6 +11,8 @@ import { Copy, ExternalLink } from 'lucide-react';
 
 import { codeHighlightTheme } from '../../../../syntax/codeHighlightTheme';
 import { useCodeHighlighter } from '../../../../syntax/useCodeHighlighter';
+import { exceedsHighlightBudget } from '../../../../syntax/highlightBudget';
+import { PlainCodeBlock } from '../../../../syntax/PlainCodeBlock';
 import { normalizeInlineCodeFences } from '../../utils/chatFormatting';
 import { copyTextToClipboard } from '../../../../utils/clipboard';
 import {
@@ -40,7 +42,7 @@ import {
 import {
   classifyImageSrc,
   parseFenceBody,
-  buildAssistantImageUrl,
+  resolveAssistantImage,
   resolveAssistantImageError,
 } from '../../utils/assistantImageSrc';
 import DocumentShareButton from '../../../document-sharing/DocumentShareButton';
@@ -218,62 +220,54 @@ function resolveInsertError(
  *
  * مسؤوليات:
  * 1. تحليل الجسم (parseFenceBody) → مصدر + caption.
- * 2. تصنيف المصدر (classifyImageSrc) → نوع الجلب.
- * 3. بناء URL الجلب المناسب للنوع.
- * 4. تفويض العرض والـlightbox إلى ChatMessageImage.
- * 5. حالات الخطأ المرئية للأنواع المرفوضة (remote/empty).
+ * 2. تصنيف المصدر وبناء URL الجلب (resolveAssistantImage) — القرار نفسه لصورة Markdown.
+ * 3. تفويض العرض والـlightbox إلى ChatMessageImage.
+ * 4. حالات الخطأ المرئية للأنواع المرفوضة (remote/empty).
  *
  * `sessionId` يصل عبر ChatActionsContext لتجنّب prop-drilling.
  */
 const AssistantImageBlock = ({ raw }: { raw: string }) => {
   const { sessionId } = useChatActions();
   const { source, caption } = parseFenceBody(raw);
-  const kind = classifyImageSrc(source);
+  const resolved = resolveAssistantImage(source, sessionId);
+  if (!resolved.ok) return <InlineImageError message={resolved.message} />;
 
   // basename للـalt الافتراضي (آخر مقطع من المسار أو النصّ كاملاً)
-  const defaultAlt = source.split('/').filter(Boolean).pop() ?? source;
-  const alt = defaultAlt || 'image';
+  const alt = source.split('/').filter(Boolean).pop() || 'image';
+  return <AssistantImageDisplay src={resolved.src} alt={alt} caption={caption} />;
+};
 
-  // حالة المصدر الفارغ
-  if (kind === 'empty') {
-    return (
-      <InlineImageError message="طلب صورة غير صالح" />
-    );
-  }
-
-  // الروابط البعيدة معطَّلة في المرحلة الأولى (§4 من التصميم)
-  if (kind === 'remote') {
-    return (
-      <InlineImageError message="الروابط البعيدة معطّلة" />
-    );
-  }
-
-  // data: يُمرَّر مباشرةً
-  if (kind === 'data') {
-    return (
-      <AssistantImageDisplay src={source} alt={alt} caption={caption} />
-    );
-  }
-
-  // /api/... يُمرَّر مباشرةً (authenticatedFetch داخل ChatMessageImage)
-  if (kind === 'api') {
-    return (
-      <AssistantImageDisplay src={source} alt={alt} caption={caption} />
-    );
-  }
-
-  // مسار مطلق محلي — يحتاج sessionId لبناء URL نقطة النهاية
-  // kind === 'path'
-  if (!sessionId) {
-    return (
-      <InlineImageError message={resolveAssistantImageError(400)} />
-    );
-  }
-  const apiUrl = buildAssistantImageUrl(source, sessionId);
+/**
+ * B-1667: صورة Markdown العادية `![alt](src)` في رسائل المساعد وبطاقات الأدوات.
+ * بلا هذا العارض كانت react-markdown تُصيِّر `<img src>` عارياً، فيطلب متصفح كل
+ * مشاهد الرابط البعيد ويكشف عنوانه وما يُحشى في الرابط من بيانات. القرار نفسه
+ * لسياج `image`: البعيد وغير المسموح خطأ مرئي، والمحلي يمرّ بالجلب المصادَق.
+ */
+const MarkdownImage = ({ src, alt }: { src?: unknown; alt?: string }) => {
+  const { sessionId } = useChatActions();
+  const resolved = resolveAssistantImage(typeof src === 'string' ? src : '', sessionId);
+  if (!resolved.ok) return <InlineImageError message={resolved.message} />;
   return (
-    <AssistantImageDisplay src={apiUrl} alt={alt} caption={caption} />
+    <ChatMessageImage
+      src={resolved.src}
+      alt={alt}
+      showLoadError
+      loadErrorMessageFor={resolveAssistantImageError}
+      objectFit="contain"
+    />
   );
 };
+
+/** يمنع أي مصدر صورة غير محلي قبل أن يصل إلى أي عارض (دفاع في العمق، B-1667). */
+const BLOCKED_IMAGE_SRC = 'about:blank#remote-image-blocked';
+
+function markdownUrlTransform(url: string, key: string, node: { tagName?: string }): string {
+  if (node.tagName !== 'img' || key !== 'src') return defaultUrlTransform(url);
+  const kind = classifyImageSrc(url);
+  if (kind === 'remote') return BLOCKED_IMAGE_SRC;
+  // data: لا يلمس الشبكة؛ المحوِّل الافتراضي كان يُفرغه فيضيع المرفق.
+  return kind === 'data' ? url : defaultUrlTransform(url);
+}
 
 /** غلاف بسيط يجمع ChatMessageImage مع caption اختياري. */
 const AssistantImageDisplay = ({
@@ -778,6 +772,8 @@ const CodeBlock = ({ node, inline, className, children, ...props }: CodeBlockPro
     : raw;
 
   const highlightLang = isExecBlock ? 'bash' : displayLang;
+  // كتلة ضخمة تُعرَض نصّاً بنفس الإطار: التلوين يجمّد الخيط الرئيس (src/syntax/highlightBudget)
+  const CodeRenderer = exceedsHighlightBudget(syntaxContent) ? PlainCodeBlock : SyntaxHighlighter;
 
   /*
    * B-274 — إزاحات فيزيائية داخل جزيرة LTR، لا منطقية. الكود دائماً LTR ولذلك
@@ -1005,7 +1001,7 @@ const CodeBlock = ({ node, inline, className, children, ...props }: CodeBlockPro
         </button>
       </div>
 
-      <SyntaxHighlighter
+      <CodeRenderer
         language={highlightLang}
         style={codeHighlightTheme}
         customStyle={{
@@ -1030,7 +1026,7 @@ const CodeBlock = ({ node, inline, className, children, ...props }: CodeBlockPro
         }}
       >
         {syntaxContent}
-      </SyntaxHighlighter>
+      </CodeRenderer>
 
       {/* ── نتيجة محاولة الإدراج (تحت الكتلة) ────────────────────────────
           B-261: أحمر و role=alert للعطل وحده. الرفض المتعمَّد كهرماني وrole=status
@@ -1254,6 +1250,7 @@ const markdownComponents = {
     'border border-border px-3 py-2 align-top text-sm'
   ),
   a: ProjectFileLink,
+  img: MarkdownImage,
   table: SortableTable,
   thead: ({ children }: { children?: React.ReactNode }) => (
     <thead className="bg-muted">{children}</thead>
@@ -1299,6 +1296,7 @@ export function Markdown({ children, className, streaming = false }: MarkdownPro
             remarkPlugins={remarkPlugins}
             rehypePlugins={rehypePlugins}
             components={markdownComponents as any}
+            urlTransform={markdownUrlTransform}
           >
             {content}
           </ReactMarkdown>

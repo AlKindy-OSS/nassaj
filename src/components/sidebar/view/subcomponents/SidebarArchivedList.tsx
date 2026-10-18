@@ -6,7 +6,8 @@ import { cn } from '../../../../lib/utils';
 import SessionProviderLogo from '../../../llm-logo-provider/SessionProviderLogo';
 import type { ArchivedSessionListItem } from '../../types/types';
 import type { BulkSelectionKind } from '../../hooks/useSidebarController';
-import { formatCompactArchivedAge, type ArchivedFolder, type ArchivedFolderSession } from '../../utils/archivedFolders';
+import type { ArchivedFolder, ArchivedFolderSession } from '../../utils/archivedFolders';
+import { formatCompactAge } from '../../utils/sessionAge';
 
 type BulkProps = {
   bulkSelectionKind: BulkSelectionKind | null;
@@ -49,7 +50,7 @@ function folderHeaderSurface(isProjectArchived: boolean, isExpanded: boolean): s
 type SessionRowProps = BulkProps & ArchivedActions & { session: ArchivedFolderSession; t: TFunction };
 
 function ArchivedSessionRow({ session, bulkSelectionKind, bulkSelectedIds, onToggleBulkId, t, ...actions }: SessionRowProps) {
-  const age = formatCompactArchivedAge(session.lastActivity);
+  const age = formatCompactAge(session.lastActivity, Date.now(), t);
   return (
     <div data-archived-session-row className="sidebar-project-session-row group relative">
       <div className="sidebar-project-session-content relative flex min-w-0 items-center gap-1 px-2 py-1.5 transition-colors duration-150 group-hover:bg-[var(--project-hover,hsl(var(--foreground)/0.04))]">
@@ -70,7 +71,7 @@ function ArchivedSessionRow({ session, bulkSelectionKind, bulkSelectedIds, onTog
           <span className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-md bg-muted/50">
             <SessionProviderLogo provider={session.provider} className="h-3 w-3" />
           </span>
-          <span dir="auto" title={session.sessionTitle} className="min-w-0 truncate text-xs font-medium text-[color:var(--project-foreground,hsl(var(--foreground)))]">
+          <span dir="auto" title={session.sessionTitle} className="line-clamp-1 min-w-0 break-words text-xs font-medium text-[color:var(--project-foreground,hsl(var(--foreground)))]">
             {session.sessionTitle}
           </span>
           {age && (

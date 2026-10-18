@@ -18,6 +18,7 @@ import type {
 import { resolveServerErrorMessage } from '../../utils/serverErrorMessage';
 import { formatUsageLimitText } from '../../utils/chatFormatting';
 import { parseChoices } from '../../utils/parseChoices';
+import { extractAgyTextToolCalls } from '../../utils/agyTextToolCall';
 import { resolveTextDirection } from '../../../../utils/textDirection';
 import { ToolRenderer, shouldHideToolResult } from '../../tools';
 import { Tooltip } from '../../../../shared/view/ui';
@@ -28,6 +29,7 @@ import SteerBubble from '../../../session-steer/SteerBubble';
 import { useTurnCostMap } from '../../context/TurnCostContext';
 
 import { Markdown } from './Markdown';
+import AgyTextToolCalls from './AgyTextToolCalls';
 import ChatMessageImage from './ChatMessageImage';
 import MessageCopyControl from './MessageCopyControl';
 import QuickReplies from './QuickReplies';
@@ -297,6 +299,14 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, o
     () => (isPrimaryAssistantText ? parseChoices(formattedMessageContent) : null),
     [isPrimaryAssistantText, formattedMessageContent],
   );
+  // B-1665: agy `send_message(...)` written as reply text → cards. Decided by the
+  // provider of THIS row (a session can change provider mid-way), not the session's.
+  const agyTextCalls = useMemo(() => {
+    if (!isPrimaryAssistantText || message.isStreaming) return null;
+    if ((message.provider ?? provider) !== 'antigravity') return null;
+    const extracted = extractAgyTextToolCalls(parsedChoices ? parsedChoices.body : formattedMessageContent);
+    return extracted.calls.length > 0 ? extracted : null;
+  }, [isPrimaryAssistantText, message.isStreaming, message.provider, provider, parsedChoices, formattedMessageContent]);
   const showForkAction = isPrimaryAssistantText && onForkFromMessage !== undefined;
   const forkDisabledReason = !getProviderCapabilities(provider).messageFork?.supported
     ? t('messageFork.errors.unsupported_provider')
@@ -788,12 +798,12 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, o
             ) : message.isToolUse ? (
               <>
                 {/*
-                 * Sub-agent badge: any `Task` tool call delegates to a child
-                 * agent (subagent). Surfaced as a small pill so the user can
-                 * tell the work is being done by a delegated agent rather
-                 * than the primary model.
+                 * Sub-agent badge: a delegation container (`Task`, its rename
+                 * `Agent`, or any row carrying the neutral `subagent` record)
+                 * hands work to a child agent. Surfaced as a small pill so the
+                 * user can tell the work is done by a delegated agent.
                  */}
-                {message.toolName === 'Task' && (
+                {message.isSubagentContainer && (
                   <div className="mb-1.5 flex">
                     {coordinatorParticipant && coordinatorParticipant.username && coordinatorColorClass ? (
                       /* Sub-agent launched within a coordinator's run: tint the
@@ -831,7 +841,9 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, o
                   </div>
                 </div>
 
-                {message.toolInput && (
+                {/* B-1665: a container still renders while its input is deferred
+                    (light history); its title then comes from `subagent`. */}
+                {(message.toolInput || message.isSubagentContainer) && (
                   <ToolRenderer
                     toolName={message.toolName || 'UnknownTool'}
                     toolInput={message.toolInput}
@@ -846,10 +858,13 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, o
                     rawToolInput={typeof message.toolInput === 'string' ? message.toolInput : undefined}
                     isSubagentContainer={message.isSubagentContainer}
                     subagentState={message.subagentState}
+                    subagent={message.subagent}
                   />
                 )}
 
-                {hasDeferredTool && !message.toolInput && !message.toolResult && (
+                {/* B-1665: the explicit deferral marker decides, not the absence
+                    of a result — a completed tool usually has its result here. */}
+                {hasDeferredTool && !message.toolInput && (
                   <button
                     type="button"
                     onClick={onRequestDeferredHistory}
@@ -860,7 +875,12 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, o
                 )}
 
                 {/* Tool Result Section */}
-                {message.toolResult && !shouldHideToolResult(message.toolName || 'UnknownTool', message.toolResult) && (
+                {message.backgroundAgentAck ? (
+                  <div className="mt-1 inline-flex w-fit items-center gap-1.5 rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground">
+                    <span className="h-1.5 w-1.5 rounded-full bg-purple-500 dark:bg-purple-400" aria-hidden="true" />
+                    {t('subagent.backgroundLaunched')}
+                  </div>
+                ) : message.toolResult && !shouldHideToolResult(message.toolName || 'UnknownTool', message.toolResult) && (
                   message.toolResult.isError ? (
                     // Error results - red error box with content
                     <div
@@ -892,6 +912,8 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, o
                         createDiff={createDiff}
                         selectedProject={selectedProject}
                         autoExpandTools={autoExpandTools}
+                        isSubagentContainer={message.isSubagentContainer}
+                        subagentState={message.subagentState}
                       />
                     </div>
                   )
@@ -1022,7 +1044,7 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, o
                             <span className="font-medium">{t('json.response')}</span>
                           </div>
                           <div className="overflow-hidden rounded-lg border border-gray-600/30 bg-gray-800 dark:border-gray-700 dark:bg-gray-900">
-                            <pre className="overflow-x-auto p-4">
+                            <pre dir="ltr" className="overflow-x-auto p-4">
                               <code className="block whitespace-pre font-mono text-sm text-gray-100 dark:text-gray-200">
                                 {formatted}
                               </code>
@@ -1045,8 +1067,9 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, o
                         className="prose prose-sm prose-gray max-w-none dark:prose-invert"
                         streaming={message.isStreaming === true}
                       >
-                        {parsedChoices ? parsedChoices.body : content}
+                        {agyTextCalls ? agyTextCalls.body : parsedChoices ? parsedChoices.body : content}
                       </Markdown>
+                      {agyTextCalls && <AgyTextToolCalls calls={agyTextCalls.calls} />}
                       {parsedChoices && !message.isStreaming && (
                         <QuickReplies choices={parsedChoices.choices} onSelect={quickReplyEligible ? onQuickReply : undefined} />
                       )}

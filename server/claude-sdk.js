@@ -27,7 +27,7 @@ import { engineProviderLabel } from '../shared/engineProviders.js';
 
 import { claudeDelegationProfile, prepareClaudeReviewedDelegation } from './services/claude-delegation-admission.js';
 import { evaluatePublicPageWrite } from './services/public-page-agent-guidance.js';
-import { restoreMaskedUpdatedInput } from './services/display-secret-mask.js';
+import { isSameUser, restoreMaskedUpdatedInput } from './services/display-secret-mask.js';
 import { claudeTextPayloadHash, createClaudeReceiptPrompt, isTrustedClaudeActivity } from './modules/providers/list/claude/claude-receipt-identity.js';
 import {
   createClaudeProgressFold, claudeNotifiedTasks, claudeSettlements,
@@ -3011,14 +3011,18 @@ async function loadMcpConfig(cwd, configDir) {
  * starter may answer it (`_starterOnly`). No live socket, a closed socket, a
  * timeout or a cancellation all end in a deny.
  *
- * The prompt is bound to the starter's raw socket captured at RUN START. A
- * reconnect (new tab, page refresh) does not move it: the old socket's close
- * settles it as offline and the tool is denied — a safe deny, never an allow.
+ * The prompt is bound to the starter's raw socket captured at RUN START (this
+ * factory runs inside armSteerRun). A reconnect (new tab, page refresh) does
+ * not move it: the old socket's close settles it as offline and the tool is
+ * denied — a safe deny, never an allow. B-1666: it was read at question time,
+ * so after a writer reclaim the raw, unmasked tool input reached whichever
+ * socket the writer then held; the socket must also belong to the starter.
  */
 function createSteerStarterApproval({ ws, sessionIdRef, waitForApproval, settleApproval }) {
+  const raw = ws?.ws;
   return async (toolName, input, signal) => {
-    const raw = ws?.ws;
-    if (!raw || raw.readyState !== 1 || !Number.isInteger(ws?.userId)) return 'offline';
+    if (!raw || raw.readyState !== 1 || !Number.isInteger(ws?.userId)
+      || !isSameUser(raw.userId, ws.userId)) return 'offline';
     const sid = sessionIdRef();
     const requestId = createRequestId();
     const send = (payload) => { raw.send(JSON.stringify(payload)); };
@@ -5383,6 +5387,15 @@ function reconnectSessionWriter(sessionId, newRawWs) {
       `[WS-DIAG] writer-swap-skipped session=${sessionId} `
       + `reason=no-writer hasSession=${Boolean(session)}`
     );
+    return false;
+  }
+  // B-1666 (ADR-210 amendment): only the run owner's own socket may adopt the
+  // writer. The writer is shared by every run of the owner's socket and the
+  // primary socket receives owner-only frames, so another member's socket must
+  // not take it over; that member keeps the masked stream through its mirror.
+  // Fails closed when either side carries no user id.
+  if (!isSameUser(newRawWs?.userId, session.writer.userId)) {
+    console.log(`[WS-DIAG] writer-swap-skipped session=${sessionId} reason=different-user`);
     return false;
   }
   session.writer.updateWebSocket(newRawWs);

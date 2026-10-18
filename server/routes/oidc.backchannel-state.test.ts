@@ -4,9 +4,9 @@
  * the logout is verified with the row's issuer, client id and PINNED jwks_uri
  * (also for broken rows, never a fresh discovery), legacy env uses discovery
  * under the `public` policy, and anything unverifiable (unreadable state,
- * unparseable row or env) asks the IdP to retry (503 + Retry-After). Owner
- * subjects are never revoked. Only the verifier's network half and live-access
- * side effects are faked.
+ * unparseable row or env) asks the IdP to retry (503 + Retry-After). A
+ * verified logout ends only the browser session bound to its sid (ADR-H20 D6).
+ * Only the verifier's network half and live-access side effects are faked.
  */
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
@@ -34,7 +34,10 @@ mock.module(verifierUrl, {
       if (options.endpoints && typeof (options.endpoints as { jwks_uri?: unknown }).jwks_uri !== 'string') {
         throw new Error('invalid_pinned_endpoints');
       }
-      return { issuer: options.issuer, verifyLogoutToken: async () => ({ sub: logoutSubject }) };
+      return {
+        issuer: options.issuer,
+        verifyLogoutToken: async () => ({ sub: logoutSubject, sid: IDP_SID, jti: crypto.randomUUID() }),
+      };
     },
   },
 });
@@ -45,11 +48,13 @@ mock.module(url('../modules/account-wallet/user-identity-revocation.js'), {
 mock.module(url('../utils/client-ip.js'), { namedExports: { clientIp: () => '127.0.0.1' } });
 
 const ISSUER = 'https://idp.example';
+const IDP_SID = 'V1_idp-session-synthetic';
+const REFRESH_SID = 'A'.repeat(22);
 
 const { initializeDatabase } = await import('../modules/database/init-db.js');
 const { stopReconcileScheduler } = await import('../modules/database/project-reconcile.service.js');
 const { getConnection } = await import('../modules/database/connection.js');
-const { userDb, userIdentitiesDb } = await import('../modules/database/index.js');
+const { revokedTokenSidsDb, ssoDeviceSessionsDb, userDb, userIdentitiesDb } = await import('../modules/database/index.js');
 const { writeDisabledRecordOn } = await import('../modules/database/repositories/sso-oidc-config.js');
 const { migrateSsoOidcConfig } = await import('../modules/database/sso-oidc-config.migration.js');
 const { clearSsoConfig, writeSsoRow } = await import('../services/__tests__/sso-config-fixture.js');
@@ -77,7 +82,12 @@ beforeEach(() => {
   const db = getConnection();
   migrateSsoOidcConfig(db);
   clearSsoConfig(db);
-  db.exec('DELETE FROM user_identities');
+  db.exec('DELETE FROM user_identities; DELETE FROM revoked_token_sids; DELETE FROM oidc_logout_jtis;');
+  // ADR-H20 N5: the member's browser session is bound to the IdP sid at sign-in.
+  ssoDeviceSessionsDb.bind({
+    refreshSid: REFRESH_SID, userId: member.id, issuer: ISSUER, idpSid: IDP_SID, loginHint: null,
+    ownerTier: false, privilegedUntil: null, nowMs: Date.now(), pruneAfter: Date.now() + 86_400_000,
+  });
   for (const key of ENV_KEYS) delete process.env[key];
   resetSsoConfigCacheForTests();
   setSsoNetworkOverridesForTests({});
@@ -92,10 +102,11 @@ const stamp = (userId = member.id) => (getConnection()
 
 async function logout() {
   return fetch(`${baseUrl}/api/auth/oidc/backchannel-logout`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ logout_token: 'logout-token-synthetic' }),
+    method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ logout_token: 'logout-token-synthetic' }).toString(),
   });
 }
+const sessionEnded = () => revokedTokenSidsDb.isRevoked(REFRESH_SID, Date.now());
 
 const CASES: Array<{ label: string; setup: () => void; status: number; revokes?: boolean }> = [
   { label: 'fresh install', setup: () => { envVerifier(); }, status: 501 },
@@ -142,7 +153,8 @@ for (const { label, setup, status, revokes = false } of CASES) {
     const response = await logout();
     assert.equal(response.status, status);
     if (status === 503) assert.equal(response.headers.get('retry-after'), '300');
-    assert.equal(stamp() !== before, revokes, revokes ? 'the member is revoked' : 'nothing is revoked');
+    assert.equal(sessionEnded(), revokes, revokes ? 'that browser session ends' : 'nothing is revoked');
+    assert.equal(stamp(), before, 'ADR-H20 D6: never a sign-out everywhere');
   });
 }
 
@@ -153,6 +165,7 @@ test('an unknown subject is a 200 no-op while enforced', async () => {
   const before = stamp();
   assert.equal((await logout()).status, 200);
   assert.equal(stamp(), before);
+  assert.equal(sessionEnded(), false, 'a sid whose subject does not match ends nothing');
 });
 
 test('a broken row is verified with its pinned jwks_uri only, never by discovery', async () => {
@@ -175,12 +188,13 @@ test('legacy env verifies by discovery under the public policy', async () => {
   assert.equal(options.network.addressPolicy, 'public');
 });
 
-test('ADR-194 D6: a subject linked to an owner is a 200 no-op', async () => {
+test('ADR-H20 D6: an owner subject without a bound sid is a 200 no-op (never a sub fallback)', async () => {
   linkMember();
   userIdentitiesDb.link(owner.id, ISSUER, 'sub-owner');
   writeSsoRow(getConnection());
   logoutSubject = 'sub-owner';
   const before = stamp(owner.id);
   assert.equal((await logout()).status, 200);
-  assert.equal(stamp(owner.id), before, 'owner sessions are never revoked by the IdP');
+  assert.equal(stamp(owner.id), before, 'no sign-out everywhere for the owner');
+  assert.equal(sessionEnded(), false, "the member's session bound to that sid is not the owner's");
 });

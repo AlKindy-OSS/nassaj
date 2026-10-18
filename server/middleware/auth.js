@@ -3,6 +3,7 @@ import jwt from 'jsonwebtoken';
 import * as databaseModule from '../modules/database/index.js';
 import { IS_PLATFORM } from '../constants/config.js';
 import { clientIp } from '../utils/client-ip.js';
+import { secretsEqual } from '../utils/secret-compare.js';
 import { multiAccountSwitchingEnabled } from '../utils/trusted-origin.js';
 import { enforceCookieMutationGuard } from '../modules/account-wallet/request-csrf.js';
 import {
@@ -16,6 +17,7 @@ import { recordAuthRejection } from './auth-rejection-audit.js';
 import { registerServiceSecretValue } from '../shared/secret-path-guard.js';
 import { currentTokenEpoch } from '../modules/account-wallet/token-epoch.js';
 import {
+  isSsoSessionIdleExpired,
   legacyTokenSid,
   mintTokenSid,
   sessionSidOf,
@@ -23,6 +25,8 @@ import {
   tokenSidOf,
 } from '../modules/account-wallet/token-session.js';
 import { configureLoginThrottle } from '../services/login-throttle.service.js';
+import { ownerStepUpRequired, touchSsoDeviceSession } from '../services/sso-device-session.service.js';
+import { isOwnerPrivilegedRequest, OWNER_STEP_UP_REQUIRED_CODE } from '../services/owner-privileged-actions.js';
 
 const { userDb, appConfigDb, auditLogDb } = databaseModule;
 const deviceAccountSessionsDb = databaseModule.deviceAccountSessionsDb;
@@ -419,12 +423,34 @@ const validateApiKey = (req, res, next) => {
     return next();
   }
 
-  const apiKey = req.headers['x-api-key'];
-  if (apiKey !== process.env.API_KEY) {
+  if (!secretsEqual(req.headers['x-api-key'], process.env.API_KEY)) {
     return res.status(401).json({ error: 'Invalid API key' });
   }
   next();
 };
+
+/** 401 code for an SSO device session that was idle for 24 h (ADR-H20 N8). */
+const SSO_SESSION_EXPIRED_CODE = 'sso_session_expired';
+
+/**
+ * ADR-H20 N2: refuses (403 owner_step_up_required) a privileged action from an
+ * owner-tier SSO session without a live step-up grant for THIS browser. True
+ * when the request was answered.
+ */
+function refuseOwnerPrivilegedWithoutStepUp(req, res) {
+  if (req.user?.role !== 'owner' || !isOwnerPrivilegedRequest(req)) return false;
+  if (!ownerStepUpRequired({ role: req.user.role, refreshSid: req.tokenSession?.refreshSid })) return false;
+  auditLogDb.record('owner_step_up_required', {
+    userId: req.user.id,
+    metadata: { method: req.method },
+    ipAddress: clientIp(req),
+    userAgent: req.headers['user-agent'] ?? null,
+  });
+  res.status(403).set('Cache-Control', 'no-store').json({
+    error: 'Confirm with your passkey to continue', code: OWNER_STEP_UP_REQUIRED_CODE,
+  });
+  return true;
+}
 
 // JWT authentication middleware
 const authenticateToken = async (req, res, next) => {
@@ -558,6 +584,15 @@ const authenticateToken = async (req, res, next) => {
       });
       return res.status(401).json({ error: 'Token invalidated' });
     }
+    // ADR-H20 N8: an SSO device session idle for 24 h ends; the SPA re-runs
+    // the IdP sign-in silently on this code (checked before any renewal).
+    if (isSsoSessionIdleExpired(refreshSidOf(decoded, token))) {
+      recordAuthRejection({
+        reason: 'sso_session_idle', transport: 'rest', userId: user.id,
+        ipAddress: ip, userAgent: ua,
+      });
+      return res.status(401).json({ error: 'Session expired', code: SSO_SESSION_EXPIRED_CODE });
+    }
     // T-2035: a sign-out everywhere bumped the epoch, or this device signed out.
     if (!tokenSessionCurrent(decoded, user, token)) {
       recordAuthRejection({
@@ -647,6 +682,11 @@ const authenticateToken = async (req, res, next) => {
         });
       }
     }
+    // ADR-H20 N2: an owner's no-click SSO session needs this browser's passkey
+    // step-up grant before a privileged action; reads stay open.
+    if (refuseOwnerPrivilegedWithoutStepUp(req, res)) return;
+    // ADR-H20 N8: use renews the 24 h idle clock (throttled, best effort).
+    touchSsoDeviceSession(req.tokenSession.refreshSid);
     installIdentityFence(req, res);
     next();
   } catch (err) {
@@ -929,6 +969,7 @@ const authenticateWebSocket = (token) => {
     if (!userSsoAttestationFresh(user)) {
       return null;
     }
+    touchSsoDeviceSession(sessionSidOf(decoded, token));
     return {
       id: user.id,
       userId: user.id,
@@ -992,4 +1033,5 @@ export {
   REFRESH_GRACE_MAX_HOURS,
   JWT_SECRET,
   PASSWORD_CHANGE_COOKIE,
+  SSO_SESSION_EXPIRED_CODE,
 };

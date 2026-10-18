@@ -21,6 +21,8 @@
 
 import { projectsDb as defaultProjectsDb, sessionsDb as defaultSessionsDb } from '../modules/database/index.js';
 
+import { displaySessionTitle } from './session-title-text.js';
+
 /**
  * Attaches a human title to each blocking live session.
  *
@@ -64,7 +66,9 @@ export function attachSessionTitles(liveSessions, requesterId, deps = {}) {
         if (projectPath && !visiblePaths.has(projectPath)) {
             return { ...entry, titleRedacted: true };
         }
-        const title = typeof row.custom_name === 'string' ? row.custom_name.trim() : '';
+        // B-1668 + ADR-210: the sidebar's display title (blocks out, masked); this
+        // path returned the raw stored name before.
+        const title = displaySessionTitle(row.custom_name);
         return title ? { ...entry, title } : entry;
     });
 }

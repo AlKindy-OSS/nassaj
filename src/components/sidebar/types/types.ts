@@ -94,7 +94,8 @@ export type SidebarProps = ProjectToolbarProps & {
   terminals: SidebarTerminalsProps;
   onSectionChange: (section: SidebarSection) => void;
   onProjectSelect: (project: Project) => void;
-  onSessionSelect: (session: ProjectSession) => void;
+  // `ownerProject` selects the owning project WITHOUT a second navigation (B-1668).
+  onSessionSelect: (session: ProjectSession, ownerProject?: Project) => void;
   onNewSession: (project: Project) => void;
   onSessionDelete?: (sessionId: string) => void;
   onLoadMoreSessions?: (projectId: string) => Promise<void> | void;
@@ -123,7 +124,6 @@ export type SessionViewModel = {
   isClosed: boolean;
   sessionName: string;
   sessionTime: string;
-  messageCount: number;
 };
 
 // Retained as `name` for backwards compatibility with existing settings

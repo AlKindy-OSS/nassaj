@@ -32,6 +32,7 @@ import EditorSidebar from '../../code-editor/view/EditorSidebar';
 import { ProjectBoardPanel } from '../../project-board';
 import { WikiPanel } from '../../wiki';
 import TerminalsPanel from '../../terminals/view/TerminalsPanel';
+import { canUseTerminals } from '../../terminals/utils/canUseTerminals';
 import { useAuth } from '../../auth';
 
 import MainContentHeader from './subcomponents/MainContentHeader';
@@ -152,7 +153,7 @@ function MainContent({
   // non-privileged user at REST + WS regardless, but this guard stops a stale
   // deep-link/tab from rendering an empty, error-looping terminal panel.
   const { user } = useAuth();
-  const canUseTerminals = user?.role === 'owner' || user?.role === 'admin';
+  const terminalsAllowed = canUseTerminals(user?.role);
 
   // T-2037: composer one-shot runs. A confirmed composer submit leaves a
   // request; this is the only place that turns it into a run (and a runId),
@@ -239,7 +240,7 @@ function MainContent({
   // Standalone terminals are project-independent (T-939): render the panel
   // full-area whenever the terminal surface is active, before the
   // `!selectedProject` gate (mirrors the wiki precedent below).
-  if (activeTab === 'terminal' && canUseTerminals) {
+  if (activeTab === 'terminal' && terminalsAllowed) {
     return (
       <TerminalsPanel
         terminals={terminals}

@@ -69,7 +69,6 @@ function renderExpanded() {
       editingSessionName=""
       onEditingNameChange={() => {}}
       onToggleProject={() => {}}
-      onProjectSelect={() => {}}
       onToggleStarProject={() => {}}
       onStartEditingProject={() => {}}
       onCancelEditingProject={() => {}}

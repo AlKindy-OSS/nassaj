@@ -57,7 +57,6 @@ function renderProject(linkUrl: string | null = null) {
       editingSessionName=""
       onEditingNameChange={() => {}}
       onToggleProject={vi.fn()}
-      onProjectSelect={() => {}}
       onToggleStarProject={() => {}}
       onStartEditingProject={() => {}}
       onCancelEditingProject={() => {}}
@@ -123,7 +122,6 @@ describe('SidebarProjectItem — رابط المشروع', () => {
         editingSessionName=""
         onEditingNameChange={() => {}}
         onToggleProject={onToggleProject}
-        onProjectSelect={() => {}}
         onToggleStarProject={() => {}}
         onStartEditingProject={() => {}}
         onCancelEditingProject={() => {}}

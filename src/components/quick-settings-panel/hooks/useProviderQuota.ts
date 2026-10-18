@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { api } from '../../../utils/api';
 import {
+  looksLikeAnthropicModel,
   nextQuotaTickMs,
   resolveQuotaWindows,
   type ProviderExtraUsageCredits,
@@ -93,6 +94,13 @@ export function useProviderQuota(
   // الحوامل (ومنها جسم claude مع محرّك آخر) تبقي النموذج كي يحسم الخادم المورّد.
   const requestModel = isDirectProvider ? undefined : (activeModel ?? undefined);
   const requestKey = `${provider ?? ''}\u0000${requestModel ?? ''}`;
+  // B-1669: a claude body on an Anthropic model bills the Claude account; the
+  // server would answer 404 PROVIDER_QUOTA_ANTHROPIC, which the browser logs as
+  // a network error. Decide it locally and send nothing. Only the claude body:
+  // carriers and unrecognised ids (e.g. 'default') still ask the server, which
+  // stays the authority. refetch() follows the same rule; no retry timer is set
+  // because the 180s retry covers none/error only.
+  const isAnthropicClaudeBody = provider === 'claude' && looksLikeAnthropicModel(requestModel);
   const [snapshot, setSnapshot] = useState<KeyedProviderQuotaState>({
     requestKey: '',
     state: { status: 'idle' },
@@ -107,6 +115,10 @@ export function useProviderQuota(
     }
 
     abortRef.current?.abort();
+    if (isAnthropicClaudeBody) {
+      setSnapshot({ requestKey, state: { status: 'anthropic' } });
+      return;
+    }
     const controller = new AbortController();
     abortRef.current = controller;
 
@@ -187,7 +199,7 @@ export function useProviderQuota(
       if (controller.signal.aborted) return;
       setSnapshot({ requestKey, state: { status: 'error' } });
     }
-  }, [provider, isDirectProvider, requestKey, requestModel]);
+  }, [provider, isDirectProvider, isAnthropicClaudeBody, requestKey, requestModel]);
 
   useEffect(() => {
     if (!enabled) {

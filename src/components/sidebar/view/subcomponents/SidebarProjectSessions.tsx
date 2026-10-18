@@ -37,7 +37,6 @@ type SidebarProjectSessionsProps = ProjectToolbarProps & {
   onStartEditingSession: (sessionId: string, initialName: string) => void;
   onCancelEditingSession: () => void;
   onSaveEditingSession: (projectName: string, sessionId: string, summary: string, provider: LLMProvider) => void;
-  onProjectSelect: (project: Project) => void;
   onSessionSelect: (session: SessionWithProvider, projectName: string) => void;
   onDeleteSession: (
     projectName: string,
@@ -129,7 +128,6 @@ export default function SidebarProjectSessions({
   onStartEditingSession,
   onCancelEditingSession,
   onSaveEditingSession,
-  onProjectSelect,
   onSessionSelect,
   onDeleteSession,
   onLoadMoreSessions,
@@ -323,7 +321,6 @@ export default function SidebarProjectSessions({
                     onStartEditingSession={onStartEditingSession}
                     onCancelEditingSession={onCancelEditingSession}
                     onSaveEditingSession={onSaveEditingSession}
-                    onProjectSelect={onProjectSelect}
                     onSessionSelect={onSessionSelect}
                     onDeleteSession={onDeleteSession}
                     bulkSelectionKind={bulkSelectionKind}
@@ -359,7 +356,6 @@ export default function SidebarProjectSessions({
                       onStartEditingSession={() => {}}
                       onCancelEditingSession={() => {}}
                       onSaveEditingSession={() => {}}
-                      onProjectSelect={() => {}}
                       onSessionSelect={() => {}}
                       onDeleteSession={() => {}}
                       bulkSelectionKind={null}

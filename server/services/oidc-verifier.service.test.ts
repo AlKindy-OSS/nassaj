@@ -260,29 +260,68 @@ test('rejects redirects and oversized discovery, JWKS and tokens', async () => {
   );
 });
 
-test('logout requires a verified event, sub and unique jti; sid-only is fail-closed', async () => {
+test('ADR-H20 D5: a logout needs the event, sub, jti and sid, no nonce, RS256 and an iat in the window', async () => {
   const verifier = verifierWith([rsa]);
+  const now = Math.floor(Date.now() / 1000);
   const logoutClaims = {
     nonce: undefined,
     jti: 'logout-synthetic-1',
+    sid: 'V1_sid-synthetic',
     events: { 'http://schemas.openid.net/event/backchannel-logout': {} },
   };
   const valid = sign(rsa, logoutClaims);
   const claims = await verifier.verifyLogoutToken(valid);
   assert.equal(claims.sub, 'subject-synthetic');
-  await assert.rejects(verifier.verifyLogoutToken(valid), /logout_replay/);
+  assert.equal(claims.sid, 'V1_sid-synthetic');
+  const again = await verifier.verifyLogoutToken(valid);
+  assert.equal(again.jti, 'logout-synthetic-1', 'the verifier records no jti (V4: the route does, after 200)');
 
-  await assert.rejects(verifier.verifyLogoutToken(sign(rsa, {
-    ...logoutClaims,
-    jti: 'logout-synthetic-2',
-    sub: undefined,
-    sid: 'sid-synthetic',
-  })), /subject_required/);
-  await assert.rejects(verifier.verifyLogoutToken(sign(rsa, {
-    ...logoutClaims,
-    jti: 'logout-synthetic-3',
-    events: {},
-  })), /logout_event_required/);
+  const refusals: Array<[Record<string, unknown>, RegExp]> = [
+    [{ sub: undefined }, /subject_required/],
+    [{ sid: undefined }, /logout_sid_required/],
+    [{ sid: '' }, /logout_sid_required/],
+    [{ events: {} }, /logout_event_required/],
+    [{ events: undefined }, /logout_event_required/],
+    [{ nonce: 'n-1' }, /logout_nonce_forbidden/],
+    [{ jti: undefined }, /logout_jti_required/],
+    [{ iat: now - 181, exp: now + 600 }, /logout_iat_outside_window/],
+    [{ iat: now + 61, exp: now + 600 }, /invalid_time_claims|logout_iat_outside_window|signature_or_registered_claim_invalid/],
+  ];
+  for (const [overrides, pattern] of refusals) {
+    await assert.rejects(verifier.verifyLogoutToken(sign(rsa, { ...logoutClaims, ...overrides })), pattern, JSON.stringify(overrides));
+  }
+  const edge = await verifier.verifyLogoutToken(sign(rsa, { ...logoutClaims, iat: now - 175, exp: now + 600 }));
+  assert.equal(edge.sid, 'V1_sid-synthetic', 'an iat inside 2 min + 60 s is accepted (V4 retries)');
+});
+
+test('ADR-H20 D5: a logout token is RS256 only — PS256, ES256, HS256 and none are refused', async () => {
+  const verifier = verifierWith([rsa, pss, ec]);
+  const now = Math.floor(Date.now() / 1000);
+  const logout = {
+    iss: ISSUER, aud: CLIENT_ID, sub: 'subject-synthetic', iat: now, exp: now + 300, jti: 'j-alg', sid: 'V1_s',
+    events: { 'http://schemas.openid.net/event/backchannel-logout': {} },
+  };
+  const rsaPublicPem = crypto.createPublicKey(rsa.privateKey).export({ format: 'pem', type: 'spki' });
+  const tokens: Array<[string, string]> = [
+    ['PS256', jwt.sign(logout, pss.privateKey, { algorithm: 'PS256', keyid: pss.kid })],
+    ['ES256', jwt.sign(logout, ec.privateKey, { algorithm: 'ES256', keyid: ec.kid })],
+    ['HS256', jwt.sign(logout, rsaPublicPem, { algorithm: 'HS256', keyid: rsa.kid })],
+    ['none', unsignedToken({ alg: 'none', kid: rsa.kid }, logout)],
+  ];
+  for (const [name, token] of tokens) {
+    await assert.rejects(verifier.verifyLogoutToken(token), /invalid_algorithm/, name);
+  }
+  assert.equal((await verifier.verifyLogoutToken(jwt.sign(logout, rsa.privateKey, { algorithm: 'RS256', keyid: rsa.kid }))).sid, 'V1_s');
+});
+
+test('ADR-H20 N4: end_session_endpoint comes from discovery, same origin, exact https; otherwise null', async () => {
+  const at = (endSession: unknown) => verifierWith([rsa], { discovery: discovery({ end_session_endpoint: endSession }) });
+  assert.equal(await at(`${ISSUER}/oidc/v1/end_session`).endSessionEndpoint(), `${ISSUER}/oidc/v1/end_session`);
+  for (const bad of ['https://attacker.example/end_session', 'http://identity.example.test/end', `${ISSUER}/end?x=1`, 7, undefined]) {
+    assert.equal(await at(bad).endSessionEndpoint(), null, String(bad));
+  }
+  const failing = verifierWith([rsa], { fetchImpl: (async () => { throw new Error('down'); }) as typeof fetch });
+  assert.equal(await failing.endSessionEndpoint(), null, 'never throws');
 });
 
 test('the OIDC route logs only stable codes, never raw tokens or provider diagnostics', () => {

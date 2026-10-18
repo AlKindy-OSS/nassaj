@@ -1139,5 +1139,10 @@
     "confirm": "تأكيد",
     "cancel": "إلغاء",
     "ok": "حسناً"
+  },
+  "mermaidZoom": {
+    "zoom": "تكبير المخطط",
+    "zoomedAria": "مخطط Mermaid مكبَّر",
+    "close": "إغلاق"
   }
 }

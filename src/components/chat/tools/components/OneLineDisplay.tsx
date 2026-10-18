@@ -7,6 +7,12 @@ import type { ToolStatus } from './ToolStatusBadge';
 
 type ActionType = 'copy' | 'open-file' | 'jump-to-results' | 'none';
 
+/**
+ * B-1665: commands and paths wrap at the box edge only, never mid-word at any
+ * letter (`break-all` split "sudo" and "hook"), and render LTR inside RTL rows.
+ */
+const WRAP_CODE_CLASS = 'whitespace-pre-wrap [overflow-wrap:anywhere]';
+
 interface OneLineDisplayProps {
   toolName: string;
   icon?: string;
@@ -100,8 +106,8 @@ export const OneLineDisplay: React.FC<OneLineDisplayProps> = ({
             </svg>
           </div>
           <div className="flex min-w-0 flex-1 items-start gap-2">
-            <div className="min-w-0 flex-1 rounded bg-gray-900 px-2.5 py-1 dark:bg-black">
-              <code className={`font-mono text-xs text-green-400 ${wrapText ? 'whitespace-pre-wrap break-all' : 'block truncate'}`}>
+            <div dir="ltr" className="min-w-0 flex-1 rounded bg-gray-900 px-2.5 py-1 dark:bg-black">
+              <code dir="ltr" className={`font-mono text-xs text-green-400 ${wrapText ? WRAP_CODE_CLASS : 'block truncate'}`}>
                 <span className="select-none text-green-600 dark:text-green-500">$ </span>{value}
               </code>
             </div>
@@ -180,7 +186,7 @@ export const OneLineDisplay: React.FC<OneLineDisplayProps> = ({
       {(icon || label || toolName) && (
         <span className="text-[10px] text-muted-foreground/40">/</span>
       )}
-      <span className={`font-mono text-xs ${wrapText ? 'whitespace-pre-wrap break-all' : 'truncate'} min-w-0 flex-1 ${colorScheme.primary}`}>
+      <span dir="ltr" className={`font-mono text-xs ${wrapText ? WRAP_CODE_CLASS : 'truncate'} min-w-0 flex-1 ${colorScheme.primary}`}>
         {value}
       </span>
       {secondary && (

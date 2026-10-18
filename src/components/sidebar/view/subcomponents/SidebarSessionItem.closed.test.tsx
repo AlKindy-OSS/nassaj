@@ -78,7 +78,6 @@ function renderRow(
       onStartEditingSession={() => {}}
       onCancelEditingSession={() => {}}
       onSaveEditingSession={() => {}}
-      onProjectSelect={() => {}}
       onSessionSelect={() => {}}
       onDeleteSession={() => {}}
       {...bulkProps}

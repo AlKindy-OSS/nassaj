@@ -61,7 +61,6 @@ function renderProject(
       editingSessionName=""
       onEditingNameChange={() => {}}
       onToggleProject={onToggleProject}
-      onProjectSelect={() => {}}
       onToggleStarProject={() => {}}
       onStartEditingProject={() => {}}
       onCancelEditingProject={() => {}}

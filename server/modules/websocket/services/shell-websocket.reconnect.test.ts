@@ -205,7 +205,8 @@ test('input and resize from a stale socket are ignored; the owner is still serve
     b.emit('message', JSON.stringify({ type: 'resize', cols: 120, rows: 40 }));
 
     assert.deepEqual(pty.writes, ['owner']);
-    assert.deepEqual(pty.resizes, [[120, 40]]);
+    // [80, 24] is B's reattach init (T-2045); A's stale resize never lands.
+    assert.deepEqual(pty.resizes, [[80, 24], [120, 40]]);
   });
 });
 
@@ -325,5 +326,58 @@ test('B-1448 M2: an older PTY exiting never ends the newer session under the sam
     assert.equal(released, 1, 'the old exit did not release the new lease');
     assert.deepEqual(outputReaches(newPty, ws), [true], 'the new session is still live');
     assert.equal(terminateAllShellSessionsForUpdate(), 1, 'and still registered');
+  });
+});
+
+test('T-2045: reattach applies the init frame size once, clamped to the sane range', async () => {
+  await withIsolatedDatabase(() => {
+    terminateAllShellSessionsForUpdate();
+    spawnedPtys.length = 0;
+    connect(2045, { cols: 40, rows: 20 });
+    const pty = spawnedPtys[0]!;
+    connect(2045, { cols: 160.7, rows: 50 });
+    connect(2045, { cols: 5000, rows: 3000 });
+    assert.equal(spawnedPtys.length, 1, 'both sockets reattached');
+    assert.deepEqual(pty.resizes, [[160, 50], [1024, 1024]], 'one resize per reattach, floored and clamped');
+  });
+});
+
+test('T-2045: reattach with missing or invalid dimensions does not resize', async () => {
+  await withIsolatedDatabase(() => {
+    terminateAllShellSessionsForUpdate();
+    spawnedPtys.length = 0;
+    connect(2046);
+    const pty = spawnedPtys[0]!;
+    for (const dims of [
+      { cols: undefined, rows: undefined },
+      { cols: 0, rows: 24 },
+      { cols: -3, rows: 24 },
+      { cols: 120, rows: Number.NaN },
+      { cols: '120', rows: '40' },
+      { cols: 120, rows: null },
+    ]) {
+      connect(2046, dims);
+    }
+    assert.equal(spawnedPtys.length, 1);
+    assert.deepEqual(pty.resizes, []);
+  });
+});
+
+test('T-2045: a reattach resize that throws still completes the reattach', async () => {
+  await withIsolatedDatabase(() => {
+    terminateAllShellSessionsForUpdate();
+    spawnedPtys.length = 0;
+    connect(2047);
+    const pty = spawnedPtys[0]!;
+    pty.resize = () => { throw new Error('pty exited'); };
+    const errorLog = mock.method(console, 'error', () => {});
+    try {
+      const b = connect(2047, { cols: 120, rows: 40 });
+      assert.ok(b.sent.some((frame) => frame.data?.includes('Reconnected')), 'reattach banner sent');
+      assert.ok(!b.sent.some((frame) => frame.type === 'error'), 'no error frame for the client');
+      assert.deepEqual(outputReaches(pty, b), [true], 'the new socket owns the session');
+    } finally {
+      errorLog.mock.restore();
+    }
   });
 });

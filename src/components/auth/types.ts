@@ -47,6 +47,9 @@ export type AuthSessionPayload = {
 export type AuthStatusPayload = {
   needsSetup?: boolean;
   deviceAccountSessionsEnabled?: boolean;
+  ssoLoginAvailable?: boolean;
+  /** ADR-H20 N1: the node sends unauthenticated visits straight to the IdP. */
+  ssoAutoSignIn?: boolean;
 };
 
 export type AuthUserPayload = {

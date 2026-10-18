@@ -364,6 +364,36 @@ function UsagePopover({
   );
 }
 
+/**
+ * B-1665: an operator alert is announced through a polite live region once,
+ * when it is crossed during the session. The card itself opens only on a user
+ * click: auto-opening covered the last message (desktop) and the composer
+ * (mobile). Opening a session that is already over a threshold is silent; the
+ * pulsing ring and the tint still show it.
+ */
+function useAlertAnnouncement(alertKey: string, alertText: string, hasReading: boolean, resetKey: string): string {
+  const [announcement, setAnnouncement] = useState('');
+  const baselineRef = useRef<string | null>(null);
+  useEffect(() => {
+    baselineRef.current = null;
+    setAnnouncement('');
+  }, [resetKey]);
+  useEffect(() => {
+    if (baselineRef.current === null) {
+      if (hasReading) baselineRef.current = alertKey;
+      return;
+    }
+    if (alertKey === baselineRef.current) return;
+    baselineRef.current = alertKey;
+    if (alertKey) setAnnouncement(alertText);
+  }, [alertKey, alertText, hasReading, resetKey]);
+  return announcement;
+}
+
+const AlertLiveRegion = ({ text }: { text: string }) => (
+  <span aria-live="polite" aria-atomic="true" className="sr-only" data-testid="context-alert-live">{text}</span>
+);
+
 // ---------------------------------------------------------------------------
 // Main component
 // ---------------------------------------------------------------------------
@@ -394,21 +424,14 @@ export default function TokenUsageSummary({ usage, provider = '', modelId = null
 
   const handleClose = useCallback(() => { setOpen(false); triggerRef.current?.focus(); }, []);
 
-  // --- Operator alerts: blink the ring and open the card once per threshold ----
+  // --- Operator alerts: blink the ring; the card opens on user action only ----
   const ageMs = useSessionAgeMs(sessionStartedAt);
   const alerts = operatorAlertsFor(usedTokens, ageMs, provider, reading.proposed, totalTokens);
   const claudeThresholds = claudeAlertThresholds(totalTokens);
   const alertKey = alerts.join('+');
-  const announcedRef = useRef<string>('');
   useEffect(() => {
-    announcedRef.current = '';
     setOpen(false);
   }, [sessionId, provider, modelId]);
-  useEffect(() => {
-    if (!alertKey || announcedRef.current === alertKey) return;
-    announcedRef.current = alertKey;
-    setOpen(true);
-  }, [alertKey, sessionId, provider, modelId]);
   const alertLines = alerts.map((alert) =>
     t(`contextRot.alerts.${alert}`, {
       value: formatTokenCount(alert === 'close' ? claudeThresholds.close : claudeThresholds.compact),
@@ -426,6 +449,12 @@ export default function TokenUsageSummary({ usage, provider = '', modelId = null
       ? 'warning'
       : null;
   const ringClass = alerts.length > 0 ? 'animate-pulse' : '';
+  const announcement = useAlertAnnouncement(
+    alertKey,
+    alertLines.join(' '),
+    usedTokens !== null || onlyWhenAlerting,
+    `${sessionId ?? ''}|${provider}|${modelId ?? ''}`,
+  );
 
   if (onlyWhenAlerting && alerts.length === 0) return null;
 
@@ -466,6 +495,7 @@ export default function TokenUsageSummary({ usage, provider = '', modelId = null
             <UsageRing ratio={0} level={emptyLevel} centerText={isUnavailable ? '?' : '—'} />
           </span>
         </PromptInputButton>
+        <AlertLiveRegion text={announcement} />
 
         {open && (
           <UsagePopover
@@ -537,6 +567,7 @@ export default function TokenUsageSummary({ usage, provider = '', modelId = null
           <UsageRing ratio={rawRatio} level={level} centerText={percentDigits} />
         </span>
       </PromptInputButton>
+      <AlertLiveRegion text={announcement} />
 
       {open && (
         <UsagePopover

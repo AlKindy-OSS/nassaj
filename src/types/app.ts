@@ -81,7 +81,6 @@ export interface ProjectSession {
   created_at?: string;
   updated_at?: string;
   lastActivity?: string;
-  messageCount?: number;
   // Owning human of this session, or null for legacy sessions (B-MU-UX-API).
   owner?: SessionOwner | null;
   // EVERY human recorded on this session, owner first. Server-stamped on the
@@ -112,12 +111,22 @@ export interface ProjectSession {
   // Tags the session with the owning project's DB `projectId` so UI handlers
   // (session switching, sidebar focus, etc.) can match against selectedProject.
   __projectId?: string;
+  /**
+   * Client-only provenance (B-1668), never sent by the server. `__deepLinked`
+   * marks the one row merged in for a `/session/:id` URL; `__pagedUnstarred`
+   * marks an unstarred row that arrived in a server page. The next "load more"
+   * offset counts only server-paged rows (`projectSessionPaging.ts`).
+   */
+  __deepLinked?: boolean;
+  __pagedUnstarred?: boolean;
   [key: string]: unknown;
 }
 
 export interface ProjectSessionMeta {
   total?: number;
   hasMore?: boolean;
+  /** Creation time of the project's newest conversation (project "date" order). */
+  newestCreatedAt?: string | null;
   [key: string]: unknown;
 }
 

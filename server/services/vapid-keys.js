@@ -3,7 +3,10 @@ import webPush from 'web-push';
 import { requireStartupAdmission } from '../bootstrap-startup-context.js';
 import { getConnection } from '../modules/database/connection.js';
 
+import { resolveVapidSubject } from './vapid-subject.js';
+
 let cachedKeys = null;
+let subjectWarned = false;
 const db = getConnection();
 
 function ensureVapidKeys() {
@@ -26,10 +29,20 @@ function getPublicKey() {
   return ensureVapidKeys().publicKey;
 }
 
+/** Resolve the VAPID subject, warning about a bad or unreachable one once per process. */
+function vapidSubject() {
+  const { subject, warnings } = resolveVapidSubject();
+  if (!subjectWarned) {
+    subjectWarned = true;
+    for (const warning of warnings) console.warn(`[web-push] ${warning}`);
+  }
+  return subject;
+}
+
 function configureWebPush() {
   const keys = ensureVapidKeys();
   webPush.setVapidDetails(
-    'mailto:noreply@claudecodeui.local',
+    vapidSubject(),
     keys.publicKey,
     keys.privateKey
   );

@@ -220,7 +220,11 @@
     "completed_many": "اكتمل ({{count}} أداةً)",
     "completed_other": "اكتمل ({{count}} أداة)",
     "viewToolHistory": "اعرض سجلّ الأدوات ({{count}})",
-    "error": "(خطأ)"
+    "error": "(خطأ)",
+    "title": "وكيل فرعي",
+    "titleWithType": "وكيل فرعي / {{type}}",
+    "titleWithTask": "{{prefix}}: {{description}}",
+    "backgroundLaunched": "أُطلق وكيل في الخلفية"
   },
   "coordinator": {
     "label": "منسّق",
@@ -261,7 +265,23 @@
     "readFile": "قراءة الملف",
     "updateTodo": "تحديث قائمة المهام",
     "readTodo": "قراءة قائمة المهام",
-    "searchResults": "نتائج"
+    "searchResults": "نتائج",
+    "titles": {
+      "parameters": "المعاملات",
+      "details": "التفاصيل",
+      "plan": "الخطة",
+      "taskDetails": "تفاصيل المهمة",
+      "subagentResult": "نتيجة الوكيل الفرعي",
+      "updatingTodoList": "تحديث قائمة المهام",
+      "taskList": "قائمة المهام",
+      "implementationPlan": "خطة التنفيذ",
+      "foundFiles_zero": "لم يُعثر على ملفات",
+      "foundFiles_one": "عُثر على ملف واحد",
+      "foundFiles_two": "عُثر على ملفين",
+      "foundFiles_few": "عُثر على {{count}} ملفات",
+      "foundFiles_many": "عُثر على {{count}} ملفًا",
+      "foundFiles_other": "عُثر على {{count}} ملف"
+    }
   },
   "search": {
     "found": "تم العثور على {{count}} {{type}}",
@@ -1457,5 +1477,8 @@
   },
   "sessionDelete": {
     "forbidden": "لا يحذف المحادثة نهائياً إلا منشئها أو مالك المشروع أو المدير. يمكنك أرشفتها بدلاً من ذلك."
+  },
+  "agyMessage": {
+    "to": "رسالة إلى {{name}}"
   }
 }

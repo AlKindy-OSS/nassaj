@@ -110,17 +110,3 @@ export function buildArchivedFolders(
 
   return [...folders.values()].sort((a, b) => (b.latestActivity ?? '').localeCompare(a.latestActivity ?? ''));
 }
-
-/** Short relative age ("5m", "3hr", "2d") matching the active session rows. */
-export function formatCompactArchivedAge(dateString: string | null, now: number = Date.now()): string {
-  if (!dateString) return '';
-  const time = new Date(dateString).getTime();
-  if (Number.isNaN(time)) return '';
-
-  const diffInMinutes = Math.floor(Math.max(0, now - time) / (1000 * 60));
-  if (diffInMinutes < 1) return '<1m';
-  if (diffInMinutes < 60) return `${diffInMinutes}m`;
-  const diffInHours = Math.floor(diffInMinutes / 60);
-  if (diffInHours < 24) return `${diffInHours}hr`;
-  return `${Math.floor(diffInHours / 24)}d`;
-}

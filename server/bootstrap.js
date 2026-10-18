@@ -6,6 +6,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { establishStartupAdmission, admitSecurityStartup } from './bootstrap-startup-context.js';
+import { applyEnvContent } from './utils/env-file.js';
 
 const OWNERSHIP_SYMBOL = Symbol.for('nassaj.sourceUpdate.bootstrapOwnership.v1');
 const MAINTENANCE_POLL_MS = 5_000;
@@ -107,12 +108,7 @@ export function loadBootstrapConfiguration(projectPath, env = process.env) {
     let content;
     try { content = fs.readFileSync(path.join(projectPath, '.env'), 'utf8'); }
     catch (error) { if (error.code === 'ENOENT') return; throw error; }
-    for (const line of content.split('\n')) {
-        const trimmed = line.trim();
-        if (!trimmed || trimmed.startsWith('#')) continue;
-        const [key, ...values] = trimmed.split('=');
-        if (key && values.length && !env[key]) env[key] = values.join('=').trim();
-    }
+    applyEnvContent(content, env);
 }
 
 /** Dynamic ordering is intentional: gate claim completes before index imports. */
