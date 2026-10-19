@@ -1,0 +1,60 @@
+/**
+ * Curated "What's new" highlights, one entry per released version.
+ *
+ * Written for the user in plain language, in both Arabic and English, and
+ * shipped with the client. The release-notes step of docs/RELEASING.md adds
+ * the entry for each new version. A version without an entry shows no popup.
+ */
+
+export interface WhatsNewEntry {
+  ar: readonly string[];
+  en: readonly string[];
+}
+
+export const WHATS_NEW: Readonly<Record<string, WhatsNewEntry>> = {
+  '2.3.1.11': {
+    ar: [
+      'شريط أدوات المؤلِّف صار أرتب وأوضح.',
+      'المقبض الجانبي متاح الآن في كل الصفحات، لا في المحادثة وحدها.',
+      'نافذة التحديث أبسط: رقم المرحلة ونسبة تقدّم واحدة.',
+      'تلميح البحث في منتقي المزوّد صار نصاً مقروءاً.',
+      'نافذة «ما الجديد» هذه تعرض أبرز التغييرات بعد كل تحديث.',
+    ],
+    en: [
+      'A tidier, clearer composer toolbar.',
+      'The side handle is now on every page, not only in chat.',
+      'A cleaner update dialog: the step number and a single progress percentage.',
+      'The provider picker search hint now shows readable text.',
+      "This \"What's new\" popup shows the main changes after every update.",
+    ],
+  },
+  '2.3.1.10': {
+    ar: [
+      'لا يُطلب مفتاح المرور بعد الدخول الموحّد.',
+      'دخول مباشر بين العقد بهويتك الموحّدة.',
+      'تسجيل الخروج لم يعد يعلق.',
+      'قائمة الأوامر تُغلق بزرّ أو بالنقر خارجها، ولها أيقونة «/» مميّزة.',
+      'شعارات الوكلاء موزّعة على عرض الشاشة كاملاً.',
+      'محادثة الفريق بين الأعضاء مفعّلة، مع إدارة الأعضاء.',
+      'تبديل الحسابات متاح على العقد التي لا تستخدم الدخول الموحّد.',
+    ],
+    en: [
+      'No passkey prompt after unified sign-in.',
+      'Direct sign-in across nodes with your unified identity.',
+      'Signing out no longer gets stuck.',
+      'The commands menu can be closed and has a distinct "/" icon.',
+      'Agent logos are spread across the full width.',
+      'Team chat between members is on, with member management.',
+      'Account switching is available on nodes without unified sign-in.',
+    ],
+  },
+};
+
+/** The highlights for `version` in the UI language, or null when none were curated. */
+export function getWhatsNew(version: string | null | undefined, language: string): readonly string[] | null {
+  if (!version) return null;
+  const entry = Object.prototype.hasOwnProperty.call(WHATS_NEW, version) ? WHATS_NEW[version] : undefined;
+  if (!entry) return null;
+  const items = language.toLowerCase().startsWith('ar') ? entry.ar : entry.en;
+  return items.length > 0 ? items : null;
+}

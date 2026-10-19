@@ -427,7 +427,7 @@
         "description": "الإصدار الجديد نشط ومتحقَّق منه."
       }
     },
-    "stepperProgress": "المرحلة {{current}} من {{total}} · {{percent}}%",
+    "stepperProgress": "المرحلة {{current}} من {{total}}",
     "stepperAriaLabel": "مراحل التحديث",
     "ownerActionRequired": "التحديث جاهز. أكّد تفعيله من هذه النافذة.",
     "autoActivate": {
@@ -1134,6 +1134,13 @@
     "confirm": "هذا ملف أسرار، هل تريد فتحه؟\n{{fileName}}",
     "declined": "لم يُفتح الملف: هذا ملف أسرار ولم يُؤكَّد فتحه.",
     "badge": "ملف أسرار: يُطلب تأكيد قبل فتحه"
+  },
+  "whatsNew": {
+    "title": "ما الجديد",
+    "version": "الإصدار",
+    "close": "إغلاق نافذة ما الجديد",
+    "fullNotes": "ملاحظات الإصدار كاملة",
+    "opensInNewTab": "(تُفتح في تبويب جديد)"
   },
   "dialog": {
     "confirm": "تأكيد",

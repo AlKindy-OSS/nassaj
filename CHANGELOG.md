@@ -1,3 +1,9 @@
+## 2.3.1.11 — 2026-10-19
+
+شريط أدوات المؤلِّف بأزرار بلا إطار وبنمط واحد (أيقونة الشرطة المائلة للأوامر وأيقونة الطرفية)، ومؤشر السياق هو الدائرة الوحيدة في الصف. مقبض الإعدادات السريعة في كل صفحة بعد الدخول، وتلميح البحث في منتقي المزوّد نص مقروء بدل مفتاح الترجمة. نافذة «ما الجديد» تعرض أبرز تغييرات الإصدار بالعربية أو الإنجليزية مرة لكل إصدار في كل متصفح، ونافذة التحديث تعرض نسبة تقدّم واحدة. لا ترحيل ولا إعداد جديد.
+
+Frameless composer toolbar buttons with one shared style (slash glyph for commands, terminal glyph for the shell toggle), with the context gauge as the only circle in the row. The quick-settings handle shows on every signed-in page, and the provider picker search hint shows readable text instead of the translation key. A "What's new" popup shows each version's highlights in Arabic or English once per version per browser, and the update dialog shows a single progress percentage. No migration and no new setting.
+
 ## 2.3.1.10 — 2026-10-19
 
 سُحب تأكيد المالك بمفتاح المرور بقرار المالك: المالك المربوط يدخل بالدخول الموحّد مباشرة بلا صفحة مفتاح المرور وبلا شرط عامل دخول أو عمر جلسة، ولا تطلب المحادثة والطرفية والإدارة أي تأكيد إضافي (ADR-194 A1، ADR-H20 N2). الدخول التلقائي بالدخول الموحّد صار الافتراضي، وانتهت حلقة قفل الهوية على العقد بلا تبديل حسابات. محادثة الفريق داخل الجلسة مفعّلة افتراضياً مع واجهة إدارة الأعضاء (ADR-187)، وتُطفأ بـ`NASSAJ_INTERNAL_SESSION_CHAT_ENABLED=0`. تبديل الحسابات مفعّل افتراضياً على عقد https بلا دخول موحّد (ADR-194 A3)، ويُطفأ بـ`MULTI_ACCOUNT_SWITCHING=false`، ولم يعد كوكي جهاز قديم يحجب الدخول بالتوكن. قائمة أوامر قابلة للإغلاق بأيقونة الشرطة المائلة، وبطاقات وكلاء بعرض كامل. تغيير كاسر: أُزيل `POST /api/auth/oidc/owner-step-up/start`. خطر متبقٍّ مقبول: اختراق حساب المالك لدى مزوّد الهوية يمنح وصولاً كاملاً.

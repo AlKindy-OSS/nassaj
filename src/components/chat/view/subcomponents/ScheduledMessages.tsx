@@ -4,6 +4,7 @@ import { AlertCircle, CalendarClock, Loader2, Pencil, RefreshCcw, Trash2, X } fr
 
 import { Button, Dialog, DialogContent, DialogTitle, PromptInputButton } from '../../../../shared/view/ui';
 import type { ScheduledMessage } from '../../hooks/useScheduledMessages';
+import { COMPOSER_ICON_BUTTON_CLASS } from './composerToolbarStyles';
 
 const MIN_DELAY_MS = 60_000;
 const MAX_DELAY_MS = 30 * 24 * 60 * 60 * 1000;
@@ -86,7 +87,7 @@ export function ScheduledMessagesPanel({
 
 export function ScheduleMessageButton({ disabled, onClick }: { disabled: boolean; onClick: () => void }) {
   const { t } = useTranslation('chat');
-  return <PromptInputButton type="button" onClick={onClick} disabled={disabled} className="h-8 w-8 shrink-0 rounded-lg p-0 text-muted-foreground hover:bg-muted hover:text-foreground [&_svg]:size-4" tooltip={{ content: t('scheduled.open') }} aria-label={t('scheduled.open')}><CalendarClock /></PromptInputButton>;
+  return <PromptInputButton type="button" onClick={onClick} disabled={disabled} className={COMPOSER_ICON_BUTTON_CLASS} tooltip={{ content: t('scheduled.open') }} aria-label={t('scheduled.open')}><CalendarClock /></PromptInputButton>;
 }
 
 export function ScheduleMessageDialog({

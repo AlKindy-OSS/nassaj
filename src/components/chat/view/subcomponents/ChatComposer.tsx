@@ -21,7 +21,7 @@ import {
   XIcon,
   MicIcon,
   Loader2Icon,
-  SquareSlash,
+  Slash,
   Terminal,
 } from 'lucide-react';
 
@@ -51,6 +51,7 @@ import { effortModes } from '../../constants/thinkingModes';
 import { useComposerShellMode } from '../../hooks/useComposerShellMode';
 import FileAttachment from './FileAttachment';
 import ComposerShellToggle from './ComposerShellToggle';
+import { COMPOSER_ICON_BUTTON_CLASS } from './composerToolbarStyles';
 import type { RunAgent, RunProgress } from '../../hooks/useRunProgress';
 import type { WorkflowUiDescriptor } from '../../../../stores/workflowStatus';
 import {
@@ -940,7 +941,7 @@ function CoordinationLevelSelector({
         }}
         disabled={disabled}
         className={cn(
-          'flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-transparent px-0 text-xs font-medium outline-none transition-colors duration-200 motion-reduce:transition-none sm:h-8 sm:w-auto sm:px-2.5',
+          'flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-transparent px-0 text-xs font-medium outline-none transition-colors duration-200 motion-reduce:transition-none sm:w-auto sm:px-2.5',
           'hover:bg-muted/70 focus-visible:bg-muted/70 focus-visible:ring-1 focus-visible:ring-ring/50',
           'disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent',
           value === 'direct'
@@ -1990,7 +1991,7 @@ export default function ChatComposer({
             {/* ارتفاع موحّد 32px (h-8) لكل عناصر الشريط — أزرار وحبوب ومؤشّرات —
                 فيقرأ الصفّ خطاً واحداً بدل 28/32/36/40 متفاوتة. */}
             <PromptInputButton
-              className="h-8 w-8 shrink-0 [&_svg]:size-4"
+              className={COMPOSER_ICON_BUTTON_CLASS}
               tooltip={{
                 content: !capabilities.command.supportsImages
                   ? t('input.nonClaudeAttachmentHint')
@@ -2018,9 +2019,12 @@ export default function ChatComposer({
                   // التوهّج مربوط بـisVoiceActive (مستوى الجلسة) لا بالالتقاط:
                   // محرّك Web Speech يُنهي الالتقاط عند كل صمت ويُعيد تشغيله،
                   // فمؤشّرٌ مربوط بالالتقاط يرفرف كأنّ التسجيل ينقطع ويعود.
-                  className={`h-8 w-8 shrink-0 select-none [&_svg]:size-4 ${
-                    isVoiceActive ? 'voice-mic-live' : ''
-                  } ${isVoiceBusy ? 'text-primary' : ''}`}
+                  className={cn(
+                    COMPOSER_ICON_BUTTON_CLASS,
+                    'select-none',
+                    isVoiceActive && 'voice-mic-live',
+                    isVoiceBusy && 'text-primary',
+                  )}
                   // الزرّ معطَّل أثناء الرفع: ضغطة ثانية هناك إمّا تُلغي تفريغاً
                   // كاد يصل أو تبدأ تسجيلاً فوق آخر — وكلاهما ليس ما قصده أحد.
                   disabled={isVoiceBusy}
@@ -2111,19 +2115,15 @@ export default function ChatComposer({
             )}
 
             <PromptInputButton
-              className="group h-8 w-8 shrink-0 rounded-lg p-0 text-muted-foreground shadow-none transition-[color,background-color,transform] duration-150 hover:bg-muted hover:text-foreground hover:shadow-none active:scale-95 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+              className={COMPOSER_ICON_BUTTON_CLASS}
               tooltip={{ content: t('input.showAllCommands') }}
               onClick={onToggleCommandMenu}
               aria-label={t('input.showAllCommands')}
               aria-expanded={isCommandMenuOpen && !shellMode.active}
               data-command-menu-toggle=""
             >
-              <span
-                aria-hidden="true"
-                className="flex h-8 w-8 shrink-0 items-center justify-center text-muted-foreground transition-colors duration-150 group-hover:text-foreground"
-              >
-                <SquareSlash size={16} strokeWidth={2.2} />
-              </span>
+              {/* شَرطة بلا إطار: زرّ أيقونة عادي كبقيّة الصفّ، و`>_` للطرفية وحدها. */}
+              <Slash aria-hidden="true" />
             </PromptInputButton>
 
             <ComposerShellToggle
@@ -2131,6 +2131,10 @@ export default function ChatComposer({
               active={shellMode.active}
               onToggle={shellMode.toggle}
             />
+
+            {/* فاصل مجموعتين: أدوات الإدخال قبله، وإعدادات الدور (نموذج، تنسيق،
+                صلاحيات، جهد، سياق) بعده — فيُقرأ الصفّ مجموعتين لا ركاماً واحداً. */}
+            <span aria-hidden="true" className="h-4 w-px shrink-0 bg-border" />
 
             {/* مبدّل النموذج يأتي بعد زر الأوامر: صورة، صوت، أوامر، نموذج. */}
             {capabilities.modelSwitch?.supported && onChangeSessionModel && (
@@ -2295,7 +2299,7 @@ export default function ChatComposer({
               <PromptInputButton
                 tooltip={{ content: t('input.clearInput', { defaultValue: 'Clear input' }) }}
                 onClick={onClearInput}
-                className="sm:No-flex hidden h-8 w-8 shrink-0 [&_svg]:size-4"
+                className={cn(COMPOSER_ICON_BUTTON_CLASS, 'sm:No-flex hidden')}
               >
                 <XIcon />
               </PromptInputButton>

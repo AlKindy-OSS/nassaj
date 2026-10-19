@@ -14,6 +14,7 @@ import { WebSocketProvider } from './contexts/WebSocketContext';
 import { BrandingProvider } from './contexts/BrandingContext';
 import AppContent from './components/app/AppContent';
 import WikiPanel from './components/wiki/view/WikiPanel';
+import { QuickSettingsPanel } from './components/quick-settings-panel';
 import i18n from './i18n/config.js';
 
 // The authenticated application shell. Everything here sits behind
@@ -75,6 +76,9 @@ export function AuthenticatedApp() {
               hop now that this IS the catch-all. */}
           <Route path="/*" element={<AppContent />} />
         </Routes>
+        {/* The side notch: once for every signed-in page (chat, settings,
+            project lists, empty states, the wiki), not only inside chat. */}
+        <QuickSettingsPanel />
       </ProtectedRoute>
     </WebSocketProvider>
   );

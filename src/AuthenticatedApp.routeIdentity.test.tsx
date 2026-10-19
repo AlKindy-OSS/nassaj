@@ -32,6 +32,7 @@ vi.mock('./components/auth', () => ({
   AuthProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
 vi.mock('./components/wiki/view/WikiPanel', () => ({ default: () => null }));
+vi.mock('./components/quick-settings-panel', () => ({ QuickSettingsPanel: () => null }));
 function MockAppContent() {
   useEffect(() => {
     appContentMounts.count += 1;

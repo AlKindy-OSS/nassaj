@@ -50,7 +50,7 @@ export default function QuickSettingsHandle({
 
   return (
     <div
-      className={`fixed ${placementClass} z-50 ${transitionClass} ${!isOpen && !isDragging ? 'ltr:translate-x-[75%] rtl:-translate-x-[75%] ltr:hover:translate-x-0 rtl:hover:translate-x-0' : ''}`}
+      className={`fixed ${placementClass} z-[10002] ${transitionClass} ${!isOpen && !isDragging ? 'ltr:translate-x-[75%] rtl:-translate-x-[75%] ltr:hover:translate-x-0 rtl:hover:translate-x-0' : ''}`}
       style={positionStyle}
     >
       <button

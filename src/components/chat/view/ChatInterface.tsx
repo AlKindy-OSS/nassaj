@@ -7,7 +7,7 @@ import { useConversationCost } from '../hooks/useConversationCost';
 import { ConversationCostContext } from '../context/ConversationCostContext';
 import { TurnCostContext } from '../context/TurnCostContext';
 import PermissionContext from '../../../contexts/PermissionContext';
-import { QuickSettingsPanel } from '../../quick-settings-panel';
+import { usePublishQuickSettingsSessionProvider } from '../../quick-settings-panel';
 import { useWebSocket } from '../../../contexts/WebSocketContext';
 import type { ChatInterfaceProps, Provider  } from '../types/types';
 import type { ActiveBodyProvider, LLMProvider } from '../../../types/app';
@@ -290,6 +290,9 @@ function ChatInterface({
   // Prefer the open session's own provider so an old Claude session keeps its
   // Claude branding even if the global (composer) selection is Antigravity.
   const displayProvider = selectedSession?.__provider ?? provider;
+  // The quick-settings notch is mounted app-wide (AuthenticatedApp); it reads
+  // this chat's provider from a shared store instead of a prop.
+  usePublishQuickSettingsSessionProvider(displayProvider);
 
   // B-249: النموذج الفعّال للجلسة يُجلَب من الخادم لا يُشتقّ من الحالة العامة.
   // الحالة العامة (claudeModel/…) لا تعكس ما خزَّنه resolveResumeModel للجلسة —
@@ -1595,7 +1598,6 @@ function ChatInterface({
         />
       </div>
 
-      <QuickSettingsPanel sessionProvider={displayProvider} />
 
       <CommandResultModal
         payload={commandModalPayload}

@@ -427,7 +427,7 @@
         "description": "New release is active and verified."
       }
     },
-    "stepperProgress": "Step {{current}} of {{total}} · {{percent}}%",
+    "stepperProgress": "Step {{current}} of {{total}}",
     "stepperAriaLabel": "Update phases",
     "ownerActionRequired": "The update is ready. Confirm activation in this dialog.",
     "autoActivate": {
@@ -1090,6 +1090,13 @@
     "confirm": "This is a secrets file. Do you want to open it?\n{{fileName}}",
     "declined": "Not opened: this is a secrets file and opening it was not confirmed.",
     "badge": "Secrets file: opening it asks for confirmation"
+  },
+  "whatsNew": {
+    "title": "What's new",
+    "version": "Version",
+    "close": "Close what's new",
+    "fullNotes": "Full release notes",
+    "opensInNewTab": "(opens in a new tab)"
   },
   "dialog": {
     "confirm": "Confirm",

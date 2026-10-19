@@ -1,3 +1,9 @@
+## 2.3.1.11 — 2026-10-19
+
+شريط أدوات المؤلِّف صار أرتب: أزرار بلا إطار وبنمط واحد، وزر الأوامر بأيقونة الشرطة المائلة وزر الطرفية بأيقونة الطرفية، ومؤشر السياق هو الدائرة الوحيدة. مقبض الإعدادات السريعة يظهر في كل صفحة بعد الدخول، وتلميح البحث في منتقي المزوّد صار نصاً مقروءاً. بعد كل تحديث تظهر نافذة «ما الجديد» مرة واحدة بأبرز تغييرات الإصدار، ونافذة التحديث تعرض نسبة تقدّم واحدة.
+
+The composer toolbar is tidier: frameless buttons with one style, the slash glyph on the commands button and the terminal glyph on the shell toggle, and the context gauge as the only circle. The quick-settings handle shows on every signed-in page, and the provider picker search hint is readable text. After every update a "What's new" popup appears once with the version's highlights, and the update dialog shows a single progress percentage.
+
 ## 2.3.1.10 — 2026-10-19
 
 سُحب تأكيد المالك بمفتاح المرور بقرار المالك في 2026-10-18، عند الدخول وبعده: المالك المربوط يدخل بالدخول الموحّد مباشرة بلا صفحة «يتطلب نسّاج مفتاح المرور للمالك» وبلا شرط عامل دخول أو عمر جلسة (ADR-194 A1)، ويملك نسّاج كاملاً فلا تطلب المحادثة والطرفية والإدارة أي تأكيد إضافي (ADR-H20 N2). يبقى التحقق من رمز الهوية وربطها، ويبقى تأكيد إعداد الدخول الموحّد وجلسة مالك الموصلات لعشر دقائق.
