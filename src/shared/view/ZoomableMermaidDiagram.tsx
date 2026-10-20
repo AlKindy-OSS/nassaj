@@ -8,12 +8,15 @@
  * The overlay is accessible:
  *  - role="dialog" + aria-modal="true" + aria-label
  *  - Closes on Escape and on backdrop click
- *  - Focus moves to the close button on open and back to the zoom button on close
+ *  - B-1676: Tab and Shift+Tab stay inside the dialog (focus-trap-react, as in
+ *    the wiki overlays); focus moves to the close button on open and back to
+ *    the zoom button on close
  */
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import type { HTMLAttributes } from 'react';
 import { createPortal } from 'react-dom';
+import FocusTrap from 'focus-trap-react';
 import { useTranslation } from 'react-i18next';
 import { Maximize2, X } from 'lucide-react';
 
@@ -46,7 +49,7 @@ function useDefaultLabels(): MermaidZoomLabels {
   };
 }
 
-/** Open/close state with focus hand-off and a capturing Escape handler. */
+/** Open/close state with focus restore and a capturing Escape handler. */
 function useZoomDialog() {
   const [zoomed, setZoomed] = useState(false);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
@@ -57,13 +60,6 @@ function useZoomDialog() {
     setZoomed(false);
     requestAnimationFrame(() => zoomButtonRef.current?.focus());
   }, []);
-
-  useEffect(() => {
-    if (!zoomed) return undefined;
-    // Slight delay so the overlay is painted before the focus attempt.
-    const id = setTimeout(() => closeButtonRef.current?.focus(), 20);
-    return () => clearTimeout(id);
-  }, [zoomed]);
 
   useEffect(() => {
     if (!zoomed) return undefined;
@@ -125,38 +121,58 @@ export default function ZoomableMermaidDiagram({
 
       {/* Portaled to body so a transformed/clipped ancestor (chat bubble, board) can't trap the fixed overlay. */}
       {zoomed && createPortal(
-        <div
-          role="dialog"
-          aria-modal="true"
-          aria-label={text.zoomedAria}
-          className="fixed inset-0 z-50 flex items-center justify-center"
+        <FocusTrap
+          focusTrapOptions={{
+            // The close button takes focus once the overlay is painted.
+            initialFocus: () => closeButtonRef.current ?? false,
+            fallbackFocus: () => closeButtonRef.current ?? document.body,
+            // Escape is the capturing handler above (it must not bubble), and
+            // `close` restores focus to the zoom button itself.
+            escapeDeactivates: false,
+            returnFocusOnDeactivate: false,
+            allowOutsideClick: true,
+            // Everything in the panel is visible; skip layout checks that see
+            // no boxes before the first reflow (B-122).
+            tabbableOptions: { displayCheck: 'none' },
+          }}
         >
           <div
-            className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-            onClick={close}
-            aria-hidden="true"
-            data-testid="mermaid-zoom-backdrop"
-          />
-          <div
-            className={[
-              overlayClassName,
-              'relative z-10 max-h-[90dvh] max-w-[95dvw] overflow-auto rounded-lg border border-border bg-card p-6 shadow-2xl',
-            ].filter(Boolean).join(' ')}
+            role="dialog"
+            aria-modal="true"
+            aria-label={text.zoomedAria}
+            className="fixed inset-0 z-50 flex items-center justify-center"
           >
-            <button
-              ref={closeButtonRef}
-              type="button"
+            <div
+              className="absolute inset-0 bg-black/60 backdrop-blur-sm"
               onClick={close}
-              aria-label={text.close}
-              className={CLOSE_BUTTON_CLASS}
+              aria-hidden="true"
+              data-testid="mermaid-zoom-backdrop"
+            />
+            {/* Focusable so a keyboard user can scroll a diagram larger than the panel. */}
+            <div
+              tabIndex={0}
+              data-testid="mermaid-zoom-panel"
+              className={[
+                overlayClassName,
+                'relative z-10 max-h-[90dvh] max-w-[95dvw] overflow-auto rounded-lg border border-border bg-card p-6 shadow-2xl',
+                'focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/50',
+              ].filter(Boolean).join(' ')}
             >
-              <X className="h-4 w-4" aria-hidden="true" />
-            </button>
-            <div className="min-w-[min(600px,85dvw)]">
-              <MermaidDiagram code={code} />
+              <button
+                ref={closeButtonRef}
+                type="button"
+                onClick={close}
+                aria-label={text.close}
+                className={CLOSE_BUTTON_CLASS}
+              >
+                <X className="h-4 w-4" aria-hidden="true" />
+              </button>
+              <div className="min-w-[min(600px,85dvw)]">
+                <MermaidDiagram code={code} />
+              </div>
             </div>
           </div>
-        </div>,
+        </FocusTrap>,
         document.body,
       )}
     </div>

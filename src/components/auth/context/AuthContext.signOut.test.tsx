@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
 
 import { AUTH_TOKEN_STORAGE_KEY } from '../constants';
-import { SIGNED_OUT_EVERYWHERE_NOTICE_KEY } from '../loginLock';
+import { SIGN_OUT_INCOMPLETE_NOTICE_KEY, SIGNED_OUT_EVERYWHERE_NOTICE_KEY } from '../loginLock';
 import type { AuthActionResult } from '../types';
 
 import { AuthProvider, useAuth } from './AuthContext';
@@ -97,6 +97,45 @@ describe('AuthProvider sign-out (T-2035)', () => {
     await act(async () => { auth!.logout(); });
     await act(async () => { await Promise.resolve(); });
     expect(sessionStorage.getItem(SIGNED_OUT_EVERYWHERE_NOTICE_KEY)).toBeNull();
+  });
+});
+
+describe('AuthProvider sign-out the server could not complete (B-1652)', () => {
+  it.each([
+    ['500', () => json({ error: 'Internal server error' }, 500)],
+    ['400 ambiguous_authentication', () => json({ error: 'Ambiguous authentication', code: 'ambiguous_authentication' }, 400)],
+  ])('a %s answer after the local clear leaves the incomplete notice', async (_label, answer) => {
+    localStorage.setItem(AUTH_TOKEN_STORAGE_KEY, 'token-synthetic');
+    installFetch((url) => (url.endsWith('/api/auth/logout') ? answer() : json({})));
+    await renderProvider();
+    await act(async () => { auth!.logout(); });
+    expect(localStorage.getItem(AUTH_TOKEN_STORAGE_KEY)).toBeNull();
+    await waitFor(() => expect(sessionStorage.getItem(SIGN_OUT_INCOMPLETE_NOTICE_KEY)).toBe('1'));
+    expect(sessionStorage.getItem(SIGNED_OUT_EVERYWHERE_NOTICE_KEY)).toBeNull();
+  });
+
+  it('a network failure leaves the incomplete notice too', async () => {
+    localStorage.setItem(AUTH_TOKEN_STORAGE_KEY, 'token-synthetic');
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    installFetch((url) => {
+      if (url.endsWith('/api/auth/logout')) throw new TypeError('Failed to fetch');
+      return json({});
+    });
+    await renderProvider();
+    await act(async () => { auth!.logout(); });
+    await waitFor(() => expect(sessionStorage.getItem(SIGN_OUT_INCOMPLETE_NOTICE_KEY)).toBe('1'));
+  });
+
+  it.each([
+    ['a confirmed sign-out', () => json({ success: true, scope: 'device' })],
+    ['an already-ended session (401)', () => json({ error: 'Unauthorized' }, 401)],
+  ])('%s leaves no incomplete notice', async (_label, answer) => {
+    localStorage.setItem(AUTH_TOKEN_STORAGE_KEY, 'token-synthetic');
+    installFetch((url) => (url.endsWith('/api/auth/logout') ? answer() : json({})));
+    await renderProvider();
+    await act(async () => { auth!.logout(); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(sessionStorage.getItem(SIGN_OUT_INCOMPLETE_NOTICE_KEY)).toBeNull();
   });
 });
 

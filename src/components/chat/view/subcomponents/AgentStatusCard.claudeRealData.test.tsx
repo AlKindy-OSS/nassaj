@@ -135,7 +135,7 @@ function renderCard(rows: NormalizedMessage[]) {
     onAbort={() => {}} isLoading={progress.agents.some((agent) => agent.status === 'running')}
     provider="claude" runStartedAt={null} progress={progress} />,
   );
-  fireEvent.click(screen.getByRole('button', { name: /qa-critic — (Running|Done)/ }));
+  fireEvent.click(screen.getByRole('button', { name: /qa-critic — (Running|Succeeded)/ }));
   return { progress, container: rendered.container };
 }
 

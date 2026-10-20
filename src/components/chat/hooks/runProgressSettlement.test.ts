@@ -69,8 +69,10 @@ describe('background agents settle through status rows', () => {
 
   it('completed and failed settlements close them', () => {
     const progress = progressOf(ROWS);
-    assert.deepEqual(progress.agents.map((a) => [a.id, a.status]), [[COMPLETED_AGENT, 'done'], [FAILED_AGENT, 'done']]);
-    assert.equal(progress.agentsDone, 2);
+    assert.deepEqual(progress.agents.map((a) => [a.id, a.status, a.outcome]),
+      [[COMPLETED_AGENT, 'done', 'completed'], [FAILED_AGENT, 'done', 'failed']]);
+    // P0: a failure ends the agent but is never counted as done (success).
+    assert.deepEqual([progress.agentsDone, progress.agentsUnsuccessful], [1, 1]);
     assert.equal(progress.activeSubagent, null);
   });
 

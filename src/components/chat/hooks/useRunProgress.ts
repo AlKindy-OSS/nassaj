@@ -63,6 +63,11 @@
 
 import { useMemo } from 'react';
 import type { SkillObservation, SkillCoverage } from '../../../../shared/skillObservations';
+import {
+  isTerminalSubagentState,
+  type SubagentInferredCause,
+  type SubagentOutcome,
+} from '../../../../shared/subagent-states';
 
 import type { ChatMessage, ProgressPlan, SubagentChildTool } from '../types/types';
 
@@ -108,6 +113,14 @@ export interface RunAgent {
    * transcript-derived rows in this file never emit it.
    */
   status: 'running' | 'done' | 'stale';
+  /**
+   * How a `done` row ended (study §3.2, P0). Only `completed` is a success:
+   * `failed`, `stopped` and `unknown` never render as 100% or with a check.
+   * Absent on rows from sources without outcomes (read as `completed`).
+   */
+  outcome?: SubagentOutcome;
+  /** Why Nassaj inferred `stopped`/`unknown` (owner, process-exit, timeout); absent when measured. */
+  outcomeCause?: SubagentInferredCause;
   /** name of the most recent child tool while running (e.g. 'Read'); undefined when done or idle. */
   currentTool?: string;
   /** number of child tool calls this sub-agent has issued so far. */
@@ -129,8 +142,10 @@ export interface RunProgress {
   inProgress: number;
   /** unique sub-agents in the current reply — tooltip detail only */
   agentsTotal: number;
-  /** sub-agents whose lifecycle is completed or failed — tooltip detail only */
+  /** sub-agents that completed successfully — tooltip detail only */
   agentsDone: number;
+  /** sub-agents that ended without success (failed, stopped, unknown) — never counted as done */
+  agentsUnsuccessful?: number;
   /**
    * The single currently-running sub-agent (isComplete === false), if any.
    * `callCount` = number of child tool calls it has issued so far. `null` when
@@ -171,6 +186,7 @@ const EMPTY_PROGRESS: RunProgress = {
   inProgress: 0,
   agentsTotal: 0,
   agentsDone: 0,
+  agentsUnsuccessful: 0,
   activeSubagent: null,
   agents: [],
   declaredPercent: null,
@@ -260,13 +276,21 @@ export function gateComputedProgress(progress: RunProgress, planTiming: string):
  */
 function settledSnapshot(progress: RunProgress): RunProgress {
   if (progress.total === 0) return EMPTY_PROGRESS;
-  const { done, total, inProgress, agentsTotal, agentsDone } = progress;
-  return { ...EMPTY_PROGRESS, done, total, inProgress, agentsTotal, agentsDone, settled: true };
+  const { done, total, inProgress, agentsTotal, agentsDone, agentsUnsuccessful } = progress;
+  return { ...EMPTY_PROGRESS, done, total, inProgress, agentsTotal, agentsDone, agentsUnsuccessful, settled: true };
 }
 
-/** A sub-agent lifecycle state that has ended. */
-function isSettledState(state: unknown): boolean {
-  return state === 'completed' || state === 'failed';
+/** How a sub-agent ended, or null while it has not (turn end is not settlement). */
+function outcomeOf(state: unknown): SubagentOutcome | null {
+  return isTerminalSubagentState(state) ? state : null;
+}
+
+/** Outcome fields of a row: `outcome` always when ended, the cause only when inferred. */
+function outcomeFields(
+  outcome: SubagentOutcome | null, cause: SubagentInferredCause | undefined,
+): Pick<RunAgent, 'outcome' | 'outcomeCause'> {
+  if (!outcome) return {};
+  return { outcome, ...(cause ? { outcomeCause: cause } : {}) };
 }
 
 /** Per-provider reading options, from its progress capability (ADR-199). */
@@ -300,7 +324,7 @@ export function gateTurnSubagents(progress: RunProgress, subagentTiming: string)
     ...progress,
     agents,
     activeSubagent: null,
-    agentsTotal: progress.agentsDone,
+    agentsTotal: progress.agentsDone + (progress.agentsUnsuccessful ?? 0),
     subagentsWhenFinished: true,
   };
 }
@@ -320,6 +344,7 @@ interface ScanState {
   /** Unique sub-agent ids seen. */
   taskIds: Set<string>;
   agentsDone: number;
+  agentsUnsuccessful: number;
   activeSubagent: { callCount: number } | null;
   /**
    * Per-agent rows for the strip, collected in tail→head order (newest first);
@@ -338,6 +363,7 @@ function createScanState(): ScanState {
     todosAt: -Infinity,
     taskIds: new Set<string>(),
     agentsDone: 0,
+    agentsUnsuccessful: 0,
     activeSubagent: null,
     agentsRev: [],
     declaredPercent: null,
@@ -371,13 +397,17 @@ function considerPlan(state: ScanState, plan: ProgressPlan | undefined, at: numb
 }
 
 /**
- * Register one sub-agent id: dedup, settle tally, and the active agent (the
- * first unsettled one scanning backwards). Returns false when already seen.
+ * Register one sub-agent id: dedup, outcome tally (success apart from the
+ * rest), and the active agent (the first unsettled one scanning backwards).
+ * Returns false when already seen.
  */
-function registerAgent(state: ScanState, id: string, complete: boolean, callCount: number): boolean {
+function registerAgent(
+  state: ScanState, id: string, outcome: SubagentOutcome | null, callCount: number,
+): boolean {
   if (!id || state.taskIds.has(id)) return false;
   state.taskIds.add(id);
-  if (complete) state.agentsDone++;
+  if (outcome === 'completed') state.agentsDone++;
+  else if (outcome) state.agentsUnsuccessful++;
   else if (state.activeSubagent === null) state.activeSubagent = { callCount };
   return true;
 }
@@ -390,8 +420,8 @@ function considerTurnSubagents(state: ScanState, msg: ChatMessage): void {
   const list = msg.turnSubagents ?? [];
   for (let k = list.length - 1; k >= 0; k--) {
     const sub = list[k];
-    const complete = isSettledState(sub?.state);
-    if (!sub || !registerAgent(state, sub.id, complete, 0)) continue;
+    const outcome = outcomeOf(sub?.state);
+    if (!sub || !registerAgent(state, sub.id, outcome, 0)) continue;
     state.agentsRev.push({
       id: sub.id,
       type: sub.agentName ?? '',
@@ -401,7 +431,8 @@ function considerTurnSubagents(state: ScanState, msg: ChatMessage): void {
       modelInherited: sub.modelInherited,
       effort: sub.effort,
       tools: sub.tools,
-      status: complete ? 'done' : 'running',
+      status: outcome ? 'done' : 'running',
+      ...outcomeFields(outcome, sub.inferredCause),
       callCount: 0,
       startedAt: tsMs(msg.timestamp),
     });
@@ -424,7 +455,8 @@ function considerDeclaredPercent(state: ScanState, msg: ChatMessage): void {
  * child tool name — the same "last child" the container UI treats as current.
  * Done agents expose no current tool.
  */
-function buildAgentRow(msg: ChatMessage, id: string, label: string, complete: boolean): RunAgent {
+function buildAgentRow(msg: ChatMessage, id: string, label: string, outcome: SubagentOutcome | null): RunAgent {
+  const complete = outcome !== null;
   const childTools = msg.subagentState?.childTools;
   const meta = readAgentMeta(msg.toolInput);
   const lastChild = childTools && childTools.length > 0 ? childTools[childTools.length - 1] : undefined;
@@ -438,6 +470,7 @@ function buildAgentRow(msg: ChatMessage, id: string, label: string, complete: bo
     tools: msg.subagent?.tools,
     description: meta.description || label,
     status: complete ? 'done' : 'running',
+    ...outcomeFields(outcome, msg.subagent?.inferredCause),
     currentTool: complete ? undefined : lastChild?.toolName || undefined,
     callCount: childTools?.length ?? 0,
     startedAt: tsMs(msg.timestamp),
@@ -459,9 +492,9 @@ function considerSubagentRow(state: ScanState, msg: ChatMessage): void {
   if (childPlan) considerPlan(state, childPlan.plan, tsMs(childPlan.timestamp));
 
   const id = msg.toolId || subagent.id;
-  const complete = isSettledState(subagent.state);
-  if (!registerAgent(state, id, complete, childTools?.length ?? 0)) return;
-  state.agentsRev.push(buildAgentRow(msg, id, subagent.label, complete));
+  const outcome = outcomeOf(subagent.state);
+  if (!registerAgent(state, id, outcome, childTools?.length ?? 0)) return;
+  state.agentsRev.push(buildAgentRow(msg, id, subagent.label, outcome));
 }
 
 /**
@@ -516,6 +549,7 @@ function snapshotFromScan(state: ScanState): RunProgress {
     inProgress: state.inProgress,
     agentsTotal: state.taskIds.size,
     agentsDone: state.agentsDone,
+    agentsUnsuccessful: state.agentsUnsuccessful,
     activeSubagent: state.activeSubagent,
     // tail→head collection reversed → delegation (head→tail) order for the strip.
     agents: state.agentsRev.reverse(),

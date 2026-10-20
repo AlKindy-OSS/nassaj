@@ -90,14 +90,15 @@ interface OverallInput {
   total: number;
   inProgress: number;
   declaredPercent?: number | null;
-  agents: Array<{ status: 'running' | 'done' | 'stale'; progress?: DeclaredProgress }>;
+  agents: Array<{ status: 'running' | 'done' | 'stale'; outcome?: string; progress?: DeclaredProgress }>;
 }
 
 /**
  * Overall completion, in priority order: plan fraction (computed) →
  * coordinator's own declared line → average of the agents' values. The average
- * is only offered when EVERY agent has a value (declared, or done via its
- * tool_result = 100); one unknown agent makes the average a guess, so we hide it.
+ * is only offered when EVERY agent has a value (declared, or completed via
+ * its tool_result = 100); one unknown agent makes the average a guess, and an
+ * agent that ended without success has no honest value, so we hide it.
  */
 export function resolveOverallPercent(input: OverallInput): OverallPercent | null {
   if (input.total > 0) {
@@ -110,6 +111,8 @@ export function resolveOverallPercent(input: OverallInput): OverallPercent | nul
   if (input.agents.length === 0) return null;
   let sum = 0;
   for (const agent of input.agents) {
+    // P0: only a successful end counts as 100; failed/stopped/unknown hide the average.
+    if (agent.status === 'done' && agent.outcome && agent.outcome !== 'completed') return null;
     const value = agent.status === 'done' ? 100 : agent.progress?.percent;
     if (value === undefined) return null;
     sum += value;

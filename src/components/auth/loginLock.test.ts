@@ -1,13 +1,18 @@
 // T-2035: lock parsing, minute rounding and the one-shot sign-out notice.
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import {
   consumeSignedOutEverywhereNotice,
+  consumeSignOutIncompleteNotice,
   hasSignedOutEverywhereNotice,
+  hasSignOutIncompleteNotice,
+  isIncompleteSignOutStatus,
   loginLockedMessage,
   loginLockMinutes,
   readLoginLock,
   recordSignedOutEverywhereNotice,
+  recordSignOutIncompleteNotice,
+  SIGN_OUT_INCOMPLETE_EVENT,
 } from './loginLock';
 
 function memoryStorage() {
@@ -50,5 +55,30 @@ describe('loginLock', () => {
     expect(hasSignedOutEverywhereNotice(storage)).toBe(true);
     expect(consumeSignedOutEverywhereNotice(storage)).toBe(true);
     expect(consumeSignedOutEverywhereNotice(storage)).toBe(false);
+  });
+
+  it('B-1652: the sign-out-incomplete notice is one-shot and announces itself', () => {
+    const storage = memoryStorage();
+    const onIncomplete = vi.fn();
+    window.addEventListener(SIGN_OUT_INCOMPLETE_EVENT, onIncomplete);
+    try {
+      expect(hasSignOutIncompleteNotice(storage)).toBe(false);
+      recordSignOutIncompleteNotice(storage);
+      expect(onIncomplete).toHaveBeenCalledTimes(1);
+      expect(hasSignOutIncompleteNotice(storage)).toBe(true);
+      expect(consumeSignOutIncompleteNotice(storage)).toBe(true);
+      expect(consumeSignOutIncompleteNotice(storage)).toBe(false);
+    } finally {
+      window.removeEventListener(SIGN_OUT_INCOMPLETE_EVENT, onIncomplete);
+    }
+  });
+
+  it('B-1652: only a non-2xx other than 401 is an incomplete sign-out', () => {
+    expect(isIncompleteSignOutStatus(500)).toBe(true);
+    expect(isIncompleteSignOutStatus(400)).toBe(true);
+    expect(isIncompleteSignOutStatus(403)).toBe(true);
+    expect(isIncompleteSignOutStatus(401)).toBe(false);
+    expect(isIncompleteSignOutStatus(200)).toBe(false);
+    expect(isIncompleteSignOutStatus(204)).toBe(false);
   });
 });

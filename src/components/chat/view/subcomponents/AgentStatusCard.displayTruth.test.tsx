@@ -418,7 +418,7 @@ describe('عنوان الورشة الخلفية', () => {
 
     const text = container.textContent ?? '';
     assert.equal(/0\/3 running/.test(text), false, `الملخّص ما يزال يقول running: ${text}`);
-    assert.equal(text.includes('1 done'), true, text);
+    assert.equal(text.includes('1 succeeded'), true, text);
     assert.equal(/\d\/\d/.test(text.replace(/#\d+/g, '').replace(/[0-9a-f]{8}/g, '')), false, 'صيغة x/N يجب ألّا تظهر');
   });
 
@@ -625,17 +625,17 @@ describe('مؤشّر الوكلاء الموحّد', () => {
     );
   }
 
-  it('منتهٍ + جارٍ ⇒ شارة واحدة «2 done · 1 running» بلا صيغة x/N', () => {
+  it('ناجح + جارٍ ⇒ شارة واحدة «2 succeeded · 1 running» بلا صيغة x/N', () => {
     const { container } = renderCounts(['done', 'done', 'running']);
     const chip = screen.getByTestId('agent-counts-chip').textContent ?? '';
-    assert.equal(chip, '2 done · 1 running');
+    assert.equal(chip, '2 succeeded · 1 running');
     assert.equal(/\d\/\d/.test(container.textContent ?? ''), false);
     assert.equal(screen.queryByLabelText('Show completed agents') !== null, true);
   });
 
-  it('منتهٍ فقط (لا جارٍ) ⇒ «2 done» وحدها', () => {
+  it('ناجح فقط (لا جارٍ) ⇒ «2 succeeded» وحدها', () => {
     renderCounts(['done', 'done']);
-    assert.equal(screen.getByTestId('agent-counts-chip').textContent, '2 done');
+    assert.equal(screen.getByTestId('agent-counts-chip').textContent, '2 succeeded');
   });
 
   it('جارٍ فقط ⇒ نصّ «1 running» بلا زرّ تبديل', () => {
@@ -653,13 +653,97 @@ describe('تصريف نصوص المؤشّر العربية', () => {
     await inst.init({ lng: 'ar', resources: { ar: { chat: ar } }, ns: ['chat'], defaultNS: 'chat' });
     const f = (k: string, count: number) =>
       inst.t(`agentActivity.${k}`, { count, n: String(count) });
-    assert.equal(f('agentsCompleted', 1), 'منتهٍ');
-    assert.equal(f('agentsCompleted', 2), 'منتهيان');
-    assert.equal(f('agentsCompleted', 3), '3 منتهون');
-    assert.equal(f('agentsCompleted', 11), '11 منتهياً');
+    assert.equal(f('agentsCompleted', 1), 'ناجح');
+    assert.equal(f('agentsCompleted', 2), 'ناجحان');
+    assert.equal(f('agentsCompleted', 3), '3 ناجحون');
+    assert.equal(f('agentsCompleted', 11), '11 ناجحاً');
+    assert.equal(f('agentsFailed', 1), 'فاشل');
+    assert.equal(f('agentsFailed', 2), 'فاشلان');
+    assert.equal(f('agentsStopped', 3), '3 موقوفون');
+    assert.equal(f('agentsUnknown', 1), 'واحد بلا إشارة انتهاء');
     assert.equal(f('agentsRunning', 1), 'يعمل');
     assert.equal(f('agentsRunning', 2), 'يعملان');
     assert.equal(f('agentsRunning', 5), '5 يعملون');
     assert.equal(f('agentsRunning', 11), '11 يعمل');
+  });
+});
+
+// ── P0: نتائج الوكلاء — الفشل والإيقاف والمجهول لا تُعرض نجاحاً ───────────────
+describe('نتيجة الوكيل (agent-progress P0)', () => {
+  function renderOutcomes(rows: Array<Partial<RunAgent>>) {
+    localStorage.setItem('nassaj:agentStatusCard:hideCompleted', '0');
+    return render(
+      <AgentStatusCard
+        agents={rows.map((row, i) => agent({ id: `o${i}`, type: `t${i}`, ...row }))}
+        status={{ text: 'Working', can_interrupt: true }}
+        onAbort={() => {}}
+        isLoading
+        provider="claude"
+        runStartedAt={null}
+        progress={null}
+      />,
+    );
+  }
+
+  it('(f) صفّ فاشل: لا علامة صحّ ولا 100% ونصّ «Failed» صريح', () => {
+    const { container } = renderOutcomes([{ status: 'done', outcome: 'failed', progress: { percent: 100 } as never }]);
+    assert.equal(container.querySelectorAll('[data-testid="agent-mark-success"]').length, 0);
+    assert.equal(container.querySelectorAll('[data-testid="agent-mark-failed"]').length, 1);
+    assert.equal(container.querySelectorAll('[data-testid="agent-percent"]').length, 0);
+    assert.equal((container.textContent ?? '').includes('100'), false);
+    assert.equal(screen.getByTestId('agent-outcome-badge').textContent, 'Failed');
+  });
+
+  it('صفّ ناجح وحده يحمل علامة الصحّ و100%', () => {
+    const { container } = renderOutcomes([{ status: 'done', outcome: 'completed' }]);
+    assert.equal(container.querySelectorAll('[data-testid="agent-mark-success"]').length, 1);
+    assert.equal(screen.getByTestId('agent-percent').textContent?.includes('100'), true);
+  });
+
+  it('موقوف بأمر المالك ومجهول النهاية: علامة ونصّ مميّزان مع سبب في التلميح', () => {
+    const { container } = renderOutcomes([
+      { status: 'done', outcome: 'stopped', outcomeCause: 'owner' },
+      { status: 'done', outcome: 'unknown', outcomeCause: 'process-exit' },
+      { status: 'done', outcome: 'stopped' },
+    ]);
+    const badges = screen.getAllByTestId('agent-outcome-badge').map((badge) => badge.textContent);
+    assert.deepEqual(badges, ['Stopped by owner', 'No end signal', 'Stopped']);
+    const titles = screen.getAllByTestId('agent-outcome-badge').map((badge) => badge.getAttribute('title'));
+    assert.equal(titles[1], 'Its process ended without reporting how this agent finished.');
+    const unknownRow = container.querySelector('[data-testid="agent-mark-unknown"]')!.closest('button')!;
+    assert.equal(unknownRow.getAttribute('aria-label')?.includes('Its process ended without reporting'), true,
+      'the inferred cause reaches keyboard users, not only a hover title');
+    assert.equal(container.querySelectorAll('[data-testid="agent-mark-stopped"]').length, 2);
+    assert.equal(container.querySelectorAll('[data-testid="agent-mark-unknown"]').length, 1);
+    assert.equal(container.querySelectorAll('[data-testid="agent-mark-success"]').length, 0);
+  });
+
+  it('المؤشّر الموحّد يفصّل النتائج ولا يعدّ الفاشل ناجحاً', () => {
+    renderOutcomes([
+      { status: 'done', outcome: 'completed' },
+      { status: 'done', outcome: 'failed' },
+      { status: 'done', outcome: 'unknown', outcomeCause: 'timeout' },
+      { status: 'running' },
+    ]);
+    assert.equal(screen.getByTestId('agent-counts-chip').textContent,
+      '1 succeeded · 1 failed · 1 no end signal · 1 running');
+  });
+
+  it('بلا ناجح: النصّ يذكر الفاشل بلا زرّ إخفاء المكتمل، والفاشل لا يُخفى', () => {
+    localStorage.setItem('nassaj:agentStatusCard:hideCompleted', '1');
+    const { container } = render(
+      <AgentStatusCard
+        agents={[agent({ id: 'f1', type: 'failed-agent', status: 'done', outcome: 'failed' })]}
+        status={{ text: 'Working', can_interrupt: true }}
+        onAbort={() => {}}
+        isLoading
+        provider="claude"
+        runStartedAt={null}
+        progress={null}
+      />,
+    );
+    assert.equal(screen.getByTestId('agent-counts-text').textContent, '1 failed');
+    assert.equal(screen.queryByTestId('agent-counts-chip'), null);
+    assert.equal((container.textContent ?? '').includes('failed-agent'), true);
   });
 });

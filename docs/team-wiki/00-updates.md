@@ -1,3 +1,9 @@
+## 2.3.2.0 — 2026-10-20
+
+محادثة الفريق صارت داخل المؤلِّف نفسه: زرّ «الفريق» في شريط الأدوات يحوّل الكتابة إلى الفريق بدل النموذج، ورسائل الفريق تظهر داخل المحادثة بترتيبها. المالك يستطيع تثبيت واجهتي codex وopencode الناقصتين بزرّ من تبويب الحساب في الإعدادات. تقدّم الوكلاء يعرض النتيجة الحقيقية لكل وكيل: ناجح أو فاشل أو موقوف أو غير معروف. ونافذة «ما الجديد» تظهر مرة واحدة لكل مستخدم، مع إصلاحات في نافذة التحديث وتسجيل الخروج.
+
+Team chat now lives inside the composer: a Team button in the toolbar sends what you type to the team instead of the model, and team messages appear inline in the conversation. The owner can install the missing codex and opencode CLIs with a button on the Account tab in settings. Agent progress shows each agent's real outcome: succeeded, failed, stopped or unknown. The "What's new" popup shows once per user, with fixes to the update dialog and sign-out.
+
 ## 2.3.1.11 — 2026-10-19
 
 شريط أدوات المؤلِّف صار أرتب: أزرار بلا إطار وبنمط واحد، وزر الأوامر بأيقونة الشرطة المائلة وزر الطرفية بأيقونة الطرفية، ومؤشر السياق هو الدائرة الوحيدة. مقبض الإعدادات السريعة يظهر في كل صفحة بعد الدخول، وتلميح البحث في منتقي المزوّد صار نصاً مقروءاً. بعد كل تحديث تظهر نافذة «ما الجديد» مرة واحدة بأبرز تغييرات الإصدار، ونافذة التحديث تعرض نسبة تقدّم واحدة.

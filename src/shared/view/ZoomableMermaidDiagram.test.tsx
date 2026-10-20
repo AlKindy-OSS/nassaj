@@ -1,6 +1,6 @@
 /**
  * T-2046 (Q7): shared Mermaid zoom dialog — open, Escape/backdrop/close,
- * focus hand-off, label override, and wiki CSS hooks.
+ * focus hand-off, label override, and wiki CSS hooks. B-1676: focus trap.
  *
  * Run: NODE_ENV=test npx vitest run src/shared/view/ZoomableMermaidDiagram.test.tsx
  */
@@ -82,5 +82,32 @@ describe('ZoomableMermaidDiagram', () => {
     fireEvent.click(screen.getByRole('button', { name: 'تكبير المخطط' }));
     expect(screen.getByRole('dialog', { name: 'مخطط مكبَّر' }).querySelector('.wiki-mermaid-overlay')).not.toBeNull();
     expect(screen.getByRole('button', { name: 'إغلاق' })).toBeTruthy();
+  });
+
+  it('B-1676: Tab and Shift+Tab cycle inside the dialog and focus cannot leave it', async () => {
+    render(<ZoomableMermaidDiagram code="x" />);
+    openDialog();
+    const close = screen.getByRole('button', { name: 'Close' });
+    const panel = screen.getByTestId('mermaid-zoom-panel');
+    await waitFor(() => expect(document.activeElement).toBe(close));
+
+    // Tab order inside the trap: the scroll panel, then the close button in it.
+    fireEvent.keyDown(close, { key: 'Tab' });
+    expect(document.activeElement).toBe(panel);
+    fireEvent.keyDown(panel, { key: 'Tab', shiftKey: true });
+    expect(document.activeElement).toBe(close);
+
+    // A focus attempt outside (the zoom button behind the overlay) is pulled back.
+    screen.getByRole('button', { name: 'Zoom diagram', hidden: true }).focus();
+    await waitFor(() => expect(screen.getByRole('dialog').contains(document.activeElement)).toBe(true));
+  });
+
+  it('B-1676: closing releases the trap and restores focus to the zoom button', async () => {
+    render(<ZoomableMermaidDiagram code="x" />);
+    openDialog();
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Close' })));
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+    expect(screen.queryByRole('dialog')).toBeNull();
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Zoom diagram' })));
   });
 });

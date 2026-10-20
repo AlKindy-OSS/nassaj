@@ -1,3 +1,9 @@
+## 2.3.2.0 — 2026-10-20
+
+محادثة الفريق داخل المؤلِّف: زرّ «الفريق» في شريط الأدوات يحوّل المؤلِّف إلى وضع الفريق بمسودّة مستقلة وإشارات @، ورسائل الفريق تظهر داخل الخط الزمني. زرّ للمالك في تبويب الحساب يثبّت واجهتي codex وopencode الناقصتين على الخادم (أصل مثبّت بالبصمة لـopencode، وسكربت رسمي من مضيفين مسموحين لـcodex، بمهلات محدودة). نتائج صادقة للوكلاء الفرعيين (ناجح، فاشل، موقوف، غير معروف). نافذة «ما الجديد» مرة لكل مستخدم، وبطاقة سؤال واحدة قابلة للإجابة، وسبب عدم التجهيز المسبق في نافذة التحديث، وتنبيه عند تعذّر تسجيل الخروج، وإيقاف codex كسطر هادئ، وحبس التركيز في تكبير Mermaid، و`--yes` عند نقطة اللاعودة في أمر الإصدار. لا ترحيل ولا إعداد جديد.
+
+Team chat inside the composer: a Team button in the toolbar puts the composer in team mode with its own draft and @mentions, and team messages appear inline in the timeline. An owner button on the Account tab installs the missing codex and opencode CLIs on the server (a digest-pinned asset for opencode, the official script from allow-listed hosts for codex, with bounded timeouts). Honest sub-agent outcomes (succeeded, failed, stopped, unknown). The "What's new" popup shows once per user, one answerable question card per session, the real not-prestaged reason in the update dialog, a warning when sign-out cannot complete, a muted codex stop notice, a focus trap in the Mermaid zoom dialog, and `--yes` at the release PONR prompt. No migration and no new setting.
+
 ## 2.3.1.11 — 2026-10-19
 
 شريط أدوات المؤلِّف بأزرار بلا إطار وبنمط واحد (أيقونة الشرطة المائلة للأوامر وأيقونة الطرفية)، ومؤشر السياق هو الدائرة الوحيدة في الصف. مقبض الإعدادات السريعة في كل صفحة بعد الدخول، وتلميح البحث في منتقي المزوّد نص مقروء بدل مفتاح الترجمة. نافذة «ما الجديد» تعرض أبرز تغييرات الإصدار بالعربية أو الإنجليزية مرة لكل إصدار في كل متصفح، ونافذة التحديث تعرض نسبة تقدّم واحدة. لا ترحيل ولا إعداد جديد.

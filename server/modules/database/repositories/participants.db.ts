@@ -182,6 +182,18 @@ export const participantsDb = {
     ).get(sessionId, userId) !== undefined;
   },
 
+  /**
+   * Whether any run of the session was started through this server (a 'spawn'
+   * row, any user). Process-liveness probes only see runs this server spawned,
+   * so a session without one has no observable process (agent-progress P0).
+   */
+  hasAnySpawn(sessionId: string): boolean {
+    if (!sessionId) return false;
+    return getConnection().prepare(
+      `SELECT 1 FROM session_participants WHERE session_id = ? AND attribution = 'spawn' LIMIT 1`,
+    ).get(sessionId) !== undefined;
+  },
+
   /** Exact owner proof for accounting authority; never infers a viewer. */
   resolveStrictSpawnOwnerUserId,
   /**

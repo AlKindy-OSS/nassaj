@@ -12,6 +12,22 @@ export interface WhatsNewEntry {
 }
 
 export const WHATS_NEW: Readonly<Record<string, WhatsNewEntry>> = {
+  '2.3.2.0': {
+    ar: [
+      'محادثة الفريق صارت داخل المؤلِّف: زرّ «الفريق» يرسل ما تكتبه إلى الفريق بدل النموذج.',
+      'رسائل الفريق تظهر داخل المحادثة بترتيبها الزمني.',
+      'المالك يثبّت واجهتي codex وopencode الناقصتين بزرّ من الإعدادات.',
+      'تقدّم الوكلاء يعرض النتيجة الحقيقية: ناجح أو فاشل أو موقوف أو غير معروف.',
+      'نافذة «ما الجديد» تظهر مرة واحدة لكل مستخدم.',
+    ],
+    en: [
+      'Team chat now lives in the composer: the Team button sends what you type to the team, not the model.',
+      'Team messages appear inline in the conversation, in time order.',
+      'The owner can install the missing codex and opencode CLIs with a button in settings.',
+      'Agent progress shows the real outcome: succeeded, failed, stopped or unknown.',
+      "The \"What's new\" popup shows once per user.",
+    ],
+  },
   '2.3.1.11': {
     ar: [
       'شريط أدوات المؤلِّف صار أرتب وأوضح.',

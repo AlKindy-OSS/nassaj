@@ -724,7 +724,9 @@
     "agentWorkingTooltip": "Sub-agent working: {{calls}} calls",
     "estimateRemaining": "≈ {{time}} left",
     "estimating": "estimating…",
-    "estimateTooltip": "Rough estimate — based on completed tasks so far."
+    "estimateTooltip": "Rough estimate — based on completed tasks so far.",
+    "agentsUnsuccessfulTooltip_one": "{{n}} ended without success",
+    "agentsUnsuccessfulTooltip_other": "{{n}} ended without success"
   },
   "agentActivity": {
     "percentAria": "Agent progress",
@@ -740,11 +742,11 @@
     "summary": "{{running}}/{{total}} running",
     "agentsRunning_one": "{{n}} running",
     "agentsRunning_other": "{{n}} running",
-    "agentsCompleted_one": "{{n}} done",
-    "agentsCompleted_other": "{{n}} done",
+    "agentsCompleted_one": "{{n}} succeeded",
+    "agentsCompleted_other": "{{n}} succeeded",
     "approvalSummary": "{{approved}}/{{total}} approved · {{percent}}%",
     "running": "Running",
-    "done": "Done",
+    "done": "Succeeded",
     "reviewing": "Coordinator reviewing",
     "rejected": "Rejected",
     "reviewActions": "Coordinator review actions",
@@ -770,7 +772,22 @@
     "hideCompletedAria": "Hide completed agents",
     "showCompletedAria": "Show completed agents",
     "allCompletedSummary": "{{count}} completed",
-    "shownWhenFinished": "Shown when finished"
+    "shownWhenFinished": "Shown when finished",
+    "agentsFailed_one": "{{n}} failed",
+    "agentsFailed_other": "{{n}} failed",
+    "agentsStopped_one": "{{n}} stopped",
+    "agentsStopped_other": "{{n}} stopped",
+    "agentsUnknown_one": "{{n}} no end signal",
+    "agentsUnknown_other": "{{n}} no end signal",
+    "failed": "Failed",
+    "stopped": "Stopped",
+    "stoppedByOwner": "Stopped by owner",
+    "unknownOutcome": "No end signal",
+    "failedTooltip": "The agent reported a failure.",
+    "stoppedTooltip": "The harness reported that the agent stopped before finishing.",
+    "stoppedByOwnerTooltip": "The run was stopped while this agent was working.",
+    "unknownProcessExitTooltip": "Its process ended without reporting how this agent finished.",
+    "unknownTimeoutTooltip": "No signal from this agent for over 6 hours."
   },
   "projectSelection": {
     "startChatWithProvider": "Select a project to start chatting with {{provider}}"
@@ -1168,7 +1185,9 @@
     "skipAll": "Skip all",
     "back": "Back",
     "submit": "Submit",
-    "next": "Next"
+    "next": "Next",
+    "resolved": "Earlier question — already answered",
+    "superseded": "Earlier question — replaced by a newer one"
   },
   "reasoning": {
     "thinking": "Thinking…",
@@ -1209,13 +1228,9 @@
   "internalChat": {
     "button": "Team chat",
     "title": "Team chat",
-    "privacyNote": "Internal to the team — never sent to the model",
-    "close": "Close team chat",
     "unavailable": "Team chat is not available for this session, or you are not allowed to create it.",
     "createFailed": "Team chat is not available for this session.",
-    "empty": "No internal messages yet.",
     "unknownAuthor": "Team member",
-    "modeToggle": "Internal message",
     "draftLabel": "Internal message draft",
     "placeholder": "Write to the team… use @ to mention a member",
     "notSentNote": "This message is not sent to the model.",
@@ -1224,6 +1239,11 @@
     "reactivate": "Re-activate room",
     "reactivateHint": "If the session moved to another project, its creator can re-activate the room and then add members again.",
     "reactivateFailed": "The room could not be re-activated; only the session's creator can do this.",
+    "exit": "Exit",
+    "toggleWithMentions": "Team chat — {{count}} unread mentions",
+    "mentionList": "Room members to mention",
+    "inlineLabel": "Internal to the team",
+    "bubbleAria": "Team message from {{name}}, not sent to the model",
     "members": {
       "toggle": "Members ({{count}})",
       "heading": "Room members",

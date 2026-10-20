@@ -52,7 +52,10 @@ describe('prestageNotice', () => {
     [at({ state: 'waiting', notPrestagedReason: 'low_disk' }), 'versionUpdate.prestage.lowDisk', 'neutral'],
     [at({ state: 'none', notPrestagedReason: 'policy_off' }), 'versionUpdate.prestage.stopped', 'neutral'],
     [at({ state: 'none', notPrestagedReason: 'kill_switch' }), 'versionUpdate.prestage.stopped', 'neutral'],
-    [at({ state: 'waiting', notPrestagedReason: 'resource_busy' }), 'versionUpdate.prestage.notYet', 'neutral'],
+    [at({ state: 'waiting', notPrestagedReason: 'resource_busy' }), 'versionUpdate.prestage.busy', 'neutral'],
+    [at({ state: 'waiting', notPrestagedReason: 'failed' }), 'versionUpdate.prestage.gaveUp', 'neutral'],
+    [at({ state: 'none', notPrestagedReason: 'other' }), 'versionUpdate.prestage.notYet', 'neutral'],
+    [at({ state: 'none', notPrestagedReason: 'constructor' }), 'versionUpdate.prestage.notYet', 'neutral'],
     [at({ state: 'none', notPrestagedReason: 'something_new' }), 'versionUpdate.prestage.notYet', 'neutral'],
   ])('%o → %s', (prestage, key, tone) => {
     expect(prestageNotice(prestage, L)).toEqual({ key, tone });

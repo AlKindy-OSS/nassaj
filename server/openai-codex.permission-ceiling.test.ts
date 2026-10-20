@@ -1033,6 +1033,8 @@ describe('queryCodex turn processes (ADR-206 S3/S4)', () => {
       assert.equal(cleanups.length, 1, 'user stop cleans up even after a completed reply');
       assert.equal(trace.at(-1), 'settle:cancelled');
       const notice = frames.find(frame => frame.code === 'codex_processes_stopped');
+      // B-1624: the user's own stop is a neutral notice, never an error frame.
+      assert.equal(notice?.kind, 'notice', 'a user stop is a neutral notice');
       assert.match(String(notice?.content), /sleep \(4321\)/u);
     } finally { cleanupResult = { outcome: 'absent', stopped: [] }; }
   });

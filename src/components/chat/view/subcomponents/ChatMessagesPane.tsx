@@ -16,11 +16,16 @@ import type {
 import type { ProviderAuthStatusMap } from '../../../provider-auth/types';
 import { getIntrinsicMessageKey } from '../../utils/messageKeys';
 import { findQuickReplyEligibleIndex, type QuickReplyGate } from '../../utils/quickReplyEligibility';
+import TeamMessageBubble from '../../../internal-session-chat/TeamMessageBubble';
+import { placeTeamMessages } from '../../../internal-session-chat/interleaveTeamMessages';
+import type { InternalMessage } from '../../../internal-session-chat/internalSessionChatApi';
 
 import MessageComponent from './MessageComponent';
 import ProviderSelectionEmptyState from './ProviderSelectionEmptyState';
 import DateSeparator from './DateSeparator';
 import SessionIdleWarning from './SessionIdleWarning';
+
+const EMPTY_INTERNAL_MESSAGES: InternalMessage[] = [];
 
 // Parse a ChatMessage timestamp (string | number | Date) into a valid Date, or null.
 function toValidDate(timestamp: string | number | Date | undefined): Date | null {
@@ -89,6 +94,8 @@ interface ChatMessagesPaneProps {
   sessionMessagesCount: number;
   visibleMessageCount: number;
   visibleMessages: ChatMessage[];
+  /** ADR-187 team messages, shown inline by time; they never reach the model. */
+  internalMessages?: InternalMessage[];
   loadEarlierMessages: () => void;
   /** يجلب الصفحة الأقدم من الخادم (نظير التمرير-إلى-الأعلى بضغطة، B-431). */
   loadMoreMessages: () => void;
@@ -187,6 +194,7 @@ export default function ChatMessagesPane({
   sessionMessagesCount,
   visibleMessageCount,
   visibleMessages,
+  internalMessages = EMPTY_INTERNAL_MESSAGES,
   loadEarlierMessages,
   loadMoreMessages,
   loadAllMessages,
@@ -221,6 +229,11 @@ export default function ChatMessagesPane({
   onQuickReply,
 }: ChatMessagesPaneProps) {
   const { t } = useTranslation('chat');
+  const olderHistoryHidden = hasMoreMessages || chatMessages.length > visibleMessages.length;
+  const teamPlacement = useMemo(
+    () => placeTeamMessages(visibleMessages, internalMessages, olderHistoryHidden),
+    [visibleMessages, internalMessages, olderHistoryHidden],
+  );
 
   // T-1821 fix-6: isRetryWaiting is computed from Date.now() at render time, so
   // the button stays disabled after retryAt expires unless we force a re-render.
@@ -324,7 +337,8 @@ export default function ChatMessagesPane({
       onScroll={onScroll}
       className="relative flex-1 overflow-y-auto overflow-x-hidden px-0 py-1 sm:px-4"
     >
-      <div ref={contentRef} className="space-y-2 sm:space-y-3">
+      {/* Empty chat: the wrapper takes the pane height so the provider picker centers. */}
+      <div ref={contentRef} className={chatMessages.length === 0 ? "h-full" : "space-y-2 sm:space-y-3"}>
         {/* T-1821: حُذف زرّ التحديث من هنا — الزرّ الموحَّد (jump-down) في ChatComposer
               يتولّى دور retryHistory عند وجود historyError. النصّ يبقى للإعلام، إلا «revision»
               فحلّه التحديث وحده، فيكفي ظهور السهم. */}
@@ -467,6 +481,9 @@ export default function ChatMessagesPane({
                 (prevDate == null || messageDate.toDateString() !== prevDate.toDateString());
               return (
                 <Fragment key={getMessageKey(message)}>
+                  {teamPlacement.before[index]?.map((teamMessage) => (
+                    <TeamMessageBubble key={`team-${teamMessage.id}`} message={teamMessage} />
+                  ))}
                   {showSeparator && messageDate && <DateSeparator date={messageDate} />}
                   <MessageComponent
                     message={message}
@@ -495,6 +512,9 @@ export default function ChatMessagesPane({
                 </Fragment>
               );
             })}
+            {teamPlacement.trailing.map((teamMessage) => (
+              <TeamMessageBubble key={`team-${teamMessage.id}`} message={teamMessage} />
+            ))}
 
             {/* تنبيه الخمول — يظهر بعد مدة كاش الهارنس على آخر رسالة خارج البثّ.
                 يُعرض داخل منطقة التمرير لأنه يتبع آخر رسالة بصرياً، لا بعدها. */}

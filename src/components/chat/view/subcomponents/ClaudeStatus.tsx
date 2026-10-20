@@ -204,6 +204,7 @@ export default function ClaudeStatus({
   const activeSubagent = progress?.activeSubagent ?? null;
   const agentsTotal = progress?.agentsTotal ?? 0;
   const agentsDone = progress?.agentsDone ?? 0;
+  const agentsUnsuccessful = progress?.agentsUnsuccessful ?? 0;
 
   // Bar ratio reflects the *truth* (no monotonic clamp): half-credit for the
   // in-progress task. Estimate ratio uses completed-only.
@@ -419,6 +420,13 @@ export default function ClaudeStatus({
           done: localeNum(agentsDone),
           total: localeNum(agentsTotal),
           defaultValue: 'Sub-agents: {{done}}/{{total}}',
+        })
+      : null,
+    agentsUnsuccessful > 0
+      ? t('runProgress.agentsUnsuccessfulTooltip', {
+          count: agentsUnsuccessful,
+          n: localeNum(agentsUnsuccessful),
+          defaultValue: '{{n}} ended without success',
         })
       : null,
     activeSubagent

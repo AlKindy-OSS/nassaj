@@ -185,6 +185,8 @@ export interface ChatMessage {
   backgroundAgentAck?: boolean;
   /** Provider that produced this row (history and live), when the store knows it. */
   provider?: LLMProvider;
+  /** B-1624: a neutral server notice row (`kind: 'notice'`), rendered as a muted line. */
+  isNotice?: boolean;
   /** Task notification fields (B-94). */
   isTaskNotification?: boolean;
   taskStatus?: string;

@@ -5,7 +5,11 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import enAuth from '../../../i18n/locales/en/auth.json';
-import { SIGNED_OUT_EVERYWHERE_NOTICE_KEY } from '../loginLock';
+import {
+  recordSignOutIncompleteNotice,
+  SIGN_OUT_INCOMPLETE_NOTICE_KEY,
+  SIGNED_OUT_EVERYWHERE_NOTICE_KEY,
+} from '../loginLock';
 
 function lookup(key: string, options?: Record<string, unknown>): string {
   const value = key.split('.').reduce<unknown>(
@@ -72,5 +76,23 @@ describe('LoginForm (T-2035)', () => {
     cleanup();
     await renderForm();
     expect(screen.queryByText(enAuth.loggedOutEverywhere)).toBeNull();
+  });
+
+  it('B-1652: shows the sign-out-incomplete warning stored before mount, once', async () => {
+    sessionStorage.setItem(SIGN_OUT_INCOMPLETE_NOTICE_KEY, '1');
+    await renderForm();
+    expect(screen.getByRole('status').textContent).toContain(enAuth.signOutIncomplete);
+    expect(sessionStorage.getItem(SIGN_OUT_INCOMPLETE_NOTICE_KEY)).toBeNull();
+    cleanup();
+    await renderForm();
+    expect(screen.queryByText(enAuth.signOutIncomplete)).toBeNull();
+  });
+
+  it('B-1652: shows the warning when the failed answer arrives after mount', async () => {
+    await renderForm();
+    expect(screen.queryByText(enAuth.signOutIncomplete)).toBeNull();
+    await act(async () => { recordSignOutIncompleteNotice(); });
+    expect(screen.getByRole('status').textContent).toContain(enAuth.signOutIncomplete);
+    expect(sessionStorage.getItem(SIGN_OUT_INCOMPLETE_NOTICE_KEY)).toBeNull();
   });
 });

@@ -274,6 +274,10 @@ export type HarnessUpdateJobPhase =
   | 'queued'
   | 'preflight'
   | 'snapshotting'
+  /** T-2062 install: fetching the installer / pinned asset. */
+  | 'downloading'
+  /** T-2062 install: the installer is running. */
+  | 'installing'
   | 'updating'
   | 'verifying'
   | 'recovering'
@@ -316,6 +320,8 @@ export interface HarnessUpdateJob {
   fromVersion: string | null;
   toVersion: string | null;
   error: HarnessUpdateJobError | null;
+  /** T-2062: 'install' for a fresh CLI install job; absent means 'update'. */
+  kind?: 'update' | 'install';
 }
 
 /** GET/PUT /autoupdate-settings body. */

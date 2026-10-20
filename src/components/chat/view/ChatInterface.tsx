@@ -26,6 +26,7 @@ import { useChatRealtimeHandlers, type StreamBuffer } from '../hooks/useChatReal
 import { useChatComposerState } from '../hooks/useChatComposerState';
 import { useQuickReplyInsert } from '../hooks/useQuickReplyInsert';
 import { buildQuickReplyGate } from '../utils/quickReplyEligibility';
+import { classifyPendingQuestions } from '../utils/pendingQuestionState';
 import { hasOutboxDeliveryEvidence, verifyOutboxReceipt } from '../utils/messageOutbox';
 import { authenticatedFetch } from '../../../utils/api';
 import { useBtwSideChannel } from '../hooks/useBtwSideChannel';
@@ -85,6 +86,7 @@ import { withSteerPrefix } from '../utils/steerCommand';
 import CommandResultModal from './subcomponents/CommandResultModal';
 import BtwOverlay from './subcomponents/BtwOverlay';
 import SessionHeaderControls from './subcomponents/SessionHeaderControls';
+import { useInternalSessionChat } from '../../internal-session-chat/useInternalSessionChat';
 
 
 type PendingViewSession = {
@@ -367,6 +369,11 @@ function ChatInterface({
     resetStreamingState,
     pendingViewSessionRef,
     sessionStore,
+  });
+  // ADR-187: the team room lives in the composer (team mode) and the timeline.
+  const teamChat = useInternalSessionChat({
+    sessionId: selectedSession?.id ?? currentSessionId ?? null,
+    enabled: internalSessionChatCapability.enabled,
   });
 
   // B-1665: the single owner of "stay at the latest message" and of the arrow's state.
@@ -1134,6 +1141,13 @@ function ChatInterface({
     };
   }, [resetStreamingState]);
 
+  // At most one answerable AskUserQuestion per session: stale prompts (settled
+  // in the transcript or replaced by a newer ask) render read-only.
+  const pendingQuestionStates = useMemo(
+    () => classifyPendingQuestions(pendingPermissionRequests, chatMessages),
+    [pendingPermissionRequests, chatMessages],
+  );
+
   const permissionContextValue = useMemo(() => ({
     pendingPermissionRequests,
     handlePermissionDecision,
@@ -1343,11 +1357,7 @@ function ChatInterface({
     <PermissionContext.Provider value={permissionContextValue}>
       <div data-chat-reading-surface style={{ backgroundColor: 'var(--chat-reading-surface, transparent)' }} className="flex h-full flex-col">
         {sessionHeaderTarget && createPortal(
-          <SessionHeaderControls
-            sessionId={selectedSession?.id ?? currentSessionId ?? null}
-            internalChatEnabled={internalSessionChatCapability.enabled}
-            projectId={selectedProject?.projectId ?? null}
-          >
+          <SessionHeaderControls>
           <SessionParticipantsBar
             key={selectedSession?.id ?? currentSessionId}
             skills={sessionSkills}
@@ -1420,6 +1430,7 @@ function ChatInterface({
           sessionMessagesCount={chatMessages.length}
           visibleMessageCount={visibleMessageCount}
           visibleMessages={visibleMessages}
+          internalMessages={teamChat?.messages}
           loadEarlierMessages={loadEarlierAndRelease}
           loadMoreMessages={loadOlderAndRelease}
           loadAllMessages={loadAllAndRelease}
@@ -1490,6 +1501,7 @@ function ChatInterface({
 
         <ChatComposer
           pendingPermissionRequests={pendingPermissionRequests}
+          pendingQuestionStates={pendingQuestionStates}
           handlePermissionDecision={handlePermissionDecision}
           handleGrantToolPermission={handleGrantToolPermission}
           claudeStatus={claudeStatus}
@@ -1595,6 +1607,8 @@ function ChatInterface({
           sessionActiveModelChanged={sessionModelChanged}
           onClearSessionModel={handleClearSessionModel}
           sessionEngineProvider={sessionEngineStamp}
+          teamChat={teamChat}
+          teamProjectId={selectedProject?.projectId ?? null}
         />
       </div>
 

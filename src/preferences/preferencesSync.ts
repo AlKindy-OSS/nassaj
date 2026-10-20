@@ -138,10 +138,40 @@ let authenticatedIdentity = false;
 let identityEpoch = 0;
 let preferenceWritesReady = true;
 
+/*
+ * Whether this tab has settled the account preferences for the current
+ * identity: hydration finished (applied, seeded, empty, or failed and fell back
+ * to localStorage). Consumers that must not act on pre-sync local defaults —
+ * the once-per-user "What's new" popup — wait for it. Reset on sign-out /
+ * identity change so the next account starts unsettled.
+ */
+let preferencesHydrated = false;
+const hydratedListeners = new Set<() => void>();
+
+function setPreferencesHydrated(next: boolean): void {
+  if (preferencesHydrated === next) return;
+  preferencesHydrated = next;
+  for (const listener of hydratedListeners) listener();
+}
+
+/** Snapshot for `useSyncExternalStore`: true once account preferences settled. */
+export function getPreferencesHydratedSnapshot(): boolean {
+  return preferencesHydrated;
+}
+
+/** Subscribe to changes of `getPreferencesHydratedSnapshot()`. Returns an unsubscribe. */
+export function subscribePreferencesHydrated(listener: () => void): () => void {
+  hydratedListeners.add(listener);
+  return () => {
+    hydratedListeners.delete(listener);
+  };
+}
+
 /** Mark whether AuthContext has verified an account identity in this tab. */
 export function setPreferenceIdentityAuthenticated(authenticated: boolean): void {
   if (!authenticated) {
     preferenceWritesReady = false;
+    setPreferencesHydrated(false);
     neutralizePreferenceWork();
     neutralizeSyncedPreferences();
   }
@@ -584,7 +614,12 @@ export function collectLocalPreferences(): Record<string, unknown> {
 export async function hydratePreferencesFromServer(): Promise<
   { status: 'applied' | 'seeded' | 'unavailable' | 'skipped' }
 > {
-  if (routeUnavailable || !hasPreferenceIdentity()) {
+  if (routeUnavailable) {
+    // Route already proven missing this session: localStorage is all there is.
+    if (hasPreferenceIdentity()) setPreferencesHydrated(true);
+    return { status: 'skipped' };
+  }
+  if (!hasPreferenceIdentity()) {
     return { status: 'skipped' };
   }
 
@@ -592,6 +627,7 @@ export async function hydratePreferencesFromServer(): Promise<
   const hydrationEpoch = identityEpoch;
   const finishHydration = <T extends { status: string }>(result: T): T => {
     if (hydrationEpoch === identityEpoch && authenticatedIdentity) preferenceWritesReady = true;
+    if (hydrationEpoch === identityEpoch) setPreferencesHydrated(true);
     return result;
   };
   try {
@@ -670,6 +706,7 @@ export function __resetPreferenceSyncForTests(): void {
   authenticatedIdentity = false;
   identityEpoch += 1;
   preferenceWritesReady = true;
+  setPreferencesHydrated(false);
   // Each test installs fresh window/localStorage stubs; the patch closes over
   // the previous ones, so the mirror must be re-installable.
   writeMirrorInstalled = false;

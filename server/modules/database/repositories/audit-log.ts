@@ -327,6 +327,10 @@ export type AuditAction =
   | 'harness_snapshot_aside_pruned'
   | 'harness_recovery_acknowledged'
   | 'harness_reconcile_resolved'
+  // T-2062 owner CLI install. Metadata: provider, sha256, exitCode, cause.
+  | 'harness_install_started'
+  | 'harness_install_succeeded'
+  | 'harness_install_failed'
   // T-1910 S4: a session writer acknowledged-and-lifted a session-scoped permission fence.
   | 'permission_fence_acknowledged'
   // B-1593: a project secret file (.env*, SQLite) was read, downloaded or saved

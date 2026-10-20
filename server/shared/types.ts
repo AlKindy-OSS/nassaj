@@ -208,6 +208,14 @@ export type MessageKind =
   | 'stream_delta'
   | 'stream_end'
   | 'error'
+  /**
+   * B-1624: a neutral live-only line (no error colour, no sound, never touches
+   * the spinner or the outbox). Like the `error` frame it replaced, it is not
+   * persisted in the provider transcript and is dropped on history resync.
+   * Unlike `status`, its text does not re-arm loading, so it may arrive after
+   * the turn's `complete`.
+   */
+  | 'notice'
   | 'complete'
   | 'status'
   | 'permission_request'
@@ -514,6 +522,12 @@ export type FetchHistoryResult = {
    * the result is never cached.
    */
   readFailed?: true;
+  /**
+   * Study §3.2 (P0): ids of delegations still unsettled when the transcript
+   * recorded an owner interrupt. Server-internal input to the liveness overlay
+   * (`applySubagentLiveness`), removed before any response leaves the server.
+   */
+  subagentOwnerStops?: string[];
 };
 
 // ---------------------------

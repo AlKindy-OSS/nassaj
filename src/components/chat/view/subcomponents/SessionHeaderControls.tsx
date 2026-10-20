@@ -1,28 +1,16 @@
 import type { ReactNode } from 'react';
 
-import InternalSessionChat from '../../../internal-session-chat/InternalSessionChat';
-
 type Props = {
-  /** The participants bar (or any header control) rendered first. */
+  /** The participants bar (or any header control). */
   children: ReactNode;
-  sessionId: string | null;
-  internalChatEnabled: boolean;
-  /** The session's project, for the team-chat member picker. */
-  projectId?: string | null;
 };
 
 /**
  * Session-header controls portalled into the page header. Kept as its own
  * component so the header is render-tested: it must contain only its controls,
  * never stray text between them (a JSX `,` once rendered a visible comma).
+ * Team chat (ADR-187) moved from here into the composer toolbar.
  */
-export default function SessionHeaderControls({ children, sessionId, internalChatEnabled, projectId }: Props) {
-  // Feature off: the header is exactly what it was before ADR-187 (no wrapper).
-  if (!internalChatEnabled) return <>{children}</>;
-  return (
-    <div className="flex items-center gap-2">
-      {children}
-      <InternalSessionChat sessionId={sessionId} enabled={internalChatEnabled} projectId={projectId} />
-    </div>
-  );
+export default function SessionHeaderControls({ children }: Props) {
+  return <>{children}</>;
 }

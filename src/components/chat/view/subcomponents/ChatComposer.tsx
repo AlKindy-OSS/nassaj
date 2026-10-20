@@ -37,6 +37,7 @@ import { useVoiceTranscriptionSettings } from '../../hooks/useVoiceTranscription
 // اختبار يُركّب المُؤلِّف بلا حاجة.
 import { useOptionalAuth } from '../../../auth/context/AuthContext';
 import type { PendingPermissionRequest, PermissionMode, Provider } from '../../types/types';
+import type { PendingQuestionState } from '../../utils/pendingQuestionState';
 import type { LLMProvider, ProviderModelsDefinition } from '../../../../types/app';
 import {
   getProviderCapabilities,
@@ -51,6 +52,10 @@ import { effortModes } from '../../constants/thinkingModes';
 import { useComposerShellMode } from '../../hooks/useComposerShellMode';
 import FileAttachment from './FileAttachment';
 import ComposerShellToggle from './ComposerShellToggle';
+import TeamChatToggle from '../../../internal-session-chat/TeamChatToggle';
+import { TeamComposerPanel, TeamMentionList } from '../../../internal-session-chat/TeamComposerPanel';
+import { useComposerTeamMode } from '../../../internal-session-chat/useComposerTeamMode';
+import type { InternalSessionChatController } from '../../../internal-session-chat/useInternalSessionChat';
 import { COMPOSER_ICON_BUTTON_CLASS } from './composerToolbarStyles';
 import type { RunAgent, RunProgress } from '../../hooks/useRunProgress';
 import type { WorkflowUiDescriptor } from '../../../../stores/workflowStatus';
@@ -112,6 +117,8 @@ interface SlashCommand {
 
 interface ChatComposerProps {
   pendingPermissionRequests: PendingPermissionRequest[];
+  /** Display state per requestId; absent entries are treated as active. */
+  pendingQuestionStates?: Map<string, PendingQuestionState>;
   handlePermissionDecision: (
     requestIds: string | string[],
     decision: { allow?: boolean; message?: string; rememberEntry?: string | null; updatedInput?: unknown },
@@ -281,6 +288,10 @@ interface ChatComposerProps {
    * غير null → المبدّل يُعطَّل كلياً مع سبب مرئي للمستخدم.
    */
   sessionEngineProvider?: string | null;
+  /** ADR-187 team room; null hides the team toggle (capability off or no session). */
+  teamChat?: InternalSessionChatController | null;
+  /** The session's project, for the team room's add-member picker. */
+  teamProjectId?: string | null;
 }
 
 /**
@@ -1029,6 +1040,7 @@ function CoordinationLevelSelector({
 
 export default function ChatComposer({
   pendingPermissionRequests,
+  pendingQuestionStates,
   handlePermissionDecision,
   handleGrantToolPermission,
   claudeStatus,
@@ -1119,6 +1131,8 @@ export default function ChatComposer({
   sessionActiveModelChanged = false,
   onClearSessionModel,
   sessionEngineProvider = null,
+  teamChat = null,
+  teamProjectId = null,
 }: ChatComposerProps) {
   const { t, i18n } = useTranslation('chat');
   // B-1042: الراية تُرفع فقط عند رفض القبول بسبب امتلاء الصندوق، وتنخفض عند
@@ -1130,6 +1144,19 @@ export default function ChatComposer({
   // T-2037: explicit shell mode. While active, Enter/submit run the draft as a
   // one-shot in the Shell tab; nothing reaches the chat transcript.
   const shellMode = useComposerShellMode({ input, onClearInput });
+  // ADR-187: team mode writes to the room, never to the model. It and shell
+  // mode are mutually exclusive; each toggle leaves the other first.
+  const teamMode = useComposerTeamMode({ chat: teamChat, textareaRef, sendByCtrlEnter: Boolean(sendByCtrlEnter) });
+  const toggleTeamMode = () => {
+    if (!teamChat) return;
+    if (!teamChat.active && shellMode.active) shellMode.exit();
+    teamChat.toggle();
+    teamMode.focusSoon();
+  };
+  const toggleShellMode = () => {
+    if (teamMode.active) teamChat?.exit();
+    shellMode.toggle();
+  };
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [scheduledEdit, setScheduledEdit] = useState<ScheduledMessage | null>(null);
 
@@ -1628,6 +1655,7 @@ export default function ChatComposer({
   // نُسقط السِمة فيرث الحقل اتجاه المستند، ونعيد `auto` فور وجود مسودّة كي يبقى
   // الاتجاه محسوباً من أول حرف قوي فيها ومطابقاً لطبقة مرآة الـ@mentions.
   const composerDir = input ? 'auto' : undefined;
+  const teamDir = teamChat?.draft ? 'auto' : undefined;
   const textareaRect = textareaRef.current?.getBoundingClientRect();
   // bottom-anchored position: distance from bottom of viewport to top of textarea + gap.
   // design-ok: `left` here is a raw viewport pixel X-coordinate (not a CSS physical property);
@@ -1639,8 +1667,10 @@ export default function ChatComposer({
   };
 
   // Detect if the AskUserQuestion interactive panel is active
+  // Only an ANSWERABLE question hides the composer; a stale read-only one must not.
   const hasQuestionPanel = pendingPermissionRequests.some(
     (r) => r.toolName === 'AskUserQuestion'
+      && (pendingQuestionStates?.get(r.requestId) ?? 'active') === 'active'
   );
 
   const permissionModeLabel =
@@ -1707,6 +1737,7 @@ export default function ChatComposer({
         <div className="mx-auto mb-3 max-w-4xl">
           <PermissionRequestsBanner
             pendingPermissionRequests={pendingPermissionRequests}
+            pendingQuestionStates={pendingQuestionStates}
             handlePermissionDecision={handlePermissionDecision}
             handleGrantToolPermission={handleGrantToolPermission}
           />
@@ -1760,7 +1791,7 @@ export default function ChatComposer({
             باستخدام إزاحة سالبة هشّة تتوقّف على ما يسبقه في DOM. */}
       {!hasQuestionPanel && <div className="relative mx-auto max-w-4xl">
 
-        {!shellMode.active && showFileDropdown && filteredFiles.length > 0 && (
+        {!shellMode.active && !teamMode.active && showFileDropdown && filteredFiles.length > 0 && (
           <div className="absolute bottom-full start-0 end-0 z-50 mb-2 max-h-48 overflow-y-auto rounded-xl border border-border/50 bg-card/95 shadow-lg backdrop-blur-md">
             {filteredFiles.map((file, index) => (
               <div
@@ -1793,7 +1824,7 @@ export default function ChatComposer({
           onSelect={onCommandSelect}
           onClose={onCloseCommandMenu}
           position={commandMenuPosition}
-          isOpen={isCommandMenuOpen && !shellMode.active}
+          isOpen={isCommandMenuOpen && !shellMode.active && !teamMode.active}
           frequentCommands={frequentCommands}
           isCommandDisabled={isCommandDisabled}
         />
@@ -1831,17 +1862,35 @@ export default function ChatComposer({
           onRefresh={() => { void scheduled.refresh(); }}
         />
 
+        {teamMode.active && teamChat && <TeamComposerPanel chat={teamChat} projectId={teamProjectId} />}
+
+        {/* The mention list sits outside the form: PromptInput clips overflow.
+            This wrapper anchors it right above the input box. */}
+        <div className="relative">
+        {teamMode.active && (
+          <TeamMentionList
+            id={teamMode.listId}
+            suggestions={teamMode.mentions.suggestions}
+            highlighted={teamMode.mentions.highlighted}
+            onSelect={teamMode.mentions.select}
+          />
+        )}
+
         <PromptInput
-          onSubmit={shellMode.active
-            ? shellMode.handleSubmit
-            : (onSubmit as (event: FormEvent<HTMLFormElement>) => void)}
-          status={isLoading && !shellMode.active ? 'streaming' : 'ready'}
+          onSubmit={teamMode.active
+            ? teamMode.handleSubmit
+            : shellMode.active
+              ? shellMode.handleSubmit
+              : (onSubmit as (event: FormEvent<HTMLFormElement>) => void)}
+          status={isLoading && !shellMode.active && !teamMode.active ? 'streaming' : 'ready'}
           className={cn(
             isTextareaExpanded && 'chat-input-expanded',
             // design-ok: إشارة وضع الطرفية — حدّ مميّز لا يُخلط بوضع المحادثة.
             shellMode.active && 'border-emerald-500/70 ring-1 ring-emerald-500/40 focus-within:border-emerald-500 focus-within:ring-emerald-500/40',
+            teamMode.active && 'border-[color:var(--session-internal-accent)]/70 ring-1 ring-[color:var(--session-internal-accent)]/40 focus-within:border-[color:var(--session-internal-accent)]',
           )}
           data-shell-mode={shellMode.active ? 'on' : undefined}
+          data-team-mode={teamMode.active ? 'on' : undefined}
           {...getRootProps()}
         >
           {isDragActive && (
@@ -1860,7 +1909,7 @@ export default function ChatComposer({
             </div>
           )}
 
-          {(attachedImages.length > 0 || attachedFiles.length > 0) && (
+          {!teamMode.active && (attachedImages.length > 0 || attachedFiles.length > 0) && (
             <PromptInputHeader>
               <div className="rounded-xl bg-muted/40 p-2">
                 <div className="flex flex-wrap gap-2">
@@ -1918,9 +1967,10 @@ export default function ChatComposer({
             */}
             <div ref={inputHighlightRef} dir={shellMode.active ? 'ltr' : composerDir} aria-hidden="true" className="pointer-events-none absolute inset-0 overflow-hidden rounded-xl">
               <div className={cn('chat-input-placeholder block w-full whitespace-pre-wrap break-words px-4 py-2 text-sm leading-6 text-transparent', shellMode.active && 'font-mono')}>
-                {shellMode.active ? input : renderInputWithMentions(input)}
+                {teamMode.active ? teamChat?.draft : shellMode.active ? input : renderInputWithMentions(input)}
               </div>
             </div>
+
 
             <PromptInputTextarea
               ref={textareaRef}
@@ -1930,21 +1980,32 @@ export default function ChatComposer({
               // الـautosize بـstyle مباشرة، فلا أثر لـrows عليه.
               rows={1}
               // وضع الطرفية: الأوامر لاتينية دائماً، فالاتجاه ltr والخط أحادي المسافة.
-              dir={shellMode.active ? 'ltr' : composerDir}
+              dir={teamMode.active ? teamDir : shellMode.active ? 'ltr' : composerDir}
               className={shellMode.active ? 'font-mono' : undefined}
               spellCheck={shellMode.active ? false : undefined}
               autoCapitalize={shellMode.active ? 'off' : undefined}
-              aria-label={shellMode.active ? t('shellMode.badge') : undefined}
-              value={input}
-              onChange={onInputChange}
-              onClick={onTextareaClick}
-              onKeyDown={shellMode.active ? shellMode.handleKeyDown : onTextareaKeyDown}
-              onPaste={onTextareaPaste}
+              aria-label={teamMode.active ? t('internalChat.draftLabel') : shellMode.active ? t('shellMode.badge') : undefined}
+              aria-controls={teamMode.active && teamMode.mentions.suggestions.length > 0 ? teamMode.listId : undefined}
+              aria-activedescendant={teamMode.active && teamMode.mentions.suggestions.length > 0
+                ? `${teamMode.listId}-${teamMode.mentions.highlighted}`
+                : undefined}
+              value={teamMode.active ? teamChat?.draft ?? '' : input}
+              onChange={teamMode.active ? (event) => teamChat?.setDraft(event.target.value) : onInputChange}
+              onClick={teamMode.active ? undefined : onTextareaClick}
+              onKeyDown={teamMode.active
+                ? teamMode.handleKeyDown
+                : shellMode.active ? shellMode.handleKeyDown : onTextareaKeyDown}
+              onPaste={teamMode.active ? undefined : onTextareaPaste}
               onScroll={(event) => onTextareaScrollSync(event.target as HTMLTextAreaElement)}
-              onFocus={() => onInputFocusChange?.(true)}
+              onFocus={() => {
+                onInputFocusChange?.(true);
+                if (teamMode.active) void teamChat?.markRead();
+              }}
               onBlur={() => onInputFocusChange?.(false)}
               onInput={onTextareaInput}
-              placeholder={shellMode.active ? t('shellMode.placeholder') : placeholder}
+              placeholder={teamMode.active
+                ? t('internalChat.placeholder')
+                : shellMode.active ? t('shellMode.placeholder') : placeholder}
             />
 
             {/* تلميح مفاتيح الإرسال — داخل صندوق الكتابة تحت الحقل مباشرة، لا في
@@ -1957,7 +2018,7 @@ export default function ChatComposer({
               // ‏-mt-2 يلغي حشوة الـtextarea السفلية (py-2) فيلتصق التلميح بالنائب
               // سطراً تالياً له تماماً (24px = leading-6) بدل فجوة ~36px.
               className={`pointer-events-none -mt-2 hidden select-none px-4 pb-2 text-sm leading-6 text-muted-foreground/50 transition-opacity duration-200 sm:block ${
-                input.trim() || shellMode.active ? 'opacity-0' : 'opacity-100'
+                input.trim() || shellMode.active || teamMode.active ? 'opacity-0' : 'opacity-100'
               }`}
             >
               {sendByCtrlEnter ? t('input.hintText.ctrlEnter') : t('input.hintText.enter')}
@@ -2129,8 +2190,12 @@ export default function ChatComposer({
             <ComposerShellToggle
               availability={shellMode.availability}
               active={shellMode.active}
-              onToggle={shellMode.toggle}
+              onToggle={toggleShellMode}
             />
+
+            {teamChat && (
+              <TeamChatToggle sessionId={teamChat.sessionId} active={teamMode.active} onToggle={toggleTeamMode} />
+            )}
 
             {/* فاصل مجموعتين: أدوات الإدخال قبله، وإعدادات الدور (نموذج، تنسيق،
                 صلاحيات، جهد، سياق) بعده — فيُقرأ الصفّ مجموعتين لا ركاماً واحداً. */}
@@ -2295,11 +2360,12 @@ export default function ChatComposer({
               </button>
             )}
 
-            {hasInput && (
+            {hasInput && !teamMode.active && (
               <PromptInputButton
                 tooltip={{ content: t('input.clearInput', { defaultValue: 'Clear input' }) }}
                 onClick={onClearInput}
-                className={cn(COMPOSER_ICON_BUTTON_CLASS, 'sm:No-flex hidden')}
+                aria-label={t('input.clearInput', { defaultValue: 'Clear input' })}
+                className={cn(COMPOSER_ICON_BUTTON_CLASS, 'hidden sm:inline-flex')}
               >
                 <XIcon />
               </PromptInputButton>
@@ -2309,21 +2375,26 @@ export default function ChatComposer({
 
           <div className="flex shrink-0 items-center gap-2">
             <ScheduleMessageButton
-              disabled={shellMode.active || !sessionId || !input.trim() || attachedImages.length > 0 || attachedFiles.length > 0 || isSubmitSealed || Boolean(executingCommand)}
+              disabled={shellMode.active || teamMode.active || !sessionId || !input.trim() || attachedImages.length > 0 || attachedFiles.length > 0 || isSubmitSealed || Boolean(executingCommand)}
               onClick={openNewSchedule}
             />
             <PromptInputSubmit
-              status={shellMode.active ? 'ready' : promptSubmitStatus}
-              disabled={shellMode.active
+              status={shellMode.active || teamMode.active ? 'ready' : promptSubmitStatus}
+              disabled={teamMode.active
+                ? !teamMode.canSend
+                : shellMode.active
                 ? !input.trim()
                 : (!input.trim() && attachedImages.length === 0) || Boolean(executingCommand) || (isLoading && !isBtwReady && !isSteerReady && !isViewerComposer) || !isWsConnected || isImageCropping}
-              title={!shellMode.active && !isWsConnected ? t('ws.sendDisabledTitle', { defaultValue: 'Cannot send — connection lost' }) : undefined}
-              aria-label={shellMode.active ? t('shellMode.run') : promptSubmitAriaLabel}
+              title={!shellMode.active && !teamMode.active && !isWsConnected ? t('ws.sendDisabledTitle', { defaultValue: 'Cannot send — connection lost' }) : undefined}
+              aria-label={teamMode.active
+                ? t('internalChat.send')
+                : shellMode.active ? t('shellMode.run') : promptSubmitAriaLabel}
               className="h-8 w-8 shrink-0 sm:h-8 sm:w-8"
             />
           </div>
         </PromptInputFooter>
       </PromptInput>
+        </div>
       <ScheduleMessageDialog
         open={scheduleOpen}
         message={scheduledEdit}

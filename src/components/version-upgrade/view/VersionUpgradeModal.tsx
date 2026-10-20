@@ -968,7 +968,7 @@ export function VersionUpgradeModal({
                     {localStatus?.policy && <div className="space-y-2 rounded-lg border border-border p-3 text-sm">
                         <p>{t(localStatus.policy.mode === 'dev-full-auto' ? 'versionUpdate.local.policyEnabled' : 'versionUpdate.local.policyDisabled')}</p>
                         <p className="text-muted-foreground">{t('versionUpdate.local.policyDescription')}</p>
-                        <button disabled={localBusy || localDisconnected || (localStatus.policy.mode === 'disabled' && !localStatus.policy.available)}
+                        <button data-keep-fill disabled={localBusy || localDisconnected || (localStatus.policy.mode === 'disabled' && !localStatus.policy.available)}
                             onClick={() => void changeDevelopmentPolicy()} className="rounded-md bg-primary px-4 py-2 text-primary-foreground disabled:opacity-50">
                             {t(localStatus.policy.mode === 'dev-full-auto' ? 'versionUpdate.local.disablePolicy' : 'versionUpdate.local.enablePolicy')}
                         </button>
@@ -982,9 +982,9 @@ export function VersionUpgradeModal({
                     <div className="flex flex-wrap gap-2">
                         <button onClick={onClose} className="rounded-md bg-muted px-4 py-2 text-sm">{t('versionUpdate.buttons.close')}</button>
                         {canCancel && <button disabled={localBusy || localDisconnected} onClick={() => void submitLocalUpdate('cancel')} className="rounded-md bg-muted px-4 py-2 text-sm disabled:opacity-50">{t('versionUpdate.local.cancel')}</button>}
-                        {canPrepare && localStatus?.available && <button disabled={localBusy || localDisconnected} onClick={() => void submitLocalUpdate('prepare')} className="rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground disabled:opacity-50">{t('versionUpdate.buttons.updateNow')}</button>}
-                        {canConfirm && <button disabled={localBusy || localDisconnected || !localStatus?.activationReady} onClick={() => { if (showConsent) void submitLocalUpdate('confirm'); else { localConsentRef.current = JSON.stringify([update!.sequence, update!.revision, update!.targetDigest]); setShowConsent(true); } }} className="rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground disabled:opacity-50">{t(showConsent ? 'versionUpdate.local.confirm' : 'versionUpdate.local.activate')}</button>}
-                        {phase === 'activated' && <button onClick={() => window.location.reload()} className="rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground">{t('versionUpdate.buttons.reload')}</button>}
+                        {canPrepare && localStatus?.available && <button data-keep-fill disabled={localBusy || localDisconnected} onClick={() => void submitLocalUpdate('prepare')} className="rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground disabled:opacity-50">{t('versionUpdate.buttons.updateNow')}</button>}
+                        {canConfirm && <button data-keep-fill disabled={localBusy || localDisconnected || !localStatus?.activationReady} onClick={() => { if (showConsent) void submitLocalUpdate('confirm'); else { localConsentRef.current = JSON.stringify([update!.sequence, update!.revision, update!.targetDigest]); setShowConsent(true); } }} className="rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground disabled:opacity-50">{t(showConsent ? 'versionUpdate.local.confirm' : 'versionUpdate.local.activate')}</button>}
+                        {phase === 'activated' && <button data-keep-fill onClick={() => window.location.reload()} className="rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground">{t('versionUpdate.buttons.reload')}</button>}
                     </div>
                 </div>
             </div>
@@ -1207,18 +1207,18 @@ export function VersionUpgradeModal({
                             </button>
                         )}
 
-                        {awaitingReleaseConfirmation && <button onClick={() => void confirmPreparedRelease()} className="rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground">{t('versionUpdate.local.activate')}</button>}
+                        {awaitingReleaseConfirmation && <button data-keep-fill onClick={() => void confirmPreparedRelease()} className="rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground">{t('versionUpdate.local.activate')}</button>}
 
                         {/* Reload after successful activation */}
                         {!jobActive && job?.state === 'activated' && (
-                            <button onClick={() => window.location.reload()} className="flex-1 rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700">
+                            <button data-keep-fill onClick={() => window.location.reload()} className="flex-1 rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700">
                                 {t('versionUpdate.buttons.reload')}
                             </button>
                         )}
 
                         {/* Retry after non-activated terminal state (but not cancelled — start fresh) */}
                         {job && !jobActive && job.state !== 'activated' && job.state !== 'manual_recovery_required' && job.state !== 'cancelled' && (
-                            <button
+                            <button data-keep-fill
                                 onClick={() => void handleRetryUpdate()}
                                 disabled={startDisabled}
                                 aria-busy={preflightChecking || undefined}
@@ -1230,7 +1230,7 @@ export function VersionUpgradeModal({
 
                         {/* Phase 2 (T-1730): "Prepare update" when sessions block — primary action */}
                         {!job && !upgradeCommand && isBlockedBySessions && capability.ready && (
-                            <button
+                            <button data-keep-fill
                                 onClick={() => void handlePrepareUpdate()}
                                 className="flex flex-1 items-center justify-center rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
                             >
@@ -1240,7 +1240,7 @@ export function VersionUpgradeModal({
 
                         {/* Phase 1 (T-1730): "Update Now" → opens consent panel */}
                         {!job && !upgradeCommand && !isBlockedBySessions && (
-                            <button
+                            <button data-keep-fill
                                 onClick={() => void handleUpdateNow()}
                                 disabled={startDisabled}
                                 aria-busy={preflightChecking || undefined}

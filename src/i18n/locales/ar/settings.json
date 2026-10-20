@@ -1,4 +1,27 @@
 {
+  "harnessInstall": {
+    "install": "تثبيت",
+    "installing": "جارٍ التثبيت…",
+    "retry": "إعادة المحاولة",
+    "progress": "تقدّم التثبيت",
+    "succeeded": "اكتمل التثبيت.",
+    "log": "سجلّ التثبيت",
+    "otherOperation": "توجد عملية أخرى جارية على هذه الأداة؛ أعد المحاولة بعد انتهائها.",
+    "error": {
+      "generic": "تعذّر بدء التثبيت.",
+      "network": "تعذّر الاتصال بالخادم.",
+      "install_failed": "فشل تثبيت الأداة.",
+      "install_timeout": "انتهت مهلة التثبيت.",
+      "verify_failed": "ثُبّتت الأداة لكن تعذّر التحقق منها.",
+      "script_rejected": "رُفض سكربت التثبيت لأنه لا يطابق المصدر الموثوق.",
+      "PLATFORM_MODE_UNSUPPORTED": "التثبيت من الواجهة غير متاح في هذا الوضع.",
+      "HARNESS_ALREADY_INSTALLED": "الأداة مثبّتة أصلاً.",
+      "HARNESS_OVERRIDE_SET": "مسار مخصّص للأداة مضبوط؛ ثبّتها يدوياً.",
+      "HARNESS_INSTALL_INVALID": "يوجد تثبيت غير صالح؛ أصلحه يدوياً.",
+      "HARNESS_ACTION_RATE_LIMITED": "محاولات كثيرة؛ انتظر قليلاً ثم أعد المحاولة.",
+      "HARNESS_UPDATE_IN_PROGRESS": "توجد عملية أخرى جارية على هذه الأداة."
+    }
+  },
   "harnessVersion": {
     "updateIndicator": "تحديث متاح",
     "title": "إصدار أداة المزوّد",
@@ -26,6 +49,9 @@
     "glmManagedNote": "يعمل GLM عبر OpenCode ويُحدَّث معه.",
     "autoUpdateMovedNote": "إعدادات التحديث التلقائي في تبويب «النظام»",
     "phase": {
+      "downloading": "جارٍ التنزيل",
+      "installing": "جارٍ التثبيت",
+      "snapshotting": "جارٍ أخذ نسخة احتياطية",
       "queued": "في الانتظار",
       "preflight": "فحص ما قبل التحديث",
       "updating": "جارٍ التحديث",

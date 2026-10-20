@@ -1,0 +1,70 @@
+{
+ "_provenance": "Output of sessionsService.fetchHistory in server test (c) of claude-subagent-outcomes.test.ts (process exit, nassaj-spawned session): the inferred end sits on the async_launched tool_result row; no status row. Ids are synthetic.",
+ "rows": [
+  {
+   "id": "55555555-5555-4555-8555-555555555555_0",
+   "sessionId": "00000000-0000-4000-8000-0000000000b0",
+   "timestamp": "2026-10-10T20:42:16.160Z",
+   "provider": "claude",
+   "kind": "tool_use",
+   "toolName": "Agent",
+   "toolInput": {
+    "description": "Critical review of CoT claims",
+    "subagent_type": "qa-critic",
+    "prompt": "[scrubbed]",
+    "run_in_background": true
+   },
+   "toolId": "toolu_synthetic_agent",
+   "subagent": {
+    "id": "toolu_synthetic_agent",
+    "parentId": null,
+    "label": "Critical review of CoT claims",
+    "state": "started",
+    "agentName": "qa-critic"
+   },
+   "toolResult": {
+    "content": "[{\"type\":\"text\",\"text\":\"Async agent launched successfully. [scrubbed]\"}]",
+    "isError": false,
+    "toolUseResult": {
+     "status": "async_launched",
+     "agentId": "a0000000000000001",
+     "description": "Critical review of CoT claims",
+     "isAsync": true,
+     "outputFile": "/var/tmp/[scrubbed]/tasks/a0000000000000001.output",
+     "canReadOutputFile": true,
+     "prompt": "[scrubbed]",
+     "resolvedModel": "claude-opus-5-5"
+    }
+   }
+  },
+  {
+   "id": "66666666-6666-4666-8666-666666666666_tr_toolu_synthetic_agent",
+   "sessionId": "00000000-0000-4000-8000-0000000000b0",
+   "timestamp": "2026-10-10T20:42:16.257Z",
+   "provider": "claude",
+   "kind": "tool_result",
+   "toolId": "toolu_synthetic_agent",
+   "content": "[{\"type\":\"text\",\"text\":\"Async agent launched successfully. [scrubbed]\"}]",
+   "isError": false,
+   "toolUseResult": {
+    "status": "async_launched",
+    "agentId": "a0000000000000001",
+    "description": "Critical review of CoT claims",
+    "isAsync": true,
+    "outputFile": "/var/tmp/[scrubbed]/tasks/a0000000000000001.output",
+    "canReadOutputFile": true,
+    "prompt": "[scrubbed]",
+    "resolvedModel": "claude-opus-5-5"
+   },
+   "subagent": {
+    "id": "toolu_synthetic_agent",
+    "parentId": null,
+    "label": "Critical review of CoT claims",
+    "state": "unknown",
+    "agentName": "qa-critic",
+    "model": "claude-opus-5-5",
+    "inferredCause": "process-exit"
+   }
+  }
+ ]
+}
