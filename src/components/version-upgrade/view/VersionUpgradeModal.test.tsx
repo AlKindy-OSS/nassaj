@@ -411,6 +411,26 @@ describe('VersionUpgradeModal async updater', () => {
     expect((screen.getByRole('button', { name: 'Update Now' }) as HTMLButtonElement).disabled).toBe(true);
   });
 
+  it('offers the owner the release-branch repair when /health says sourceAttachOffered (ADR-216)', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response(200, {
+      updaterProtocol: 'async-v2', updateReady: false, blockedReasonCode: 'detached_head', sourceAttachOffered: true, restartPending: false,
+    })));
+    routeFetch({ status: () => response(200, { eligible: true, reason: null, headCommit: 'b'.repeat(40), operation: null }) });
+    renderModal();
+    expect(await screen.findByText(/Use “Repair release-branch link” below/)).not.toBeNull();
+    expect(await screen.findByRole('button', { name: 'Repair release-branch link' })).not.toBeNull();
+    expect(authenticatedFetch.mock.calls.some(([url]) => url === '/api/system/update/source-attach')).toBe(true);
+  });
+
+  it('shows no repair section when /health does not offer it', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response(200, {
+      updaterProtocol: 'async-v2', updateReady: false, blockedReasonCode: 'detached_head', sourceAttachOffered: false,
+    })));
+    renderModal();
+    expect(await screen.findByText(/Use “Repair release-branch link” below/)).not.toBeNull();
+    expect(screen.queryByTestId('source-attach')).toBeNull();
+  });
+
   it('fetches owner-only storage figures when /health blocks on insufficient_disk, and renders them', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response(200, {
       systemUpdate: { updaterProtocol: 'async-v2', updateReady: false, blockedReasonCode: 'insufficient_disk' },

@@ -244,6 +244,22 @@
   "class": "global",
   "reason": "per-user usage (upstream 502 in tests)"
  },
+ "GET /api/providers/claude/api-spend": {
+  "class": "global",
+  "reason": "per-user Anthropic Admin key and its month-to-date spend; no project context"
+ },
+ "GET /api/providers/claude/api-spend/key": {
+  "class": "global",
+  "reason": "per-user Anthropic Admin key and its month-to-date spend; no project context"
+ },
+ "PUT /api/providers/claude/api-spend/key": {
+  "class": "global",
+  "reason": "per-user Anthropic Admin key and its month-to-date spend; no project context"
+ },
+ "DELETE /api/providers/claude/api-spend/key": {
+  "class": "global",
+  "reason": "per-user Anthropic Admin key and its month-to-date spend; no project context"
+ },
  "GET /api/providers/company/:companyId/key": {
   "class": "global",
   "reason": "no project context: refused to every plain user by role or missing resource (404)"
@@ -316,9 +332,16 @@
   "class": "project",
   "creatorDenied": "probe session has no agent rows; uses the same assertSessionAccessible gate proven with a real session [inferred from handler code, not individually probed]"
  },
+ "GET /api/sessions/:sessionId/agents/live": {
+  "class": "project"
+ },
  "GET /api/sessions/:sessionId/participants": {
   "class": "project",
   "creatorDenied": "generic probe session is archived by the probe's own DELETE; real-session read by creator/member proven in 'read a real session'"
+ },
+ "GET /api/sessions/:sessionId/peer-messages": {
+  "class": "project",
+  "creatorDenied": "probe session has no peer rows; uses the same assertSessionAccessible 'read' gate proven with a real session [inferred from handler code, not individually probed]"
  },
  "GET /api/sessions/outcomes/unseen": {
   "class": "global",

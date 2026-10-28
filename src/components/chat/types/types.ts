@@ -101,6 +101,17 @@ export interface ChatMessage {
    */
   steerSenderDisplayName?: string;
   /**
+   * ADR-219 S1: server provenance marker on a `type:'user'` row the CLI framed
+   * as non-user input (a cross-session delivery). Never rendered as the user.
+   */
+  isSynthetic?: boolean;
+  /**
+   * ADR-219 S1: the peer message id of the delivery turn that produced this
+   * live row (from the server's `peer:<id>:<n>` clientMsgId). Display only, and
+   * only shown when the peer store holds that id addressed to this session.
+   */
+  peerDeliveryId?: string;
+  /**
    * The model that produced this assistant message, verbatim from the provider
    * (B-352). Present on assistant rows whenever any harness names the model,
    * live and on history alike; absent on user rows and on providers that expose
@@ -187,6 +198,10 @@ export interface ChatMessage {
   provider?: LLMProvider;
   /** B-1624: a neutral server notice row (`kind: 'notice'`), rendered as a muted line. */
   isNotice?: boolean;
+  /** B-1699: a known notice the client renders translated (e.g. `scheduled_wakeup`). */
+  noticeCode?: string;
+  /** B-1699: why a scheduled wake-up hold closed (`scheduled_wakeup_closed`). */
+  noticeReason?: string;
   /** Task notification fields (B-94). */
   isTaskNotification?: boolean;
   taskStatus?: string;

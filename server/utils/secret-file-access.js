@@ -43,17 +43,26 @@ export function sendSecretFileConfirmationRequired(res) {
 
 /**
  * Audit options for a confirmed access: who, which project, the
- * project-relative path and how. Never the content.
+ * project-relative path and how. Never the content. B-1689 (qa M-2): an access
+ * through a session overlay also records `overlay: true`, the session and the
+ * overlay id, and `path` is then relative to the overlay root.
  *
  * @param {{ user?: { id?: unknown }, ip?: string, get?: (name: string) => string | undefined }} req
  * @param {{ userId: number | null, projectId: string, projectRoot: string, absolutePath: string,
- *   access: 'read' | 'download' | 'save' }} details
+ *   access: 'read' | 'download' | 'save',
+ *   overlayScope?: { overlay: boolean, sessionId: string|null, overlayId: string|null } | null }} details
  */
-export function buildSecretFileAuditEntry(req, { userId, projectId, projectRoot, absolutePath, access }) {
+export function buildSecretFileAuditEntry(req, {
+  userId, projectId, projectRoot, absolutePath, access, overlayScope = null,
+}) {
+  const metadata = { projectId: String(projectId), path: path.relative(projectRoot, absolutePath), access };
+  if (overlayScope?.overlay === true) {
+    Object.assign(metadata, { overlay: true, sessionId: overlayScope.sessionId, overlayId: overlayScope.overlayId });
+  }
   return {
     userId,
     ipAddress: req.ip ?? null,
     userAgent: req.get?.('user-agent') ?? null,
-    metadata: { projectId: String(projectId), path: path.relative(projectRoot, absolutePath), access },
+    metadata,
   };
 }

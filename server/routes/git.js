@@ -40,6 +40,7 @@ import {
 } from '../../scripts/session-commit-arbiter.mjs';
 import { dispatchCommittedPreview } from '../../scripts/preview-oid-dispatch.mjs';
 import { stampWriterEpoch } from '../shared/user-revocation-epoch.js';
+import { hardenGitArgs } from '../../shared/git-safety.js';
 import {
   PROVIDER_REMOVED_CODE,
   PROVIDER_REMOVED_MESSAGE,
@@ -268,6 +269,12 @@ export function redactCredentials(text) {
     .replace(BARE_TOKEN_PATTERN, '***');
 }
 
+/**
+ * B-1691: every git child gets the shared hardening prefix (shared/git-safety.js):
+ * no fsmonitor command and no implicitly discovered bare repository (qa F2), and
+ * no hooks for read-only verbs; commit, push, pull and checkout keep the
+ * project's hooks (owner decision F12).
+ */
 export function spawnAsync(command, args, options = {}) {
   return new Promise((resolve, reject) => {
     const {
@@ -281,7 +288,7 @@ export function spawnAsync(command, args, options = {}) {
     const env = command === 'git'
       ? { ...(spawnOptions.env ?? process.env), GIT_LITERAL_PATHSPECS: '1' }
       : spawnOptions.env;
-    const child = spawn(command, args, {
+    const child = spawn(command, command === 'git' ? hardenGitArgs(args) : args, {
       ...spawnOptions,
       ...(env ? { env } : {}),
       shell: false,
@@ -440,7 +447,7 @@ function validateBranchName(branch) {
  *   2. canonical — `isResolvedPathInsideRootReal` (fs.realpath on both sides),
  *      which catches a symlink INSIDE the tree pointing outside it.
  */
-export function validateFilePath(file, projectPath) {
+export function validateFilePath(file, projectPath, { trustedOverlayRoot = false } = {}) {
   if (!file || typeof file !== 'string' || file.includes('\0')) {
     throw new Error('Invalid file path');
   }
@@ -455,7 +462,10 @@ export function validateFilePath(file, projectPath) {
   if (!resolved.startsWith(normalizedRoot) && resolved !== path.resolve(projectPath)) {
     throw new Error('Invalid file path: path traversal detected');
   }
-  if (!isResolvedPathInsideRootReal(projectPath, resolved)) {
+  // B-1691 (qa F1): never a path inside a `.git` directory (config, other
+  // sessions' overlays), lexically or through a symlink.
+  // qa F8: a root inside `.git` is refused unless it is a bound session overlay.
+  if (!isResolvedPathInsideRootReal(projectPath, resolved, { refuseGitDir: true, trustedOverlayRoot })) {
     throw new Error('Invalid file path: path traversal detected');
   }
   return file;
@@ -774,14 +784,16 @@ function buildFilePathCandidates(projectPath, repositoryRootPath, filePath) {
  * project directory — checked lexically and then canonically (symlink-aware).
  * Every return path of resolveRepositoryFilePath goes through here.
  */
-function assertResolvedFilePathInsideProject(projectPath, repositoryRootPath, repositoryRelativeFilePath) {
+function assertResolvedFilePathInsideProject(projectPath, repositoryRootPath, repositoryRelativeFilePath, scope = {}) {
   const projectRootAbs = path.resolve(projectPath);
   const resolvedTarget = path.resolve(repositoryRootPath, repositoryRelativeFilePath);
 
   if (resolvedTarget !== projectRootAbs && !resolvedTarget.startsWith(projectRootAbs + path.sep)) {
     throw new Error('Invalid file path: path traversal detected');
   }
-  if (!isResolvedPathInsideRootReal(projectRootAbs, resolvedTarget)) {
+  if (!isResolvedPathInsideRootReal(projectRootAbs, resolvedTarget, {
+    refuseGitDir: true, trustedOverlayRoot: scope.trustedOverlayRoot === true,
+  })) {
     throw new Error('Invalid file path: path traversal detected');
   }
 
@@ -793,8 +805,8 @@ function assertResolvedFilePathInsideProject(projectPath, repositoryRootPath, re
  * databases and sidecars are refused by name, since database copies carry the
  * live secrets under arbitrary backup names.
  */
-async function resolveRepositoryReadableFilePath(projectPath, filePath) {
-  const resolved = await resolveRepositoryFilePath(projectPath, filePath);
+async function resolveRepositoryReadableFilePath(projectPath, filePath, scope = {}) {
+  const resolved = await resolveRepositoryFilePath(projectPath, filePath, scope);
   if (isSqliteFileName(path.basename(resolved.repositoryRelativeFilePath))) {
     throw new Error('Invalid file path: protected content');
   }
@@ -812,10 +824,14 @@ function assertNoSqliteContent(...texts) {
   }
 }
 
-async function resolveRepositoryFilePath(projectPath, filePath) {
+/**
+ * `scope.trustedOverlayRoot` is set only when `projectPath` is the cwd of a
+ * session workspace bound server-side (requireGitReadWorkspace), qa F8.
+ */
+async function resolveRepositoryFilePath(projectPath, filePath, scope = {}) {
   // The project root is passed EXPLICITLY: the previous single-argument call
   // left the whole traversal guard dead (B-GIT-SEC-2).
-  validateFilePath(filePath, projectPath);
+  validateFilePath(filePath, projectPath, scope);
 
   const repositoryRootPath = await getRepositoryRootPath(projectPath);
   const candidateFilePaths = buildFilePathCandidates(projectPath, repositoryRootPath, filePath);
@@ -823,7 +839,7 @@ async function resolveRepositoryFilePath(projectPath, filePath) {
   for (const candidateFilePath of candidateFilePaths) {
     const { stdout } = await spawnAsync('git', ['status', '--porcelain', '--', candidateFilePath], { cwd: repositoryRootPath });
     if (stdout.trim()) {
-      return assertResolvedFilePathInsideProject(projectPath, repositoryRootPath, candidateFilePath);
+      return assertResolvedFilePathInsideProject(projectPath, repositoryRootPath, candidateFilePath, scope);
     }
   }
 
@@ -837,11 +853,11 @@ async function resolveRepositoryFilePath(projectPath, filePath) {
     );
 
     if (suffixMatches.length === 1) {
-      return assertResolvedFilePathInsideProject(projectPath, repositoryRootPath, suffixMatches[0]);
+      return assertResolvedFilePathInsideProject(projectPath, repositoryRootPath, suffixMatches[0], scope);
     }
   }
 
-  return assertResolvedFilePathInsideProject(projectPath, repositoryRootPath, candidateFilePaths[0]);
+  return assertResolvedFilePathInsideProject(projectPath, repositoryRootPath, candidateFilePaths[0], scope);
 }
 
 /**
@@ -1022,7 +1038,9 @@ router.get('/diff', async (req, res) => {
     const {
       repositoryRootPath,
       repositoryRelativeFilePath,
-    } = await resolveRepositoryReadableFilePath(overlay?.cwd ?? projectPath, file);
+    } = await resolveRepositoryReadableFilePath(overlay?.cwd ?? projectPath, file, {
+      trustedOverlayRoot: Boolean(overlay),
+    });
 
     if (overlay) {
       const overlayDiff = await readGitWorkspaceDiff(overlay, repositoryRelativeFilePath);

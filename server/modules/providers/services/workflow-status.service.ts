@@ -285,7 +285,7 @@ type PinnedWorkflows = { dir: SessionArtifactDir; terminalWorkflowIds: ReadonlyS
  * `subagents/workflows` dir. Null when anything is refused or absent; the
  * caller closes `dir`.
  */
-async function openSessionWorkflows(row: OwnedSessionRow, userId: number): Promise<PinnedWorkflows | null> {
+async function openSessionWorkflows(row: OwnedSessionRow): Promise<PinnedWorkflows | null> {
   // Authorised by this endpoint's own gate: `row` comes only from the caller's
   // participation set, filtered by the session read predicate (M2).
   const transcript = await openRecordedTranscript(row, 'workflow-status');
@@ -573,7 +573,7 @@ export const workflowStatusService = {
         // M2 (ADR-201, ADR-172): a participant who lost read access to the
         // session (project enforcement) gets nothing opened or reported.
         const readable = isSessionAccessibleByUser(sessionId, row.project_path, userId as number, 'read');
-        const pinned = readable ? await openSessionWorkflows(row, userId as number) : null;
+        const pinned = readable ? await openSessionWorkflows(row) : null;
         if (!pinned) {
           continue; // No admissible transcript or workflows dir.
         }
@@ -603,6 +603,33 @@ export const workflowStatusService = {
         error instanceof Error ? error.message : String(error),
       );
       return empty;
+    }
+  },
+
+  /**
+   * ADR-218: the workflows of ONE session for its agents snapshot. Authorization
+   * is the caller's: it runs only after the session read gate of the requesting
+   * viewer (REST) or for a viewer registered through that gate (mirror). Same
+   * pinned reads and classification as {@link getActiveWorkflows}; never throws.
+   */
+  async getSessionWorkflows(
+    sessionId: string,
+    options: { now?: number; quietMs?: number } = {},
+  ): Promise<Array<Omit<ActiveWorkflow, 'projectId'>>> {
+    try {
+      const row = sessionsDb.getSessionFilePathsByIds([sessionId])[0];
+      if (!row || !(await mayHaveWorkflows(row))) return [];
+      const pinned = await openSessionWorkflows(row);
+      if (!pinned) return [];
+      try {
+        return await scanSessionWorkflows(sessionId, pinned.dir, options.now ?? Date.now(),
+          options.quietMs ?? DEFAULT_QUIET_MS, row.project_path ?? null, await buildScopeLivenessResolver(),
+          pinned.terminalWorkflowIds);
+      } finally {
+        await pinned.dir.close();
+      }
+    } catch {
+      return [];
     }
   },
 };

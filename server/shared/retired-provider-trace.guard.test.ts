@@ -42,6 +42,12 @@ const ALLOWLIST: Readonly<Record<string, string>> = Object.freeze({
   'scripts/repair-agy-orphan-workspaces.test.mjs': AGY_HOME,
   'server/agy-cli.handover.test.ts': AGY_HOME,
   'server/modules/providers/harness-update/descriptors.ts': AGY_HOME,
+  // ADR-215 install cleanup and installer env: protections, not leftovers.
+  'server/modules/providers/harness-update/install-cleanup.ts': `cleanup deny-list protects ~/.gemini and the ~/.local/bin/gemini link; ${CREDENTIAL_UNIT}`,
+  'server/modules/providers/harness-update/install-cleanup.test.ts': 'asserts the cleanup deny-list refuses ~/.gemini and ~/.local/bin/gemini',
+  'server/modules/providers/harness-update/install.agy.test.ts': 'asserts agy install never touches ~/.gemini and never passes GEMINI_API_KEY',
+  'server/modules/providers/harness-update/install.service.ts': 'installer env allow-list documents that GEMINI_* keys never reach an installer',
+  'server/modules/providers/harness-update/install.service.test.ts': 'iron-rule env test: GEMINI_API_KEY must not reach an installer',
   'server/modules/providers/list/antigravity/agy-brain-dir.js': AGY_HOME,
   'server/modules/providers/list/antigravity/agy-brain-layout.ts': AGY_HOME,
   'server/modules/websocket/services/session-handover.test.ts': AGY_HOME,

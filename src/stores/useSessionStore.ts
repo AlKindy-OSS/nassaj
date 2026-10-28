@@ -37,6 +37,10 @@ export type MessageKind =
 export interface NormalizedMessage {
   /** Structured provider error, preserved for safe classification at render time. */
   error?: unknown;
+  /** B-1699: a known `notice` the client renders translated (e.g. `scheduled_wakeup`). */
+  noticeCode?: string;
+  /** B-1699: why a scheduled wake-up hold closed (`scheduled_wakeup_closed`). */
+  noticeReason?: string;
   id: string;
   sessionId: string;
   timestamp: string;
@@ -105,6 +109,10 @@ export interface NormalizedMessage {
   isCompactSummary?: boolean;
   /** A skill body Claude injected after a Skill tool call; rendered as a compact expandable line. */
   isSkillLoad?: boolean;
+  /** Server provenance marker: the CLI framed this row as non-user input (ADR-219 delivery, skill body). */
+  isSynthetic?: boolean;
+  /** ADR-219 S1: server-set id of the peer delivery turn that produced this row (never client-derived). */
+  peerDeliveryId?: string;
   skillName?: string;
   /** T-1862: locally-added "Context compaction started." row — see ChatMessage doc. */
   isCompactionBoundary?: boolean;
@@ -685,9 +693,15 @@ export function computeMerged(server: NormalizedMessage[], realtime: NormalizedM
   if (realtime.length === 0) return server;
   if (server.length === 0) return dedupeAdjacentAssistantEchoes([...realtime].sort(compareMessagesByTimestamp));
   const serverIds = new Set(server.map(m => m.id));
+  // A live SteerBubble (useSteerQueuedInsertion) and the verified history row
+  // share `steerClientMsgId`. Without this, a reload during a still-running turn
+  // showed one steer twice: the server replays the run's `steer-queued` from its
+  // ring (lastSeq=0) and the page-scoped insertion guard is empty again.
+  const serverSteerIds = new Set(server.flatMap(m => (m.steerClientMsgId ? [m.steerClientMsgId] : [])));
   const pendingUsers = new Set(retainUnsyncedOptimisticRows(realtime, server));
   const extra = realtime.filter((m) => {
     if (serverIds.has(m.id)) return false;
+    if (m.steerClientMsgId && serverSteerIds.has(m.steerClientMsgId)) return false;
     if (isOptimisticUser(m) && !pendingUsers.has(m)) return false;
     return true;
   });

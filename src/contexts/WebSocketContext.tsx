@@ -12,6 +12,7 @@ import {
   type SessionProcessState,
 } from '../stores/sessionProcessStateStore';
 import { applyOutcomeDelta, type OutcomeState } from '../stores/sessionCompletionStore';
+import { ingestPeerMessageFrame } from '../components/peer-relay/peerMessageStore';
 import { consumeOutboxIngressVerdict } from '../components/chat/utils/messageOutbox';
 import {
   consumeExpectedWalletRevocation,
@@ -92,6 +93,13 @@ type WebSocketContextType = {
    * قابلاً للاستنتاج عند المستهلك.
    */
   controlEvents: ControlEventLog;
+  /**
+   * ADR-218 — latest `session-agents` snapshot per session (a full snapshot, so
+   * the newest wins). Own slice, keyed by session like `controlFrames`, so a
+   * snapshot never shares a slot with `session-status` and is never swallowed by
+   * the single-value `latestMessage`.
+   */
+  sessionAgentsFrames: ControlFrameMap;
   streamFrames: StreamFrameMap;
   /** Durable reconnect signal; unrelated incoming frames cannot overwrite it. */
   reconnectEpoch: number;
@@ -208,6 +216,9 @@ const OPEN_SESSIONS_MESSAGE_TYPE = 'open_sessions_count';
  * **لا-عملية صامتة**. مكانها `CONTROL_EVENT_KINDS` أدناه.
  */
 export const CONTROL_MESSAGE_TYPES: ReadonlySet<string> = new Set(['session-status']);
+
+/** ADR-218 — the server's full agents snapshot for one session. */
+export const SESSION_AGENTS_MESSAGE_TYPE = 'session-agents';
 
 /**
  * أنواع **أحداث** التحكّم، مفروزة بـ`data.kind` لا `data.type`.
@@ -346,6 +357,7 @@ const useWebSocketProviderState = (): WebSocketContextType => {
   const [reconnectEpoch, setReconnectEpoch] = useState(0);
   const [controlFrames, setControlFrames] = useState<ControlFrameMap>(EMPTY_CONTROL_FRAMES);
   const [controlEvents, setControlEvents] = useState<ControlEventLog>(EMPTY_CONTROL_EVENTS);
+  const [sessionAgentsFrames, setSessionAgentsFrames] = useState<ControlFrameMap>(EMPTY_CONTROL_FRAMES);
   const [streamFrames, setStreamFrames] = useState<StreamFrameMap>(EMPTY_STREAM_FRAMES);
   // عدّاد رتيب لإطارات التحكّم عبر كل الاتصالات: المستهلك يعرف به ما لم يُعالج.
   // **واحد للشريحتين** عمداً: به وحده يبقى ترتيب حدثٍ بالنسبة لحالةٍ معلوماً.
@@ -487,6 +499,18 @@ const useWebSocketProviderState = (): WebSocketContextType => {
             streamSeqRef.current += 1;
             const seq = streamSeqRef.current;
             setStreamFrames((previous) => applyStreamFrame(previous, data, seq));
+          }
+          // ADR-219 S1 (T-2072): a cross-session message state change goes to its own
+          // store synchronously, never through `latestMessage` (B-208 swallowing).
+          if (ingestPeerMessageFrame(data)) return;
+          // ADR-218: a snapshot per session; its own slice, never `latestMessage`.
+          if (data && data.type === SESSION_AGENTS_MESSAGE_TYPE) {
+            const agentsSessionId = typeof data.sessionId === 'string' ? data.sessionId : '';
+            if (!agentsSessionId) return;
+            controlSeqRef.current += 1;
+            const seq = controlSeqRef.current;
+            setSessionAgentsFrames((previous) => applyControlFrame(previous, agentsSessionId, data, seq));
+            return;
           }
           // إطار تحكّم (session-status …): إلى الشريحة التراكمية عبر updater
           // دالّي — إطاران في نفس دفعة الـrender يُطبَّقان كلاهما بدل أن يبتلع
@@ -685,6 +709,7 @@ const useWebSocketProviderState = (): WebSocketContextType => {
     latestMessage,
     controlFrames,
     controlEvents,
+    sessionAgentsFrames,
     streamFrames,
     reconnectEpoch,
     isConnected,
@@ -695,6 +720,7 @@ const useWebSocketProviderState = (): WebSocketContextType => {
     latestMessage,
     controlFrames,
     controlEvents,
+    sessionAgentsFrames,
     streamFrames,
     reconnectEpoch,
     isConnected,

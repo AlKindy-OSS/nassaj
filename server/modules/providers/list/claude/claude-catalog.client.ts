@@ -14,6 +14,9 @@ import { resolveProviderEnv } from '@/services/isolation/resolve-provider-env.js
 import { buildCagedSdkSpawn } from '@/services/isolation/provider-cage-wiring.js';
 import type { ProviderModelOption, ProviderModelsDefinition } from '@/shared/types.js';
 
+// eslint-disable-next-line boundaries/dependencies -- ADR-219 ح-1: the relay spawn policy leaf (member count only), applied at every Claude spawn.
+import { relaySdkSpawnOptions } from '../../../peer-relay/peer-spawn-policy.js';
+
 import {
   brokenModelsUserKey,
   getBrokenModels,
@@ -294,6 +297,8 @@ async function probeSupportedModels(
       cwd: probeCwd,
       pathToClaudeCodeExecutable: resolveHarnessBinary('claude'),
       systemPrompt: { type: 'preset', preset: 'claude_code' },
+      // ADR-219 ح-1: a relay-mode node refuses inbound cross-session messages on every spawn.
+      ...relaySdkSpawnOptions(),
     };
 
     // Vendor-resilience iron rule (fail-closed): refuse to spawn this catalog

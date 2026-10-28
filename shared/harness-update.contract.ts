@@ -183,7 +183,7 @@ export interface HarnessActionError {
 
 /** One acknowledgement the server requires before a risky action. */
 export interface HarnessRequiredAck {
-  kind: 'pinBreak' | 'dataLoss';
+  kind: 'pinBreak' | 'dataLoss' | 'systemCopy' | 'npmRemoval';
   /** Single-use, 5 minutes, bound to user + harness + action + facts. */
   token: string;
   /** Epoch ms. */
@@ -202,7 +202,7 @@ export interface HarnessConfirmationRequired {
 
 /** `acks` entry of a POST body: echo `kind` + `token` of each required ack. */
 export interface HarnessSuppliedAck {
-  kind: 'pinBreak' | 'dataLoss';
+  kind: 'pinBreak' | 'dataLoss' | 'systemCopy' | 'npmRemoval';
   token: string;
 }
 

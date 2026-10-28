@@ -26,7 +26,7 @@ export default function CodeEditorBinaryFile({
   message,
 }: CodeEditorBinaryFileProps) {
   const { t } = useTranslation('codeEditor');
-  const { isDownloading, hasError, download } = useBinaryFileDownload(projectId, file.path, file.name);
+  const { isDownloading, hasError, download } = useBinaryFileDownload(projectId, file.path, file.name, file.sessionId);
   const binaryContent = (
     <div className="flex h-full w-full flex-col items-center justify-center bg-background p-8 text-muted-foreground">
       <div className="flex max-w-md flex-col items-center gap-4 text-center">

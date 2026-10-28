@@ -58,6 +58,7 @@ import { useComposerTeamMode } from '../../../internal-session-chat/useComposerT
 import type { InternalSessionChatController } from '../../../internal-session-chat/useInternalSessionChat';
 import { COMPOSER_ICON_BUTTON_CLASS } from './composerToolbarStyles';
 import type { RunAgent, RunProgress } from '../../hooks/useRunProgress';
+import type { SessionAgentRow } from '../../hooks/useSessionAgents';
 import type { WorkflowUiDescriptor } from '../../../../stores/workflowStatus';
 import {
   PromptInput,
@@ -140,6 +141,8 @@ interface ChatComposerProps {
    * the current reply: a workflow's agents outlive the reply that launched them.
    */
   workflowAgents?: RunAgent[];
+  /** ADR-218: server registry rows for this session; merged by the card. */
+  sessionAgents?: SessionAgentRow[];
   /** Honest verdict for those rows; drives the card's headline (see AgentStatusCard). */
   workflowStatus?: WorkflowUiDescriptor | null;
   /**
@@ -1050,6 +1053,7 @@ export default function ChatComposer({
   runStartedAt = null,
   runProgress = null,
   workflowAgents = [],
+  sessionAgents,
   workflowStatus = null,
   viewerStarterName = null,
   steerable = false,
@@ -1717,6 +1721,7 @@ export default function ChatComposer({
       <AgentStatusCard
           agents={runProgress?.agents ?? []}
           workflowAgents={workflowAgents}
+          sessionAgents={sessionAgents}
           workflowStatus={workflowStatus}
           status={claudeStatus}
           isLoading={isLoading}

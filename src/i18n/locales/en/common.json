@@ -523,7 +523,7 @@
       },
       "detached_head": {
         "title": "Detached HEAD",
-        "hint": "Check out the release branch (not a detached commit), then retry."
+        "hint": "Use “Repair release-branch link” in the update dialog to reconnect to the release branch, then retry."
       },
       "non_fast_forward": {
         "title": "Not a fast-forward update",
@@ -682,7 +682,7 @@
       "invalid_release_source": "The release source configuration (NASSAJ_RELEASE_SOURCE) is invalid on this node. Contact the operator.",
       "unsupported_install_mode": "Automatic updates are available only for a Nassaj source installation.",
       "invalid_update_source": "The update source configuration on this node is unsafe. Contact the operator.",
-      "detached_head": "The source tree on this node has a detached HEAD. Reconnect it to the release branch on the server, then retry.",
+      "detached_head": "The source tree on this node has a detached HEAD. Use “Repair release-branch link” below to reconnect it, then retry.",
       "wrong_branch": "The source tree on this node is not on the branch pinned for releases. Switch to it on the server, then retry.",
       "remote_unavailable": "The remote repository could not be reached from this node. No update was started.",
       "ambiguous_remote": "The remote repository on this node has more than one URL. Contact the operator.",
@@ -850,7 +850,77 @@
           "terminal": "This update has already finished, so there is nothing to cancel."
         }
       }
-    }
+    },
+    "sourceAttach": {
+      "title": "Release-branch link",
+      "intro": "This node runs a release from a detached source tree, so the update button cannot work yet. Repair the link to the release branch here; nothing in your work or settings changes.",
+      "button": "Repair release-branch link",
+      "starting": "Starting the repair…",
+      "running": "Repairing the link: {{step}}",
+      "runningHint": "This takes a moment. You can keep this window open; it updates by itself.",
+      "steps": {
+        "inspect": "checking the source tree",
+        "quiescence": "checking that nothing is writing to it",
+        "prove": "verifying the release",
+        "lease": "locking the source tree",
+        "recheck": "checking again before the change",
+        "apply": "linking to the release branch",
+        "unknown": "working"
+      },
+      "checking": "Checking whether the link can be repaired…",
+      "succeeded": "The source tree is linked to the release branch again.",
+      "restartQueued": "Next step: a safe restart is queued. Open Settings → Command board and confirm it to finish. No session is stopped.",
+      "restartReused": "Next step: a safe restart was already queued and will be used. Open Settings → Command board and confirm it to finish.",
+      "restartNotQueued": {
+        "restart_row_job_bound": "The safe restart could not be queued because another queued action is bound to an update. Finish or cancel that action on the command board, then restart safely from there.",
+        "server_build_id_unavailable": "The safe restart could not be queued because the running build could not be identified. Restart safely from the command board when it is available.",
+        "restart_queue_failed": "The safe restart could not be queued. Restart safely from the command board.",
+        "unknown": "The safe restart could not be queued. Restart safely from the command board."
+      },
+      "restartPending": "The link is already repaired. A safe restart is still pending: open Settings → Command board and confirm it to finish.",
+      "writersActive": "The repair needs every terminal closed so nothing writes to the source tree. Open terminals: {{count}}. Close them, then try again.",
+      "writersActiveUsers": "Held by:",
+      "retry": "Try again",
+      "refusedGeneric": "The repair was refused for safety and nothing was changed.",
+      "failedGeneric": "The repair failed. Any partial change was undone automatically.",
+      "codes": {
+        "already_attached": "The source tree is already linked to the release branch.",
+        "source_attach_not_offered": "The repair is not available on this node.",
+        "dirty_worktree": "The source tree has local changes. The repair cannot run until the tree is clean.",
+        "head_not_release": "The source tree is not on a published release, so it cannot be linked automatically.",
+        "head_not_release_tag": "The source tree is not on a published release, so it cannot be linked automatically.",
+        "local_tag_mismatch": "The local release tag does not match the published one.",
+        "local_branch_diverged": "The local release branch has commits that are not in the published release.",
+        "update_maintenance_active": "An update maintenance window is active. Try again when it ends.",
+        "update_job_active": "An update is running. Try again when it ends.",
+        "prestage_active": "An update is being prepared in the background. Try again in a few minutes.",
+        "invalid_request": "The request was not valid. Close this window, open it again, and retry.",
+        "owner_identity_unavailable": "Your owner identity could not be confirmed. Sign in again, then retry.",
+        "csrf_or_origin_rejected": "The request was blocked by a security check. Reload the page, then retry.",
+        "forbidden": "Only the owner can repair the release-branch link.",
+        "source_attach_in_progress": "A repair is already running.",
+        "source_changed": "The source tree changed since this window read it. Check again, then retry.",
+        "source_attach_lock_unsafe": "The repair lock is in an unsafe state. Contact the operator.",
+        "source_attach_lock_unavailable": "The repair lock is busy. Try again in a moment.",
+        "operation_not_found": "This repair is no longer known to the server. Check again.",
+        "release_fetch_failed": "The published release could not be fetched. Check the network, then retry.",
+        "remote_mismatch": "The source repository does not match the configured release source.",
+        "remote_changed": "The source repository changed during the repair. Nothing was changed.",
+        "tag_not_annotated": "The release tag could not be verified as a published release.",
+        "tag_not_on_release_branch": "The release is not part of the release branch.",
+        "ancestry_unproven": "The release's place on the release branch could not be proven.",
+        "release_unverified": "The release signature could not be verified.",
+        "attach_verify_failed": "The link could not be verified after the change, so it was undone.",
+        "attach_head_flip_failed": "The source tree could not be switched to the release branch, so the change was undone.",
+        "source_attach_failed": "The repair failed unexpectedly.",
+        "operation_interrupted": "The repair was interrupted, for example by a server restart.",
+        "rate_limited": "Too many requests. Wait a minute, then retry.",
+        "network": "The server could not be reached. Check the connection, then retry.",
+        "unknown": "The repair could not run."
+      },
+      "detailsLabel": "Details:"
+    },
+    "latestVersionUnavailable": "Unavailable"
   },
   "sessionProcessState": {
     "running": "Running",

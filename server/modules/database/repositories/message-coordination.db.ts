@@ -3,6 +3,9 @@ import crypto from 'node:crypto';
 import { getConnection } from '@/modules/database/connection.js';
 import { hashMessageAuthorContent } from '@/modules/database/repositories/message-authors.db.js';
 
+import { readSteerImageRefs } from '../../../../shared/session-steer.contract.js';
+import type { SteerImageRef } from '../../../../shared/session-steer.contract.js';
+
 /** Structural view of the providers-module HistoryReadLease; no cross-module import (T-1632). */
 type HistoryReadLease = {
   queryRows<T>(db: ReturnType<typeof getConnection>, sql: string, parameters: readonly unknown[]): T[];
@@ -23,11 +26,36 @@ export type SteerStatus = 'queued' | 'delivered' | 'unconfirmed' | 'rejected';
 export type SteerIngressInput = {
   clientMsgId: string; userId: number; provider: string; sessionId: string; turnId: string;
   text: string; uuid: string; payloadSha256: string;
+  /** B-1697: store refs of the steer's images (never absolute paths). */
+  images?: SteerImageRef[];
 };
 export type SteerIngressRow = {
   clientMsgId: string; userId: number; uuid: string; payloadSha256: string; text: string;
   turnId: string; deliveryStatus: SteerStatus; createdAt: string;
+  /** B-1697: present only when the steer carried images. */
+  images?: SteerImageRef[];
 };
+
+/**
+ * B-1697: a steer row never receives a run verdict (recordVerdict/claim key on
+ * delivery_kind='message' fingerprints), so its existing `verdict_json` column
+ * carries the steer's image refs as `{"steerImages":[...]}` — no schema change.
+ * Every verdict reader requires `kind`/`codexUserProof`, which this never has.
+ */
+function steerImagesJson(images: SteerImageRef[] | undefined): string | null {
+  const refs = readSteerImageRefs(images);
+  return refs.length > 0 ? JSON.stringify({ steerImages: refs }) : null;
+}
+
+function readSteerImagesJson(json: string | null | undefined): SteerImageRef[] {
+  if (!json || json.length > 16_384) return [];
+  try {
+    const parsed = JSON.parse(json) as { steerImages?: unknown } | null;
+    return readSteerImageRefs(parsed && typeof parsed === 'object' ? parsed.steerImages : null);
+  } catch {
+    return [];
+  }
+}
 const CLIENT_MSG_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u;
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 export type CoordinationClaimResult =
@@ -219,11 +247,11 @@ export const messageCoordinationDb = {
       `INSERT OR IGNORE INTO message_coordination_ingress
         (session_id, client_msg_id, user_id, provider, canonical_content, content_hash,
          request_fingerprint, coordination_level, lifecycle_status, claude_user_uuid,
-         claude_payload_sha256, delivery_kind, turn_id, delivery_status, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 'direct', 'started', ?, ?, 'steer', ?, 'queued', ?)`,
+         claude_payload_sha256, delivery_kind, turn_id, delivery_status, created_at, verdict_json)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'direct', 'started', ?, ?, 'steer', ?, 'queued', ?, ?)`,
     ).run(input.sessionId, input.clientMsgId, input.userId, input.provider, input.text,
       hashMessageAuthorContent(input.text), requestFingerprint, input.uuid, input.payloadSha256,
-      input.turnId, createdAt).changes === 1;
+      input.turnId, createdAt, steerImagesJson(input.images)).changes === 1;
   },
 
   /** Moves a steer row forward; a delivered or rejected row is final. */
@@ -241,13 +269,18 @@ export const messageCoordinationDb = {
     if (!sessionId || Buffer.byteLength(sessionId) > 256) return [];
     const sql = `SELECT client_msg_id AS clientMsgId, user_id AS userId, claude_user_uuid AS uuid,
         claude_payload_sha256 AS payloadSha256, canonical_content AS text, turn_id AS turnId,
-        delivery_status AS deliveryStatus, created_at AS createdAt
+        delivery_status AS deliveryStatus, created_at AS createdAt, verdict_json AS imagesJson
       FROM message_coordination_ingress INDEXED BY idx_coordination_steer_session
       WHERE session_id = ? AND delivery_kind = 'steer' ORDER BY id LIMIT 1001`;
+    type Stored = SteerIngressRow & { imagesJson?: string | null };
     const db = getConnection();
-    const rows = lease ? lease.queryRows<SteerIngressRow>(db, sql, [sessionId])
-      : db.prepare(sql).all(sessionId) as SteerIngressRow[];
-    return rows.length > 1000 ? [] : rows;
+    const rows = lease ? lease.queryRows<Stored>(db, sql, [sessionId])
+      : db.prepare(sql).all(sessionId) as Stored[];
+    if (rows.length > 1000) return [];
+    return rows.map(({ imagesJson, ...row }) => {
+      const images = readSteerImagesJson(imagesJson);
+      return images.length > 0 ? { ...row, images } : row;
+    });
   },
 
   listBySession(sessionId: string, lease?: HistoryReadLease): MessageCoordinationRow[] {

@@ -2,6 +2,7 @@
 import { spawn } from 'node:child_process';
 import { chmod, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { hardenGitArgs } from '../../../../shared/git-safety.js';
 
 const GITHUB_OWNER_PATTERN = /^[A-Za-z0-9][A-Za-z0-9-]{0,38}$/;
 const GITHUB_REPO_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/;
@@ -137,7 +138,8 @@ export function spawnGitWithAskpass(
   args: string[],
   options: { cwd?: string; env: NodeJS.ProcessEnv },
 ) {
-  return spawn('git', args, {
+  // B-1691 (qa F10): push/pull keep the project's hooks; fsmonitor and bare never.
+  return spawn('git', hardenGitArgs(args), {
     cwd: options.cwd,
     env: options.env,
     stdio: ['ignore', 'pipe', 'pipe'],

@@ -5,6 +5,7 @@ import type { TFunction } from 'i18next';
 
 import { cn } from '../../lib/utils';
 import SessionProviderLogo from '../llm-logo-provider/SessionProviderLogo';
+import { subagentTypeLabel } from '../chat/tools/subagentTitle';
 import {
   resolveAnchoredPlacement,
   type AnchoredPlacement,
@@ -317,7 +318,7 @@ function AgentsPanel({
                     className="h-3.5 w-3.5 shrink-0 self-center text-muted-foreground"
                     aria-hidden
                   />
-                  <bdi className="min-w-0 flex-1 break-words text-foreground">{agent.agent_name}</bdi>
+                  <bdi className="min-w-0 flex-1 break-words text-foreground">{subagentTypeLabel(t, agent.agent_name)}</bdi>
                   {/* The model is shown only when it DIFFERS from the answering
                       model. Subagents usually inherit it, so printing it always
                       stacked four identical `claude-opus-5` columns whose only

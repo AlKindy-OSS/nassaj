@@ -12,6 +12,7 @@ import type {
   WorkspacePathValidationResult,
 } from '@/shared/types.js';
 import { isForbiddenProjectRoot } from '@/shared/secret-path-guard.js';
+import { pathHasGitDirSegment } from '../../../../shared/git-safety.js';
 import { AppError, normalizeProjectPath, validateWorkspacePath } from '@/shared/utils.js';
 
 import { emptySessionBuckets, type SessionBuckets } from '../../../../shared/sessionBuckets.js';
@@ -147,7 +148,9 @@ export async function createProject(
   const resolvedProjectPath = normalizeProjectPath(pathValidation.resolvedPath);
   // B-1373: the service user's home (or any root holding credentials) is never a
   // project — registering it would let members read every secret under it.
-  if (isForbiddenProjectRoot(resolvedProjectPath)) {
+  // B-1691 (qa F8): nor is a directory inside `.git` (config, hooks, overlays),
+  // whatever validatePath said.
+  if (isForbiddenProjectRoot(resolvedProjectPath) || pathHasGitDirSegment(resolvedProjectPath)) {
     throw new AppError('Project root is not allowed', {
       code: 'PROJECT_ROOT_FORBIDDEN',
       statusCode: 400,

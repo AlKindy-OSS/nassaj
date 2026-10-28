@@ -94,9 +94,12 @@ test('sidecar poller emits tool progress from a copied real agent transcript', a
         state: 'started',
       }),
     })]);
+    // B-1696: the shape the SDK streams when an Agent task registers (SDKTaskStartedMessage);
+    // a foreground agent names its id nowhere else until its final tool result.
     poller.observe({
-      type: 'assistant',
-      message: { content: [{ id: meta.toolUseId, tool_use_result: { agentId } }] },
+      type: 'system', subtype: 'task_started', task_id: agentId, tool_use_id: meta.toolUseId,
+      task_type: 'local_agent', is_backgrounded: false, description: 'real agent',
+      session_id: 'real-sidecar-test',
     }, 'real-sidecar-test');
     const updates = [];
     await new Promise((resolve, reject) => {
@@ -114,5 +117,105 @@ test('sidecar poller emits tool progress from a copied real agent transcript', a
   } finally {
     await poller?.close();
     await rm(scratch, { recursive: true, force: true });
+  }
+});
+
+// B-1696: synthetic artifacts — an agent file whose lines carry the resolved model.
+const SESSION = 'b1696-session';
+const AGENT_ID = 'a0123456789abcdef';
+const TOOL_ID = 'toolu_b1696_agent';
+const agentLine = (model, toolId) => JSON.stringify({ type: 'assistant', message: { role: 'assistant', model,
+  content: [{ type: 'tool_use', id: toolId, name: 'Read', input: {} }] } });
+
+async function sidecarFixture() {
+  const scratch = await mkdtemp('/var/tmp/claude-sidecar-b1696-');
+  await writeFile(path.join(scratch, `agent-${AGENT_ID}.meta.json`),
+    JSON.stringify({ agentType: 'backend-dev', toolUseId: TOOL_ID, requestShape: 'foreground' }));
+  await writeFile(path.join(scratch, `agent-${AGENT_ID}.jsonl`), `${agentLine('claude-opus-x', 'toolu_c1')}\n`);
+  const artifacts = await openArtifactDirAt(scratch);
+  assert.ok('dir' in artifacts);
+  const opened = [];
+  const openFile = artifacts.openFile.bind(artifacts);
+  artifacts.openFile = (name) => {
+    if (name.endsWith('.jsonl')) opened.push(name);
+    return openFile(name);
+  };
+  const poller = createClaudeAgentSidecarPoller({ openArtifacts: async () => artifacts });
+  const fold = createClaudeProgressFold('live', null);
+  fold.observe({ type: 'assistant' }, [createNormalizedMessage({
+    id: TOOL_ID, sessionId: SESSION, provider: 'claude', kind: 'tool_use', toolName: 'Agent', toolId: TOOL_ID,
+    subagent: buildProgressSubagent({ id: TOOL_ID, parentId: null, label: 'agent', state: 'started' }),
+  })]);
+  return { scratch, poller, fold, opened };
+}
+
+const taskStarted = (extra = {}) => ({ type: 'system', subtype: 'task_started', task_id: AGENT_ID,
+  tool_use_id: TOOL_ID, task_type: 'local_agent', is_backgrounded: false, subagent_type: 'backend-dev',
+  spawn_depth: 1, description: 'agent', session_id: SESSION, ...extra });
+// The SDK user message that carries an Agent tool's structured output (SDKUserMessage.tool_use_result).
+const agentToolResult = (toolUseResult) => ({ type: 'user', parent_tool_use_id: null, session_id: SESSION,
+  message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: TOOL_ID, content: 'launched' }] },
+  tool_use_result: toolUseResult });
+const models = (rows) => rows.map((row) => row.subagent?.model).filter(Boolean);
+
+test('B-1696: a foreground agent is tailed from task_started while it still runs', async () => {
+  const { scratch, poller, fold, opened } = await sidecarFixture();
+  try {
+    poller.observe(taskStarted(), SESSION);
+    const first = await poller.poll(null, SESSION, fold);
+    assert.ok(models(first).includes('claude-opus-x'), 'resolvedModel reaches the agent row');
+    assert.ok(first.some((row) => row.subagent?.tools?.length), 'child tools reach the agent row');
+    await writeFile(path.join(scratch, `agent-${AGENT_ID}.jsonl`),
+      `${agentLine('claude-opus-x', 'toolu_c1')}\n${agentLine('claude-opus-x', 'toolu_c2')}\n`);
+    const second = await poller.poll(null, SESSION, fold);
+    assert.ok(second.length > 0, 'later lines keep flowing before the agent settles');
+    assert.deepEqual(opened, [`agent-${AGENT_ID}.jsonl`]);
+  } finally {
+    await poller.close();
+    await rm(scratch, { recursive: true, force: true });
+  }
+});
+
+test('B-1696: task_started of other task types or unsafe ids is ignored', async () => {
+  const { scratch, poller, fold, opened } = await sidecarFixture();
+  try {
+    poller.observe(taskStarted({ task_type: 'local_bash' }), SESSION);
+    poller.observe(taskStarted({ task_id: '../agent-x' }), SESSION);
+    poller.observe(taskStarted({ tool_use_id: undefined }), SESSION);
+    assert.deepEqual(await poller.poll(null, SESSION, fold), []);
+    assert.deepEqual(opened, []);
+  } finally {
+    await poller.close();
+    await rm(scratch, { recursive: true, force: true });
+  }
+});
+
+test('B-1696: the background path (agentId in tool_use_result) is unchanged', async () => {
+  const { scratch, poller, fold, opened } = await sidecarFixture();
+  try {
+    poller.observe(agentToolResult({ status: 'async_launched', agentId: AGENT_ID, isAsync: true }), SESSION);
+    const rows = await poller.poll(null, SESSION, fold);
+    assert.ok(models(rows).includes('claude-opus-x'));
+    assert.deepEqual(opened, [`agent-${AGENT_ID}.jsonl`]);
+  } finally {
+    await poller.close();
+    await rm(scratch, { recursive: true, force: true });
+  }
+});
+
+test('B-1696: task_started plus a tool_use_result agentId tail the agent once', async () => {
+  for (const pollBetween of [false, true]) {
+    const { scratch, poller, fold, opened } = await sidecarFixture();
+    try {
+      poller.observe(taskStarted({ is_backgrounded: true }), SESSION);
+      if (pollBetween) await poller.poll(null, SESSION, fold);
+      poller.observe(agentToolResult({ status: 'async_launched', agentId: AGENT_ID, isAsync: true }), SESSION);
+      await poller.poll(null, SESSION, fold);
+      await poller.poll(null, SESSION, fold);
+      assert.deepEqual(opened, [`agent-${AGENT_ID}.jsonl`], `opened once (poll between: ${pollBetween})`);
+    } finally {
+      await poller.close();
+      await rm(scratch, { recursive: true, force: true });
+    }
   }
 });

@@ -13,6 +13,8 @@ import { codeHighlightTheme } from '../../../../syntax/codeHighlightTheme';
 import { useCodeHighlighter } from '../../../../syntax/useCodeHighlighter';
 import { exceedsHighlightBudget } from '../../../../syntax/highlightBudget';
 import { PlainCodeBlock } from '../../../../syntax/PlainCodeBlock';
+import { ProseFenceBlock } from '../../../../syntax/ProseFenceBlock';
+import { isProseFenceLanguage } from '../../../../syntax/proseFence';
 import { normalizeInlineCodeFences } from '../../utils/chatFormatting';
 import { copyTextToClipboard } from '../../../../utils/clipboard';
 import {
@@ -773,7 +775,15 @@ const CodeBlock = ({ node, inline, className, children, ...props }: CodeBlockPro
 
   const highlightLang = isExecBlock ? 'bash' : displayLang;
   // كتلة ضخمة تُعرَض نصّاً بنفس الإطار: التلوين يجمّد الخيط الرئيس (src/syntax/highlightBudget)
-  const CodeRenderer = exceedsHighlightBudget(syntaxContent) ? PlainCodeBlock : SyntaxHighlighter;
+  // B-1674: a prose fence (no language / text / markdown) resolves bidi per line;
+  // every code fence stays a strict LTR box (indentation and `//`/`#`/`+` at left).
+  const isProseFence = !isExecBlock && isProseFenceLanguage(matchLang?.[1]);
+  // Over the highlight budget every fence (prose included) falls back to plain
+  // text: one span per line would re-render thousands of nodes while streaming.
+  const overBudget = exceedsHighlightBudget(syntaxContent);
+  const CodeRenderer = overBudget
+    ? PlainCodeBlock
+    : isProseFence ? ProseFenceBlock : SyntaxHighlighter;
 
   /*
    * B-274 — إزاحات فيزيائية داخل جزيرة LTR، لا منطقية. الكود دائماً LTR ولذلك

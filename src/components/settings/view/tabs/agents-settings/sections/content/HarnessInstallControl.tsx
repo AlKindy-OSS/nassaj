@@ -1,9 +1,12 @@
+import { useMemo } from 'react';
 import { ChevronDown, Download, RefreshCw } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 import type { InstallableHarnessId } from '../../../../../../../../shared/harness-install.contract';
+import type { HarnessSuppliedAck } from '../../../../../../../../shared/harness-update.contract';
 import type { HarnessInstallState } from '../../../../../../../hooks/useHarnessInstall';
 import { Button } from '../../../../../../../shared/view/ui';
+import HarnessUpdateConfirmDialog from '../HarnessUpdateConfirmDialog';
 
 /** Arabic fallbacks per refusal/job error code (i18n keys `harnessInstall.error.<code>`). */
 const ERROR_DEFAULTS: Record<string, string> = {
@@ -16,6 +19,9 @@ const ERROR_DEFAULTS: Record<string, string> = {
   HARNESS_OVERRIDE_SET: 'مسار مخصّص للأداة مضبوط؛ ثبّتها يدوياً.',
   HARNESS_INSTALL_INVALID: 'يوجد تثبيت غير صالح؛ أصلحه يدوياً.',
   HARNESS_ACTION_RATE_LIMITED: 'محاولات كثيرة؛ انتظر قليلاً ثم أعد المحاولة.',
+  insufficient_space: 'المساحة الحرّة لا تكفي للتثبيت؛ وفّر مساحة ثم أعد المحاولة.',
+  verifier_unavailable: 'أداة التحقق من التوقيع (gpgv) غير مثبّتة على الخادم؛ ثبّتها أو ثبّت الأداة يدوياً.',
+  HARNESS_INSTALL_SLOT_BUSY: 'يجري تثبيت أداة أخرى الآن؛ أعد المحاولة بعد انتهائه.',
 };
 
 type Props = {
@@ -27,7 +33,7 @@ type Props = {
 /** Owner-only Install/Retry button, rendered inline at the end of the command row (T-2062). */
 export function HarnessInstallButton({ provider, state, onStart }: Props) {
   const { t } = useTranslation('settings');
-  const busy = state.status === 'starting' || state.status === 'running';
+  const busy = state.status === 'starting' || state.status === 'running' || state.status === 'confirming';
   const failed = state.status === 'failed';
   return (
     <Button
@@ -53,8 +59,15 @@ export function HarnessInstallButton({ provider, state, onStart }: Props) {
  * Full-width install feedback below the command row: progress, phase, error
  * and log tail (T-2062). Progress mirrors the update bar in HarnessVersionSection.
  */
-export default function HarnessInstallProgress({ provider, state }: Omit<Props, 'onStart'>) {
+export default function HarnessInstallProgress({ provider, state, onConfirm, onCancel }: Omit<Props, 'onStart'> & {
+  /** Re-sends the install with the echoed acks (ADR-215 stage B pre-run warnings). */
+  onConfirm?: (acks?: HarnessSuppliedAck[]) => void;
+  onCancel?: () => void;
+}) {
   const { t, i18n } = useTranslation('settings');
+  // Stable identity: the dialog resets its checkboxes whenever `confirmation` changes.
+  const confirmation = useMemo(() => ({ action: 'install' as const, required: state.required ?? [] }), [state.required]);
+  const submitting = state.status === 'starting' && Boolean(state.required);
   const busy = state.status === 'starting' || state.status === 'running';
   const failed = state.status === 'failed';
   const phase = state.phase ?? 'queued';
@@ -66,6 +79,17 @@ export default function HarnessInstallProgress({ provider, state }: Omit<Props, 
     })
     : '';
   if (state.status === 'idle') return null;
+  if (state.status === 'confirming' || submitting) {
+    return (
+      <HarnessUpdateConfirmDialog
+        confirmation={confirmation}
+        submitting={submitting}
+        onConfirm={(acks) => onConfirm?.(acks)}
+        onCancel={() => { if (!submitting) onCancel?.(); }}
+        onRefresh={() => onConfirm?.()}
+      />
+    );
+  }
 
   return (
     <div className="space-y-2" data-testid={`harness-install-progress-${provider}`}>

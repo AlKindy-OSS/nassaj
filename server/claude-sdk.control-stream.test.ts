@@ -119,6 +119,12 @@ mock.module('@anthropic-ai/claude-agent-sdk', {
 
 // Resume-profile enforcement has its own focused suite; these tests isolate
 // control-stream lifetime and abort semantics.
+// B-1699: the owner's usage, read before a wake-up hold is renewed (default: low).
+let usageSummary: unknown = { session: { utilization: 10 }, weeklyAllModels: { utilization: 10 } };
+mock.module('./modules/providers/services/claude-usage.service.js', {
+  namedExports: { claudeUsageService: { getUsage: async () => usageSummary } },
+});
+
 mock.module('./services/isolation/resolve-claude-run-profile.js', {
   namedExports: {
     resolveClaudeRunProfileOrThrow: async ({ baseEnv = process.env } = {}) => ({
@@ -132,6 +138,8 @@ const sdk = (await import('./claude-sdk.js')) as unknown as {
   abortClaudeSDKSession: (sessionId: string, rawWs?: unknown) => Promise<{ aborted: boolean }>;
   announceUnresolvedWorkflows: (sessionId: string, ids: string[], send: (p: unknown) => void) => void;
   settleAnnouncedWorkflows: (sessionId: string, ids: string[], reason: string) => void;
+  releaseScheduledWakeupHoldsForDrain: () => number;
+  resetScheduledWakeupDrainForTests: () => void;
 };
 const liveness = (await import('./services/workflow-liveness.js')) as unknown as {
   registerWorkflowPid: (sessionId: string, pid: number) => void;
@@ -144,8 +152,9 @@ const PROMPT = 'delegate this please';
 // B-1401: payloads the run sent, to read the `complete` frame.
 let sentPayloads: Array<Record<string, unknown>> = [];
 
-function makeWs() {
-  return { send: (p: Record<string, unknown>) => { sentPayloads.push(p); }, userId: null, ws: { readyState: 1 } };
+function makeWs(extra: Record<string, unknown> = {}) {
+  return { send: (p: Record<string, unknown>) => { sentPayloads.push(p); }, userId: null, ws: { readyState: 1 },
+    ...extra };
 }
 
 /** Resolves to true if the prompt stream has been closed within `ms`. */
@@ -191,8 +200,8 @@ const sleep = (ms: number) => new Promise<void>(resolve => { setTimeout(resolve,
  * The run promise is wrapped: returned bare from an async function it would be
  * adopted, and awaiting startRun() would then wait for the whole run to end.
  */
-async function startRun(options: Record<string, unknown> = {}) {
-  const run = sdk.queryClaudeSDK(PROMPT, { cwd: process.cwd(), ...options }, makeWs());
+async function startRun(options: Record<string, unknown> = {}, ws: unknown = makeWs()) {
+  const run = sdk.queryClaudeSDK(PROMPT, { cwd: process.cwd(), ...options }, ws);
   await queryStarted;
   assert.ok(firstPrompt, 'the prompt read must start with query construction');
   await firstPrompt;
@@ -250,7 +259,10 @@ const capture = JSON.parse(fs.readFileSync(
 
 const ENV_KEYS = [
   'CLAUDE_CONFIG_DIR', 'CLAUDE_SDK_INPUT_CLOSE_GRACE_MS', 'CLAUDE_SDK_BACKGROUND_HOLD_IDLE_MAX_MS',
-  'CLAUDE_SDK_CONTINUATION_WAIT_MS', 'CLAUDE_SDK_WORKFLOW_EXIT_POLL_MS',
+  'CLAUDE_SDK_CONTINUATION_WAIT_MS', 'CLAUDE_SDK_WORKFLOW_EXIT_POLL_MS', 'CLAUDE_SDK_SCHEDULED_WAKEUP_MARGIN_MS',
+  'CLAUDE_SDK_SCHEDULED_WAKEUP_HOLD', 'CLAUDE_SDK_SCHEDULED_WAKEUP_TOTAL_MAX_MS',
+  'CLAUDE_SDK_SCHEDULED_WAKEUP_MAX_PULSES', 'CLAUDE_SDK_SCHEDULED_WAKEUP_LISTENER_GRACE_MS',
+  'CLAUDE_SDK_SCHEDULED_WAKEUP_LISTENER_POLL_MS',
 ] as const;
 let savedEnv: Record<string, string | undefined> = {};
 let tmpConfigDir = '';
@@ -265,6 +277,8 @@ const closeReason = () => {
 
 beforeEach(() => {
   scriptedMessages = [];
+  usageSummary = { session: { utilization: 10 }, weeklyAllModels: { utilization: 10 } };
+  sdk.resetScheduledWakeupDrainForTests();
   interruptImpl = async () => {};
   streamExitError = null;
   sentPayloads = [];
@@ -631,6 +645,108 @@ for (const scenario of ['bgBash', 'bgAgent']) {
   });
 }
 
+// ── ADR-218: a SendMessage that resumes a finished agent ─────────────────────
+
+/** Captured on CLI 2.1.306 (haiku, cwd /var/tmp), redacted: Agent, then SendMessage resume. */
+const resumeCapture = JSON.parse(fs.readFileSync(
+  new URL('./claude-sdk.control-stream.resume.fixture.json', import.meta.url), 'utf8',
+)) as { scenarios: { resumeAgent: SdkMessage[] } };
+
+const resumedToolResult = (agentId: string, toolUseId = 'tu_send'): SdkMessage => ({
+  type: 'user', session_id: SID, parent_tool_use_id: null,
+  message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: toolUseId, content: 'resuming' }] },
+  tool_use_result: { success: true, resumedAgentId: agentId },
+});
+
+test('ADR-218: a resume result without task_started still holds the channel until its notification', async () => {
+  const GRACE = 100;
+  process.env.CLAUDE_SDK_INPUT_CLOSE_GRACE_MS = String(GRACE);
+  scriptedMessages = [
+    assistantToolUse('SendMessage', { to: 'a1', message: 'again' }),
+    resumedToolResult('a1'),
+    assistantText('WAITING'),
+    resultMsg,
+  ];
+  preparePhases([[taskNotification('a1')], [resultMsg]]);
+  const { run } = await startRun();
+
+  assert.equal(await promptClosedWithin(6 * GRACE), false, 'the resumed agent is a pending task');
+  assert.ok(logLines.some(l => l === `[CONTROL-STREAM-HOLD] session=${SID} pending=1`), 'the hold is logged');
+  phaseReleases[0]();
+  phaseReleases[1]();
+  assert.equal(await promptClosedWithin(GRACE + 400), true, 'its notification releases it on the grace');
+  releaseMessageStream();
+  await run;
+});
+
+test('ADR-218: a resume result for an already-pending task does not count it twice', async () => {
+  process.env.CLAUDE_SDK_INPUT_CLOSE_GRACE_MS = '100';
+  scriptedMessages = [
+    assistantToolUse('SendMessage', { to: 'a1', message: 'again' }),
+    taskStarted('a1'),
+    resumedToolResult('a1'),
+    resultMsg,
+  ];
+  preparePhases([[taskNotification('a1')], [resultMsg]]);
+  const { run } = await startRun();
+
+  assert.equal(await promptClosedWithin(300), false);
+  assert.ok(logLines.some(l => l === `[CONTROL-STREAM-HOLD] session=${SID} pending=1`), 'one task, not two');
+  phaseReleases[0]();
+  phaseReleases[1]();
+  assert.equal(await promptClosedWithin(500), true, 'one notification settles it');
+  releaseMessageStream();
+  await run;
+});
+
+test('ADR-218: the captured CLI 2.1.306 resume stream holds the channel through the resumed run', async () => {
+  const GRACE = 100;
+  process.env.CLAUDE_SDK_INPUT_CLOSE_GRACE_MS = String(GRACE);
+  const stream = resumeCapture.scenarios.resumeAgent.map(m => ({ ...m, session_id: SID }));
+  const resumed = stream.findIndex(m => (m.tool_use_result as { resumedAgentId?: string })?.resumedAgentId);
+  assert.ok(resumed > 0, 'the capture holds a structured resumedAgentId');
+  const started = stream.findIndex((m, i) => i < resumed && i > 0 && m.subtype === 'task_started'
+    && (m.tool_use_id as string) === (stream[resumed].message as { content: Array<{ tool_use_id: string }> })
+      .content[0].tool_use_id);
+  assert.ok(started > 0, 'measured: CLI 2.1.306 emits task_started for the resumed agent');
+  const ended = stream.findIndex((m, i) => i > resumed && m.subtype === 'task_notification');
+  scriptedMessages = [...stream.slice(0, resumed + 1), resultMsg];
+  preparePhases([stream.slice(resumed + 1, ended + 1), [resultMsg]]);
+  const { run } = await startRun();
+
+  assert.equal(await promptClosedWithin(6 * GRACE), false, 'the resumed agent holds the channel');
+  phaseReleases[0]();
+  phaseReleases[1]();
+  assert.equal(await promptClosedWithin(GRACE + 400), true, 'and its notification releases it');
+  releaseMessageStream();
+  await run;
+});
+
+test('ADR-218: a new run mirrors its session without stealing the view the socket switched to', async () => {
+  const mirrors = await import('./modules/websocket/services/websocket-writer.service.js');
+  const VIEWED = 'control-stream-viewed-session';
+  const frames: string[] = [];
+  const raw = { readyState: 1, send: (frame: string) => { frames.push(frame); } };
+  // The user started a run, then opened another session before the new id arrived.
+  mirrors.setSocketViewMirror(VIEWED, raw as never);
+  scriptedMessages = [systemInit, resultMsg];
+  const run = sdk.queryClaudeSDK(PROMPT, { cwd: process.cwd() }, { ...makeWs(), ws: raw });
+  await queryStarted;
+  await firstPrompt;
+  releaseScriptedMessages();
+  await scriptedMessagesConsumed;
+
+  try {
+    assert.equal(mirrors.countLiveMirrors(VIEWED), 1, 'the viewed session keeps its live stream');
+    mirrors.broadcastToSessionMirrors(SID, 'new-session-frame');
+    assert.ok(frames.includes('new-session-frame'), 'the new session reaches the socket too');
+  } finally {
+    mirrors.removeSessionMirrorsForSocket(raw as never);
+    releaseMessageStream();
+    await run;
+  }
+});
+
 // ── B-1400 / B-1401 ──────────────────────────────────────────────────────────
 
 const levelSignal = (taskIds: string[]): SdkMessage => ({
@@ -897,4 +1013,329 @@ test('B-1399: a CLI exit while the stop interrupt is in flight is a stop, not sp
   answerInterrupt();
   await abort;
   assert.equal(sentPayloads.filter(p => p.kind === 'error').length, 0, 'no failure frame');
+});
+
+// ── B-1699: scheduled wake-ups (ScheduleWakeup / `/loop`, session-only CronCreate) ──
+// The streams below are real SDK 0.3.310 / CLI 2.1.306 captures (redacted): the
+// wake-up fires as `command_lifecycle started` + a new cycle with no user message.
+const wakeCapture = JSON.parse(fs.readFileSync(
+  new URL('./claude-sdk.control-stream.wakeup.fixture.json', import.meta.url), 'utf8',
+)) as { scenarios: Record<string, Array<{ t: number; m: SdkMessage }>> };
+
+/**
+ * A captured scenario split at its first top-level result: the scheduling turn and
+ * the wake-up turn. The scheduled time is moved to `wakeInMs` from now.
+ */
+function wakeScenario(name: string, wakeInMs: number, patch: Record<string, unknown> = {}, sid = SID) {
+  const stream = wakeCapture.scenarios[name].map(({ m }) => {
+    const message = { ...m, session_id: sid };
+    const structured = message.tool_use_result as Record<string, unknown> | undefined;
+    if (structured && typeof structured === 'object'
+      && ('scheduledFor' in structured || 'nextFireAt' in structured)) {
+      const key = 'scheduledFor' in structured ? 'scheduledFor' : 'nextFireAt';
+      message.tool_use_result = { ...structured, [key]: Date.now() + wakeInMs, ...patch };
+    }
+    return message;
+  });
+  const firstResult = stream.findIndex(m => m.type === 'result');
+  const fire = stream.find(m => m.type === 'command_lifecycle' && m.state === 'started');
+  assert.ok(firstResult > 0 && fire, `${name}: the capture holds a result and a wake-up start`);
+  return { scheduling: stream.slice(0, firstResult + 1), wake: stream.slice(firstResult + 1),
+    commandUuid: fire.command_uuid as string };
+}
+
+test('B-1699: a scheduled wake-up holds the channel past the grace and its turn runs', async () => {
+  const GRACE = 100;
+  process.env.CLAUDE_SDK_INPUT_CLOSE_GRACE_MS = String(GRACE);
+  process.env.CLAUDE_SDK_SCHEDULED_WAKEUP_MARGIN_MS = '2000';
+  const { scheduling, wake, commandUuid } = wakeScenario('scheduleWakeup', 300);
+  scriptedMessages = scheduling;
+  preparePhases([wake]);
+  const { run } = await startRun();
+
+  assert.equal(await promptClosedWithin(6 * GRACE), false, 'the wake-up must find the channel open');
+  assert.ok(logLines.some(l => l.startsWith(`[CONTROL-STREAM-HOLD] session=${SID} scheduled-wakeup-in-ms=`)));
+  phaseReleases[0]();
+  assert.equal(await promptClosedWithin(GRACE + 600), true, 'after the wake-up turn the grace applies');
+  assert.equal(closeReason(), 'grace-expired');
+  const notice = sentPayloads.find(p => p.kind === 'notice');
+  assert.equal(notice?.noticeCode, 'scheduled_wakeup', 'the wake-up turn is marked, not shown as a user message');
+  assert.equal(notice?.id, commandUuid, 'with the id the transcript gives its prompt row');
+  assert.equal(sentPayloads.filter(p => p.kind === 'text' && p.role === 'user').length, 0);
+  releaseMessageStream();
+  await run;
+});
+
+test('B-1699: a wake-up that never fires releases the channel at its time plus the margin', async () => {
+  process.env.CLAUDE_SDK_INPUT_CLOSE_GRACE_MS = '50';
+  process.env.CLAUDE_SDK_SCHEDULED_WAKEUP_MARGIN_MS = '200';
+  scriptedMessages = wakeScenario('scheduleWakeup', 200).scheduling;
+  const { run } = await startRun();
+
+  assert.equal(await promptClosedWithin(250), false, 'held until the wake-up time');
+  assert.equal(await promptClosedWithin(1000), true, 'released once time plus margin passed');
+  assert.equal(closeReason(), 'scheduled-wakeup-expired');
+  releaseMessageStream();
+  await run;
+});
+
+test('B-1699: a wake-up beyond the idle cap is released at the cap', async () => {
+  process.env.CLAUDE_SDK_INPUT_CLOSE_GRACE_MS = '50';
+  process.env.CLAUDE_SDK_BACKGROUND_HOLD_IDLE_MAX_MS = '300';
+  scriptedMessages = wakeScenario('scheduleWakeup', 3_600_000).scheduling;
+  const { run } = await startRun();
+
+  assert.equal(await promptClosedWithin(150), false, 'held past the grace');
+  assert.equal(await promptClosedWithin(1000), true, 'but never past the cap');
+  assert.equal(closeReason(), 'scheduled-wakeup-cap');
+  releaseMessageStream();
+  await run;
+});
+
+test('B-1699: a session-only CronCreate holds the channel until it fires', async () => {
+  const GRACE = 100;
+  process.env.CLAUDE_SDK_INPUT_CLOSE_GRACE_MS = String(GRACE);
+  process.env.CLAUDE_SDK_SCHEDULED_WAKEUP_MARGIN_MS = '2000';
+  const { scheduling, wake } = wakeScenario('cronCreate', 300);
+  scriptedMessages = scheduling;
+  preparePhases([wake]);
+  const { run } = await startRun();
+
+  assert.equal(await promptClosedWithin(6 * GRACE), false, 'the cron fire must find the channel open');
+  phaseReleases[0]();
+  assert.equal(await promptClosedWithin(GRACE + 600), true);
+  assert.equal(sentPayloads.filter(p => p.kind === 'notice').length, 1, 'its turn is marked too');
+  releaseMessageStream();
+  await run;
+});
+
+test('B-1699: a durable CronCreate (not session-local) does not hold the channel', async () => {
+  process.env.CLAUDE_SDK_INPUT_CLOSE_GRACE_MS = '100';
+  process.env.CLAUDE_SDK_SCHEDULED_WAKEUP_MARGIN_MS = '600000';
+  scriptedMessages = wakeScenario('cronCreate', 600_000, { durable: true }).scheduling;
+  const { run } = await startRun();
+
+  assert.equal(await promptClosedWithin(600), true, 'nothing held beyond the ordinary close');
+  assert.notEqual(closeReason(), 'scheduled-wakeup-expired');
+  releaseMessageStream();
+  await run;
+});
+
+test('B-1699: a failed ScheduleWakeup schedules nothing', async () => {
+  process.env.CLAUDE_SDK_INPUT_CLOSE_GRACE_MS = '600000';
+  const failed = wakeScenario('scheduleWakeup', 600_000).scheduling.map((m) => {
+    if (m.type !== 'user' || !m.tool_use_result) return m;
+    const content = (m.message as { content: Array<Record<string, unknown>> }).content
+      .map(block => ({ ...block, is_error: true, content: '<tool_use_error>refused</tool_use_error>' }));
+    return { ...m, tool_use_result: 'Error: refused', message: { role: 'user', content } };
+  });
+  scriptedMessages = failed;
+  const { run } = await startRun();
+
+  assert.equal(await promptClosedWithin(300), true, 'an ordinary turn closes at once');
+  assert.equal(closeReason(), 'result-immediate');
+  releaseMessageStream();
+  await run;
+});
+
+test('B-1699: a drain releases a run held only for a wake-up, and no new wake-up hold starts', async () => {
+  process.env.CLAUDE_SDK_INPUT_CLOSE_GRACE_MS = '50';
+  process.env.CLAUDE_SDK_SCHEDULED_WAKEUP_MARGIN_MS = '600000';
+  scriptedMessages = wakeScenario('scheduleWakeup', 600_000).scheduling;
+  const { run } = await startRun();
+
+  assert.equal(await promptClosedWithin(200), false, 'held for the wake-up');
+  assert.equal(sdk.releaseScheduledWakeupHoldsForDrain(), 1, 'the drain finds the held run');
+  assert.equal(await promptClosedWithin(500), true, 'and its input closes so the CLI can exit');
+  assert.equal(closeReason(), 'drain-scheduled-wakeup');
+  releaseMessageStream();
+  await run;
+
+  resetQueryHarness();
+  logLines = [];
+  scriptedMessages = wakeScenario('scheduleWakeup', 600_000).scheduling;
+  const second = await startRun();
+  assert.equal(await promptClosedWithin(500), true, 'once draining, a wake-up holds nothing');
+  assert.equal(closeReason(), 'drain-scheduled-wakeup');
+  releaseMessageStream();
+  await second.run;
+});
+
+/** The `scheduled_wakeup_closed` notices the run sent, as their reasons. */
+const wakeClosedReasons = () => sentPayloads.filter(p => p.kind === 'notice'
+  && p.noticeCode === 'scheduled_wakeup_closed').map(p => p.noticeReason);
+
+test('B-1699 M1: a finished task keeps its longer continuation wait over a sooner wake-up', async () => {
+  process.env.CLAUDE_SDK_INPUT_CLOSE_GRACE_MS = '50';
+  process.env.CLAUDE_SDK_CONTINUATION_WAIT_MS = '1200';
+  process.env.CLAUDE_SDK_SCHEDULED_WAKEUP_MARGIN_MS = '100';
+  const { scheduling } = wakeScenario('scheduleWakeup', 100);
+  const result = scheduling.at(-1) as SdkMessage;
+  scriptedMessages = [...scheduling.slice(0, -1), taskStarted('t1'), result];
+  preparePhases([[taskNotification('t1')]]);
+  const { run } = await startRun();
+  phaseReleases[0]();
+
+  assert.equal(await promptClosedWithin(700), false, 'the wake-up time passed, the continuation wait did not');
+  assert.equal(await promptClosedWithin(2000), true);
+  assert.equal(closeReason(), 'continuation-wait-expired', 'the longer hold of the run decided');
+  releaseMessageStream();
+  await run;
+});
+
+test('B-1699 M1: a result that does not answer the turn keeps its wait over a sooner wake-up', async () => {
+  process.env.CLAUDE_SDK_INPUT_CLOSE_GRACE_MS = '50';
+  process.env.CLAUDE_SDK_CONTINUATION_WAIT_MS = '1200';
+  process.env.CLAUDE_SDK_SCHEDULED_WAKEUP_MARGIN_MS = '100';
+  const { scheduling } = wakeScenario('scheduleWakeup', 100);
+  const foreign = { ...(scheduling.at(-1) as SdkMessage), origin: { kind: 'task-notification' } };
+  scriptedMessages = [...scheduling.slice(0, -1), foreign];
+  const { run } = await startRun();
+
+  assert.equal(await promptClosedWithin(700), false, 'held past the wake-up time by the turn wait');
+  assert.equal(await promptClosedWithin(2000), true);
+  assert.equal(closeReason(), 'turn-result-wait-expired');
+  releaseMessageStream();
+  await run;
+});
+
+test('B-1699 M1: with a pending task the wake-up is not the only reason, so a drain leaves it', async () => {
+  process.env.CLAUDE_SDK_INPUT_CLOSE_GRACE_MS = '50';
+  process.env.CLAUDE_SDK_BACKGROUND_HOLD_IDLE_MAX_MS = '1200';
+  process.env.CLAUDE_SDK_SCHEDULED_WAKEUP_MARGIN_MS = '100';
+  const { scheduling } = wakeScenario('scheduleWakeup', 100);
+  scriptedMessages = [...scheduling.slice(0, -1), taskStarted('t1'), scheduling.at(-1) as SdkMessage];
+  const { run } = await startRun();
+
+  assert.equal(sdk.releaseScheduledWakeupHoldsForDrain(), 0, 'not a wake-up-only hold');
+  assert.equal(await promptClosedWithin(700), false, 'the pending task still holds the channel');
+  assert.equal(await promptClosedWithin(2000), true);
+  assert.equal(closeReason(), 'background-idle-cap');
+  releaseMessageStream();
+  await run;
+});
+
+test('B-1699 C2: the total cap from the first schedule ends the hold and says why', async () => {
+  process.env.CLAUDE_SDK_INPUT_CLOSE_GRACE_MS = '50';
+  process.env.CLAUDE_SDK_SCHEDULED_WAKEUP_TOTAL_MAX_MS = '300';
+  scriptedMessages = wakeScenario('scheduleWakeup', 600_000).scheduling;
+  const { run } = await startRun();
+
+  assert.equal(await promptClosedWithin(150), false);
+  assert.equal(await promptClosedWithin(1000), true);
+  assert.equal(closeReason(), 'scheduled-wakeup-total-cap');
+  assert.deepEqual(wakeClosedReasons(), ['total_cap']);
+  releaseMessageStream();
+  await run;
+});
+
+test('B-1699 C2: the kill switch holds nothing and says so', async () => {
+  process.env.CLAUDE_SDK_INPUT_CLOSE_GRACE_MS = '600000';
+  process.env.CLAUDE_SDK_SCHEDULED_WAKEUP_HOLD = '0';
+  scriptedMessages = wakeScenario('scheduleWakeup', 600_000).scheduling;
+  const { run } = await startRun();
+
+  assert.equal(await promptClosedWithin(300), true, 'closed at once, not after the grace');
+  assert.equal(closeReason(), 'scheduled-wakeup-disabled');
+  assert.deepEqual(wakeClosedReasons(), ['disabled']);
+  releaseMessageStream();
+  await run;
+});
+
+test('B-1699 C2: a hold whose session has no viewer is released after the listener grace', async () => {
+  process.env.CLAUDE_SDK_INPUT_CLOSE_GRACE_MS = '50';
+  process.env.CLAUDE_SDK_SCHEDULED_WAKEUP_LISTENER_GRACE_MS = '150';
+  process.env.CLAUDE_SDK_SCHEDULED_WAKEUP_LISTENER_POLL_MS = '40';
+  // Its own session id: earlier runs leave open mirrors registered under SID.
+  scriptedMessages = wakeScenario('scheduleWakeup', 600_000, {}, 'wake-no-listener-session').scheduling;
+  const { run } = await startRun({}, makeWs({ ws: { readyState: 3 } }));
+
+  assert.equal(await promptClosedWithin(1500), true);
+  assert.equal(closeReason(), 'scheduled-wakeup-listeners-gone');
+  assert.deepEqual(wakeClosedReasons(), ['listeners_gone']);
+  releaseMessageStream();
+  await run;
+});
+
+test('B-1699 C2: a hold is not renewed when the owner usage is at or above 90%', async () => {
+  process.env.CLAUDE_SDK_INPUT_CLOSE_GRACE_MS = '50';
+  usageSummary = { session: { utilization: 91 }, weeklyAllModels: { utilization: 40 } };
+  scriptedMessages = wakeScenario('scheduleWakeup', 600_000).scheduling;
+  const { run } = await startRun();
+
+  assert.equal(await promptClosedWithin(1000), true);
+  assert.equal(closeReason(), 'scheduled-wakeup-quota');
+  assert.deepEqual(wakeClosedReasons(), ['quota']);
+  releaseMessageStream();
+  await run;
+});
+
+test('B-1699 M3: a recurring session-only cron holds until CronDelete', async () => {
+  const GRACE = 100;
+  process.env.CLAUDE_SDK_INPUT_CLOSE_GRACE_MS = String(GRACE);
+  process.env.CLAUDE_SDK_SCHEDULED_WAKEUP_MARGIN_MS = '50';
+  scriptedMessages = wakeScenario('cronCreate', 50, { recurring: true }).scheduling;
+  const del = { type: 'assistant', session_id: SID, parent_tool_use_id: null,
+    message: { role: 'assistant', content: [{ type: 'tool_use', id: 'tu_del', name: 'CronDelete',
+      input: { id: '<cron-id>' } }] } };
+  const deleted = { type: 'user', session_id: SID, parent_tool_use_id: null,
+    message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'tu_del', content: 'Cancelled.' }] } };
+  preparePhases([[systemInit, del, deleted, resultMsg]]);
+  const { run } = await startRun();
+
+  assert.equal(await promptClosedWithin(600), false, 'no end is known for a recurring task');
+  phaseReleases[0]();
+  assert.equal(await promptClosedWithin(GRACE + 600), true, 'CronDelete ends the hold');
+  assert.equal(closeReason(), 'grace-expired');
+  releaseMessageStream();
+  await run;
+});
+
+test('B-1699 M2: a new message to a wake-up-only held session starts a fresh run, never session_busy', async () => {
+  process.env.CLAUDE_SDK_INPUT_CLOSE_GRACE_MS = '50';
+  scriptedMessages = wakeScenario('scheduleWakeup', 600_000).scheduling;
+  const first = await startRun({ sessionId: SID });
+  assert.equal(await promptClosedWithin(200), false, 'held for the wake-up');
+
+  const second = sdk.queryClaudeSDK('a new message', { cwd: process.cwd(), sessionId: SID }, makeWs());
+  assert.equal(await promptClosedWithin(1000), true, 'the hold yields to the new message');
+  assert.equal(closeReason(), 'superseded-by-user-turn');
+  releaseMessageStream();
+  await first.run;
+  resetQueryHarness();
+  scriptedMessages = [resultMsg];
+  await queryStarted;
+  assert.equal(sentPayloads.filter(p => p.code === 'session_busy').length, 0, 'never refused as busy');
+  assert.deepEqual(wakeClosedReasons(), [], 'yielding to the user is not announced as a stop');
+  releaseScriptedMessages();
+  releaseMessageStream();
+  await second;
+});
+
+test('B-1699 M6: the live wake-up notice and the history row share one id', async () => {
+  const { ClaudeSessionsProvider } = await import('./modules/providers/list/claude/claude-sessions.provider.js');
+  const row = (wakeCapture as unknown as { transcriptWakeRow: Record<string, unknown> }).transcriptWakeRow;
+  const [history] = new ClaudeSessionsProvider().normalizeMessage(row as never, SID);
+  const { commandUuid } = wakeScenario('scheduleWakeup', 0);
+  assert.equal(history.kind, 'notice');
+  assert.equal(history.id, commandUuid, 'history id = command_uuid = the live notice id (asserted above)');
+});
+
+test('B-1699 H1: while draining, a far wake-up never extends the run\'s own continuation wait', async () => {
+  process.env.CLAUDE_SDK_INPUT_CLOSE_GRACE_MS = '50';
+  process.env.CLAUDE_SDK_CONTINUATION_WAIT_MS = '600';
+  process.env.CLAUDE_SDK_SCHEDULED_WAKEUP_MARGIN_MS = '600000';
+  assert.equal(sdk.releaseScheduledWakeupHoldsForDrain(), 0, 'the drain starts with nothing held');
+  const { scheduling } = wakeScenario('scheduleWakeup', 600_000);
+  scriptedMessages = [...scheduling.slice(0, -1), taskStarted('t1'), scheduling.at(-1) as SdkMessage];
+  preparePhases([[taskNotification('t1')]]);
+  const t0 = Date.now();
+  const { run } = await startRun();
+  phaseReleases[0]();
+
+  assert.equal(await promptClosedWithin(2000), true, 'closed at the continuation wait, not the idle cap');
+  assert.equal(closeReason(), 'continuation-wait-expired');
+  assert.ok(Date.now() - t0 < 2000, `closed after ${Date.now() - t0}ms`);
+  releaseMessageStream();
+  await run;
 });

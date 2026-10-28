@@ -18,6 +18,14 @@
  *   npm run doctor -- --reopen-gate [--complete-source-rollback] [--yes] [--project <path>]
  *   sudo npm run doctor -- --seal-overlay
  *   npm run doctor -- --explain-divergence [--target <ref>]
+ *   npm run doctor -- --attach-release-branch [--yes] [--project <path>]
+ *   npm run doctor -- --revert-release-attach <receipt> --yes [--project <path>]
+ *
+ * `--attach-release-branch` / `--revert-release-attach` (ADR-216 §3.5) are
+ * owner-privileged writers like `--reopen-gate`: their writes live in
+ * `scripts/lib/doctor-release-attach.mjs`, under the same attach lock and
+ * exclusive source-ref lease as the in-app «إصلاح ربط فرع الإصدار». Without
+ * `--yes` the attach only inspects (no network, no write).
  *
  * `--seal-overlay` (ADR-156 §3.1 C1.1, T-1730 W10) is the owner-privileged
  * sealer: it enumerates each overlay mount directory, REFUSES every symlink and
@@ -522,6 +530,94 @@ async function reportReopenGate() {
 }
 
 // ---------------------------------------------------------------------------
+// 8b. Release-branch re-attach (ADR-216 §3.5) — owner-privileged
+// ---------------------------------------------------------------------------
+
+/** The run context (service account, operator token) printed before any attach write. */
+function printAttachRunContext(title) {
+  console.log(`\n${title}\n`);
+  checkPreflightRunContext();
+  const icon = { ok: `${GREEN}✓${RESET}`, warn: `${YELLOW}!${RESET}`, fail: `${RED}✗${RESET}` };
+  for (const r of results) {
+    console.log(`  ${icon[r.level]} ${r.name}: ${r.detail}`);
+    for (const line of r.fix) console.log(`      ${DIM}→ ${line}${RESET}`);
+  }
+  return results.filter((r) => r.level === 'fail').length;
+}
+
+function attachProjectRoot() {
+  const projectFlag = process.argv.indexOf('--project');
+  return projectFlag >= 0 && process.argv[projectFlag + 1] ? path.resolve(process.argv[projectFlag + 1]) : ROOT;
+}
+
+async function reportAttachReleaseBranch() {
+  const { runDoctorAttach } = await import('./lib/doctor-release-attach.mjs');
+  const appRoot = attachProjectRoot();
+  const confirmed = process.argv.includes('--yes');
+  const contextFails = printAttachRunContext('nassaj doctor — attach the release branch / ربط فرع الإصدار');
+  const outcome = await runDoctorAttach({ appRoot, confirmed: confirmed && contextFails === 0 });
+  const { inspection } = outcome;
+  console.log(`\n  ${DIM}العقدة / node: ${appRoot}${RESET}`);
+  console.log(`  الشكل / shape: ${inspection.shape}  head=${inspection.head ?? 'none'}  tag=${inspection.tag ?? 'none'}  shallow=${inspection.shallow}`);
+  if (inspection.shape === 'attached') {
+    console.log(`\n  ${GREEN}✓ الرأس مربوط بفرع الإصدار أصلاً / HEAD is already attached to the release branch${RESET}\n`);
+    process.exit(contextFails > 0 ? 1 : 0);
+  }
+  if (!inspection.eligible) {
+    console.log(`\n  ${RED}✗ غير مؤهَّل / not eligible: ${inspection.reason}${RESET}\n`);
+    process.exit(1);
+  }
+  if (contextFails > 0) {
+    console.log(`\n  ${RED}حكم غير موثوق / UNTRUSTED: سياق التشغيل أعلاه يُبطل التنفيذ، لم يُكتب شيء.${RESET}\n`);
+    process.exit(1);
+  }
+  if (!confirmed) {
+    console.log(`\n  ${YELLOW}لم يُكتب شيء ولم يُجلب شيء. هذه كتابة على شجرة الإنتاج تحتاج إذناً صريحاً: أعد التشغيل بـ--yes.${RESET}`);
+    console.log(`  ${YELLOW}Nothing was fetched or written. This writes refs in the production tree: re-run with --yes.${RESET}`);
+    console.log(`      ${DIM}$ npm run doctor -- --attach-release-branch --yes${RESET}\n`);
+    process.exit(0);
+  }
+  const { result } = outcome;
+  if (!result.ok) {
+    console.log(`\n  ${RED}✗ لم يكتمل / not applied: ${result.code} (step ${result.step})${RESET}\n`);
+    process.exit(1);
+  }
+  console.log(`\n  ${GREEN}✓ رُبط الرأس بفرع ${result.plan.branch} عند ${result.plan.tag} / HEAD attached to ${result.plan.branch} at ${result.plan.tag}${RESET}`);
+  console.log(`  ${DIM}الإيصال / receipt: ${result.receiptPath}${RESET}`);
+  if (result.receiptWriteFailed) console.log(`  ${YELLOW}! تعذّر تحديث الإيصال بعد التبديل (الربط متحقَّق) / the receipt could not be updated after the flip (attach verified)${RESET}`);
+  console.log(`  ${YELLOW}اطلب إعادة التشغيل الآمنة من لوحة الأوامر لتُفعَّل القدرة / request the governed safe restart from the command board.${RESET}\n`);
+  process.exit(0);
+}
+
+async function reportRevertReleaseAttach() {
+  const { runDoctorRevert } = await import('./lib/doctor-release-attach.mjs');
+  const flag = process.argv.indexOf('--revert-release-attach');
+  const receiptPath = process.argv[flag + 1] && !process.argv[flag + 1].startsWith('--') ? process.argv[flag + 1] : null;
+  const appRoot = attachProjectRoot();
+  const contextFails = printAttachRunContext('nassaj doctor — revert a release-branch attach / التراجع عن ربط فرع الإصدار');
+  if (!receiptPath) {
+    console.log(`\n  ${RED}✗ مرّر مسار الإيصال / pass the receipt path: --revert-release-attach <receipt> --yes${RESET}\n`);
+    process.exit(1);
+  }
+  if (contextFails > 0) {
+    console.log(`\n  ${RED}حكم غير موثوق / UNTRUSTED: لم يُكتب شيء.${RESET}\n`);
+    process.exit(1);
+  }
+  const outcome = await runDoctorRevert({ appRoot, receiptPath, confirmed: process.argv.includes('--yes') });
+  if (outcome.code === 'confirmation_required') {
+    console.log(`\n  ${YELLOW}لم يُكتب شيء: أعد التشغيل بـ--yes / nothing written: re-run with --yes.${RESET}\n`);
+    process.exit(0);
+  }
+  if (!outcome.applied) {
+    console.log(`\n  ${RED}✗ رُفض / refused: ${outcome.code}${RESET}\n`);
+    process.exit(1);
+  }
+  console.log(`\n  ${GREEN}✓ أُعيد الرأس منفصلاً كما كان / HEAD detached again; refs and config restored${RESET}\n`);
+  if (outcome.receiptWriteFailed) console.log(`  ${YELLOW}! تعذّر تسجيل التراجع في الإيصال / the revert could not be recorded in the receipt${RESET}\n`);
+  process.exit(0);
+}
+
+// ---------------------------------------------------------------------------
 // 9. Seal the node overlay (ADR-156 §3.1 C1.1, T-1730 W10) — owner-privileged
 // ---------------------------------------------------------------------------
 
@@ -827,6 +923,10 @@ if (process.argv.includes('--update-preflight')) {
   await reportUpdatePreflight();
 } else if (process.argv.includes('--reopen-gate')) {
   await reportReopenGate();
+} else if (process.argv.includes('--attach-release-branch')) {
+  await reportAttachReleaseBranch();
+} else if (process.argv.includes('--revert-release-attach')) {
+  await reportRevertReleaseAttach();
 } else if (process.argv.includes('--seal-overlay')) {
   await reportSealOverlay();
 } else if (process.argv.includes('--explain-divergence')) {

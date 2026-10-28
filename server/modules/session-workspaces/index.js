@@ -1,6 +1,7 @@
 export {
   bindSessionWorkspace,
   createSessionWorkspace,
+  findSessionOverlayWorkspace,
   probeSessionWorkspaceAlias,
   logicalProjectPathForWorkspace,
   readSessionSubmittedBlobs,

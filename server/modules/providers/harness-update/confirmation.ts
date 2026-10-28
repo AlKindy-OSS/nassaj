@@ -24,8 +24,8 @@ import { ensurePrivateDir, harnessDataHome, nassajDataDir } from './snapshot/pat
 export const ACK_TOKEN_TTL_MS = 5 * 60 * 1000;
 const KEY_BYTES = 32;
 
-export type AckKind = 'pinBreak' | 'dataLoss';
-export type AckAction = 'update' | 'restore-compatible' | 'rollback';
+export type AckKind = 'pinBreak' | 'dataLoss' | 'systemCopy' | 'npmRemoval';
+export type AckAction = 'update' | 'restore-compatible' | 'rollback' | 'install';
 
 /** pinBreak facts: the opt-in pin is armed, so every mode refuses a non-pinned binary. */
 export interface PinBreakFacts {
@@ -44,6 +44,18 @@ export interface DataLossFacts {
   asideExpiry: number;
 }
 
+/** systemCopy facts (ADR-215 owner decision 2): system claude copies that stay in place. */
+export interface SystemCopyFacts {
+  paths: string[];
+}
+
+/** npmRemoval facts (ADR-215 stage B): the npm-global claude `claude install` uninstalls. */
+export interface NpmRemovalFacts {
+  packageDir: string;
+}
+
+export type AckFacts = PinBreakFacts | DataLossFacts | SystemCopyFacts | NpmRemovalFacts;
+
 /** Everything the server knows about the requested action. */
 export interface AckContext {
   userId: number;
@@ -52,6 +64,8 @@ export interface AckContext {
   action: AckAction;
   pinBreak: PinBreakFacts | null;
   dataLoss: DataLossFacts | null;
+  systemCopy?: SystemCopyFacts | null;
+  npmRemoval?: NpmRemovalFacts | null;
 }
 
 /** One entry of the 409 CONFIRMATION_REQUIRED `required` list. */
@@ -61,7 +75,7 @@ export interface RequiredAck {
   expiresAt: number;
   textEn: string;
   textAr: string;
-  facts: PinBreakFacts | DataLossFacts;
+  facts: AckFacts;
 }
 
 /** A client-supplied acknowledgement. */
@@ -118,7 +132,7 @@ function canonical(value: unknown): string {
 }
 
 /** sha256 over the canonical JSON of `facts`. */
-export function factsDigest(facts: PinBreakFacts | DataLossFacts): string {
+export function factsDigest(facts: AckFacts): string {
   return createHash('sha256').update(canonical(facts)).digest('hex');
 }
 
@@ -144,10 +158,41 @@ export function dataLossTexts(harnessName: string, f: DataLossFacts): { en: stri
   };
 }
 
-function requiredFacts(ctx: AckContext): { kind: AckKind; facts: PinBreakFacts | DataLossFacts }[] {
-  const out: { kind: AckKind; facts: PinBreakFacts | DataLossFacts }[] = [];
+/** Server-built systemCopy texts (owner decision 2: warn, allow, never delete). */
+export function systemCopyTexts(f: SystemCopyFacts): { en: string; ar: string } {
+  const list = f.paths.join(', ');
+  return {
+    en: `A system copy of Claude Code exists (${list}). Nassaj will install and use its own copy in `
+      + '~/.local/bin/claude and will not delete the system copy. To keep the system copy instead, cancel and '
+      + 'set CLAUDE_CLI_PATH.',
+    ar: `توجد نسخة نظام من Claude Code (${list}). سيثبّت نسّاج نسخته في ~/.local/bin/claude ويستعملها، `
+      + 'ولن يحذف نسخة النظام. لتبقى على نسخة النظام ألغِ واضبط CLAUDE_CLI_PATH.',
+  };
+}
+
+/** Server-built npmRemoval texts: the vendor installer uninstalls the npm-global copy. */
+export function npmRemovalTexts(f: NpmRemovalFacts): { en: string; ar: string } {
+  return {
+    en: 'Claude Code\'s official installer runs "npm uninstall --global @anthropic-ai/claude-code". '
+      + `The npm copy at ${f.packageDir} will be removed.`,
+    ar: 'يشغّل مثبّت Claude Code الرسمي الأمر "npm uninstall --global @anthropic-ai/claude-code"، '
+      + `فستُحذف نسخة npm الموجودة في ${f.packageDir}.`,
+  };
+}
+
+function textsOf(ctx: AckContext, kind: AckKind, facts: AckFacts): { en: string; ar: string } {
+  if (kind === 'pinBreak') return pinBreakTexts(ctx.harnessName, facts as PinBreakFacts);
+  if (kind === 'dataLoss') return dataLossTexts(ctx.harnessName, facts as DataLossFacts);
+  if (kind === 'systemCopy') return systemCopyTexts(facts as SystemCopyFacts);
+  return npmRemovalTexts(facts as NpmRemovalFacts);
+}
+
+function requiredFacts(ctx: AckContext): { kind: AckKind; facts: AckFacts }[] {
+  const out: { kind: AckKind; facts: AckFacts }[] = [];
   if (ctx.pinBreak) out.push({ kind: 'pinBreak', facts: ctx.pinBreak });
   if (ctx.dataLoss) out.push({ kind: 'dataLoss', facts: ctx.dataLoss });
+  if (ctx.systemCopy) out.push({ kind: 'systemCopy', facts: ctx.systemCopy });
+  if (ctx.npmRemoval) out.push({ kind: 'npmRemoval', facts: ctx.npmRemoval });
   return out;
 }
 
@@ -177,15 +222,13 @@ export class AckTokenService {
       const expiresAt = this.now() + ACK_TOKEN_TTL_MS;
       this.nonces.set(nonce, expiresAt);
       const token = `${nonce}.${expiresAt}.${this.mac(ctx, kind, factsDigest(facts), nonce, expiresAt)}`;
-      const texts = kind === 'pinBreak'
-        ? pinBreakTexts(ctx.harnessName, facts as PinBreakFacts)
-        : dataLossTexts(ctx.harnessName, facts as DataLossFacts);
+      const texts = textsOf(ctx, kind, facts);
       return { kind, token, expiresAt, textEn: texts.en, textAr: texts.ar, facts };
     });
   }
 
   /** Returns the nonce when `token` is valid for (ctx, kind, facts) now, else null. */
-  private check(ctx: AckContext, kind: AckKind, facts: PinBreakFacts | DataLossFacts, token: unknown): string | null {
+  private check(ctx: AckContext, kind: AckKind, facts: AckFacts, token: unknown): string | null {
     if (typeof token !== 'string' || token.length > 512) return null;
     const [nonce, exp, mac, extra] = token.split('.');
     const expiresAt = Number(exp);

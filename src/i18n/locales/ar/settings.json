@@ -19,7 +19,28 @@
       "HARNESS_OVERRIDE_SET": "مسار مخصّص للأداة مضبوط؛ ثبّتها يدوياً.",
       "HARNESS_INSTALL_INVALID": "يوجد تثبيت غير صالح؛ أصلحه يدوياً.",
       "HARNESS_ACTION_RATE_LIMITED": "محاولات كثيرة؛ انتظر قليلاً ثم أعد المحاولة.",
-      "HARNESS_UPDATE_IN_PROGRESS": "توجد عملية أخرى جارية على هذه الأداة."
+      "HARNESS_UPDATE_IN_PROGRESS": "توجد عملية أخرى جارية على هذه الأداة.",
+      "insufficient_space": "المساحة الحرّة لا تكفي للتثبيت؛ وفّر مساحة ثم أعد المحاولة.",
+      "HARNESS_INSTALL_SLOT_BUSY": "يجري تثبيت أداة أخرى الآن؛ أعد المحاولة بعد انتهائه.",
+      "verifier_unavailable": "أداة التحقق من التوقيع (gpgv) غير مثبّتة على الخادم؛ ثبّتها أو ثبّت الأداة يدوياً."
+    },
+    "info": {
+      "codex": {
+        "label": "أداة Codex غير مثبّتة",
+        "note": "المثبّت الرسمي المستقل يضعها في ~/.local/bin/codex. لا تُكتشف نسخة مثبّتة بـ npm -g."
+      },
+      "opencode": {
+        "label": "أداة OpenCode غير مثبّتة",
+        "note": "المثبّت الرسمي يضعها في ~/.opencode/bin/opencode. لا تُكتشف نسخة مثبّتة بـ npm -g."
+      },
+      "antigravity": {
+        "label": "أداة Antigravity (agy) غير مثبّتة",
+        "note": "المثبّت الرسمي يضعها في ~/.local/bin/agy؛ ينزّلها من خادم بيان على Cloud Run ومن storage.googleapis.com، ويضيف سطر PATH إلى ~/.bashrc و~/.profile."
+      },
+      "claude": {
+        "label": "أداة Claude Code غير مثبّتة",
+        "note": "المثبّت الرسمي الأصلي يضعها في ~/.local/bin/claude ← ~/.local/share/claude/versions/<v>؛ ويتحقق نسّاج أولاً من البيان الموقَّع من المورّد."
+      }
     }
   },
   "harnessVersion": {
@@ -407,6 +428,40 @@
       "weeklySonnet": "Sonnet فقط",
       "weeklyOpus": "Opus فقط",
       "extraUsage": "رصيد الاستخدام الإضافي"
+    }
+  },
+  "apiSpend": {
+    "mark": "API",
+    "title": "إنفاق Anthropic API",
+    "period": "منذ {{since}} (UTC) حتى {{until}}",
+    "excludesPriorityTier": "لا يشمل فئة الأولوية (Priority Tier)",
+    "noData": "لم يُسجَّل استخدام API بعدُ هذا الشهر",
+    "noDataShort": "$—",
+    "authErrorLabel": "رُفض مفتاح Admin",
+    "authErrorTooltip": "رفضت Anthropic مفتاح Admin — استبدله من الإعدادات › المورّدون والاعتمادات.",
+    "unavailableLabel": "تعذّرت قراءة إنفاق API",
+    "unavailableTooltip": "تعذّرت قراءة تقرير التكلفة من Anthropic الآن، وستُعاد المحاولة تلقائياً.",
+    "settings": {
+      "title": "إنفاق Anthropic API",
+      "description": "اعرض إنفاق مؤسستك على Anthropic API منذ بداية الشهر في رأس المحادثة.",
+      "help": "يتطلّب مؤسسةً (Organization) في {{console}} ومفتاح Admin (يبدأ بـ {{prefix}}). تُقرأ المبالغ من Anthropic وحدها — لا إدخال يدوياً. يقرأ مفتاح Admin إنفاق مؤسستك كلّها لا إنفاقك وحدك، ولا يراه في نسّاج أحدٌ سواك.",
+      "keyLabel": "مفتاح Admin",
+      "placeholder": "sk-ant-admin…",
+      "placeholderStored": "مفتاحٌ محفوظ — أدخل مفتاحاً جديداً لاستبداله",
+      "configured": "مُعدّ",
+      "notConfigured": "غير مُعدّ",
+      "save": "حفظ",
+      "saveAria": "حفظ مفتاح Anthropic Admin",
+      "remove": "إزالة",
+      "removeAria": "إزالة مفتاح Anthropic Admin",
+      "saved": "حُفظ مفتاح Admin.",
+      "warning": "مفتاح Admin يتحكّم في مؤسستك على Anthropic كلّها (الأعضاء والمفاتيح ومساحات العمل). لا تحفظه إلا على خادمٍ تثق به.",
+      "errors": {
+        "INVALID_ADMIN_KEY": "هذا ليس مفتاح Admin صالحاً. استخدم مفتاحاً يبدأ بـ {{prefix}} من {{console}}.",
+        "LOAD_FAILED": "تعذّرت قراءة حالة المفتاح.",
+        "SAVE_FAILED": "تعذّر حفظ المفتاح.",
+        "DELETE_FAILED": "تعذّرت إزالة المفتاح."
+      }
     }
   },
   "providerCycle": {

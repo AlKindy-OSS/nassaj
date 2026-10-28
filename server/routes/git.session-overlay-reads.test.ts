@@ -138,3 +138,17 @@ test('overlay diff refuses a symlink that escapes the isolated worktree', async 
   assert.equal(typeof response.body.error, 'string');
   assert.doesNotMatch(JSON.stringify(response.body), /shared dirty value/);
 });
+
+test('B-1691 (qa F1): file-with-diff never reads .git or another session overlay', async () => {
+  const otherFile = path.join(otherOwner.cwd, 'other-secret.txt');
+  fs.writeFileSync(otherFile, 'other session secret\n');
+  const otherRelative = path.relative(repository, otherFile);
+  assert.equal(otherRelative.split(path.sep)[0], '.git', 'overlays live under .git');
+  const control = await get('/api/git/file-with-diff?project=project-1&file=shared.txt');
+  assert.equal(control.body.currentContent, 'shared dirty value\n', 'a normal file still opens');
+  for (const file of ['.git/config', '.GIT/config', otherRelative, otherFile]) {
+    const response = await get(`/api/git/file-with-diff?project=project-1&file=${encodeURIComponent(file)}`);
+    assert.equal(typeof response.body.error, 'string', file);
+    assert.doesNotMatch(JSON.stringify(response.body), /other session secret|repositoryformatversion/, file);
+  }
+});

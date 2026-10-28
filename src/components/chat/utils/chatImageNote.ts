@@ -1,3 +1,4 @@
+import { readSteerImageRefs } from '../../../../shared/session-steer.contract';
 import type { ChatImage } from '../types/types';
 
 /**
@@ -54,6 +55,19 @@ export function extractChatImagesFromPrompt(content: string): ChatImage[] {
   }
 
   return images;
+}
+
+/**
+ * B-1697: images of a steer, from the store refs the server sends on the
+ * steer-queued event, the live echo and the reloaded history row. Malformed
+ * refs are dropped; the URL is the same authenticated route a normal prompt's
+ * image is served from, so a steer image is never a separate access path.
+ */
+export function chatImagesFromRefs(refs: unknown): ChatImage[] {
+  return readSteerImageRefs(refs).map(({ bucket, name }) => ({
+    name,
+    data: `/api/chat-images/${bucket}/${name}`,
+  }));
 }
 
 /**

@@ -51,6 +51,7 @@ import {
   PROVIDER_UI_CAPABILITIES,
 } from '../constants/providerCapabilities';
 import { gateComputedProgress, gateTurnSubagents, useRunProgress } from '../hooks/useRunProgress';
+import { useSessionAgents } from '../hooks/useSessionAgents';
 import { SessionParticipantsBar } from '../../participants';
 import { useSessionSkills } from '../../participants/useSessionSkills';
 import { attachObservedSkills } from '../../participants/skillObservationHelpers';
@@ -1193,6 +1194,9 @@ function ChatInterface({
   // The verdict for those same rows. Same session key and same store, so the two
   // cannot describe different workflows.
   const workflowStripStatus = useWorkflowStripStatus(currentSessionId || selectedSession?.id || null);
+  // ADR-218: the server registry of this session's agents, so agents of earlier
+  // turns (background, resumed by SendMessage, or alive after a reload) show too.
+  const sessionAgents = useSessionAgents(currentSessionId || selectedSession?.id || null);
 
   // كلفة المحادثة للشارة العلوية + خريطة الأدوار للتذييلات (T-1676 / B-1021).
   // نستدعي الخطّاف هنا بدل جلب ثانٍ في ConversationCostChip لأن المصدر
@@ -1431,6 +1435,7 @@ function ChatInterface({
           visibleMessageCount={visibleMessageCount}
           visibleMessages={visibleMessages}
           internalMessages={teamChat?.messages}
+          onOpenPeerSession={onNavigateToSession}
           loadEarlierMessages={loadEarlierAndRelease}
           loadMoreMessages={loadOlderAndRelease}
           loadAllMessages={loadAllAndRelease}
@@ -1511,6 +1516,7 @@ function ChatInterface({
           runStartedAt={runStartedAt}
           runProgress={runProgress}
           workflowAgents={observedWorkflowAgents}
+          sessionAgents={sessionAgents.agents}
           workflowStatus={workflowStripStatus}
           viewerStarterName={viewerStarterName}
           steerable={canSteer}

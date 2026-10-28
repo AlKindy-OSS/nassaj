@@ -192,6 +192,21 @@ function settingsFiles(configDir, cwd, managedDir) {
 }
 
 /**
+ * T-2071 (qa M5): every settings file the CLI loads for a spawn with `env` in `cwd`,
+ * labelled like {@link settingsFiles}; shared so another reader resolves the same set.
+ * @param {NodeJS.ProcessEnv} env the child's env (HOME / CLAUDE_CONFIG_DIR)
+ * @param {string|null|undefined} cwd the child's working directory
+ * @param {string} [managedSettingsDir] test seam
+ * @returns {Array<{file:string, label:string}>}
+ */
+export function claudeSpawnSettingsFiles(env, cwd, managedSettingsDir) {
+  const home = env.HOME || os.homedir();
+  const configDir = env.CLAUDE_CONFIG_DIR || path.join(home, '.claude');
+  const managedDir = managedSettingsDir ?? MANAGED_SETTINGS_DIR[process.platform] ?? MANAGED_SETTINGS_DIR.linux;
+  return settingsFiles(configDir, path.resolve(cwd || process.cwd()), managedDir);
+}
+
+/**
  * Drop-in policy fragments (`managed-settings.d/*.json`). An unreadable
  * directory that exists refuses the spawn.
  * @param {string} managedDir

@@ -28,6 +28,7 @@ import {
   isSecretFileConfirmed,
   sendSecretFileConfirmationRequired,
 } from './utils/secret-file-access.js';
+import { rebaseRequestedPath } from './services/session-file-root.js';
 
 const INDEX_SOURCE = fs.readFileSync(
   path.join(path.dirname(fileURLToPath(import.meta.url)), 'index.js'),
@@ -67,10 +68,10 @@ function buildHandler(routeMarker, collaborators) {
 
 /** The real top-level `function validatePathInProject(...)` from index.js. */
 function buildValidatePathInProject() {
-  const marker = 'function validatePathInProject(projectRoot, targetPath) ';
+  const marker = 'function validatePathInProject(projectRoot, targetPath, { trustedOverlayRoot = false } = {}) ';
   const at = INDEX_SOURCE.indexOf(marker);
   assert.notStrictEqual(at, -1, 'validatePathInProject not found in index.js');
-  return evaluate(`function validatePathInProject(projectRoot, targetPath) ${sliceBalancedBlock(INDEX_SOURCE, at)}`,
+  return evaluate(`function validatePathInProject(projectRoot, targetPath, { trustedOverlayRoot = false } = {}) ${sliceBalancedBlock(INDEX_SOURCE, at + marker.length)}`,
     { path, isResolvedPathInsideRootReal });
 }
 
@@ -181,7 +182,14 @@ const auditSecretFileAccess = (_req, projectId, projectRoot, absolutePath, acces
   audits.push({ projectId, path: path.relative(projectRoot, absolutePath), access });
 };
 
-const secretCollaborators = { isSecretFileConfirmed, sendSecretFileConfirmationRequired, auditSecretFileAccess };
+// B-1689: no sessionId in these requests, so the file root is the project root.
+const projectRootOnly = (_req, _res, root) => ({
+  root, overlay: false, sessionId: null, overlayId: null,
+});
+const secretCollaborators = {
+  isSecretFileConfirmed, sendSecretFileConfirmationRequired, auditSecretFileAccess,
+  resolveFileRootOrRespond: projectRootOnly, rebaseRequestedPath,
+};
 
 function readHandler(root = project) {
   return buildHandler("app.get('/api/projects/:projectId/file'", {

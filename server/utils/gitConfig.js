@@ -1,4 +1,5 @@
 import { spawn } from 'child_process';
+import { hardenGitArgs } from '../../shared/git-safety.js';
 
 function spawnAsync(command, args) {
   return new Promise((resolve, reject) => {
@@ -20,8 +21,8 @@ function spawnAsync(command, args) {
 export async function getSystemGitConfig() {
   try {
     const [nameResult, emailResult] = await Promise.all([
-      spawnAsync('git', ['config', '--global', 'user.name']).catch(() => ({ stdout: '' })),
-      spawnAsync('git', ['config', '--global', 'user.email']).catch(() => ({ stdout: '' }))
+      spawnAsync('git', hardenGitArgs(['config', '--global', 'user.name'])).catch(() => ({ stdout: '' })),
+      spawnAsync('git', hardenGitArgs(['config', '--global', 'user.email'])).catch(() => ({ stdout: '' }))
     ]);
 
     return {

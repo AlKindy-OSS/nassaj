@@ -11,7 +11,7 @@ import { createInstance, type TFunction } from 'i18next';
 import { describe, expect, it } from 'vitest';
 
 import { getToolConfig } from './configs/toolConfigs';
-import { formatSubagentTitle } from './subagentTitle';
+import { formatSubagentTitle, subagentTypeLabel } from './subagentTitle';
 
 const LOCALES = join(dirname(fileURLToPath(import.meta.url)), '../../../i18n/locales');
 const readChat = (locale: string) => JSON.parse(readFileSync(join(LOCALES, locale, 'chat.json'), 'utf8'));
@@ -58,12 +58,24 @@ describe('tool card titles (B-1665)', () => {
     expect(formatSubagentTitle(t, 'qa-critic', null)).toBe('Subagent / qa-critic');
   });
 
+  it('T-2071: the built-in fork type gets a translated label; other types stay identifiers', async () => {
+    const ar = await translator('ar');
+    const en = await translator('en');
+    expect(subagentTypeLabel(en, 'fork')).toBe('Fork');
+    expect(subagentTypeLabel(ar, 'fork')).toBe('نسخة متفرّعة');
+    expect(subagentTypeLabel(ar, 'qa-critic')).toBe('qa-critic');
+    expect(subagentTypeLabel(ar, undefined)).toBe('');
+    expect(titleOf('Agent', 'input', { subagent_type: 'fork', description: 'فحص' }, ar))
+      .toBe('وكيل فرعي / نسخة متفرّعة: فحص');
+  });
+
   it('Agent shares the Task card instead of the generic Default', () => {
     expect(getToolConfig('Agent')).toBe(getToolConfig('Task'));
   });
 
   it('every new key exists in every locale that ships chat.json', () => {
     const keys = ['subagent.title', 'subagent.titleWithType', 'subagent.titleWithTask', 'subagent.backgroundLaunched',
+      'subagent.forkType',
       'tools.titles.parameters', 'tools.titles.details', 'tools.titles.plan', 'tools.titles.taskDetails',
       'tools.titles.subagentResult', 'tools.titles.updatingTodoList', 'tools.titles.taskList',
       'tools.titles.implementationPlan', 'tools.titles.foundFiles_other', 'agyMessage.to'];

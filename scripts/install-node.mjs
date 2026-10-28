@@ -23,6 +23,12 @@
  *      that entry boots nothing else (qa-critic C3).
  *   5. `dist/assets` and `dist-server` seeded so the first build on a fresh
  *      install does not fail (B-1060).
+ *   6. `release-checkout` (ADR-216 §3.6): the checkout must be attached to the
+ *      release branch. A detached clone that is eligible is repaired with the
+ *      same library and lease as the in-app repair; an ineligible one, another
+ *      branch, or (in release mode) an attached HEAD that is not an annotated
+ *      release commit on the remote branch stops the install. The installer
+ *      never finishes on a detached HEAD.
  *
  * Every byte of node state it writes lands under `config/` or `.artifacts/`,
  * both gitignored: a writer in the install root turns the *next* update into a
@@ -32,7 +38,7 @@
  * Usage:
  *   node scripts/install-node.mjs --node <name> \
  *        [--port 3004] [--database-path <file>] [--process-name nassaj-dev] \
- *        [--yes] [--write-ssh-config] [--release-layout --deploy-root <path>]
+ *        [--yes] [--write-ssh-config] [--unshallow] [--release-layout --deploy-root <path>]
  *
  * مثبّت العقدة الكامل لتثبيت git (ADR-156، WI-16): ريموت SSH متحقَّق منه ببيئة
  * السحب نفسها، والبصمات الثلاث المنشورة وقت التثبيت، ومصدر الإصدار بتأكيد
@@ -51,12 +57,20 @@ import path from 'node:path';
 import readline from 'node:readline/promises';
 import { fileURLToPath } from 'node:url';
 
+import { resolveDatabaseFilePath } from '../server/modules/database/database-path.js';
 import { normalizeGitHubRepositoryIdentity, RELEASE_SOURCE_LOCK_SCHEMA } from '../server/services/release-source-config.js';
-import { releaseGitEnvironment } from '../server/services/source-updater.js';
+import { advanceRemoteTrackingRef, defaultSourceUpdateControlRoot, releaseGitEnvironment } from '../server/services/source-updater.js';
+import { verifySignedReleasePort } from '../server/services/update-prestager.js';
 
 import { prepareClientPublicationAssets } from './lib/client-publication-archive.mjs';
 import { verifyAssetClosure } from './lib/client-publication-artifacts.mjs';
 import pm2InstallLayout from './lib/pm2-install-layout.cjs';
+import { cliRequiresVerifiedRelease, createCliQuiescenceReader } from './lib/doctor-release-attach.mjs';
+import { resolveNodeUpdateMode } from './lib/node-update-mode.mjs';
+import {
+    RELEASE_IDENTITY_CODES, acquireSourceAttachLock, attachFetchDeadlineMs, createAttachGit, ensureUpstreamConfig,
+    evaluateAttachQuiescence, inspectReleaseCheckout, proveHeadOnBranch, proveReleaseCommit, runReleaseAttachment,
+} from './lib/release-branch-attach.mjs';
 
 const { GIT_CHECKOUT_LAYOUT, RELEASE_LAYOUT, expectedPm2Entry, resolveInstallLayout } = pm2InstallLayout;
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -704,6 +718,108 @@ async function confirmDerivedSource({ identity, sshUrl, assumeYes, input = proce
     return true;
 }
 
+const CLEAN_INSTALL_REMEDY = 'Reinstall with the "Clean node (re)install" commands in docs/RELEASING.md '
+    + '(full clone of main, local main at the annotated release tag, tracking origin/main), then re-run this installer.';
+
+function releaseCheckoutInvalid(reason) {
+    return new NodeInstallError('release_checkout_invalid',
+        `The checkout is not attached to the release branch and cannot be repaired (${reason}).`, CLEAN_INSTALL_REMEDY);
+}
+
+function headNotRelease(reason) {
+    return new NodeInstallError('install_head_not_release',
+        `HEAD is not an annotated release commit on the remote release branch (${reason}).`, CLEAN_INSTALL_REMEDY);
+}
+
+/** The installer's lease: the gate's exclusive source-ref lease (creates the journal on a fresh node, t4). */
+async function installerLease(appRoot, options) {
+    const { createUpdateMaintenanceGate } = await import('../server/services/update-maintenance-gate.js');
+    return createUpdateMaintenanceGate({ projectPath: appRoot }).acquireExclusiveSourceRefLease(options);
+}
+
+/**
+ * An attached checkout (§3.6 step 2): in release mode HEAD must be an annotated
+ * release tag's commit on the remote branch; in local-main mode only its
+ * ancestry on the remote branch is required. Then the upstream config, and the
+ * tracking ref when absent, under the lease (proof first, outside it).
+ */
+async function verifyAttachedInstall(context, inspection) {
+    const { git, appRoot, remote, branch, configuredRemoteUrl, updateMode, deadlineMs } = context;
+    if (inspection.reason === 'dirty_worktree' || inspection.reason === 'git_status_failed') throw releaseCheckoutInvalid(inspection.reason);
+    let proof;
+    if (updateMode === 'release') {
+        if (inspection.reason) throw headNotRelease(inspection.reason);
+        proof = await proveReleaseCommit({ remote, branch, configuredRemoteUrl, git, deadlineMs,
+            verifySignedRelease: verifySignedReleasePort, requireVerified: context.requireVerified });
+        if (!proof.ok) throw RELEASE_IDENTITY_CODES.includes(proof.code) ? headNotRelease(proof.code) : releaseCheckoutInvalid(proof.code);
+    } else {
+        proof = await proveHeadOnBranch({ remote, branch, configuredRemoteUrl, git, deadlineMs });
+        if (!proof.ok) throw releaseCheckoutInvalid(proof.code);
+    }
+    let lease;
+    try { lease = await context.acquireLease({ kind: 'source-attach-install' }); } catch (error) {
+        throw releaseCheckoutInvalid(error?.message || 'update_maintenance_active');
+    }
+    try {
+        const quiet = evaluateAttachQuiescence(await context.readQuiescence());
+        if (quiet) throw releaseCheckoutInvalid(quiet);
+        const head = (await git(['rev-parse', '--verify', 'HEAD^{commit}'])).stdout.trim();
+        if (head !== proof.head) throw releaseCheckoutInvalid('source_changed');
+        const upstream = await ensureUpstreamConfig(git, { remote, branch });
+        const trackingAbsent = (await git(['rev-parse', '--verify', '--quiet', `refs/remotes/${remote}/${branch}`])).code !== 0;
+        const tracking = trackingAbsent
+            ? await advanceRemoteTrackingRef({ git, remote, branch, fetchedRef: proof.remoteBranchOid })
+            : 'present';
+        return { shape: 'attached', repaired: false, head, upstreamChanged: upstream, tracking };
+    } finally {
+        lease.release();
+    }
+}
+
+/**
+ * The `release-checkout` step (ADR-216 §3.6). Uses its own governed git (real
+ * repository, not the installer's injected `spawn`), the attach lock and the
+ * exclusive source-ref lease. Never finishes on a detached HEAD.
+ */
+export async function runReleaseCheckoutStep({
+    appRoot = ROOT, remote = 'origin', branch = 'main', configuredRemoteUrl, env = process.env, databasePath,
+    updateMode = 'release', unshallow = false, acquireLease = null, git = null,
+} = {}) {
+    const controlRoot = defaultSourceUpdateControlRoot(appRoot);
+    const context = {
+        appRoot, remote, branch, configuredRemoteUrl, updateMode, controlRoot,
+        git: git || createAttachGit({ appRoot, env }),
+        deadlineMs: attachFetchDeadlineMs(env),
+        requireVerified: cliRequiresVerifiedRelease(env, databasePath || resolveDatabaseFilePath(env)),
+        acquireLease: acquireLease || ((options) => installerLease(appRoot, options)),
+        readQuiescence: createCliQuiescenceReader({ controlRoot, databasePath: databasePath || resolveDatabaseFilePath(env) }),
+    };
+    const inspection = await inspectReleaseCheckout(context);
+    let outcome;
+    if (inspection.shape === 'attached') {
+        let lock;
+        try { lock = acquireSourceAttachLock(controlRoot); } catch (error) { throw releaseCheckoutInvalid(error.code); }
+        try { outcome = await verifyAttachedInstall(context, inspection); } finally { lock.release(); }
+    } else if (inspection.shape === 'detached' && inspection.eligible) {
+        const result = await runReleaseAttachment({ ...context, verifySignedRelease: verifySignedReleasePort });
+        if (!result.ok) throw releaseCheckoutInvalid(result.code);
+        outcome = { shape: 'detached', repaired: true, head: result.plan.head, receiptPath: result.receiptPath, changed: result.changed };
+    } else {
+        throw releaseCheckoutInvalid(inspection.reason || inspection.shape);
+    }
+    if (unshallow && inspection.shallow) {
+        const deepened = await context.git(['fetch', '--unshallow', '--no-tags', '--refmap=', '--no-write-fetch-head', remote,
+            `refs/heads/${branch}`],
+            { timeoutMs: context.deadlineMs });
+        if (deepened.code !== 0) {
+            throw new NodeInstallError('unshallow_failed', 'The optional --unshallow fetch failed; the checkout is attached and usable.',
+                'Re-run without --unshallow, or retry when the network is stable.');
+        }
+        outcome.unshallowed = true;
+    }
+    return outcome;
+}
+
 /** Run every step in order, stopping at the first one with a single named action. */
 export async function installNode({
     appRoot = ROOT,
@@ -723,6 +839,8 @@ export async function installNode({
     now = () => new Date().toISOString(),
     confirm = confirmDerivedSource,
     output = process.stdout,
+    unshallow = false,
+    releaseCheckout = runReleaseCheckoutStep,
 } = {}) {
     const steps = [];
     const record = (name, detail) => { steps.push({ step: name, ...detail }); return detail; };
@@ -772,6 +890,12 @@ export async function installNode({
 
     record('remote', setRemoteSsh({ appRoot, remote, sshUrl: source.sshUrl, spawn }));
     record('release-fetch', verifyReleaseFetch({ appRoot, sshUrl: source.sshUrl, spawn, env, knownHostsPath }));
+    // ADR-216 §3.6: before any node state is written, the checkout must be on the
+    // release branch (a detached clone is repaired; anything else stops here).
+    record('release-checkout', await releaseCheckout({
+        appRoot, remote, branch: env.NASSAJ_UPDATE_BRANCH || 'main', configuredRemoteUrl: source.sshUrl, env,
+        databasePath, updateMode: resolveNodeUpdateMode(appRoot, env), unshallow,
+    }));
 
     const confirmedBy = `${env.SUDO_USER || env.USER || env.LOGNAME || 'unknown'}@${os.hostname()}`;
     const nodeEnv = record('node-env', writeNodeEnv({
@@ -932,6 +1056,7 @@ function parseArguments(argv) {
         else if (flag === '--remote') options.remote = take();
         else if (flag === '--yes') options.assumeYes = true;
         else if (flag === '--write-ssh-config') options.writeSshConfigAllowed = true;
+        else if (flag === '--unshallow') options.unshallow = true;
         else if (flag === '--release-layout') options.layout = RELEASE_LAYOUT;
         else throw new Error(`Unknown argument: ${flag}`);
     }

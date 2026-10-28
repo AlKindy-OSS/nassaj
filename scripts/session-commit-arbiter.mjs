@@ -4,6 +4,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { hardenGitArgs } from '../shared/git-safety.js';
 import { fileURLToPath } from 'node:url';
 
 import { previewDomainsForPaths } from './preview-oid-dispatch.mjs';
@@ -14,7 +15,7 @@ const sleepBuffer = new Int32Array(new SharedArrayBuffer(4));
 const DEFAULT_TTL_MS = 5 * 60_000;
 
 function runGit(repo, args, options = {}) {
-  const result = spawnSync('git', ['-C', repo, ...args], {
+  const result = spawnSync('git', hardenGitArgs(['-C', repo, ...args]), {
     encoding: options.encoding === null ? null : 'utf8',
     env: { ...process.env, ...options.env },
     input: options.input,
@@ -615,7 +616,7 @@ function createReplayRefs(repo, journal) {
   ].join('\n');
   const result = spawnSync('flock', [
     '-x', previewEventMutationLock(repo),
-    'git', '-C', repo, 'update-ref', '--stdin',
+    'git', ...hardenGitArgs(['-C', repo, 'update-ref', '--stdin']),
   ], { encoding: 'utf8', input: commands });
   if (result.status !== 0) {
     throw new Error(`atomic preview replay ref creation failed: ${String(result.stderr || '').trim()}`);
@@ -742,7 +743,7 @@ function advanceHeadWithPreviewEvent(repo, targetRef, oldHead, newCommit, eventR
   if (!eventRefs.length) return runGit(repo, ['update-ref', '--stdin'], { input: commands, allowFailure: true });
   const result = spawnSync('flock', [
     '-x', previewEventMutationLock(repo),
-    'git', '-C', repo, 'update-ref', '--stdin',
+    'git', ...hardenGitArgs(['-C', repo, 'update-ref', '--stdin']),
   ], { encoding: 'utf8', input: commands });
   return result;
 }

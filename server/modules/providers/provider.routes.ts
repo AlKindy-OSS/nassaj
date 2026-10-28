@@ -12,6 +12,11 @@ import {
   resolveQuotaVendor,
 } from '@/modules/providers/services/usage/provider-quota.service.js';
 import { claudeUsageService } from '@/modules/providers/services/claude-usage.service.js';
+import {
+  anthropicApiSpendService,
+  ApiSpendError,
+  InvalidAdminKeyError,
+} from '@/modules/providers/services/usage/anthropic-api-spend.service.js';
 import { providerAuthService } from '@/modules/providers/services/provider-auth.service.js';
 import { providerMcpService } from '@/modules/providers/services/mcp.service.js';
 import { providerModelsService } from '@/modules/providers/services/provider-models.service.js';
@@ -294,17 +299,24 @@ const readApiKeyFromBody = (payload: unknown): unknown => {
 const readAuthenticatedUserRole = (req: Request): string | null =>
   (req as Request & { user?: { role?: string } }).user?.role ?? null;
 
+/**
+ * Runs one external provider read under a runtime permission lease. `labels`
+ * names a distinct reader that shares a purpose (ADR-214: the API spend read
+ * uses the existing 'balance' purpose, which the DB CHECK allows, and is told
+ * apart by engine/entrypoint, which the DB only length-checks).
+ */
 const runAuthorizedProviderSideQuery = <T>(
   req: Request,
   purpose: 'quota' | 'balance',
   provider: string,
   effect: () => Promise<T>,
+  labels?: { engine: string; entrypoint: string },
 ): Promise<T> => {
   const execution = authorizeRuntimeUserProviderEffect({
     authenticatedPrincipal: (req as Request & { user?: unknown }).user,
     provider,
-    engine: `${provider}_${purpose}`,
-    entrypoint: `provider.routes.${purpose}`,
+    engine: labels?.engine ?? `${provider}_${purpose}`,
+    entrypoint: labels?.entrypoint ?? `provider.routes.${purpose}`,
     purpose,
     effectFootprint: 'external',
     projectId: `system:provider-${purpose}`,
@@ -1003,6 +1015,120 @@ router.get(
         code: 'CLAUDE_USAGE_UNAVAILABLE',
       });
     }
+  }),
+);
+
+// ----------------- Anthropic API month-to-date spend (ADR-214 / T-2066) -----------------
+// Declared before the generic `/:provider/*` routes. Strictly the CALLER's own
+// spend: the Admin key lives in their own secrets tree (member scope only) and
+// the user id comes from the token, never from the request. No response, log
+// line, or audit row carries the key.
+const SPEND_LABELS = Object.freeze({ engine: 'claude_spend', entrypoint: 'provider.routes.spend' });
+
+const adminKeyWriteLimiter = createRateLimiter({
+  windowMs: 60_000,
+  max: 10,
+  message: 'Too many Admin key changes; try again in a minute.',
+  code: 'ADMIN_KEY_RATE_LIMITED',
+  key: (req: Request) => `admin-key:${String(readAuthenticatedUserId(req) ?? req.ip ?? 'unknown')}`,
+});
+
+/** The caller's id, or a 401 already sent. */
+const requireSpendCaller = (req: Request, res: Response): string | number | null => {
+  const userId = readAuthenticatedUserId(req);
+  if (userId === null || userId === '') {
+    res.status(401).json({ error: 'Authentication required.', code: 'AUTH_REQUIRED' });
+    return null;
+  }
+  return userId;
+};
+
+const recordAdminKeyChange = (
+  req: Request,
+  action: 'anthropic_admin_key_set' | 'anthropic_admin_key_removed',
+  metadata: Record<string, unknown>,
+): void => {
+  auditLogDb.record(action, {
+    userId: coerceUserId(readAuthenticatedUserId(req)) ?? undefined,
+    metadata,
+    ipAddress: req.ip,
+    userAgent: req.get('user-agent') ?? undefined,
+  });
+};
+
+router.get(
+  '/claude/api-spend',
+  asyncHandler(async (req: Request, res: Response) => {
+    const userId = requireSpendCaller(req, res);
+    if (userId === null) return;
+    try {
+      const spend = await anthropicApiSpendService.getSpend(userId, {
+        runEffect: effect => runAuthorizedProviderSideQuery(req, 'balance', 'claude', effect, SPEND_LABELS),
+      });
+      if (!spend) {
+        res.status(404).json({ error: 'No Anthropic Admin key is configured.', code: 'NO_SPEND_SOURCE' });
+        return;
+      }
+      res.json(spend);
+    } catch (error) {
+      if (error instanceof ApiSpendError) {
+        res.status(502).json({ error: error.message, code: error.code });
+        return;
+      }
+      if (error instanceof AppError) {
+        res.status(error.statusCode).json({ error: error.message, code: error.code });
+        return;
+      }
+      const refusal = (error as { code?: unknown } | null)?.code;
+      console.warn('[api-spend] read refused', { code: typeof refusal === 'string' ? refusal : 'unknown' });
+      res.status(502).json({ error: 'Anthropic API spend is currently unavailable.', code: 'API_SPEND_UNAVAILABLE' });
+    }
+  }),
+);
+
+router.get(
+  '/claude/api-spend/key',
+  asyncHandler(async (req: Request, res: Response) => {
+    const userId = requireSpendCaller(req, res);
+    if (userId === null) return;
+    try {
+      res.json({ configured: anthropicApiSpendService.hasKey(userId) });
+    } catch (error) {
+      if (!(error instanceof AppError)) throw error;
+      res.status(error.statusCode).json({ error: error.message, code: error.code });
+    }
+  }),
+);
+
+router.put(
+  '/claude/api-spend/key',
+  adminKeyWriteLimiter,
+  asyncHandler(async (req: Request, res: Response) => {
+    const userId = requireSpendCaller(req, res);
+    if (userId === null) return;
+    try {
+      anthropicApiSpendService.setKey(userId, (req.body as Record<string, unknown> | undefined)?.key);
+    } catch (error) {
+      if (error instanceof InvalidAdminKeyError) {
+        res.status(400).json({ error: error.message, code: error.code });
+        return;
+      }
+      throw error;
+    }
+    recordAdminKeyChange(req, 'anthropic_admin_key_set', { provider: 'anthropic' });
+    res.json({ configured: true });
+  }),
+);
+
+router.delete(
+  '/claude/api-spend/key',
+  adminKeyWriteLimiter,
+  asyncHandler(async (req: Request, res: Response) => {
+    const userId = requireSpendCaller(req, res);
+    if (userId === null) return;
+    const removed = anthropicApiSpendService.deleteKey(userId);
+    recordAdminKeyChange(req, 'anthropic_admin_key_removed', { provider: 'anthropic', removed });
+    res.json({ configured: false });
   }),
 );
 

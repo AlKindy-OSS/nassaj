@@ -270,6 +270,39 @@ export function countLiveMirrors(sessionId: string): number {
   return live;
 }
 
+/**
+ * ADR-218: sends a session-level frame (the `session-agents` snapshot) to EVERY
+ * live mirror of the session, the run owner's socket included, whether or not a
+ * run or writer exists (a notification after the coordinator's turn, a workflow
+ * update). Mirrors are registered only behind the B-137 visibility gate, so this
+ * reaches no other viewer. Bypasses the replay ring: a snapshot supersedes the
+ * previous one, so there is nothing to replay.
+ * @returns how many sockets the frame was handed to.
+ */
+export function broadcastToSessionMirrors(sessionId: string, serialized: string): number {
+  const mirrors = sessionMirrors.get(sessionId);
+  if (!mirrors) {
+    return 0;
+  }
+  let delivered = 0;
+  for (const mirror of mirrors) {
+    if (mirror.readyState !== WS_OPEN_STATE) {
+      mirrors.delete(mirror);
+      continue;
+    }
+    try {
+      mirror.send(serialized);
+      delivered += 1;
+    } catch {
+      mirrors.delete(mirror);
+    }
+  }
+  if (mirrors.size === 0) {
+    sessionMirrors.delete(sessionId);
+  }
+  return delivered;
+}
+
 /** A supervised run as seen by user-level revocation (B-1327). */
 export type UserRevocableRun = {
   sessionId: string;

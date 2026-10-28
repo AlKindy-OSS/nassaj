@@ -328,6 +328,18 @@ export const authenticatedFetch = async (url, options = {}) => {
 };
 
 // API endpoints
+/**
+ * Raw-bytes URL for a project file; with `sessionId` (B-1689) the server serves
+ * the chat session's overlay copy when the session has one.
+ * @param {string} projectId
+ * @param {string} filePath
+ * @param {string|null} [sessionId]
+ * @returns {string}
+ */
+export const fileContentUrl = (projectId, filePath, sessionId = null) =>
+  `/api/projects/${encodeURIComponent(projectId)}/files/content?path=${encodeURIComponent(filePath)}`
+  + (sessionId ? `&sessionId=${encodeURIComponent(sessionId)}` : '');
+
 export const api = {
   // Auth endpoints (no token required)
   auth: {
@@ -792,23 +804,44 @@ export const api = {
     }),
   // B-1593: `confirmSecret` is the explicit per-request confirmation a project
   // secrets file (.env*, SQLite) needs; without it the server answers 428.
-  readFile: (projectId, filePath, { confirmSecret = false } = {}) =>
+  // B-1689: `sessionId` reads the chat session's overlay copy when it has one.
+  /**
+   * @param {string} projectId
+   * @param {string} filePath
+   * @param {{ confirmSecret?: boolean, sessionId?: string|null }} [options]
+   * @returns {Promise<Response>}
+   */
+  readFile: (projectId, filePath, { confirmSecret = false, sessionId = null } = {}) =>
     authenticatedFetch(`/api/projects/${projectId}/file?filePath=${encodeURIComponent(filePath)}`
-      + (confirmSecret ? '&confirmSecret=1' : '')),
+      + (confirmSecret ? '&confirmSecret=1' : '')
+      + (sessionId ? `&sessionId=${encodeURIComponent(sessionId)}` : '')),
   /**
    * Raw file bytes. `signal` lets a caller abort a streamed read early.
    * @param {string} projectId
    * @param {string} filePath
-   * @param {{ confirmSecret?: boolean, signal?: AbortSignal }} [options]
+   * @param {{ confirmSecret?: boolean, signal?: AbortSignal, sessionId?: string|null }} [options]
    * @returns {Promise<Response>}
    */
-  readFileBlob: (projectId, filePath, { confirmSecret = false, signal } = {}) =>
-    authenticatedFetch(`/api/projects/${encodeURIComponent(projectId)}/files/content?path=${encodeURIComponent(filePath)}`
+  readFileBlob: (projectId, filePath, { confirmSecret = false, signal, sessionId = null } = {}) =>
+    authenticatedFetch(fileContentUrl(projectId, filePath, sessionId)
       + (confirmSecret ? '&confirmSecret=1' : ''), signal ? { signal } : {}),
-  saveFile: (projectId, filePath, content, { confirmSecret = false } = {}) =>
+  /**
+   * Save text content; `sessionId` (B-1689) saves into the same overlay copy it was read from.
+   * @param {string} projectId
+   * @param {string} filePath
+   * @param {string} content
+   * @param {{ confirmSecret?: boolean, sessionId?: string|null }} [options]
+   * @returns {Promise<Response>}
+   */
+  saveFile: (projectId, filePath, content, { confirmSecret = false, sessionId = null } = {}) =>
     authenticatedFetch(`/api/projects/${projectId}/file`, {
       method: 'PUT',
-      body: JSON.stringify(confirmSecret ? { filePath, content, confirmSecret: true } : { filePath, content }),
+      body: JSON.stringify({
+        filePath,
+        content,
+        ...(confirmSecret ? { confirmSecret: true } : {}),
+        ...(sessionId ? { sessionId } : {}),
+      }),
     }),
   /**
    * Project file tree. `partial: true` (B-1669) asks for the lean, always-200
@@ -895,6 +928,18 @@ export const api = {
     // Claude account usage (plan limits, session/weekly windows, extra usage).
     // Backend caches for 180s; the client should not poll more frequently.
     claudeUsage: () => authenticatedFetch('/api/providers/claude/usage'),
+    // ADR-214: the CURRENT user's Anthropic API month-to-date spend, read with
+    // their own Admin key. 404 NO_SPEND_SOURCE = no key configured (hide).
+    anthropicApiSpend: () => authenticatedFetch('/api/providers/claude/api-spend'),
+    // Admin key presence only ({ configured }) — the key itself never comes back.
+    anthropicApiSpendKey: () => authenticatedFetch('/api/providers/claude/api-spend/key'),
+    saveAnthropicApiSpendKey: (key) =>
+      authenticatedFetch('/api/providers/claude/api-spend/key', {
+        method: 'PUT',
+        body: JSON.stringify({ key }),
+      }),
+    deleteAnthropicApiSpendKey: () =>
+      authenticatedFetch('/api/providers/claude/api-spend/key', { method: 'DELETE' }),
     // Quota windows as the PROVIDER itself reports them (codex: ChatGPT backend;
     // glm: z.ai monitor). 404 = no official source for that provider — an
     // explicit answer the caller must distinguish from a failure. The token/key

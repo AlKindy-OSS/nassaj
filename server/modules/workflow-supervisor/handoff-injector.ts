@@ -55,9 +55,11 @@ import {
   ledgerHasTask,
   writeLedgerEntries,
   finalizeDelivery,
+  readSessionPermissionMode,
   type DeliverOutcome,
 } from './handoff.js';
 import { acquireInjectorTurnLock } from './chat-turn-lock.js';
+import type { ClaudePermissionMode } from './permission-mode.js';
 import { wouldExceedBudget, recordSpend, tokensFromResult } from './handoff-budget.js';
 
 /** Total injected-prompt byte ceiling for a coalesced batch (each block is
@@ -81,6 +83,8 @@ export type ResumeTurnParams = {
   prompt: string;
   systemFraming: string;
   model: string | null;
+  /** T-2071: the conversation's own permission mode, always passed to the resumed turn. */
+  permissionMode: ClaudePermissionMode;
   disallowedTools: readonly string[];
   /** The run-profile env (resolveClaudeRunProfileOrThrow), never raw process.env. */
   env: NodeJS.ProcessEnv;
@@ -407,6 +411,7 @@ export async function injectForConversation(
       prompt,
       systemFraming: SYSTEM_FRAMING,
       model: injectorModel(env),
+      permissionMode: readSessionPermissionMode(input.jsonlPath),
       disallowedTools: LEAF_ONLY_DISALLOWED_TOOLS,
       env: spawnEnv,
       engineHosts,

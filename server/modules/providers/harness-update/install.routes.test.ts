@@ -105,7 +105,7 @@ test('a member gets 403 and nothing starts', async () => {
 
 test('unknown harness 404 UNKNOWN_HARNESS; a non-installable one 404 HARNESS_NOT_INSTALLABLE', async () => {
   assert.deepEqual([(await post('/api/providers/nope/install', OWNER)).json.code], ['UNKNOWN_HARNESS']);
-  const res = await post('/api/providers/claude/install', OWNER);
+  const res = await post('/api/providers/cursor/install', OWNER);
   assert.equal(res.status, 404);
   assert.equal(res.json.code, 'HARNESS_NOT_INSTALLABLE');
 });

@@ -13,6 +13,9 @@ import type Database from 'better-sqlite3';
 import { getConnection } from '@/modules/database/connection.js';
 
 export type AuditAction =
+  // ADR-219 S1 (T-2072): cross-session relay decisions (no message text).
+  | 'peer_relay_intake_failed'
+  | 'peer_relay_unregistered_agent_send'
   | 'local_models_settings_updated'
   | 'local_model_server_changed'
   | 'document_share_created'
@@ -67,6 +70,12 @@ export type AuditAction =
   // with no further detail is what made B-1056 take manual forensics; the
   // distinct code lives here. Metadata carries ids only.
   | 'server_action_queue_refused'
+  // ADR-216: the owner's release-branch re-attach. Metadata: operation id, tag,
+  // branch, commit, shallow, receipt basename, steps or the refusal code.
+  | 'source_attach_requested'
+  | 'source_attach_succeeded'
+  | 'source_attach_refused'
+  | 'source_attach_failed'
   | 'command_board_config_updated'
   | 'command_board_custom_updated'
   | 'command_board_raw_exec'
@@ -199,6 +208,10 @@ export type AuditAction =
   | 'voice_transcription_key_set'
   | 'voice_transcription_key_removed'
   | 'voice_transcription_used'
+  // ADR-214/T-2066: a member stored or removed their own Anthropic Admin key
+  // (month-to-date spend). Metadata { provider[, removed] } — never the key.
+  | 'anthropic_admin_key_set'
+  | 'anthropic_admin_key_removed'
   // OIDC Relying Party flow (P-IDP-3, ADR-046).
   | 'oidc_login'
   | 'oidc_backchannel_logout'

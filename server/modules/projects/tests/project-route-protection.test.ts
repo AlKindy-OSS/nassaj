@@ -470,3 +470,31 @@ test('B-1423: create-project never discloses a registered path to a non-member',
     fs.rmSync(sandbox, { recursive: true, force: true });
   }
 });
+
+test('B-1691 (qa F8): create-project refuses a path inside .git, lexically or through a symlink', async () => {
+  const savedRoot = process.env.WORKSPACES_ROOT;
+  const sandbox = fs.realpathSync(fs.mkdtempSync('/var/tmp/b1691-create-'));
+  process.env.WORKSPACES_ROOT = sandbox;
+  const repo = path.join(sandbox, 'P');
+  fs.mkdirSync(path.join(repo, '.git', 'hooks'), { recursive: true });
+  fs.symlinkSync(path.join(repo, '.git'), path.join(sandbox, 'alias'));
+  const overlay = path.join(repo, '.git', 'nassaj-session-overlays', 'instances', 'X', 'workspace');
+  currentUser = creator;
+  try {
+    for (const target of [path.join(repo, '.git'), path.join(repo, '.GIT'), overlay, path.join(sandbox, 'alias')]) {
+      const response = await fetch(`${baseUrl}/api/projects/create-project`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: target }),
+        signal: AbortSignal.timeout(15_000),
+      });
+      assert.equal(response.status, 400, target);
+      assert.equal(projectsDb.getProjectPath(target), null, `${target} is not registered`);
+    }
+    assert.equal(fs.existsSync(overlay), false, 'nothing created under .git');
+  } finally {
+    if (savedRoot === undefined) delete process.env.WORKSPACES_ROOT;
+    else process.env.WORKSPACES_ROOT = savedRoot;
+    fs.rmSync(sandbox, { recursive: true, force: true });
+  }
+});

@@ -19,7 +19,28 @@
       "HARNESS_OVERRIDE_SET": "A custom CLI path is set; install it manually.",
       "HARNESS_INSTALL_INVALID": "A broken install exists; fix it manually.",
       "HARNESS_ACTION_RATE_LIMITED": "Too many attempts; wait a moment and retry.",
-      "HARNESS_UPDATE_IN_PROGRESS": "Another operation is running on this CLI."
+      "HARNESS_UPDATE_IN_PROGRESS": "Another operation is running on this CLI.",
+      "insufficient_space": "Not enough free space to install; free some space and retry.",
+      "HARNESS_INSTALL_SLOT_BUSY": "Another CLI is being installed; retry when it finishes.",
+      "verifier_unavailable": "The signature verifier (gpgv) is not installed on the server; install it, or install the CLI manually."
+    },
+    "info": {
+      "codex": {
+        "label": "Codex CLI is not installed",
+        "note": "Official standalone installer → ~/.local/bin/codex. An npm -g copy is not detected."
+      },
+      "opencode": {
+        "label": "OpenCode CLI is not installed",
+        "note": "Official installer → ~/.opencode/bin/opencode. An npm -g copy is not detected."
+      },
+      "antigravity": {
+        "label": "Antigravity CLI (agy) is not installed",
+        "note": "Official installer → ~/.local/bin/agy; it downloads from a Cloud Run manifest host and storage.googleapis.com, and adds a PATH line to ~/.bashrc and ~/.profile."
+      },
+      "claude": {
+        "label": "Claude Code CLI is not installed",
+        "note": "Official native installer → ~/.local/bin/claude → ~/.local/share/claude/versions/<v>; Nassaj verifies the vendor-signed manifest first."
+      }
     }
   },
   "harnessVersion": {
@@ -382,6 +403,40 @@
       "weeklySonnet": "Sonnet only",
       "weeklyOpus": "Opus only",
       "extraUsage": "Extra usage credits"
+    }
+  },
+  "apiSpend": {
+    "mark": "API",
+    "title": "Anthropic API spend",
+    "period": "Since {{since}} (UTC) until {{until}}",
+    "excludesPriorityTier": "Excludes Priority Tier",
+    "noData": "No API usage recorded yet this month",
+    "noDataShort": "$—",
+    "authErrorLabel": "Admin key rejected",
+    "authErrorTooltip": "Anthropic rejected the Admin key — replace it in Settings › Vendors & credentials.",
+    "unavailableLabel": "Couldn't read API spend",
+    "unavailableTooltip": "Anthropic's cost report couldn't be read right now. It will retry automatically.",
+    "settings": {
+      "title": "Anthropic API spend",
+      "description": "Show your organization's month-to-date Anthropic API spend in the chat header.",
+      "help": "Requires an Organization on {{console}} and an Admin key (starts with {{prefix}}). Amounts are read from Anthropic only — nothing is entered by hand. The Admin key reads your whole organization's spend, not just yours, and only you see it in Nassaj.",
+      "keyLabel": "Admin key",
+      "placeholder": "sk-ant-admin…",
+      "placeholderStored": "A key is saved — enter a new one to replace it",
+      "configured": "Configured",
+      "notConfigured": "Not configured",
+      "save": "Save",
+      "saveAria": "Save Anthropic Admin key",
+      "remove": "Remove",
+      "removeAria": "Remove Anthropic Admin key",
+      "saved": "Admin key saved.",
+      "warning": "An Admin key controls your whole Anthropic organization (members, keys, workspaces). Store it only on a server you trust.",
+      "errors": {
+        "INVALID_ADMIN_KEY": "This is not a valid Admin key. Use a key that starts with {{prefix}} from {{console}}.",
+        "LOAD_FAILED": "Couldn't read the key status.",
+        "SAVE_FAILED": "Couldn't save the key.",
+        "DELETE_FAILED": "Couldn't remove the key."
+      }
     }
   },
   "providerCycle": {

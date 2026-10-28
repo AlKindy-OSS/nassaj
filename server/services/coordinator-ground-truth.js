@@ -24,6 +24,7 @@ import { execFile } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
+import { hardenGitArgs } from '../../shared/git-safety.js';
 import { getExternalBinding, readProjectBoardState } from './project-board-reader.js';
 
 /**
@@ -108,7 +109,7 @@ export function readRecentCommits(repoRoot) {
     try {
       execFile(
         'git',
-        ['-C', repoRoot, 'log', '--oneline', '-n', String(MAX_COMMITS)],
+        hardenGitArgs(['-C', repoRoot, 'log', '--oneline', '-n', String(MAX_COMMITS)]),
         { timeout: GIT_TIMEOUT_MS, windowsHide: true, maxBuffer: 1024 * 1024 },
         (err, stdout) => {
           if (err || typeof stdout !== 'string') {

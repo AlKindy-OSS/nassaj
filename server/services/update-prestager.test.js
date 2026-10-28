@@ -9,7 +9,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
 
-import { buildMutexHolder } from './source-update-build-mutex.js';
+import { buildMutexHolder, tryAcquireBuildMutex } from './source-update-build-mutex.js';
 import { createSourceUpdater } from './source-updater.js';
 import { buildPrestageIdentityKey } from './update-prestage-identity.js';
 import { PRESTAGE_BUILD_MUTEX_KIND, createPrestageSlot, newPrestageTransactionId } from './update-prestage-slot.js';
@@ -82,7 +82,8 @@ function fixture(t, { env: processEnv = {}, settings = DELAYED_12H, ...overrides
     const env = {
         appRoot, controlRoot, clock: Date.parse('2026-10-14T10:00:00Z'), activeJob: false, jobs: [],
         journal: OPEN_JOURNAL, memAvailable: 8 * GIB, freeDisk: 50 * GIB, cpu: 10, mem: 10, preflight: { ok: true },
-        release: { version: '1.42.0.1', tagName: 'v1.42.0.1', commit: COMMIT_1 }, intervals: [], processEnv,
+        release: { version: '1.42.0.1', tagName: 'v1.42.0.1', commit: COMMIT_1 }, intervals: [], timeouts: [], processEnv,
+        discoveries: 0,
         settings: { ...settings },
     };
     env.now = () => env.clock;
@@ -94,7 +95,7 @@ function fixture(t, { env: processEnv = {}, settings = DELAYED_12H, ...overrides
     };
     env.prestager = createUpdatePrestager({
         appRoot, slot: env.slot, buildPrestage: env.builder.build, env: processEnv, now: env.now, runGit,
-        discoverRelease: async () => ({ release: { ...env.release } }),
+        discoverRelease: async () => { env.discoveries += 1; return { release: { ...env.release } }; },
         readRuntime: () => ({ updateMode: 'release', isPlatform: false, hostReady: true, jobStrategy: 'git-checkout-v2',
             runtimeVersion: '1.42.0.0', runtimeCommit: 'a'.repeat(40), builderBuildId: H('e') }),
         hasActiveJob: () => env.activeJob, listJobReferences: () => env.jobs,
@@ -104,7 +105,8 @@ function fixture(t, { env: processEnv = {}, settings = DELAYED_12H, ...overrides
         readMemAvailable: () => env.memAvailable, readFreeDisk: () => env.freeDisk,
         sleep: async () => {}, logger: { info() {} }, readSettings: () => env.settings,
         timers: {
-            setTimeout: (fn, ms) => ({ fn, ms, unref() {} }), clearTimeout() {},
+            setTimeout: (fn, ms) => { const handle = { fn, ms, cleared: false, unref() {} }; env.timeouts.push(handle); return handle; },
+            clearTimeout: (handle) => { if (handle) handle.cleared = true; },
             setInterval: (fn) => { env.intervals.push(fn); return fn; },
             clearInterval: (fn) => { env.intervals = env.intervals.filter((entry) => entry !== fn); },
         },
@@ -604,4 +606,320 @@ test('qa condition 3: a click while prestaging aborts it, waits for the discard,
 test('abortForJob with nothing running resolves at once', async (t) => {
     const env = fixture(t);
     assert.equal(await env.prestager.abortForJob(), true);
+});
+
+// ---------------------------------------------------------------------------
+// T-2025: wake on discovery, reason-code transition logging
+// ---------------------------------------------------------------------------
+
+const IMMEDIATE = Object.freeze({ prestageEnabled: true, prestageQuarantineHours: 0 });
+
+/** A logger that keeps every parsed `[update-prestager]` event. */
+function recordingLogger() {
+    const events = [];
+    return { events, info: (_tag, line) => { events.push(JSON.parse(line)); } };
+}
+const named = (logger, event) => logger.events.filter((entry) => entry.event === event);
+
+test('T-2025: a discovered newer release wakes one cycle, once per release, across repeated polls', async (t) => {
+    const logger = recordingLogger();
+    const env = fixture(t, { settings: IMMEDIATE, logger });
+    env.prestager.start();
+    const woken = env.prestager.noteRelease({ ...env.release });
+    assert.ok(woken, 'the first sighting wakes');
+    await woken;
+    assert.deepEqual([env.prestager.status().state, env.prestager.status().reasonCode], ['settling', 'settling']);
+    for (let poll = 0; poll < 5; poll += 1) assert.equal(env.prestager.noteRelease({ ...env.release }), null);
+    assert.equal(named(logger, 'wake_on_discovery').length, 1);
+    env.tick(5 * MIN);
+    await env.prestager.runCycle();
+    await settle(env);
+    assert.equal(env.prestager.status().state, 'ready', 'the settle window still applies, then one build');
+    assert.equal(env.prestager.noteRelease({ ...env.release }), null, 'a ready release never wakes again');
+    env.release = { version: '1.42.0.2', tagName: 'v1.42.0.2', commit: COMMIT_2 };
+    const again = env.prestager.noteRelease({ ...env.release });
+    assert.ok(again, 'a newer release wakes once more');
+    await again;
+    assert.deepEqual(named(logger, 'wake_on_discovery').map((entry) => entry.version), ['1.42.0.1', '1.42.0.2']);
+    assert.equal(env.builder.calls, 1);
+    await env.prestager.stop();
+});
+
+test('T-2025: a release the prestager already settles is not woken again', async (t) => {
+    const logger = recordingLogger();
+    const env = fixture(t, { settings: IMMEDIATE, logger });
+    env.prestager.start();
+    await env.prestager.runCycle();
+    assert.equal(env.prestager.noteRelease({ ...env.release }), null);
+    assert.equal(named(logger, 'wake_on_discovery').length, 0);
+    await env.prestager.stop();
+});
+
+test('T-2025: no wake for a release not newer than the runtime, or the runtime commit itself', async (t) => {
+    const logger = recordingLogger();
+    const env = fixture(t, { settings: IMMEDIATE, logger });
+    env.prestager.start();
+    assert.equal(env.prestager.noteRelease({ version: '1.42.0.0', tagName: 'v1.42.0.0', commit: COMMIT_1 }), null);
+    assert.equal(env.prestager.noteRelease({ version: '1.41.9.9', tagName: 'v1.41.9.9', commit: COMMIT_2 }), null);
+    assert.equal(env.prestager.noteRelease({ version: '1.42.0.9', tagName: 'v1.42.0.9', commit: 'a'.repeat(40) }), null);
+    assert.equal(env.prestager.noteRelease({ version: 'not-a-version', commit: COMMIT_2 }), null);
+    assert.equal(env.prestager.noteRelease(null), null);
+    assert.equal(named(logger, 'wake_on_discovery').length, 0);
+    assert.equal(env.prestager.status().reasonCode, 'not_started', 'no cycle ran');
+    await env.prestager.stop();
+});
+
+test('T-2025: no wake while stopped, disabled or killed; enabling later still wakes once', async (t) => {
+    const logger = recordingLogger();
+    const env = fixture(t, { settings: { prestageEnabled: false, prestageQuarantineHours: 0 }, logger });
+    assert.equal(env.prestager.noteRelease({ ...env.release }), null, 'not started');
+    env.prestager.start();
+    assert.equal(env.prestager.noteRelease({ ...env.release }), null, 'owner disabled');
+    env.settings = { ...IMMEDIATE };
+    const killed = fixture(t, { settings: IMMEDIATE, env: { NASSAJ_UPDATE_PRESTAGE: '0' }, logger });
+    killed.prestager.start();
+    assert.equal(killed.prestager.noteRelease({ ...killed.release }), null, 'kill switch');
+    assert.equal(named(logger, 'wake_on_discovery').length, 0);
+    assert.ok(env.prestager.noteRelease({ ...env.release }), 'a refused call does not use up the wake');
+    await env.prestager.wake();
+    assert.equal(env.prestager.status().reasonCode, 'settling');
+    await env.prestager.stop();
+    await killed.prestager.stop();
+});
+
+test('T-2025: no wake while a job is active or the settings are unreadable; later polls may wake', async (t) => {
+    const logger = recordingLogger();
+    let unreadable = true;
+    const env = fixture(t, { settings: IMMEDIATE, logger,
+        readSettings: () => { if (unreadable) throw new Error('store down'); return IMMEDIATE; } });
+    env.prestager.start();
+    assert.equal(env.prestager.noteRelease({ ...env.release }), null, 'settings unavailable');
+    unreadable = false;
+    env.activeJob = true;
+    assert.equal(env.prestager.noteRelease({ ...env.release }), null, 'job active');
+    assert.equal(named(logger, 'wake_on_discovery').length, 0);
+    env.activeJob = false;
+    const woken = env.prestager.noteRelease({ ...env.release });
+    assert.ok(woken);
+    await woken;
+    assert.equal(named(logger, 'wake_on_discovery').length, 1);
+    await env.prestager.stop();
+});
+
+test('T-2025: each state or reason-code change is logged once, repeats are not', async (t) => {
+    const logger = recordingLogger();
+    const env = fixture(t, { logger });
+    await env.prestager.runCycle();
+    await env.prestager.runCycle();
+    env.tick(5 * MIN);
+    await env.prestager.runCycle();
+    await env.prestager.runCycle();
+    env.activeJob = true;
+    env.tick(12 * HOUR);
+    await env.prestager.runCycle();
+    const transitions = named(logger, 'status_changed').map((entry) => [entry.previousReasonCode, entry.reasonCode]);
+    assert.deepEqual(transitions, [['not_started', 'settling'], ['settling', 'quarantine'], ['quarantine', 'job_active']]);
+    const entry = named(logger, 'status_changed').at(-1);
+    assert.deepEqual(Object.keys(entry).sort(), ['event', 'previousReasonCode', 'previousState', 'reasonCode', 'state', 'version']);
+    assert.deepEqual([entry.state, entry.previousState, entry.version], ['blocked', 'blocked', '1.42.0.1']);
+    env.activeJob = false;
+    await env.prestager.runCycle();
+    await settle(env);
+    const tail = named(logger, 'status_changed').slice(3).map((item) => [item.state, item.reasonCode]);
+    assert.deepEqual(tail, [['building', null], ['ready', null]]);
+});
+
+// The probe timer: `random: () => 0` removes its (upward) jitter, `probeMs` 7 min tells it from the 5 min first poll.
+const PROBE = Object.freeze({ random: () => 0, options: { probeMs: 7 * MIN } });
+const probeTimers = (env) => env.timeouts.filter((handle) => handle.ms === 7 * MIN && !handle.cleared);
+
+/** Fire the one live probe timer and wait for its discovery and any wake to finish. */
+async function fireProbe(env) {
+    const [timer] = probeTimers(env);
+    assert.ok(timer, 'a probe timer is armed');
+    timer.cleared = true; // fired: it no longer counts as live
+    timer.fn();
+    for (let turn = 0; turn < 20; turn += 1) await new Promise((resolve) => setImmediate(resolve));
+    await env.prestager.wake();
+}
+
+test('T-2025 probe: a tick that discovers a newer release wakes one cycle, then re-arms', async (t) => {
+    const logger = recordingLogger();
+    const env = fixture(t, { settings: IMMEDIATE, logger, ...PROBE });
+    env.prestager.start();
+    assert.equal(probeTimers(env).length, 1, 'start() arms one probe');
+    await fireProbe(env);
+    assert.equal(named(logger, 'wake_on_discovery').length, 1);
+    assert.equal(env.prestager.status().reasonCode, 'settling');
+    assert.equal(env.builder.calls, 0, 'the tick itself builds nothing');
+    assert.equal(probeTimers(env).length, 1, 'the probe re-arms once');
+    await fireProbe(env);
+    assert.equal(named(logger, 'wake_on_discovery').length, 1, 'no change: no second wake');
+    assert.equal(env.discoveries >= 2, true);
+    await env.prestager.stop();
+    assert.equal(probeTimers(env).length, 0, 'stop() clears the probe');
+});
+
+test('T-2025 probe: a tick with nothing newer wakes nothing; a direct probe while stopped does nothing', async (t) => {
+    const logger = recordingLogger();
+    const env = fixture(t, { settings: IMMEDIATE, logger, ...PROBE });
+    env.release = { version: '1.42.0.0', tagName: 'v1.42.0.0', commit: COMMIT_1 };
+    env.prestager.start();
+    await fireProbe(env);
+    assert.equal(named(logger, 'wake_on_discovery').length, 0);
+    await env.prestager.stop();
+    const before = env.discoveries;
+    assert.equal(await env.prestager.probe(), null);
+    assert.equal(env.discoveries, before, 'stopped: no discovery');
+    assert.equal(probeTimers(env).length, 0);
+});
+
+test('T-2025 probe: a timer that fires after stop() neither discovers nor re-arms', async (t) => {
+    const env = fixture(t, { settings: IMMEDIATE, ...PROBE });
+    env.prestager.start();
+    const [timer] = probeTimers(env);
+    await env.prestager.stop();
+    const before = env.discoveries;
+    timer.fn();
+    for (let turn = 0; turn < 10; turn += 1) await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(env.discoveries, before);
+    assert.equal(probeTimers(env).length, 0);
+});
+
+test('T-2025 probe: owner off skips the discovery but keeps probing; the kill switch ends the probe', async (t) => {
+    const env = fixture(t, { settings: { prestageEnabled: false, prestageQuarantineHours: 0 }, ...PROBE });
+    env.prestager.start();
+    await fireProbe(env);
+    assert.equal(env.discoveries, 0, 'off: no ls-remote');
+    assert.equal(probeTimers(env).length, 1, 'off keeps the probe for a later enable');
+    await env.prestager.stop();
+    const killed = fixture(t, { settings: IMMEDIATE, env: { NASSAJ_UPDATE_PRESTAGE: '0' }, ...PROBE });
+    killed.prestager.start();
+    await fireProbe(killed);
+    assert.equal(probeTimers(killed).length, 0, 'kill switch: the probe ends');
+    await killed.prestager.stop();
+});
+
+const flush = async (turns = 20) => { for (let turn = 0; turn < turns; turn += 1) await new Promise((resolve) => setImmediate(resolve)); };
+
+test('T-2025 qa 1a: a woken cycle that finds the mutex taken keeps the wake for the next probe', async (t) => {
+    const logger = recordingLogger();
+    const env = fixture(t, { settings: IMMEDIATE, logger });
+    env.prestager.start();
+    const held = tryAcquireBuildMutex(env.appRoot, { kind: 'source-update-job' });
+    t.after(() => held?.release());
+    await env.prestager.noteRelease({ ...env.release });
+    assert.equal(env.prestager.status().reasonCode, 'build_in_progress');
+    held.release();
+    const again = env.prestager.noteRelease({ ...env.release });
+    assert.ok(again, 'the wake was not used up');
+    await again;
+    assert.equal(env.prestager.status().reasonCode, 'settling');
+    assert.equal(env.prestager.noteRelease({ ...env.release }), null, 'now it is used up');
+    assert.equal(named(logger, 'wake_on_discovery').length, 2);
+    await env.prestager.stop();
+});
+
+test('T-2025 qa 1b: a newer release while an older one builds supersedes it and settles at once, with a timer', async (t) => {
+    const env = fixture(t, { settings: IMMEDIATE });
+    env.builder.hold = deferred();
+    env.prestager.start();
+    await env.prestager.runCycle();
+    env.tick(5 * MIN);
+    await env.prestager.runCycle();
+    await building(env);
+    // Fire the first poll (nothing newer yet): the next poll is then ~30 min away.
+    const firstPoll = env.timeouts.find((handle) => handle.ms === 5 * MIN && !handle.cleared);
+    firstPoll.cleared = true;
+    firstPoll.fn();
+    await flush();
+    env.release = { version: '1.42.0.2', tagName: 'v1.42.0.2', commit: COMMIT_2 };
+    const before = env.timeouts.length;
+    await env.prestager.noteRelease({ ...env.release });
+    assert.equal(env.prestager.buildInFlight(), null, 'the older build is aborted');
+    assert.deepEqual([env.prestager.status().reasonCode, env.prestager.status().version], ['settling', '1.42.0.2']);
+    assert.ok(env.timeouts.slice(before).some((handle) => handle.ms === 5 * MIN && !handle.cleared), 'settle timer armed');
+    assert.equal(env.prestager.noteRelease({ ...env.release }), null, 'the wake is used up once settling');
+    env.tick(5 * MIN);
+    env.builder.hold = null;
+    await env.prestager.runCycle();
+    await settle(env);
+    assert.deepEqual([env.prestager.status().state, env.prestager.status().version], ['ready', '1.42.0.2']);
+    await env.prestager.stop();
+});
+
+test('T-2025 qa 4: a new tag on the commit being built supersedes the build', async (t) => {
+    const env = fixture(t, { settings: IMMEDIATE });
+    env.builder.hold = deferred();
+    await env.prestager.runCycle();
+    env.tick(5 * MIN);
+    await env.prestager.runCycle();
+    await building(env);
+    env.release = { version: '1.42.0.2', tagName: 'v1.42.0.2', commit: COMMIT_1 };
+    await env.prestager.runCycle();
+    assert.equal(env.prestager.buildInFlight(), null);
+    assert.deepEqual([env.prestager.status().reasonCode, env.prestager.status().version], ['settling', '1.42.0.2']);
+    env.builder.hold = null;
+});
+
+test('T-2025 qa 2: a re-tag of the same tag on a new commit wakes again', async (t) => {
+    const logger = recordingLogger();
+    const env = fixture(t, { settings: IMMEDIATE, logger });
+    env.prestager.start();
+    await env.prestager.noteRelease({ ...env.release });
+    env.release = { ...env.release, commit: COMMIT_2 };
+    const again = env.prestager.noteRelease({ ...env.release });
+    assert.ok(again);
+    await again;
+    assert.equal(named(logger, 'wake_on_discovery').length, 2);
+    await env.prestager.stop();
+});
+
+test('T-2025 qa 2: past maxWokenReleases the oldest key is evicted and may wake again', async (t) => {
+    const logger = recordingLogger();
+    const env = fixture(t, { settings: IMMEDIATE, logger, options: { maxWokenReleases: 2 } });
+    env.prestager.start();
+    const release = (n) => ({ version: `1.42.0.${n}`, tagName: `v1.42.0.${n}`, commit: String(n).repeat(40) });
+    for (const n of [1, 2, 3]) {
+        env.release = release(n);
+        await env.prestager.noteRelease(release(n));
+    }
+    assert.equal(env.prestager.noteRelease(release(2)), null, 'still remembered');
+    env.release = release(1);
+    const evicted = env.prestager.noteRelease(release(1));
+    assert.ok(evicted, 'the evicted oldest key wakes again');
+    await evicted;
+    assert.deepEqual(named(logger, 'wake_on_discovery').map((entry) => entry.version),
+        ['1.42.0.1', '1.42.0.2', '1.42.0.3', '1.42.0.1']);
+    await env.prestager.stop();
+});
+
+test('T-2025 qa 2: a probe whose discovery rejects wakes nothing and re-arms', async (t) => {
+    const logger = recordingLogger();
+    const env = fixture(t, { settings: IMMEDIATE, logger, ...PROBE,
+        discoverRelease: async () => { env.discoveries += 1; throw Object.assign(new Error('down'), { code: 'release_source_unavailable' }); } });
+    env.prestager.start();
+    await fireProbe(env);
+    assert.equal(env.discoveries >= 1, true);
+    assert.equal(named(logger, 'wake_on_discovery').length, 0);
+    assert.equal(probeTimers(env).length, 1, 're-armed after the rejection');
+    await env.prestager.stop();
+});
+
+test('T-2025 qa 2: stop() then start() while a probe is in flight leaves exactly one probe timer', async (t) => {
+    const gate = deferred();
+    const env = fixture(t, { settings: IMMEDIATE, ...PROBE,
+        discoverRelease: async () => { env.discoveries += 1; await gate.promise; return { release: { ...env.release } }; } });
+    env.prestager.start();
+    const [timer] = probeTimers(env);
+    timer.cleared = true;
+    timer.fn();
+    await flush(5);
+    assert.equal(env.discoveries, 1, 'the probe is in flight');
+    await env.prestager.stop();
+    env.prestager.start();
+    gate.resolve();
+    await flush();
+    assert.equal(probeTimers(env).length, 1);
+    await env.prestager.stop();
 });

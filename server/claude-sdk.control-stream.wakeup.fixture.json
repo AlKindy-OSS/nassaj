@@ -1,0 +1,1845 @@
+{
+ "cli": "2.1.306",
+ "sdk": "0.3.310",
+ "captured": "2026-10-27",
+ "board": "B-1699",
+ "note": "Redacted raw SDK stream (query() with a held streaming input, model haiku, cwd under /var/tmp). scheduleWakeup: ScheduleWakeup 60s fires ~108s later as command_lifecycle started + a new cycle with no user message. cronCreate: a one-shot session-only CronCreate firing the same way. \"t\" is ms since the query started. ids/paths/signatures replaced; order and shapes kept. transcriptWakeRow: the wake prompt row the CLI wrote to the session JSONL (its uuid is the command_lifecycle command_uuid).",
+ "scenarios": {
+  "scheduleWakeup": [
+   {
+    "t": 965,
+    "m": {
+     "type": "system",
+     "subtype": "hook_started",
+     "hook_id": "<hook-1>",
+     "hook_name": "SessionStart:startup",
+     "hook_event": "SessionStart",
+     "uuid": "<uuid-1>",
+     "session_id": "<session-1>"
+    }
+   },
+   {
+    "t": 965,
+    "m": {
+     "type": "system",
+     "subtype": "hook_response",
+     "hook_id": "<hook-1>",
+     "hook_name": "SessionStart:startup",
+     "hook_event": "SessionStart",
+     "output": "",
+     "stdout": "",
+     "stderr": "",
+     "exit_code": 0,
+     "outcome": "success",
+     "uuid": "<uuid-2>",
+     "session_id": "<session-1>"
+    }
+   },
+   {
+    "t": 1128,
+    "m": {
+     "type": "system",
+     "subtype": "init",
+     "cwd": "/var/tmp/<cwd>",
+     "session_id": "<session-1>",
+     "model": "claude-haiku-5-5",
+     "permissionMode": "bypassPermissions",
+     "apiKeySource": "none",
+     "claude_code_version": "2.1.306",
+     "output_style": "default",
+     "analytics_disabled": false,
+     "product_feedback_disabled": false,
+     "uuid": "<uuid-3>",
+     "original_cwd": "/var/tmp/<cwd>",
+     "additional_directories": [],
+     "messaging_socket_path": "/run/user/<uid>/cc-socks/<pid>.sock",
+     "fast_mode_state": "off",
+     "fast_mode_disabled_reason": "sdk_opt_in_required",
+     "per_turn_effort_active": true,
+     "view_mode": "default"
+    }
+   },
+   {
+    "t": 2001,
+    "m": {
+     "type": "rate_limit_event",
+     "rate_limit_info": {
+      "status": "allowed",
+      "resetsAt": 1793075400,
+      "rateLimitType": "five_hour",
+      "overageStatus": "rejected",
+      "overageDisabledReason": "out_of_credits",
+      "isUsingOverage": false,
+      "unifiedWindows": {
+       "five_hour": {
+        "utilization": 0.24,
+        "resetsAt": 1793075400
+       },
+       "seven_day": {
+        "utilization": 0.75,
+        "resetsAt": 1793246400
+       }
+      }
+     },
+     "uuid": "<uuid-4>",
+     "session_id": "<session-1>"
+    }
+   },
+   {
+    "t": 3129,
+    "m": {
+     "type": "system",
+     "subtype": "thinking_tokens",
+     "estimated_tokens": 50,
+     "estimated_tokens_delta": 50,
+     "session_id": "<session-1>",
+     "uuid": "<uuid-5>"
+    }
+   },
+   {
+    "t": 3885,
+    "m": {
+     "type": "system",
+     "subtype": "thinking_tokens",
+     "estimated_tokens": 298,
+     "estimated_tokens_delta": 248,
+     "session_id": "<session-1>",
+     "uuid": "<uuid-6>"
+    }
+   },
+   {
+    "t": 3888,
+    "m": {
+     "type": "assistant",
+     "message": {
+      "model": "claude-haiku-5-5",
+      "id": "<msg-1>",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+       {
+        "type": "thinking",
+        "thinking": "",
+        "signature": "<sig>"
+       }
+      ],
+      "container": null,
+      "stop_reason": null,
+      "stop_sequence": null,
+      "stop_details": null,
+      "usage": {
+       "input_tokens": 2,
+       "cache_creation_input_tokens": 15611,
+       "cache_read_input_tokens": 0,
+       "cache_creation": {
+        "ephemeral_5m_input_tokens": 0,
+        "ephemeral_1h_input_tokens": 15611
+       },
+       "output_tokens": 4,
+       "service_tier": "standard",
+       "inference_geo": "global",
+       "speed": "standard"
+      },
+      "input_transformations": [],
+      "diagnostics": null,
+      "context_management": null
+     },
+     "parent_tool_use_id": null,
+     "session_id": "<session-1>",
+     "uuid": "<uuid-7>",
+     "timestamp": "2026-10-27T01:51:11.243Z",
+     "request_id": "req_100000000000000000000000",
+     "thinking_duration_ms": 955,
+     "thinking_display": "updates"
+    }
+   },
+   {
+    "t": 4355,
+    "m": {
+     "type": "assistant",
+     "message": {
+      "model": "claude-haiku-5-5",
+      "id": "<msg-1>",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+       {
+        "type": "tool_use",
+        "id": "<toolu-1>",
+        "name": "ScheduleWakeup",
+        "input": {
+         "delaySeconds": 60,
+         "prompt": "say WOKE",
+         "reason": "User asked for a single 60-second wakeup that says WOKE.",
+         "noop": false
+        },
+        "caller": {
+         "type": "direct"
+        }
+       }
+      ],
+      "container": null,
+      "stop_reason": null,
+      "stop_sequence": null,
+      "stop_details": null,
+      "usage": {
+       "input_tokens": 2,
+       "cache_creation_input_tokens": 15611,
+       "cache_read_input_tokens": 0,
+       "cache_creation": {
+        "ephemeral_5m_input_tokens": 0,
+        "ephemeral_1h_input_tokens": 15611
+       },
+       "output_tokens": 4,
+       "service_tier": "standard",
+       "inference_geo": "global",
+       "speed": "standard"
+      },
+      "input_transformations": [],
+      "diagnostics": null,
+      "context_management": null
+     },
+     "parent_tool_use_id": null,
+     "session_id": "<session-1>",
+     "uuid": "<uuid-8>",
+     "timestamp": "2026-10-27T01:51:11.712Z",
+     "request_id": "req_100000000000000000000000",
+     "wire_tool_inputs": {
+      "toolu_01CoRTxuXCzPMC9nqVDJxRJ8": {
+       "delaySeconds": 60,
+       "prompt": "say WOKE",
+       "reason": "User asked for a single 60-second wakeup that says WOKE.",
+       "noop": false
+      }
+     }
+    }
+   },
+   {
+    "t": 4364,
+    "m": {
+     "type": "user",
+     "message": {
+      "role": "user",
+      "content": [
+       {
+        "tool_use_id": "<toolu-1>",
+        "type": "tool_result",
+        "content": "Next wakeup scheduled for 04:53:00 (in 108s). If you owe the user a status update this tick, write it now as ordinary response text; then end the turn — the harness re-invokes you when the wakeup fires or a task-notification arrives."
+       }
+      ]
+     },
+     "parent_tool_use_id": null,
+     "session_id": "<session-1>",
+     "uuid": "<uuid-9>",
+     "timestamp": "2026-10-27T01:51:11.721Z",
+     "tool_use_result": {
+      "scheduledFor": 1793065980000,
+      "clampedDelaySeconds": 60,
+      "wasClamped": false
+     },
+     "tool_result_meta": [
+      {
+       "id": "<toolu-1>",
+       "permission_decision": {
+        "decision": "accept",
+        "source": "config",
+        "reason_type": "mode"
+       }
+      }
+     ]
+    }
+   },
+   {
+    "t": 5693,
+    "m": {
+     "type": "assistant",
+     "message": {
+      "model": "claude-haiku-5-5",
+      "id": "<msg-2>",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+       {
+        "type": "text",
+        "text": "scheduled"
+       }
+      ],
+      "container": null,
+      "stop_reason": null,
+      "stop_sequence": null,
+      "stop_details": null,
+      "usage": {
+       "input_tokens": 2,
+       "cache_creation_input_tokens": 3324,
+       "cache_read_input_tokens": 15611,
+       "cache_creation": {
+        "ephemeral_5m_input_tokens": 0,
+        "ephemeral_1h_input_tokens": 3324
+       },
+       "output_tokens": 5,
+       "service_tier": "standard",
+       "inference_geo": "global",
+       "speed": "standard"
+      },
+      "input_transformations": [],
+      "diagnostics": null,
+      "context_management": null
+     },
+     "parent_tool_use_id": null,
+     "session_id": "<session-1>",
+     "uuid": "<uuid-10>",
+     "timestamp": "2026-10-27T01:51:13.050Z",
+     "request_id": "req_200000000000000000000000"
+    }
+   },
+   {
+    "t": 5773,
+    "m": {
+     "duration_api_ms": 5419,
+     "stop_reason": "end_turn",
+     "session_id": "<session-1>",
+     "total_cost_usd": 0.00425561,
+     "usage": {
+      "input_tokens": 4,
+      "cache_creation_input_tokens": 18935,
+      "cache_read_input_tokens": 15611,
+      "output_tokens": 356,
+      "output_tokens_details": {
+       "thinking_tokens": 200
+      },
+      "server_tool_use": {
+       "web_search_requests": 0,
+       "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+       "ephemeral_1h_input_tokens": 18935,
+       "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "global",
+      "iterations": [
+       {
+        "input_tokens": 2,
+        "output_tokens": 6,
+        "cache_read_input_tokens": 15611,
+        "cache_creation_input_tokens": 3324,
+        "cache_creation": {
+         "ephemeral_5m_input_tokens": 0,
+         "ephemeral_1h_input_tokens": 3324
+        },
+        "type": "message"
+       }
+      ],
+      "speed": "standard",
+      "fallback_credit": null
+     },
+     "modelUsage": {
+      "claude-haiku-5-5": {
+       "inputTokens": 1240,
+       "outputTokens": 377,
+       "cacheReadInputTokens": 15611,
+       "cacheCreationInputTokens": 18935,
+       "webSearchRequests": 0,
+       "costUSD": 0.00425561,
+       "contextWindow": 1000000,
+       "maxOutputTokens": 128000,
+       "thinkingTokens": 200,
+       "canonicalModel": "claude-haiku-5-5",
+       "provider": "firstParty",
+       "costBasis": "list"
+      }
+     },
+     "permission_denials": [],
+     "terminal_reason": "completed",
+     "fast_mode_state": "off",
+     "fast_mode_disabled_reason": "sdk_opt_in_required",
+     "subagent_stats": {
+      "spawned": 0,
+      "requested": {
+       "background": 0,
+       "foreground": 0,
+       "unset": 0
+      },
+      "started_in_background": 0,
+      "max_depth": 0,
+      "spawned_by_subagents": 0,
+      "completed": 0,
+      "failed": 0,
+      "killed": {
+       "parent": 0,
+       "user": 0,
+       "system": 0
+      },
+      "refused": {
+       "depth_limit": 0,
+       "concurrency_limit": 0,
+       "budget": 0
+      },
+      "by_type": {}
+     },
+     "safety_stops": 0,
+     "is_error": false,
+     "num_turns": 2,
+     "subtype": "success",
+     "api_error_status": null,
+     "result": "scheduled",
+     "ttft_ms": 2857,
+     "type": "result",
+     "duration_ms": 4744,
+     "uuid": "<uuid-11>",
+     "ttft_stream_ms": 1901,
+     "time_to_request_ms": 130,
+     "first_content_frame_ms": 1902,
+     "queued_turn_count": 0,
+     "result_index": 0
+    }
+   },
+   {
+    "t": 113395,
+    "m": {
+     "type": "command_lifecycle",
+     "command_uuid": "<uuid-12>",
+     "state": "started",
+     "uuid": "<uuid-13>",
+     "session_id": "<session-1>"
+    }
+   },
+   {
+    "t": 113458,
+    "m": {
+     "type": "system",
+     "subtype": "init",
+     "cwd": "/var/tmp/<cwd>",
+     "session_id": "<session-1>",
+     "model": "claude-haiku-5-5",
+     "permissionMode": "bypassPermissions",
+     "apiKeySource": "none",
+     "claude_code_version": "2.1.306",
+     "output_style": "default",
+     "analytics_disabled": false,
+     "product_feedback_disabled": false,
+     "uuid": "<uuid-14>",
+     "original_cwd": "/var/tmp/<cwd>",
+     "additional_directories": [],
+     "messaging_socket_path": "/run/user/<uid>/cc-socks/<pid>.sock",
+     "fast_mode_state": "off",
+     "fast_mode_disabled_reason": "sdk_opt_in_required",
+     "per_turn_effort_active": true,
+     "view_mode": "default"
+    }
+   },
+   {
+    "t": 115169,
+    "m": {
+     "type": "system",
+     "subtype": "thinking_tokens",
+     "estimated_tokens": 50,
+     "estimated_tokens_delta": 50,
+     "session_id": "<session-1>",
+     "uuid": "<uuid-15>"
+    }
+   },
+   {
+    "t": 115568,
+    "m": {
+     "type": "system",
+     "subtype": "thinking_tokens",
+     "estimated_tokens": 237,
+     "estimated_tokens_delta": 187,
+     "session_id": "<session-1>",
+     "uuid": "<uuid-16>"
+    }
+   },
+   {
+    "t": 115569,
+    "m": {
+     "type": "assistant",
+     "message": {
+      "model": "claude-haiku-5-5",
+      "id": "<msg-3>",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+       {
+        "type": "thinking",
+        "thinking": "",
+        "signature": "<sig>"
+       }
+      ],
+      "container": null,
+      "stop_reason": null,
+      "stop_sequence": null,
+      "stop_details": null,
+      "usage": {
+       "input_tokens": 2,
+       "cache_creation_input_tokens": 334,
+       "cache_read_input_tokens": 18935,
+       "cache_creation": {
+        "ephemeral_5m_input_tokens": 0,
+        "ephemeral_1h_input_tokens": 334
+       },
+       "output_tokens": 8,
+       "service_tier": "standard",
+       "inference_geo": "global",
+       "speed": "standard"
+      },
+      "input_transformations": [],
+      "diagnostics": null,
+      "context_management": null
+     },
+     "parent_tool_use_id": null,
+     "session_id": "<session-1>",
+     "uuid": "<uuid-17>",
+     "timestamp": "2026-10-27T01:53:02.927Z",
+     "request_id": "req_300000000000000000000000",
+     "thinking_duration_ms": 648,
+     "thinking_display": "updates"
+    }
+   },
+   {
+    "t": 115571,
+    "m": {
+     "type": "assistant",
+     "message": {
+      "model": "claude-haiku-5-5",
+      "id": "<msg-3>",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+       {
+        "type": "text",
+        "text": "WOKE"
+       }
+      ],
+      "container": null,
+      "stop_reason": null,
+      "stop_sequence": null,
+      "stop_details": null,
+      "usage": {
+       "input_tokens": 2,
+       "cache_creation_input_tokens": 334,
+       "cache_read_input_tokens": 18935,
+       "cache_creation": {
+        "ephemeral_5m_input_tokens": 0,
+        "ephemeral_1h_input_tokens": 334
+       },
+       "output_tokens": 8,
+       "service_tier": "standard",
+       "inference_geo": "global",
+       "speed": "standard"
+      },
+      "input_transformations": [],
+      "diagnostics": null,
+      "context_management": null
+     },
+     "parent_tool_use_id": null,
+     "session_id": "<session-1>",
+     "uuid": "<uuid-18>",
+     "timestamp": "2026-10-27T01:53:02.928Z",
+     "request_id": "req_300000000000000000000000"
+    }
+   },
+   {
+    "t": 115579,
+    "m": {
+     "type": "rate_limit_event",
+     "rate_limit_info": {
+      "status": "allowed",
+      "resetsAt": 1793075400,
+      "rateLimitType": "five_hour",
+      "overageStatus": "rejected",
+      "overageDisabledReason": "out_of_credits",
+      "isUsingOverage": false,
+      "unifiedWindows": {
+       "five_hour": {
+        "utilization": 0.25,
+        "resetsAt": 1793075400
+       },
+       "seven_day": {
+        "utilization": 0.75,
+        "resetsAt": 1793246400
+       }
+      }
+     },
+     "uuid": "<uuid-19>",
+     "session_id": "<session-1>"
+    }
+   },
+   {
+    "t": 115606,
+    "m": {
+     "duration_api_ms": 7534,
+     "stop_reason": "end_turn",
+     "session_id": "<session-1>",
+     "total_cost_usd": 0.00457696,
+     "usage": {
+      "input_tokens": 2,
+      "cache_creation_input_tokens": 334,
+      "cache_read_input_tokens": 18935,
+      "output_tokens": 130,
+      "output_tokens_details": {
+       "thinking_tokens": 124
+      },
+      "server_tool_use": {
+       "web_search_requests": 0,
+       "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+       "ephemeral_1h_input_tokens": 334,
+       "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "global",
+      "iterations": [
+       {
+        "input_tokens": 2,
+        "output_tokens": 130,
+        "cache_read_input_tokens": 18935,
+        "cache_creation_input_tokens": 334,
+        "cache_creation": {
+         "ephemeral_5m_input_tokens": 0,
+         "ephemeral_1h_input_tokens": 334
+        },
+        "type": "message"
+       }
+      ],
+      "speed": "standard",
+      "fallback_credit": null
+     },
+     "modelUsage": {
+      "claude-haiku-5-5": {
+       "inputTokens": 1242,
+       "outputTokens": 507,
+       "cacheReadInputTokens": 34546,
+       "cacheCreationInputTokens": 19269,
+       "webSearchRequests": 0,
+       "costUSD": 0.00457696,
+       "contextWindow": 1000000,
+       "maxOutputTokens": 128000,
+       "thinkingTokens": 324,
+       "canonicalModel": "claude-haiku-5-5",
+       "provider": "firstParty",
+       "costBasis": "list"
+      }
+     },
+     "permission_denials": [],
+     "terminal_reason": "completed",
+     "fast_mode_state": "off",
+     "fast_mode_disabled_reason": "sdk_opt_in_required",
+     "subagent_stats": {
+      "spawned": 0,
+      "requested": {
+       "background": 0,
+       "foreground": 0,
+       "unset": 0
+      },
+      "started_in_background": 0,
+      "max_depth": 0,
+      "spawned_by_subagents": 0,
+      "completed": 0,
+      "failed": 0,
+      "killed": {
+       "parent": 0,
+       "user": 0,
+       "system": 0
+      },
+      "refused": {
+       "depth_limit": 0,
+       "concurrency_limit": 0,
+       "budget": 0
+      },
+      "by_type": {}
+     },
+     "safety_stops": 0,
+     "is_error": false,
+     "num_turns": 1,
+     "subtype": "success",
+     "api_error_status": null,
+     "result": "WOKE",
+     "ttft_ms": 2173,
+     "type": "result",
+     "duration_ms": 2209,
+     "uuid": "<uuid-20>",
+     "ttft_stream_ms": 1524,
+     "time_to_request_ms": 77,
+     "first_content_frame_ms": 1524,
+     "queued_turn_count": 0,
+     "result_index": 1
+    }
+   },
+   {
+    "t": 115606,
+    "m": {
+     "type": "command_lifecycle",
+     "command_uuid": "<uuid-12>",
+     "state": "completed",
+     "uuid": "<uuid-21>",
+     "session_id": "<session-1>"
+    }
+   }
+  ],
+  "cronCreate": [
+   {
+    "t": 753,
+    "m": {
+     "type": "system",
+     "subtype": "hook_started",
+     "hook_id": "<hook-2>",
+     "hook_name": "SessionStart:startup",
+     "hook_event": "SessionStart",
+     "uuid": "<uuid-22>",
+     "session_id": "<session-2>"
+    }
+   },
+   {
+    "t": 753,
+    "m": {
+     "type": "system",
+     "subtype": "hook_response",
+     "hook_id": "<hook-2>",
+     "hook_name": "SessionStart:startup",
+     "hook_event": "SessionStart",
+     "output": "",
+     "stdout": "",
+     "stderr": "",
+     "exit_code": 0,
+     "outcome": "success",
+     "uuid": "<uuid-23>",
+     "session_id": "<session-2>"
+    }
+   },
+   {
+    "t": 909,
+    "m": {
+     "type": "system",
+     "subtype": "init",
+     "cwd": "/var/tmp/<cwd>",
+     "session_id": "<session-2>",
+     "model": "claude-haiku-5-5",
+     "permissionMode": "bypassPermissions",
+     "apiKeySource": "none",
+     "claude_code_version": "2.1.306",
+     "output_style": "default",
+     "analytics_disabled": false,
+     "product_feedback_disabled": false,
+     "uuid": "<uuid-24>",
+     "original_cwd": "/var/tmp/<cwd>",
+     "additional_directories": [],
+     "messaging_socket_path": "/run/user/<uid>/cc-socks/<pid>.sock",
+     "fast_mode_state": "off",
+     "fast_mode_disabled_reason": "sdk_opt_in_required",
+     "per_turn_effort_active": true,
+     "view_mode": "default"
+    }
+   },
+   {
+    "t": 1874,
+    "m": {
+     "type": "rate_limit_event",
+     "rate_limit_info": {
+      "status": "allowed_warning",
+      "resetsAt": 1793246400,
+      "rateLimitType": "seven_day",
+      "utilization": 0.75,
+      "overageStatus": "rejected",
+      "overageDisabledReason": "out_of_credits",
+      "isUsingOverage": false,
+      "surpassedThreshold": 0.75,
+      "unifiedWindows": {
+       "five_hour": {
+        "utilization": 0.27,
+        "resetsAt": 1793075400
+       },
+       "seven_day": {
+        "utilization": 0.75,
+        "resetsAt": 1793246400
+       }
+      },
+      "overageEnabled": true
+     },
+     "uuid": "<uuid-25>",
+     "session_id": "<session-2>"
+    }
+   },
+   {
+    "t": 2666,
+    "m": {
+     "type": "system",
+     "subtype": "thinking_tokens",
+     "estimated_tokens": 50,
+     "estimated_tokens_delta": 50,
+     "session_id": "<session-2>",
+     "uuid": "<uuid-26>"
+    }
+   },
+   {
+    "t": 3696,
+    "m": {
+     "type": "system",
+     "subtype": "thinking_tokens",
+     "estimated_tokens": 300,
+     "estimated_tokens_delta": 250,
+     "session_id": "<session-2>",
+     "uuid": "<uuid-27>"
+    }
+   },
+   {
+    "t": 4746,
+    "m": {
+     "type": "system",
+     "subtype": "thinking_tokens",
+     "estimated_tokens": 500,
+     "estimated_tokens_delta": 200,
+     "session_id": "<session-2>",
+     "uuid": "<uuid-28>"
+    }
+   },
+   {
+    "t": 4986,
+    "m": {
+     "type": "system",
+     "subtype": "thinking_tokens",
+     "estimated_tokens": 567,
+     "estimated_tokens_delta": 67,
+     "session_id": "<session-2>",
+     "uuid": "<uuid-29>"
+    }
+   },
+   {
+    "t": 4989,
+    "m": {
+     "type": "assistant",
+     "message": {
+      "model": "claude-haiku-5-5",
+      "id": "<msg-4>",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+       {
+        "type": "thinking",
+        "thinking": "",
+        "signature": "<sig>"
+       }
+      ],
+      "container": null,
+      "stop_reason": null,
+      "stop_sequence": null,
+      "stop_details": null,
+      "usage": {
+       "input_tokens": 2,
+       "cache_creation_input_tokens": 4602,
+       "cache_read_input_tokens": 10744,
+       "cache_creation": {
+        "ephemeral_5m_input_tokens": 0,
+        "ephemeral_1h_input_tokens": 4602
+       },
+       "output_tokens": 4,
+       "service_tier": "standard",
+       "inference_geo": "global",
+       "speed": "standard"
+      },
+      "input_transformations": [],
+      "diagnostics": null,
+      "context_management": null
+     },
+     "parent_tool_use_id": null,
+     "session_id": "<session-2>",
+     "uuid": "<uuid-30>",
+     "timestamp": "2026-10-27T02:02:42.821Z",
+     "request_id": "req_400000000000000000000000",
+     "thinking_duration_ms": 2717,
+     "thinking_display": "updates"
+    }
+   },
+   {
+    "t": 5203,
+    "m": {
+     "type": "assistant",
+     "message": {
+      "model": "claude-haiku-5-5",
+      "id": "<msg-4>",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+       {
+        "type": "tool_use",
+        "id": "<toolu-2>",
+        "name": "ToolSearch",
+        "input": {
+         "query": "select:CronCreate",
+         "max_results": 1
+        },
+        "caller": {
+         "type": "direct"
+        }
+       }
+      ],
+      "container": null,
+      "stop_reason": null,
+      "stop_sequence": null,
+      "stop_details": null,
+      "usage": {
+       "input_tokens": 2,
+       "cache_creation_input_tokens": 4602,
+       "cache_read_input_tokens": 10744,
+       "cache_creation": {
+        "ephemeral_5m_input_tokens": 0,
+        "ephemeral_1h_input_tokens": 4602
+       },
+       "output_tokens": 4,
+       "service_tier": "standard",
+       "inference_geo": "global",
+       "speed": "standard"
+      },
+      "input_transformations": [],
+      "diagnostics": null,
+      "context_management": null
+     },
+     "parent_tool_use_id": null,
+     "session_id": "<session-2>",
+     "uuid": "<uuid-31>",
+     "timestamp": "2026-10-27T02:02:43.037Z",
+     "request_id": "req_400000000000000000000000",
+     "wire_tool_inputs": {
+      "toolu_01HfFSkuWnJC2AkeosQs4E3n": {
+       "query": "select:CronCreate",
+       "max_results": 1
+      }
+     }
+    }
+   },
+   {
+    "t": 5212,
+    "m": {
+     "type": "user",
+     "message": {
+      "role": "user",
+      "content": [
+       {
+        "type": "tool_result",
+        "tool_use_id": "<toolu-2>",
+        "content": [
+         {
+          "type": "tool_reference",
+          "tool_name": "CronCreate"
+         }
+        ]
+       }
+      ]
+     },
+     "parent_tool_use_id": null,
+     "session_id": "<session-2>",
+     "uuid": "<uuid-32>",
+     "timestamp": "2026-10-27T02:02:43.045Z",
+     "tool_use_result": {
+      "matches": [
+       "CronCreate"
+      ],
+      "query": "select:CronCreate",
+      "total_deferred_tools": 52
+     },
+     "tool_result_meta": [
+      {
+       "id": "<toolu-2>",
+       "permission_decision": {
+        "decision": "accept",
+        "source": "config",
+        "reason_type": "mode"
+       }
+      }
+     ]
+    }
+   },
+   {
+    "t": 5250,
+    "m": {
+     "type": "assistant",
+     "message": {
+      "model": "claude-haiku-5-5",
+      "id": "<msg-4>",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+       {
+        "type": "tool_use",
+        "id": "<toolu-3>",
+        "name": "Skill",
+        "input": {
+         "skill": "project-manager"
+        },
+        "caller": {
+         "type": "direct"
+        }
+       }
+      ],
+      "container": null,
+      "stop_reason": null,
+      "stop_sequence": null,
+      "stop_details": null,
+      "usage": {
+       "input_tokens": 2,
+       "cache_creation_input_tokens": 4602,
+       "cache_read_input_tokens": 10744,
+       "cache_creation": {
+        "ephemeral_5m_input_tokens": 0,
+        "ephemeral_1h_input_tokens": 4602
+       },
+       "output_tokens": 4,
+       "service_tier": "standard",
+       "inference_geo": "global",
+       "speed": "standard"
+      },
+      "input_transformations": [],
+      "diagnostics": null,
+      "context_management": null
+     },
+     "parent_tool_use_id": null,
+     "session_id": "<session-2>",
+     "uuid": "<uuid-33>",
+     "timestamp": "2026-10-27T02:02:43.084Z",
+     "request_id": "req_400000000000000000000000",
+     "wire_tool_inputs": {
+      "toolu_01M6o5Svy4MoEN72hXHvVm5X": {
+       "skill": "project-manager"
+      }
+     }
+    }
+   },
+   {
+    "t": 5281,
+    "m": {
+     "type": "user",
+     "message": {
+      "role": "user",
+      "content": [
+       {
+        "type": "tool_result",
+        "content": "<tool_use_error>Unknown skill: project-manager</tool_use_error>",
+        "is_error": true,
+        "tool_use_id": "<toolu-3>"
+       }
+      ]
+     },
+     "parent_tool_use_id": null,
+     "session_id": "<session-2>",
+     "uuid": "<uuid-34>",
+     "timestamp": "2026-10-27T02:02:43.114Z",
+     "tool_use_result": "Error: Unknown skill: project-manager"
+    }
+   },
+   {
+    "t": 6721,
+    "m": {
+     "type": "system",
+     "subtype": "thinking_tokens",
+     "estimated_tokens": 50,
+     "estimated_tokens_delta": 50,
+     "session_id": "<session-2>",
+     "uuid": "<uuid-35>"
+    }
+   },
+   {
+    "t": 7640,
+    "m": {
+     "type": "system",
+     "subtype": "thinking_tokens",
+     "estimated_tokens": 322,
+     "estimated_tokens_delta": 272,
+     "session_id": "<session-2>",
+     "uuid": "<uuid-36>"
+    }
+   },
+   {
+    "t": 7641,
+    "m": {
+     "type": "assistant",
+     "message": {
+      "model": "claude-haiku-5-5",
+      "id": "<msg-5>",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+       {
+        "type": "thinking",
+        "thinking": "",
+        "signature": "<sig>"
+       }
+      ],
+      "container": null,
+      "stop_reason": null,
+      "stop_sequence": null,
+      "stop_details": null,
+      "usage": {
+       "input_tokens": 2,
+       "cache_creation_input_tokens": 5222,
+       "cache_read_input_tokens": 15346,
+       "cache_creation": {
+        "ephemeral_5m_input_tokens": 0,
+        "ephemeral_1h_input_tokens": 5222
+       },
+       "output_tokens": 4,
+       "service_tier": "standard",
+       "inference_geo": "global",
+       "speed": "standard"
+      },
+      "input_transformations": [],
+      "diagnostics": null,
+      "context_management": null
+     },
+     "parent_tool_use_id": null,
+     "session_id": "<session-2>",
+     "uuid": "<uuid-37>",
+     "timestamp": "2026-10-27T02:02:45.475Z",
+     "request_id": "req_500000000000000000000000",
+     "thinking_duration_ms": 1164,
+     "thinking_display": "updates"
+    }
+   },
+   {
+    "t": 7897,
+    "m": {
+     "type": "assistant",
+     "message": {
+      "model": "claude-haiku-5-5",
+      "id": "<msg-5>",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+       {
+        "type": "tool_use",
+        "id": "<toolu-4>",
+        "name": "Bash",
+        "input": {
+         "command": "date '+%M %H %d %m'",
+         "description": "Show current local minute, hour, day and month"
+        },
+        "caller": {
+         "type": "direct"
+        }
+       }
+      ],
+      "container": null,
+      "stop_reason": null,
+      "stop_sequence": null,
+      "stop_details": null,
+      "usage": {
+       "input_tokens": 2,
+       "cache_creation_input_tokens": 5222,
+       "cache_read_input_tokens": 15346,
+       "cache_creation": {
+        "ephemeral_5m_input_tokens": 0,
+        "ephemeral_1h_input_tokens": 5222
+       },
+       "output_tokens": 4,
+       "service_tier": "standard",
+       "inference_geo": "global",
+       "speed": "standard"
+      },
+      "input_transformations": [],
+      "diagnostics": null,
+      "context_management": null
+     },
+     "parent_tool_use_id": null,
+     "session_id": "<session-2>",
+     "uuid": "<uuid-38>",
+     "timestamp": "2026-10-27T02:02:45.730Z",
+     "request_id": "req_500000000000000000000000",
+     "wire_tool_inputs": {
+      "toolu_01DETdbahWCL1wgZGE2eivm6": {
+       "command": "date '+%M %H %d %m'",
+       "description": "Show current local minute, hour, day and month"
+      }
+     }
+    }
+   },
+   {
+    "t": 7987,
+    "m": {
+     "type": "user",
+     "message": {
+      "role": "user",
+      "content": [
+       {
+        "tool_use_id": "<toolu-4>",
+        "type": "tool_result",
+        "content": "02 05 27 10",
+        "is_error": false
+       }
+      ]
+     },
+     "parent_tool_use_id": null,
+     "session_id": "<session-2>",
+     "uuid": "<uuid-39>",
+     "timestamp": "2026-10-27T02:02:45.795Z",
+     "tool_use_result": {
+      "stdout": "02 05 27 10",
+      "stderr": "",
+      "interrupted": false,
+      "isImage": false,
+      "noOutputExpected": false
+     },
+     "tool_result_meta": [
+      {
+       "id": "<toolu-4>",
+       "permission_decision": {
+        "decision": "accept",
+        "source": "config",
+        "reason_type": "mode"
+       }
+      }
+     ]
+    }
+   },
+   {
+    "t": 9491,
+    "m": {
+     "type": "assistant",
+     "message": {
+      "model": "claude-haiku-5-5",
+      "id": "<msg-6>",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+       {
+        "type": "thinking",
+        "thinking": "",
+        "signature": "<sig>"
+       }
+      ],
+      "container": null,
+      "stop_reason": null,
+      "stop_sequence": null,
+      "stop_details": null,
+      "usage": {
+       "input_tokens": 2,
+       "cache_creation_input_tokens": 344,
+       "cache_read_input_tokens": 20568,
+       "cache_creation": {
+        "ephemeral_5m_input_tokens": 0,
+        "ephemeral_1h_input_tokens": 344
+       },
+       "output_tokens": 3,
+       "service_tier": "standard",
+       "inference_geo": "global",
+       "speed": "standard"
+      },
+      "input_transformations": [],
+      "diagnostics": null,
+      "context_management": null
+     },
+     "parent_tool_use_id": null,
+     "session_id": "<session-2>",
+     "uuid": "<uuid-40>",
+     "timestamp": "2026-10-27T02:02:47.325Z",
+     "request_id": "req_600000000000000000000000",
+     "thinking_duration_ms": 295,
+     "thinking_display": "updates"
+    }
+   },
+   {
+    "t": 9651,
+    "m": {
+     "type": "assistant",
+     "message": {
+      "model": "claude-haiku-5-5",
+      "id": "<msg-6>",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+       {
+        "type": "tool_use",
+        "id": "<toolu-5>",
+        "name": "CronCreate",
+        "input": {
+         "cron": "3 5 27 10 *",
+         "prompt": "say CRON",
+         "recurring": false
+        },
+        "caller": {
+         "type": "direct"
+        }
+       }
+      ],
+      "container": null,
+      "stop_reason": null,
+      "stop_sequence": null,
+      "stop_details": null,
+      "usage": {
+       "input_tokens": 2,
+       "cache_creation_input_tokens": 344,
+       "cache_read_input_tokens": 20568,
+       "cache_creation": {
+        "ephemeral_5m_input_tokens": 0,
+        "ephemeral_1h_input_tokens": 344
+       },
+       "output_tokens": 3,
+       "service_tier": "standard",
+       "inference_geo": "global",
+       "speed": "standard"
+      },
+      "input_transformations": [],
+      "diagnostics": null,
+      "context_management": null
+     },
+     "parent_tool_use_id": null,
+     "session_id": "<session-2>",
+     "uuid": "<uuid-41>",
+     "timestamp": "2026-10-27T02:02:47.485Z",
+     "request_id": "req_600000000000000000000000",
+     "wire_tool_inputs": {
+      "toolu_01HEP2uENKMkruJrzeDZineP": {
+       "cron": "3 5 27 10 *",
+       "prompt": "say CRON",
+       "recurring": false
+      }
+     }
+    }
+   },
+   {
+    "t": 9659,
+    "m": {
+     "type": "user",
+     "message": {
+      "role": "user",
+      "content": [
+       {
+        "tool_use_id": "<toolu-5>",
+        "type": "tool_result",
+        "content": "Scheduled one-shot task 29f07069 (3 5 27 10 *). Next run: Oct 27 5:03am. Session-only (not written to disk, dies when Claude exits). It will fire once then auto-delete."
+       }
+      ]
+     },
+     "parent_tool_use_id": null,
+     "session_id": "<session-2>",
+     "uuid": "<uuid-42>",
+     "timestamp": "2026-10-27T02:02:47.493Z",
+     "tool_use_result": {
+      "id": "<cron-id>",
+      "humanSchedule": "3 5 27 10 *",
+      "recurring": false,
+      "durable": false,
+      "nextFireAt": 1793066580000
+     },
+     "tool_result_meta": [
+      {
+       "id": "<toolu-5>",
+       "permission_decision": {
+        "decision": "accept",
+        "source": "config",
+        "reason_type": "mode"
+       }
+      }
+     ]
+    }
+   },
+   {
+    "t": 11206,
+    "m": {
+     "type": "system",
+     "subtype": "thinking_tokens",
+     "estimated_tokens": 50,
+     "estimated_tokens_delta": 50,
+     "session_id": "<session-2>",
+     "uuid": "<uuid-43>"
+    }
+   },
+   {
+    "t": 12230,
+    "m": {
+     "type": "system",
+     "subtype": "thinking_tokens",
+     "estimated_tokens": 250,
+     "estimated_tokens_delta": 200,
+     "session_id": "<session-2>",
+     "uuid": "<uuid-44>"
+    }
+   },
+   {
+    "t": 12231,
+    "m": {
+     "type": "system",
+     "subtype": "thinking_tokens",
+     "estimated_tokens": 353,
+     "estimated_tokens_delta": 103,
+     "session_id": "<session-2>",
+     "uuid": "<uuid-45>"
+    }
+   },
+   {
+    "t": 12231,
+    "m": {
+     "type": "assistant",
+     "message": {
+      "model": "claude-haiku-5-5",
+      "id": "<msg-7>",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+       {
+        "type": "thinking",
+        "thinking": "",
+        "signature": "<sig>"
+       }
+      ],
+      "container": null,
+      "stop_reason": null,
+      "stop_sequence": null,
+      "stop_details": null,
+      "usage": {
+       "input_tokens": 2,
+       "cache_creation_input_tokens": 380,
+       "cache_read_input_tokens": 20912,
+       "cache_creation": {
+        "ephemeral_5m_input_tokens": 0,
+        "ephemeral_1h_input_tokens": 380
+       },
+       "output_tokens": 7,
+       "service_tier": "standard",
+       "inference_geo": "global",
+       "speed": "standard"
+      },
+      "input_transformations": [],
+      "diagnostics": null,
+      "context_management": null
+     },
+     "parent_tool_use_id": null,
+     "session_id": "<session-2>",
+     "uuid": "<uuid-46>",
+     "timestamp": "2026-10-27T02:02:50.066Z",
+     "request_id": "req_700000000000000000000000",
+     "thinking_duration_ms": 1270,
+     "thinking_display": "updates"
+    }
+   },
+   {
+    "t": 12248,
+    "m": {
+     "type": "assistant",
+     "message": {
+      "model": "claude-haiku-5-5",
+      "id": "<msg-7>",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+       {
+        "type": "text",
+        "text": "scheduled"
+       }
+      ],
+      "container": null,
+      "stop_reason": null,
+      "stop_sequence": null,
+      "stop_details": null,
+      "usage": {
+       "input_tokens": 2,
+       "cache_creation_input_tokens": 380,
+       "cache_read_input_tokens": 20912,
+       "cache_creation": {
+        "ephemeral_5m_input_tokens": 0,
+        "ephemeral_1h_input_tokens": 380
+       },
+       "output_tokens": 7,
+       "service_tier": "standard",
+       "inference_geo": "global",
+       "speed": "standard"
+      },
+      "input_transformations": [],
+      "diagnostics": null,
+      "context_management": null
+     },
+     "parent_tool_use_id": null,
+     "session_id": "<session-2>",
+     "uuid": "<uuid-47>",
+     "timestamp": "2026-10-27T02:02:50.081Z",
+     "request_id": "req_700000000000000000000000"
+    }
+   },
+   {
+    "t": 12284,
+    "m": {
+     "duration_api_ms": 12082,
+     "stop_reason": "end_turn",
+     "session_id": "<session-2>",
+     "total_cost_usd": 0.003619,
+     "usage": {
+      "input_tokens": 8,
+      "cache_creation_input_tokens": 10548,
+      "cache_read_input_tokens": 67570,
+      "output_tokens": 1395,
+      "output_tokens_details": {
+       "thinking_tokens": 1061
+      },
+      "server_tool_use": {
+       "web_search_requests": 0,
+       "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+       "ephemeral_1h_input_tokens": 10548,
+       "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "global",
+      "iterations": [
+       {
+        "input_tokens": 2,
+        "output_tokens": 261,
+        "cache_read_input_tokens": 20912,
+        "cache_creation_input_tokens": 380,
+        "cache_creation": {
+         "ephemeral_5m_input_tokens": 0,
+         "ephemeral_1h_input_tokens": 380
+        },
+        "type": "message"
+       }
+      ],
+      "speed": "standard",
+      "fallback_credit": null
+     },
+     "modelUsage": {
+      "claude-haiku-5-5": {
+       "inputTokens": 1252,
+       "outputTokens": 1417,
+       "cacheReadInputTokens": 67570,
+       "cacheCreationInputTokens": 10548,
+       "webSearchRequests": 0,
+       "costUSD": 0.003619,
+       "contextWindow": 1000000,
+       "maxOutputTokens": 128000,
+       "thinkingTokens": 1061,
+       "canonicalModel": "claude-haiku-5-5",
+       "provider": "firstParty",
+       "costBasis": "list"
+      }
+     },
+     "permission_denials": [],
+     "terminal_reason": "completed",
+     "fast_mode_state": "off",
+     "fast_mode_disabled_reason": "sdk_opt_in_required",
+     "subagent_stats": {
+      "spawned": 0,
+      "requested": {
+       "background": 0,
+       "foreground": 0,
+       "unset": 0
+      },
+      "started_in_background": 0,
+      "max_depth": 0,
+      "spawned_by_subagents": 0,
+      "completed": 0,
+      "failed": 0,
+      "killed": {
+       "parent": 0,
+       "user": 0,
+       "system": 0
+      },
+      "refused": {
+       "depth_limit": 0,
+       "concurrency_limit": 0,
+       "budget": 0
+      },
+      "by_type": {}
+     },
+     "safety_stops": 0,
+     "is_error": false,
+     "num_turns": 5,
+     "subtype": "success",
+     "api_error_status": null,
+     "result": "scheduled",
+     "ttft_ms": 4171,
+     "type": "result",
+     "duration_ms": 11467,
+     "uuid": "<uuid-48>",
+     "ttft_stream_ms": 1454,
+     "time_to_request_ms": 122,
+     "first_content_frame_ms": 1454,
+     "queued_turn_count": 0,
+     "result_index": 0
+    }
+   },
+   {
+    "t": 22665,
+    "m": {
+     "type": "command_lifecycle",
+     "command_uuid": "<uuid-49>",
+     "state": "started",
+     "uuid": "<uuid-50>",
+     "session_id": "<session-2>"
+    }
+   },
+   {
+    "t": 22732,
+    "m": {
+     "type": "system",
+     "subtype": "init",
+     "cwd": "/var/tmp/<cwd>",
+     "session_id": "<session-2>",
+     "model": "claude-haiku-5-5",
+     "permissionMode": "bypassPermissions",
+     "apiKeySource": "none",
+     "claude_code_version": "2.1.306",
+     "output_style": "default",
+     "analytics_disabled": false,
+     "product_feedback_disabled": false,
+     "uuid": "<uuid-51>",
+     "original_cwd": "/var/tmp/<cwd>",
+     "additional_directories": [],
+     "messaging_socket_path": "/run/user/<uid>/cc-socks/<pid>.sock",
+     "fast_mode_state": "off",
+     "fast_mode_disabled_reason": "sdk_opt_in_required",
+     "per_turn_effort_active": true,
+     "view_mode": "default"
+    }
+   },
+   {
+    "t": 24041,
+    "m": {
+     "type": "system",
+     "subtype": "thinking_tokens",
+     "estimated_tokens": 50,
+     "estimated_tokens_delta": 50,
+     "session_id": "<session-2>",
+     "uuid": "<uuid-52>"
+    }
+   },
+   {
+    "t": 24382,
+    "m": {
+     "type": "system",
+     "subtype": "thinking_tokens",
+     "estimated_tokens": 247,
+     "estimated_tokens_delta": 197,
+     "session_id": "<session-2>",
+     "uuid": "<uuid-53>"
+    }
+   },
+   {
+    "t": 24383,
+    "m": {
+     "type": "assistant",
+     "message": {
+      "model": "claude-haiku-5-5",
+      "id": "<msg-8>",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+       {
+        "type": "thinking",
+        "thinking": "",
+        "signature": "<sig>"
+       }
+      ],
+      "container": null,
+      "stop_reason": null,
+      "stop_sequence": null,
+      "stop_details": null,
+      "usage": {
+       "input_tokens": 2,
+       "cache_creation_input_tokens": 475,
+       "cache_read_input_tokens": 21292,
+       "cache_creation": {
+        "ephemeral_5m_input_tokens": 0,
+        "ephemeral_1h_input_tokens": 475
+       },
+       "output_tokens": 2,
+       "service_tier": "standard",
+       "inference_geo": "global",
+       "speed": "standard"
+      },
+      "input_transformations": [],
+      "diagnostics": null,
+      "context_management": null
+     },
+     "parent_tool_use_id": null,
+     "session_id": "<session-2>",
+     "uuid": "<uuid-54>",
+     "timestamp": "2026-10-27T02:03:02.217Z",
+     "request_id": "req_800000000000000000000000",
+     "thinking_duration_ms": 544,
+     "thinking_display": "updates"
+    }
+   },
+   {
+    "t": 24513,
+    "m": {
+     "type": "assistant",
+     "message": {
+      "model": "claude-haiku-5-5",
+      "id": "<msg-8>",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+       {
+        "type": "text",
+        "text": "CRON"
+       }
+      ],
+      "container": null,
+      "stop_reason": null,
+      "stop_sequence": null,
+      "stop_details": null,
+      "usage": {
+       "input_tokens": 2,
+       "cache_creation_input_tokens": 475,
+       "cache_read_input_tokens": 21292,
+       "cache_creation": {
+        "ephemeral_5m_input_tokens": 0,
+        "ephemeral_1h_input_tokens": 475
+       },
+       "output_tokens": 2,
+       "service_tier": "standard",
+       "inference_geo": "global",
+       "speed": "standard"
+      },
+      "input_transformations": [],
+      "diagnostics": null,
+      "context_management": null
+     },
+     "parent_tool_use_id": null,
+     "session_id": "<session-2>",
+     "uuid": "<uuid-55>",
+     "timestamp": "2026-10-27T02:03:02.346Z",
+     "request_id": "req_800000000000000000000000"
+    }
+   },
+   {
+    "t": 24558,
+    "m": {
+     "duration_api_ms": 13875,
+     "stop_reason": "end_turn",
+     "session_id": "<session-2>",
+     "total_cost_usd": 0.00399612,
+     "usage": {
+      "input_tokens": 2,
+      "cache_creation_input_tokens": 475,
+      "cache_read_input_tokens": 21292,
+      "output_tokens": 138,
+      "output_tokens_details": {
+       "thinking_tokens": 133
+      },
+      "server_tool_use": {
+       "web_search_requests": 0,
+       "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+       "ephemeral_1h_input_tokens": 475,
+       "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "global",
+      "iterations": [
+       {
+        "input_tokens": 2,
+        "output_tokens": 138,
+        "cache_read_input_tokens": 21292,
+        "cache_creation_input_tokens": 475,
+        "cache_creation": {
+         "ephemeral_5m_input_tokens": 0,
+         "ephemeral_1h_input_tokens": 475
+        },
+        "type": "message"
+       }
+      ],
+      "speed": "standard",
+      "fallback_credit": null
+     },
+     "modelUsage": {
+      "claude-haiku-5-5": {
+       "inputTokens": 1254,
+       "outputTokens": 1555,
+       "cacheReadInputTokens": 88862,
+       "cacheCreationInputTokens": 11023,
+       "webSearchRequests": 0,
+       "costUSD": 0.00399612,
+       "contextWindow": 1000000,
+       "maxOutputTokens": 128000,
+       "thinkingTokens": 1194,
+       "canonicalModel": "claude-haiku-5-5",
+       "provider": "firstParty",
+       "costBasis": "list"
+      }
+     },
+     "permission_denials": [],
+     "terminal_reason": "completed",
+     "fast_mode_state": "off",
+     "fast_mode_disabled_reason": "sdk_opt_in_required",
+     "subagent_stats": {
+      "spawned": 0,
+      "requested": {
+       "background": 0,
+       "foreground": 0,
+       "unset": 0
+      },
+      "started_in_background": 0,
+      "max_depth": 0,
+      "spawned_by_subagents": 0,
+      "completed": 0,
+      "failed": 0,
+      "killed": {
+       "parent": 0,
+       "user": 0,
+       "system": 0
+      },
+      "refused": {
+       "depth_limit": 0,
+       "concurrency_limit": 0,
+       "budget": 0
+      },
+      "by_type": {}
+     },
+     "safety_stops": 0,
+     "is_error": false,
+     "num_turns": 1,
+     "subtype": "success",
+     "api_error_status": null,
+     "result": "CRON",
+     "ttft_ms": 1717,
+     "type": "result",
+     "duration_ms": 1891,
+     "uuid": "<uuid-56>",
+     "ttft_stream_ms": 1172,
+     "time_to_request_ms": 75,
+     "first_content_frame_ms": 1172,
+     "queued_turn_count": 0,
+     "result_index": 1
+    }
+   },
+   {
+    "t": 24558,
+    "m": {
+     "type": "command_lifecycle",
+     "command_uuid": "<uuid-49>",
+     "state": "completed",
+     "uuid": "<uuid-57>",
+     "session_id": "<session-2>"
+    }
+   }
+  ]
+ },
+ "transcriptWakeRow": {
+  "parentUuid": "<uuid-58>",
+  "isSidechain": false,
+  "promptId": "<prompt-1>",
+  "type": "user",
+  "message": {
+   "role": "user",
+   "content": "say WOKE"
+  },
+  "isMeta": true,
+  "uuid": "<uuid-12>",
+  "timestamp": "2026-10-27T01:53:00.756Z",
+  "permissionMode": "bypassPermissions",
+  "promptSource": "system",
+  "queueSkipSlashCommands": true,
+  "turnOrigin": "scheduled",
+  "turnPosition": {
+   "promptIndex": 0,
+   "turnIndex": 2
+  },
+  "queueSkipAttachments": true,
+  "userType": "external",
+  "entrypoint": "sdk-ts",
+  "cwd": "/var/tmp/<cwd>",
+  "sessionId": "<session-1>",
+  "version": "2.1.306"
+ }
+}

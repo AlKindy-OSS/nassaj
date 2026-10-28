@@ -38,6 +38,7 @@ import { migrateUserHarnessFilesMode } from './harness-files-mode.migration.js';
 import { migrateAuthTokenEpoch } from './auth-token-epoch.migration.js';
 import { migrateShellOneShotRuns } from './shell-oneshot-runs.migration.js';
 import { migrateSsoLinkedSessions } from './sso-linked-sessions.migration.js';
+import { migratePeerMessages } from './peer-messages.migration.js';
 
 /** True when a ledger project path still resolves to a real directory. */
 const projectPathResolves = (projectPath: string): boolean => {
@@ -80,6 +81,9 @@ export const initializeAdmittedDatabase = (db: ReturnType<typeof getConnection>,
     // ADR-H20 (S6): SSO device sessions, their IdP sids and processed logout
     // jtis. Without them every SSO sign-in fails to bind its session.
     migrateSsoLinkedSessions(db);
+    // ADR-219 S1 (T-2072): the cross-session relay rows. Without them every relayed
+    // SendMessage on a multi-member node is refused (fail closed).
+    migratePeerMessages(db);
     const result = initializeConnectorPolicyV2SubstrateOnly(db, authorityRootPath);
     if (!result.ready) throw new Error(`existing_security_connector_initialization_failed:${result.reason}`);
 };
@@ -119,6 +123,8 @@ export const initializeDatabase = async () => {
             migrateShellOneShotRuns(db);
             // ADR-H20 (S6): linked sign-in and sign-out tables (idempotent).
             migrateSsoLinkedSessions(db);
+            // ADR-219 S1 (T-2072): cross-session relay rows (idempotent).
+            migratePeerMessages(db);
             migrateConnectorAuthSchema(db);
             const existingInstallation = db.prepare(`SELECT installation_id AS installationId
                 FROM connector_installations WHERE singleton=1`).get() as { installationId: string } | undefined;

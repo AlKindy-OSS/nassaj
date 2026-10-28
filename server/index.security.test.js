@@ -36,6 +36,7 @@ import { isSecretFileConfirmed, sendSecretFileConfirmationRequired } from './uti
 import { buildPendingAction } from './services/server-actions.js';
 import { toActiveUpdateJobPayload } from './routes/update-job-abandon.js';
 import { isShareableDocument, saveSharedDocumentAtomically } from './services/document-share-files.js';
+import { rebaseRequestedPath } from './services/session-file-root.js';
 
 const INDEX_PATH = path.join(path.dirname(fileURLToPath(import.meta.url)), 'index.js');
 const INDEX_SOURCE = fs.readFileSync(INDEX_PATH, 'utf8');
@@ -146,6 +147,7 @@ function buildSaveFileHandler(projectRoot) {
     'path', 'fsPromises', 'projectsDb', 'coerceUserId', 'isResolvedPathInsideRootReal', 'console',
     'isShareableDocument', 'saveSharedDocumentAtomically',
     'classifySecretPath', 'isSecretFileConfirmed', 'sendSecretFileConfirmationRequired', 'auditSecretFileAccess',
+    'resolveFileRootOrRespond', 'rebaseRequestedPath',
     `function validatePathInProject(${validateSrc.params}) ${validateSrc.body}
      return ${handlerSrc};`,
   );
@@ -166,6 +168,11 @@ function buildSaveFileHandler(projectRoot) {
     isSecretFileConfirmed,
     sendSecretFileConfirmationRequired,
     () => {},
+    // B-1689: no sessionId here, so the file root is the project root.
+    (_req, _res, root) => ({
+      root, overlay: false, sessionId: null, overlayId: null,
+    }),
+    rebaseRequestedPath,
   );
 }
 

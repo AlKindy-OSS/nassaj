@@ -23,6 +23,7 @@ import spawn from 'cross-spawn';
 import type { NextFunction, Request, RequestHandler, Response } from 'express';
 
 import { resolveCliExecutablePath } from '@/shared/cli-executable-path.js';
+import { pathHasGitDirSegment } from '../../shared/git-safety.js';
 import { tryResolveHarnessBinary, resolveHarnessBinary } from '@/shared/harness-binaries.js';
 import { parseFrontMatter } from '@/shared/frontmatter.js';
 import { verifyVendorBinaryDigest } from '@/services/isolation/vendor-binary-integrity.js';
@@ -303,6 +304,8 @@ function findForbiddenWorkspacePathError(normalizedPath: string): string | null 
  * blocks known system directories. The root is read per call (env first, then
  * the import-time default), matching the membership admission check.
  */
+const GIT_DIR_WORKSPACE_ERROR = 'Workspace path must not be inside a .git directory';
+
 export async function validateWorkspacePath(requestedPath: string): Promise<WorkspacePathValidationResult> {
   try {
     const normalizedRequestedPath = normalizeProjectPath(requestedPath);
@@ -320,12 +323,20 @@ export async function validateWorkspacePath(requestedPath: string): Promise<Work
     if (literalForbiddenError) {
       return { valid: false, error: literalForbiddenError };
     }
+    // B-1691 (qa F8): never a workspace or project inside a `.git` directory,
+    // where `config` and `hooks/*` would become plain project files.
+    if (pathHasGitDirSegment(absolutePath)) {
+      return { valid: false, error: GIT_DIR_WORKSPACE_ERROR };
+    }
 
     const resolution = await realpathThroughMissingSegments(absolutePath);
     if (!resolution.ok) {
       return { valid: false, error: resolution.error };
     }
     const resolvedPath = normalizeProjectPath(resolution.resolvedPath);
+    if (pathHasGitDirSegment(resolvedPath)) {
+      return { valid: false, error: GIT_DIR_WORKSPACE_ERROR };
+    }
     if (resolvedPath !== normalizedPath) {
       const forbiddenError = findForbiddenWorkspacePathError(resolvedPath);
       if (forbiddenError) {

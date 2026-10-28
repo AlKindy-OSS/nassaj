@@ -57,6 +57,11 @@ vi.mock('../../../auth/context/AuthContext', () => ({
   useAuth: () => ({ user: null }),
 }));
 
+// ADR-214: شارة إنفاق API خارج نطاق هذا الملف — صامتة (none) هنا.
+vi.mock('../../../quick-settings-panel/hooks/useAnthropicApiSpend', () => ({
+  useAnthropicApiSpend: () => ({ status: 'none' }),
+}));
+
 vi.mock('../../../quick-settings-panel/hooks/useClaudeUsageShared', () => ({
   useClaudeUsageShared: (enabled: boolean) => {
     enabledCalls.push(enabled);

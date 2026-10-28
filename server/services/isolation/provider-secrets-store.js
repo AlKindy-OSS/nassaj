@@ -29,7 +29,7 @@
  * the server key. Errors log only the provider/user and an error message.
  *
  * @typedef {'kimi'|'deepseek'|'glm'|'qwen'} VendorProvider
- * @typedef {'vendor'|'connector'|'speech'|'local-model'} SecretNamespace
+ * @typedef {'vendor'|'connector'|'speech'|'local-model'|'admin-billing'} SecretNamespace
  */
 
 import crypto from 'node:crypto';
@@ -202,6 +202,22 @@ function assertMemberScope(scope) {
       'provider-secrets-store: vendor slot keys are member-scoped. The operator-wide slot is '
         + 'reachable only through resolveSlotKey (services/isolation/provider-slot-key.js).',
     );
+  }
+  assertScope(scope);
+}
+
+/**
+ * Admin-billing credentials belong to one authenticated member, never the
+ * operator-wide store: a shared Admin key would show every member the
+ * organization's spend (ADR-214 — each member sees only their own).
+ *
+ * @param {string|number} scope
+ * @returns {void}
+ * @throws {TypeError} on an implicit scope, or on the operator-wide scope
+ */
+function assertAdminBillingScope(scope) {
+  if (scope === SYSTEM_SECRET_SCOPE) {
+    throw new TypeError('provider-secrets-store: admin-billing secrets are member-scoped.');
   }
   assertScope(scope);
 }
@@ -405,8 +421,16 @@ export function isVendorSecretProvider(provider) {
  * tree). Reusing 'vendor' was not an option either: that list is a closed
  * whitelist of CLI vendors, and widening it would let a speech key be handed to
  * a spawn as a vendor credential.
+ *
+ * 'admin-billing' (ADR-214 / T-2066) holds a member's Anthropic Admin key, read
+ * only by the month-to-date spend service. It is member-scoped by construction
+ * (see {@link assertAdminBillingScope}) and is never part of any spawn env: an
+ * Admin key can manage the whole organization, not just bill a turn.
  */
-export const SECRET_NAMESPACES = Object.freeze(['vendor', 'connector', 'speech', 'local-model']);
+export const SECRET_NAMESPACES = Object.freeze(['vendor', 'connector', 'speech', 'local-model', 'admin-billing']);
+
+/** Namespaces that have no operator-wide slot at all. */
+const MEMBER_ONLY_NAMESPACES = Object.freeze(['admin-billing']);
 
 /**
  * Secret ids become a path-free segment of a JSON key, never a filename — but
@@ -415,6 +439,21 @@ export const SECRET_NAMESPACES = Object.freeze(['vendor', 'connector', 'speech',
  * Restricting to a conservative slug charset removes that whole question.
  */
 const SECRET_ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/;
+
+/**
+ * Scope check for the generic namespaced API: a member-only namespace refuses
+ * the operator-wide scope even when reached without its dedicated wrapper.
+ * @param {string|number|typeof SYSTEM_SECRET_SCOPE} scope
+ * @param {SecretNamespace} namespace
+ * @returns {void}
+ */
+function assertNamespaceScope(scope, namespace) {
+  if (MEMBER_ONLY_NAMESPACES.includes(namespace)) {
+    assertAdminBillingScope(scope);
+    return;
+  }
+  assertScope(scope);
+}
 
 /**
  * Builds the on-disk key for one (namespace, id) pair.
@@ -454,7 +493,7 @@ function storageKeyFor(namespace, id) {
  * @returns {{ namespace: string, id: string, stored: boolean }}
  */
 export function setNamespacedSecret(scope, namespace, id, secret) {
-  assertScope(scope);
+  assertNamespaceScope(scope, namespace);
   const storageKey = storageKeyFor(namespace, id);
   if (typeof secret !== 'string' || secret.trim() === '') {
     throw new Error('Secret must be a non-empty string');
@@ -478,7 +517,7 @@ export function setNamespacedSecret(scope, namespace, id, secret) {
  * @returns {string|null}
  */
 export function getNamespacedSecret(scope, namespace, id) {
-  assertScope(scope);
+  assertNamespaceScope(scope, namespace);
   const storageKey = storageKeyFor(namespace, id);
   return decrypt(readKeysFile(scope)[storageKey]);
 }
@@ -505,7 +544,7 @@ export function hasNamespacedSecret(scope, namespace, id) {
  * @returns {{ namespace: string, id: string, removed: boolean }}
  */
 export function deleteNamespacedSecret(scope, namespace, id) {
-  assertScope(scope);
+  assertNamespaceScope(scope, namespace);
   const storageKey = storageKeyFor(namespace, id);
   const removed = mutateKeysFile(scope, dropEntry(storageKey));
   return { namespace, id, removed };
@@ -555,6 +594,41 @@ export function hasLocalModelSecret(userId, serverId) {
 export function deleteLocalModelSecret(userId, serverId) {
   assertLocalModelScope(userId);
   return deleteNamespacedSecret(userId, 'local-model', serverId);
+}
+
+/** The single id under 'admin-billing'; only Anthropic exposes a cost report. */
+const ANTHROPIC_ADMIN_SECRET_ID = 'anthropic';
+
+/**
+ * Stores one member's Anthropic Admin key (ADR-214). Never echoed back.
+ * @param {string|number} userId
+ * @param {string} key
+ * @returns {{ namespace: string, id: string, stored: boolean }}
+ */
+export function setAnthropicAdminKey(userId, key) {
+  assertAdminBillingScope(userId);
+  return setNamespacedSecret(userId, 'admin-billing', ANTHROPIC_ADMIN_SECRET_ID, key);
+}
+
+/**
+ * Reads one member's Anthropic Admin key, or null. Callers outside the spend
+ * service must not exist (guarded by a test).
+ * @param {string|number} userId
+ * @returns {string|null}
+ */
+export function getAnthropicAdminKey(userId) {
+  assertAdminBillingScope(userId);
+  return getNamespacedSecret(userId, 'admin-billing', ANTHROPIC_ADMIN_SECRET_ID);
+}
+
+/**
+ * Deletes one member's Anthropic Admin key. Idempotent.
+ * @param {string|number} userId
+ * @returns {{ namespace: string, id: string, removed: boolean }}
+ */
+export function deleteAnthropicAdminKey(userId) {
+  assertAdminBillingScope(userId);
+  return deleteNamespacedSecret(userId, 'admin-billing', ANTHROPIC_ADMIN_SECRET_ID);
 }
 
 /**

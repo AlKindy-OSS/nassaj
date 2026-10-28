@@ -12,6 +12,34 @@ export interface WhatsNewEntry {
 }
 
 export const WHATS_NEW: Readonly<Record<string, WhatsNewEntry>> = {
+  '2.3.3.0': {
+    ar: [
+      'شريط الوكلاء يعرض كل وكلاء Claude، بما فيها الخلفية والمستأنفة، مع وسم «حالة تقديرية» عند الحالات المُعادة.',
+      'تفاصيل الوكيل الأمامي تظهر أثناء تشغيله، والحالة تظهر بالعربية.',
+      'بوصلة التوجيه لا تختفي مع بداية الدور، وصور التوجيه تظهر في فقاعتها.',
+      'شارة إنفاق الشهر لواجهة Anthropic API في ترويسة المحادثة.',
+      'الرسائل بين الجلسات تصل عبر نسّاج، بين جلسات المالك نفسه.',
+      'OpenCode وGLM يعملان بأوضاع الصلاحيات نفسها في Claude، مع منتقي الوضع في المؤلِّف.',
+      'الجدولة (/loop) تعمل: تبقى الجلسة مفتوحة حتى موعد الإيقاظ.',
+      'فتح الملفات المحادثية وحفظها يعملان من تراكب الجلسة.',
+      'زرّ المالك يثبّت كل الواجهات، بما فيها Claude وagy، وزرّ لإصلاح ربط فرع الإصدار.',
+      'العُقد تجهّز الإصدار الجديد مسبقاً خلال نحو ربع ساعة من صدوره.',
+      'ترقيع ثغرتين حرجتين في الاعتماديات.',
+    ],
+    en: [
+      'The agents bar shows every Claude agent, including background and resumed ones, with an "estimated state" badge where the state is reconstructed.',
+      'A foreground agent shows its details while it runs, and the run status reads in Arabic.',
+      'The steer compass no longer disappears at the start of a turn, and steer images show in their bubble.',
+      'A month-to-date Anthropic API spend badge in the chat header.',
+      'Messages between your sessions are delivered through Nassaj (same owner and mode).',
+      'OpenCode and GLM run with Claude\'s permission modes, with a mode picker in the composer.',
+      'Scheduled wake-ups (/loop) work: the session stays open until it fires.',
+      'Opening and saving chat files works from the session overlay.',
+      'The owner button installs every CLI, including Claude and agy, and a button repairs the release-branch link.',
+      'Nodes prepare a new release in advance within about 15 minutes of publication.',
+      'Two critical dependency advisories are patched.',
+    ],
+  },
   '2.3.2.0': {
     ar: [
       'محادثة الفريق صارت داخل المؤلِّف: زرّ «الفريق» يرسل ما تكتبه إلى الفريق بدل النموذج.',

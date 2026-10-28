@@ -142,6 +142,19 @@ function MainContent({
     [handleFileOpen],
   );
 
+  // B-1689: a file opened from the chat is the session's file — in an overlay
+  // session it may exist only in the overlay, so the editor reads/saves there.
+  // Project tools (files, git, board) keep reading the project root.
+  const selectedSessionId = selectedSession?.id ?? null;
+  const handleChatFileOpen = useCallback(
+    (filePath: string, diffInfo?: unknown) => handleFileOpen(
+      filePath,
+      (diffInfo ?? null) as Parameters<typeof handleFileOpen>[1],
+      { sessionId: selectedSessionId },
+    ),
+    [handleFileOpen, selectedSessionId],
+  );
+
   usePaletteOpsRegister({
     openFile: (filePath: string) => {
       setActiveTab('files');
@@ -323,7 +336,7 @@ function MainContent({
                 ws={ws}
                 sendMessage={sendMessage}
                 latestMessage={latestMessage}
-                onFileOpen={handleFileOpen}
+                onFileOpen={handleChatFileOpen}
                 onInputFocusChange={onInputFocusChange}
                 onSessionActive={onSessionActive}
                 onSessionInactive={onSessionInactive}

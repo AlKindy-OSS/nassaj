@@ -101,4 +101,27 @@ describe('useSteerQueuedInsertion', () => {
     expect(claimSteerInsertion('id-0')).toBe(true);
     expect(claimSteerInsertion('id-512')).toBe(false);
   });
+
+  it('B-1697: carries the steer images as authenticated chat-image URLs, dropping malformed refs', () => {
+    const addMessage = vi.fn();
+    const bucket = 'ab'.repeat(16);
+    renderHook(() => useSteerQueuedInsertion({
+      events: [{ ...queued, clientMsgId: 'steer-img', images: [
+        { bucket, name: 'image_0.png' }, { bucket: '../x', name: 'image_1.png' },
+      ] }],
+      sessionId: SESSION_ID, addMessage, trackedInjections: new Map(),
+    }));
+    expect(addMessage.mock.calls[0][0].images).toEqual([
+      { name: 'image_0.png', data: `/api/chat-images/${bucket}/image_0.png` },
+    ]);
+  });
+
+  it('B-1697: a text-only steer gets no images field', () => {
+    const addMessage = vi.fn();
+    renderHook(() => useSteerQueuedInsertion({
+      events: [{ ...queued, clientMsgId: 'steer-plain' }],
+      sessionId: SESSION_ID, addMessage, trackedInjections: new Map(),
+    }));
+    expect(addMessage.mock.calls[0][0].images).toBeUndefined();
+  });
 });

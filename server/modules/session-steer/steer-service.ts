@@ -10,7 +10,8 @@ import { createHash, randomUUID } from 'node:crypto';
 // named import of a member such a mock omits fails ESM linking (see chat-websocket.service.ts).
 import * as databaseModule from '@/modules/database/index.js';
 
-import type { SessionSteerResult, SteerRejectCode } from '../../../shared/session-steer.contract.js';
+import { readSteerImageRefs } from '../../../shared/session-steer.contract.js';
+import type { SessionSteerResult, SteerImageRef, SteerRejectCode } from '../../../shared/session-steer.contract.js';
 
 import { isSteeringAllowedFor } from './steer-policy.js';
 import { getMidTurnInjection } from './steer-registry.js';
@@ -40,6 +41,8 @@ export type SteerContext = {
    * read from the client request.
    */
   imageNote?: string;
+  /** Store refs of those same images, shown in the steer bubble (B-1697); never absolute paths. */
+  images?: SteerImageRef[];
   now?: () => number;
 };
 
@@ -173,14 +176,18 @@ export function handleSessionSteer(data: unknown, ctx: SteerContext): SessionSte
     const payloadSha256 = adapter.payloadHash(wrapped);
     if (!payloadSha256) return refuse('text_too_long', clean.text);
     return admit(req, run, { provider: provider as string, senderId, senderName, text: clean.text,
-      wrapped, payloadSha256, mode, refuse, onPersisted: () => recordRate(rateKey, now) });
+      images: readSteerImageRefs(ctx.images), wrapped, payloadSha256, mode, refuse,
+      onPersisted: () => recordRate(rateKey, now) });
   } catch {
     return reply(req, 'internal_error');
   }
 }
 
-/** Stores steer images; resolves the path note, or null when any image was rejected. */
-export type SteerImageStore = (images: unknown[]) => Promise<string | null>;
+/**
+ * Stores steer images; resolves the model-facing path note and the display refs,
+ * or null when any image was rejected.
+ */
+export type SteerImageStore = (images: unknown[]) => Promise<{ note: string; images: SteerImageRef[] } | null>;
 
 /**
  * Admits a steer that may carry images. Images are stored only for a well-formed
@@ -199,16 +206,17 @@ export async function handleSessionSteerWithImages(data: unknown, ctx: SteerCont
   }
   try {
     if (!ctx.isWritable(req.sessionId, sender as number)) return reply(req, 'not_writable');
-    const imageNote = await storeImages(images);
-    if (!imageNote) return reply(req, 'image_rejected');
-    return handleSessionSteer(data, { ...ctx, imageNote });
+    const stored = await storeImages(images);
+    if (!stored?.note) return reply(req, 'image_rejected');
+    return handleSessionSteer(data, { ...ctx, imageNote: stored.note, images: stored.images });
   } catch {
     return reply(req, 'internal_error');
   }
 }
 
 type Admission = {
-  provider: string; senderId: number; senderName: string; text: string; wrapped: string; payloadSha256: string;
+  provider: string; senderId: number; senderName: string; text: string; images: SteerImageRef[];
+  wrapped: string; payloadSha256: string;
   mode: string | null; refuse: (code: SteerRejectCode, text?: string | null) => SessionSteerResult;
   onPersisted: () => void;
 };
@@ -223,7 +231,7 @@ function admit(req: Request, run: SteerRun, a: Admission): SessionSteerResult {
   const uuid = randomUUID();
   const inserted = databaseModule.messageCoordinationDb.insertSteer({
     clientMsgId: req.clientMsgId, userId: a.senderId, provider: a.provider, sessionId: req.sessionId,
-    turnId: req.turnId, text: a.text, uuid, payloadSha256: a.payloadSha256,
+    turnId: req.turnId, text: a.text, uuid, payloadSha256: a.payloadSha256, images: a.images,
   });
   if (!inserted) return a.refuse('duplicate', a.text);
   a.onPersisted();
@@ -234,7 +242,8 @@ function admit(req: Request, run: SteerRun, a: Admission): SessionSteerResult {
     return reply(req, 'internal_error');
   }
   const queued = run.enqueue({ clientMsgId: req.clientMsgId, senderUserId: a.senderId,
-    senderName: a.senderName, text: a.text, wrapped: a.wrapped, uuid });
+    senderName: a.senderName, text: a.text, wrapped: a.wrapped, uuid,
+    ...(a.images.length > 0 ? { images: a.images } : {}) });
   if (!queued.ok) {
     databaseModule.messageCoordinationDb.updateSteerStatus(req.clientMsgId, a.senderId, 'rejected');
     return a.refuse(queued.code, a.text);

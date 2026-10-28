@@ -35,6 +35,9 @@ import {
   isForbiddenProjectRoot,
   isSecretPath,
 } from '@/shared/secret-path-guard.js';
+import { isGitDirSegment, pathHasGitDirSegment } from '../../shared/git-safety.js';
+
+export { isGitDirSegment, pathHasGitDirSegment };
 
 /** Refusal for a service secret (B-1373): never served, whatever the request says. */
 const SECRET_PATH_REFUSAL = Object.freeze({
@@ -49,6 +52,67 @@ const SECRET_CONFIRMATION_REFUSAL = Object.freeze({
   code: 'SECRET_CONFIRMATION_REQUIRED',
   error: 'Secret file requires confirmation',
 });
+
+/**
+ * B-1691: refusal for a path inside a git directory. Same code-free shape as an
+ * out-of-root path, so the refusal discloses nothing more than OUTSIDE_ROOT.
+ */
+const GIT_DIR_REFUSAL = Object.freeze({
+  valid: false,
+  code: 'GIT_DIR',
+  error: 'Path must be under project root',
+});
+
+/**
+ * B-1691: true when `target`, taken relative to `root`, passes through a git
+ * directory. A file API write there (`.git/config`, `.git/hooks/*`, a worktree's
+ * `.git` gitdir file) is code execution the next time the server runs git, and
+ * a read there bypasses the session checks of the overlays kept under `.git`.
+ * @param {string} root   Effective root (project root or session overlay).
+ * @param {string} target Absolute path to test.
+ * @returns {boolean}
+ */
+function hasGitDirSegment(root, target) {
+  const relative = path.relative(root, target);
+  return relative !== '' && relative.split(path.sep).some(isGitDirSegment);
+}
+
+/**
+ * B-1691: true (and one log line, the path only, never content) when `target`
+ * passes through a git directory below `root`. Call it only for a target
+ * already known to be inside `root`, so an escape is not logged as a git path.
+ * @param {string} root
+ * @param {string} target
+ * @returns {boolean}
+ */
+function refuseIfGitDir(root, target) {
+  if (!hasGitDirSegment(root, target)) return false;
+  console.warn('[path-guard] refused git directory path', {
+    event: 'project_file_git_dir_refused', root, path: path.relative(root, target),
+  });
+  return true;
+}
+
+/**
+ * B-1691 (qa F8): true (and one log line) when the project ROOT itself, lexically
+ * or for real, lies inside a git directory: a legacy project row registered on
+ * `<P>/.git` (or an overlay) would expose `config` and `hooks/*` as plain paths.
+ * The only exemption is a session overlay root the caller resolved server-side
+ * (resolveSessionFileRoot / the bound session workspace), passed explicitly as
+ * `trustedOverlayRoot`; it is never inferred from the path's shape.
+ * @param {string} rootAbs
+ * @param {string} realRoot
+ * @param {boolean} trustedOverlayRoot
+ * @returns {boolean}
+ */
+function refuseIfGitDirRoot(rootAbs, realRoot, trustedOverlayRoot) {
+  if (trustedOverlayRoot === true) return false;
+  if (!pathHasGitDirSegment(rootAbs) && !pathHasGitDirSegment(realRoot)) return false;
+  console.warn('[path-guard] refused project root inside a git directory', {
+    event: 'project_root_git_dir_refused', root: rootAbs,
+  });
+  return true;
+}
 
 /** The stricter of two secret classes ('service' > 'project' > null). */
 function stricterSecretClass(a, b) {
@@ -80,12 +144,16 @@ function stricterSecretClass(a, b) {
  * (SECRET_PATH). A project secret file (dotenv or SQLite by name) is refused
  * with SECRET_CONFIRMATION_REQUIRED unless `options.confirmSecret` is true; when
  * served, the result carries `secretFile: true` so the caller can audit it.
+ * B-1691: a path through a `.git` directory below the root, lexically or after
+ * following symlinks, is refused (GIT_DIR, same message as an out-of-root path),
+ * and so is every path under a root inside a git directory unless
+ * `options.trustedOverlayRoot` marks a server-resolved session overlay (qa F8).
  *
- * @param {{ confirmSecret?: boolean }} [options]
+ * @param {{ confirmSecret?: boolean, trustedOverlayRoot?: boolean }} [options]
  * @returns {Promise<
  *   { valid: true, resolved: string, realResolved: string, secretFile: boolean } |
  *   { valid: false, code: 'OUTSIDE_ROOT' | 'SYMLINK_ESCAPE' | 'ENOENT' | 'FORBIDDEN_ROOT' | 'SECRET_PATH'
- *     | 'SECRET_CONFIRMATION_REQUIRED', error: string }
+ *     | 'SECRET_CONFIRMATION_REQUIRED' | 'GIT_DIR', error: string }
  * >}
  */
 export async function resolveReadPathInProject(projectRoot, requestedPath, options = {}) {
@@ -101,6 +169,8 @@ export async function resolveReadPathInProject(projectRoot, requestedPath, optio
   if (!resolved.startsWith(rootAbs + path.sep)) {
     return { valid: false, code: 'OUTSIDE_ROOT', error: 'Path must be under project root' };
   }
+  // B-1691: before any disk I/O, so a refusal never tells whether it exists.
+  if (refuseIfGitDir(rootAbs, resolved)) return GIT_DIR_REFUSAL;
 
   // (2) Canonical boundary — follows symlinks on both sides.
   let realRoot;
@@ -110,6 +180,7 @@ export async function resolveReadPathInProject(projectRoot, requestedPath, optio
     // Root missing/unreadable: nothing under it can be served.
     return { valid: false, code: 'ENOENT', error: 'File not found' };
   }
+  if (refuseIfGitDirRoot(rootAbs, realRoot, options.trustedOverlayRoot)) return GIT_DIR_REFUSAL;
 
   let realResolved;
   try {
@@ -124,6 +195,8 @@ export async function resolveReadPathInProject(projectRoot, requestedPath, optio
     // Lexically inside, but the real path escapes the tree via a symlink.
     return { valid: false, code: 'SYMLINK_ESCAPE', error: 'Path must be under project root' };
   }
+  // B-1691: a symlink inside the tree that lands in a git directory.
+  if (refuseIfGitDir(realRoot, realResolved)) return GIT_DIR_REFUSAL;
 
   const secretClass = stricterSecretClass(classifySecretPath(resolved), classifySecretPath(realResolved));
   if (secretClass === 'service') return SECRET_PATH_REFUSAL;
@@ -198,7 +271,7 @@ async function inspectOpenedFile(handle, size, guard) {
  *
  * @param {string} projectRoot   Absolute project root directory.
  * @param {string} requestedPath Client-supplied path (absolute or project-relative).
- * @param {{ confirmSecret?: boolean }} [options]
+ * @param {{ confirmSecret?: boolean, trustedOverlayRoot?: boolean }} [options]
  * @returns {Promise<
  *   { valid: true, resolved: string, realResolved: string, secretFile: boolean,
  *     content: Buffer | null, handle: import('node:fs/promises').FileHandle } |
@@ -208,7 +281,9 @@ async function inspectOpenedFile(handle, size, guard) {
 export async function openReadableProjectFile(projectRoot, requestedPath, options = {}) {
   // Confirmation is decided after the content check, so a service secret is
   // always 403 and never 428.
-  const guard = await resolveReadPathInProject(projectRoot, requestedPath, { confirmSecret: true });
+  const guard = await resolveReadPathInProject(projectRoot, requestedPath, {
+    confirmSecret: true, trustedOverlayRoot: options.trustedOverlayRoot,
+  });
   if (!guard.valid) return guard;
   const handle = await open(guard.realResolved, 'r');
   try {
@@ -262,12 +337,17 @@ export async function openReadableProjectFile(projectRoot, requestedPath, option
  * secrets are refused, so a member can again create, rename, delete and (after
  * a confirmation the caller enforces) save the project's own dotenv/SQLite
  * files; without it every isSecretPath target stays refused.
+ * B-1691: with `options.refuseGitDir` a target passing through a `.git`
+ * directory below the root (lexically, or via the real path of its deepest
+ * existing ancestor) is refused too; the file API and the git routes set it.
+ * With it, a root inside a git directory is refused as a whole unless
+ * `options.trustedOverlayRoot` marks a server-resolved session overlay (qa F8).
  *
  * Returns true only when the path is provably inside the (real) project root.
  *
  * @param {string} projectRoot    Absolute project root directory.
  * @param {string} resolvedTarget Already lexically-resolved absolute target path.
- * @param {{ allowProjectSecretFiles?: boolean }} [options]
+ * @param {{ allowProjectSecretFiles?: boolean, refuseGitDir?: boolean, trustedOverlayRoot?: boolean }} [options]
  * @returns {boolean}
  */
 export function isResolvedPathInsideRootReal(projectRoot, resolvedTarget, options = {}) {
@@ -279,48 +359,53 @@ export function isResolvedPathInsideRootReal(projectRoot, resolvedTarget, option
   if (isForbiddenProjectRoot(projectRoot) || isRefusedTarget(resolvedTarget) || containsServiceRoot(resolvedTarget)) {
     return false;
   }
+  const refuseGitDir = options.refuseGitDir === true;
+  const rootAbs = path.resolve(projectRoot);
+  const targetAbs = path.resolve(resolvedTarget);
+  // B-1691: lexical git-dir check, only for a target inside the root (qa F6).
+  if (refuseGitDir && isInsideOrEqual(rootAbs, targetAbs) && refuseIfGitDir(rootAbs, targetAbs)) return false;
   let realRoot;
   try {
-    realRoot = fs.realpathSync(path.resolve(projectRoot));
+    realRoot = fs.realpathSync(rootAbs);
   } catch {
     return false;
   }
+  if (refuseGitDir && refuseIfGitDirRoot(rootAbs, realRoot, options.trustedOverlayRoot)) return false;
+  const real = realpathOfDeepestExisting(targetAbs);
+  if (real === null || isRefusedTarget(real) || !isInsideOrEqual(realRoot, real)) return false;
+  return !(refuseGitDir && refuseIfGitDir(realRoot, real));
+}
 
-  let probe = path.resolve(resolvedTarget);
-  // Walk up to the nearest existing ancestor (the leaf may not exist yet).
+/** True when `target` is `root` or strictly below it (lexical). */
+function isInsideOrEqual(root, target) {
+  return target === root || target.startsWith(root + path.sep);
+}
+
+/**
+ * Real path of the deepest EXISTING ancestor of `probe` (the leaf may not exist
+ * yet), or null when it cannot be proven: a name that exists but has no
+ * realpath (a dangling symlink, see the DANGLING-SYMLINK note above), any error
+ * other than ENOENT (EACCES, ELOOP …), or no existing ancestor at all.
+ * @param {string} probe Absolute path.
+ * @returns {string|null}
+ */
+function realpathOfDeepestExisting(probe) {
   for (;;) {
     try {
-      const real = fs.realpathSync(probe);
-      if (isRefusedTarget(real)) return false;
-      return real === realRoot || real.startsWith(realRoot + path.sep);
+      return fs.realpathSync(probe);
     } catch (err) {
-      if (err && err.code === 'ENOENT') {
-        // Disambiguate "missing" from "exists but unresolvable" (see the
-        // DANGLING-SYMLINK note above). lstat does NOT follow the final
-        // component, so a dangling link reports as an existing symlink here
-        // while a truly absent name throws ENOENT again.
-        let entry = null;
-        try {
-          entry = fs.lstatSync(probe);
-        } catch {
-          entry = null; // genuinely absent — safe to consider its parent.
-        }
-        if (entry) {
-          // The name IS present on disk yet has no realpath: a dangling symlink
-          // (or an equally unresolvable entry). A write here would follow the
-          // link and land on an unverifiable target. Fail closed.
-          return false;
-        }
-        const parent = path.dirname(probe);
-        if (parent === probe) {
-          // Reached the filesystem root without finding an existing ancestor.
-          return false;
-        }
-        probe = parent;
-        continue;
+      if (!err || err.code !== 'ENOENT') return null;
+      // lstat does NOT follow the final component: a dangling link reports as
+      // an existing entry here (fail closed), a truly absent name throws again.
+      try {
+        fs.lstatSync(probe);
+        return null;
+      } catch {
+        // Genuinely absent: consider its parent.
       }
-      // EACCES / ELOOP / any other error: fail closed.
-      return false;
+      const parent = path.dirname(probe);
+      if (parent === probe) return null;
+      probe = parent;
     }
   }
 }

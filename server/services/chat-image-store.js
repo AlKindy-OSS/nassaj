@@ -262,6 +262,25 @@ export function buildChatImageNote(paths) {
 }
 
 /**
+ * Store references `{bucket, name}` for paths returned by saveChatImages —
+ * what a client may hold instead of an absolute server path (B-1697). Paths
+ * that do not sit directly inside a store bucket are dropped.
+ * @param {string[]} paths - Paths returned by saveChatImages
+ * @returns {Array<{bucket: string, name: string}>}
+ */
+export function chatImageRefsFromPaths(paths) {
+  if (!Array.isArray(paths)) return [];
+  const root = getChatImageRoot();
+  return paths.flatMap((filepath) => {
+    if (typeof filepath !== 'string') return [];
+    const bucket = path.basename(path.dirname(filepath));
+    const name = path.basename(filepath);
+    const inStore = path.dirname(path.dirname(filepath)) === root;
+    return inStore && BUCKET_PATTERN.test(bucket) && NAME_PATTERN.test(name) ? [{ bucket, name }] : [];
+  });
+}
+
+/**
  * Writes base64 data-URL images into a fresh bucket.
  *
  * Partial failure is REPORTED, not swallowed (qa-critic): one unwritable image

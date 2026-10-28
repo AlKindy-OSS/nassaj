@@ -1,6 +1,6 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ChevronDown, Clock3, GitFork, ImageOff, Info, Sparkles } from 'lucide-react';
+import { Bot, ChevronDown, Clock3, GitFork, ImageOff, Info, Sparkles } from 'lucide-react';
 
 import SessionProviderLogo from '../../../llm-logo-provider/SessionProviderLogo';
 import ParticipantAvatar from '../../../participants/ParticipantAvatar';
@@ -29,6 +29,7 @@ import SteerBubble from '../../../session-steer/SteerBubble';
 import { useTurnCostMap } from '../../context/TurnCostContext';
 
 import { Markdown } from './Markdown';
+import { noticeText } from './noticeText';
 import AgyTextToolCalls from './AgyTextToolCalls';
 import ChatMessageImage from './ChatMessageImage';
 import MessageCopyControl from './MessageCopyControl';
@@ -239,6 +240,11 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, o
     prevMessage?.type === 'user' &&
     prevMessage.injected === true &&
     prevMessage.userId === message.userId;
+  // ADR-219 S1 (T-2072): a row the CLI framed as non-user input (a relayed
+  // cross-session delivery). The server marker decides, never the text, and it
+  // wins over every human arm: the live echo can carry the owner's userId stamp.
+  const isSyntheticSourceMessage = message.type === 'user' && message.isSynthetic === true
+    && !message.isSkillLoad && !isInjectedSteerMessage;
   const isSystemOriginMessage =
     message.type === 'user' &&
     messageOriginKind !== undefined &&
@@ -259,6 +265,7 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, o
     ((prevMessage.type === 'assistant') ||
       (prevMessage.type === 'user' &&
         prevMessage.userId === message.userId &&
+        Boolean(prevMessage.isSynthetic) === Boolean(message.isSynthetic) &&
         (prevMessage.originKind ?? undefined) === messageOriginKind) ||
       (prevMessage.type === 'tool') ||
       (prevMessage.type === 'error'));
@@ -446,16 +453,19 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, o
       data-message-timestamp={message.timestamp || undefined}
       className={`chat-message ${message.type} ${isGrouped ? 'grouped' : ''} ${
         message.type === 'user' && !isCoordinatorPrompt && !isSystemOriginMessage && !isInjectedSteerMessage
+          && !isSyntheticSourceMessage
           ? 'flex justify-end px-3 sm:px-0'
           : 'px-3 sm:px-0'
       } ${isSteerContinuation ? '!mt-0' : ''}`}
     >
       {message.isNotice ? (
-        /* B-1624: a neutral server notice (a Codex user stop): one muted line,
+        /* B-1624: a neutral server notice (a Codex user stop, a B-1699 scheduled wake-up): one muted line,
          * no error colour, no copy control, never grouped with a reply. */
         <p className="flex w-full items-start gap-2 py-0.5 text-xs text-muted-foreground" data-chat-notice>
           <Info className="mt-0.5 h-3.5 w-3.5 flex-shrink-0" aria-hidden="true" />
-          <span className="min-w-0 flex-1 whitespace-pre-wrap break-words" dir={contentDir}>{message.content}</span>
+          <span className="min-w-0 flex-1 whitespace-pre-wrap break-words" dir={contentDir}>
+            {noticeText(message, t)}
+          </span>
         </p>
       ) : message.isSkillLoad ? (
         /* Skill body injected by Claude after a Skill tool call: one compact,
@@ -475,6 +485,20 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, o
             className="mt-2 max-h-80 overflow-auto whitespace-pre-wrap break-words rounded-md border bg-muted/50 p-2 text-xs text-muted-foreground"
             dir={contentDir}
           >
+            {message.content}
+          </pre>
+        </details>
+      ) : isSyntheticSourceMessage ? (
+        /* ADR-219 S1: the delivered wrapper text, collapsed and muted. The readable
+         * inbound bubble is PeerMessageCard, built from the relay frame. */
+        <details className="group/synthetic w-full py-0.5" data-synthetic-message>
+          <summary className="flex cursor-pointer list-none items-center gap-2 text-xs text-muted-foreground hover:text-foreground [&::-webkit-details-marker]:hidden">
+            <Bot className="h-3.5 w-3.5 flex-shrink-0" aria-hidden="true" />
+            <span className="font-medium">{t('syntheticMessage.label')}</span>
+            <span className="sr-only">{t('syntheticMessage.expand')}</span>
+            <ChevronDown className="h-3 w-3 flex-shrink-0 transition-transform group-open/synthetic:rotate-180" aria-hidden="true" />
+          </summary>
+          <pre className="mt-2 max-h-80 overflow-auto whitespace-pre-wrap break-words rounded-md border bg-muted/50 p-2 text-xs text-muted-foreground" dir={contentDir}>
             {message.content}
           </pre>
         </details>
@@ -532,6 +556,7 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, o
           contentDir={contentDir}
           formattedTime={formattedTime}
           isContinuation={isSteerContinuation}
+          images={message.images}
         />
       ) : isSystemOriginMessage ? (
         /* ── System / automated message (peer / channel / task-notification) ─

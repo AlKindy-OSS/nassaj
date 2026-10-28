@@ -176,6 +176,21 @@ describe('B-928 shared row and banner classification', () => {
   });
 });
 
+describe('B-1707 an engine-side auto-rejection is not an unclassified error', () => {
+  it.each([['ar', ar], ['en', en]] as const)('maps the OpenCode engine-side codes in %s', (_name, locale) => {
+    for (const code of ['permission_auto_rejected', 'opencode_cli_args_rejected'] as const) {
+      const text = locale.serverError[code];
+      expect(typeof text).toBe('string');
+      expect(resolveServerErrorMessage({ kind: 'error', code } as never, translate(locale)))
+        .toBe(`${text}. ${locale.serverError.codeLabel}: ${code}`);
+      // P3: the same code on a failed run's unconfirmed-delivery frame.
+      expect(resolveServerErrorMessage({
+        code: 'message_dispatch_unconfirmed', providerErrorCode: code,
+      } as never, translate(locale))).toBe(`${text}. ${locale.serverError.codeLabel}: ${code}`);
+    }
+  });
+});
+
 describe('B-1374 / B-1367 pre-run refusals name their own cause', () => {
   it.each([['ar', ar], ['en', en]] as const)('maps attachment and project-config refusals in %s', (_name, locale) => {
     for (const code of ['attachment_rejected', 'opencode_project_config_refused'] as const) {

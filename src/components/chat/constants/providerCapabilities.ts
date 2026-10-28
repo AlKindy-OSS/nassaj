@@ -201,6 +201,20 @@ const DEFAULT_PERMISSION_MODES: PermissionMode[] = [
 ];
 
 /**
+ * B-1707 (owner ruling 2026-10-28: every harness gets exactly Claude Code's
+ * permissions and restrictions): Claude's mode set, shared by every body that
+ * mirrors it so the two lists cannot drift. The server resolves the chosen mode
+ * through Claude's own resolver (claude-permission-mode.js) before mapping it.
+ */
+const CLAUDE_PERMISSION_MODES: PermissionMode[] = [
+  'default',
+  'auto',
+  'acceptEdits',
+  'bypassPermissions',
+  'plan',
+];
+
+/**
  * سقوط آمن لمزوّد غير مُدرَج في PROVIDER_UI_CAPABILITIES (مزوّد مستقبلي، أو
  * قيمة displayProvider نصّية غير متوقّعة إذ النوع في ChatComposer هو
  * `Provider | string`): كل القدرات الحسّاسة false/none، ما عدا الأذونات التي
@@ -242,9 +256,7 @@ export const PROVIDER_UI_CAPABILITIES: Record<ActiveBodyProvider, ProviderUiCapa
     effort: { supported: true },
     tokenCounter: { supported: true },
     command: { supportsImages: true },
-    permissions: {
-      modes: ['default', 'auto', 'acceptEdits', 'bypassPermissions', 'plan'],
-    },
+    permissions: { modes: CLAUDE_PERMISSION_MODES },
     quota: { isClaudeAccount: true, surface: 'claude-windows' },
     posture: { supported: false },
     // T-849: القناة الجانبية «/btw» — claude وحده يملك آلية الفرك (fork) اليوم.
@@ -289,7 +301,9 @@ export const PROVIDER_UI_CAPABILITIES: Record<ActiveBodyProvider, ProviderUiCapa
     effort: { supported: false },
     tokenCounter: { supported: true },
     command: { supportsImages: false },
-    permissions: { modes: ['default'] },
+    // B-1707: Claude's exact mode set; the composer sends the chosen mode and
+    // toolsSettings the way a Claude send does (useChatComposerState).
+    permissions: { modes: CLAUDE_PERMISSION_MODES },
     quota: { isClaudeAccount: false, surface: 'cycle' },
     posture: { supported: false },
     sideChannel: { supported: false },

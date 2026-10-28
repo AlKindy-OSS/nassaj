@@ -91,7 +91,7 @@ describe('CodeEditorOfficePreview', () => {
     readFileBlob.mockResolvedValue(new Response(null, { status: 403 }));
     render(<CodeEditorOfficePreview {...props('denied.pptx', 'pptx')} />);
     expect(await screen.findByText('officePreview.failed')).toBeTruthy();
-    expect(readFileBlob).toHaveBeenCalledWith('proj-1', '/p/denied.pptx', { signal: expect.any(AbortSignal) });
+    expect(readFileBlob).toHaveBeenCalledWith('proj-1', '/p/denied.pptx', { signal: expect.any(AbortSignal), sessionId: null });
   });
 
   it('shows the secrets-file message (not "corrupt") when the server asks for confirmation (428)', async () => {
@@ -101,7 +101,7 @@ describe('CodeEditorOfficePreview', () => {
     expect(screen.getByText('common:secretFile.title')).toBeTruthy();
     expect(screen.queryByText('officePreview.failed')).toBeNull();
     // Fail closed: the preview never sends the confirmation itself.
-    expect(readFileBlob).toHaveBeenCalledWith('proj-1', '/p/vault.xlsx', { signal: expect.any(AbortSignal) });
+    expect(readFileBlob).toHaveBeenCalledWith('proj-1', '/p/vault.xlsx', { signal: expect.any(AbortSignal), sessionId: null });
     expect(parseOfficeFile).not.toHaveBeenCalled();
   });
 

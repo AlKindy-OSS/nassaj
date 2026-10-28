@@ -5,6 +5,9 @@
  * entity-encoded, case-varied and whitespace-padded variants of the tag.
  */
 
+// eslint-disable-next-line boundaries/dependencies -- ADR-219 م-2: the pure wrapper-tag escape leaf shared by every stdin writer.
+import { escapePeerWrapperTags } from '../peer-relay/peer-wire.js';
+
 export const STEER_MAX_CHARS = 4000;
 const DISPLAY_NAME_MAX = 64;
 // C0 (minus \t \n), DEL, C1, zero-width/bidi marks, line/paragraph separators,
@@ -24,8 +27,9 @@ export function sanitizeSteerText(raw: unknown): SanitizeResult {
   return { ok: true, text };
 }
 
+/** Entity-escapes `& < >`, then neutralizes the full-width/compatibility `<` forms of a peer wrapper (ADR-219). */
 function escapeMarkup(value: string): string {
-  return value.replace(/&/gu, '&amp;').replace(/</gu, '&lt;').replace(/>/gu, '&gt;');
+  return escapePeerWrapperTags(value.replace(/&/gu, '&amp;').replace(/</gu, '&lt;').replace(/>/gu, '&gt;'));
 }
 
 function unescapeMarkup(value: string): string {

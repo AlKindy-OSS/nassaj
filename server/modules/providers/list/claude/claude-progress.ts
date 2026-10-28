@@ -20,6 +20,8 @@ import {
 import type { NormalizedMessage } from '../../../../shared/types.js';
 import { isTerminalSubagentState } from '../../../../../shared/subagent-states.js';
 
+import { claudeAgentTaskBindings } from './claude-task-events.js';
+
 type AnyRecord = Record<string, any>;
 
 const PLAN_TOOL = 'TodoWrite';
@@ -85,11 +87,13 @@ export type ClaudeSubagentTracker = {
   /** Records delegations/child tools and stamps snapshots on results (mutates `messages`). */
   observe(raw: AnyRecord, messages: NormalizedMessage[]): ProgressSubagent[];
   /**
-   * Lifecycle record closing a delegation by its tool_use id, or null when this
-   * tracker never saw that delegation (e.g. a background Bash task), so a
-   * notification can never invent a subagent.
+   * Lifecycle record closing a delegation, or null when this tracker never saw
+   * that delegation (e.g. a background Bash task), so a notification can never
+   * invent a subagent. ADR-218: `taskId` (the agent id) is authoritative; the
+   * tool_use id is the fallback — a SendMessage resume is notified under the
+   * SendMessage call's id, not the delegation's.
    */
-  settle(toolUseId: string, state: SubagentState): ProgressSubagent | null;
+  settle(toolUseId: string | null, state: SubagentState, taskId?: string | null): ProgressSubagent | null;
   /** Live SDK task_progress snapshot for a child without parent_tool_use_id rows. */
   progress(raw: AnyRecord): ProgressSubagent | null;
   /**
@@ -120,6 +124,14 @@ export function createClaudeSubagentTracker(
   const childTools = new Map<string, Map<string, { name: string; status: string }>>();
   const settled = new Set<string>();
   const open = new Set<string>();
+  const toolUseIdByTask = new Map<string, string>();
+  const bindTasks = (raw: AnyRecord): void => {
+    for (const { taskId, toolUseId } of claudeAgentTaskBindings(raw)) {
+      if (!started.has(toolUseId) || toolUseIdByTask.get(taskId) === toolUseId) continue;
+      if (toolUseIdByTask.size >= maxEntries) toolUseIdByTask.delete(toolUseIdByTask.keys().next().value as string);
+      toolUseIdByTask.set(taskId, toolUseId);
+    }
+  };
   return {
     observe(raw, messages) {
       const updates: ProgressSubagent[] = [];
@@ -153,11 +165,13 @@ export function createClaudeSubagentTracker(
           continue;
         }
       }
+      bindTasks(raw);
       return updates;
     },
-    settle(toolUseId, state) {
-      const origin = started.get(toolUseId);
-      if (!origin) return null;
+    settle(toolUseIdHint, state, taskId = null) {
+      const toolUseId = (taskId && toolUseIdByTask.get(taskId)) || toolUseIdHint;
+      const origin = toolUseId ? started.get(toolUseId) : undefined;
+      if (!toolUseId || !origin) return null;
       settled.add(toolUseId);
       open.delete(toolUseId);
       const tools = childTools.get(toolUseId);

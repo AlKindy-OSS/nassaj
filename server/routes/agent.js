@@ -58,6 +58,7 @@ import {
 import { isSessionId } from '../shared/session-id.js';
 import { ResponseCollector } from './agent-response-collector.js';
 import { isForbiddenProjectRoot } from '../shared/secret-path-guard.js';
+import { GIT_CLONE_ARGS, hardenGitArgs } from '../../shared/git-safety.js';
 
 const router = express.Router();
 
@@ -234,7 +235,7 @@ const validateExternalApiKey = (req, res, next) => {
  */
 async function getGitRemoteUrl(repoPath) {
   return new Promise((resolve, reject) => {
-    const gitProcess = spawn('git', ['config', '--get', 'remote.origin.url'], {
+    const gitProcess = spawn('git', hardenGitArgs(['config', '--get', 'remote.origin.url']), {
       cwd: repoPath,
       stdio: ['pipe', 'pipe', 'pipe']
     });
@@ -504,7 +505,7 @@ function validateBranchName(branchName) {
  */
 async function getCommitMessages(projectPath, limit = 5) {
   return new Promise((resolve, reject) => {
-    const gitProcess = spawn('git', ['log', `-${limit}`, '--pretty=format:%s'], {
+    const gitProcess = spawn('git', hardenGitArgs(['log', `-${limit}`, '--pretty=format:%s']), {
       cwd: projectPath,
       stdio: ['pipe', 'pipe', 'pipe']
     });
@@ -704,9 +705,10 @@ export async function cloneGitHubRepoWithReceipt(
 
       const askpass = await dependencies.createAskpass(githubToken);
       return await new Promise((resolve, reject) => {
+        // B-1691 (qa F10): no hooks, fsmonitor or file:// transport during the clone.
         const gitProcess = dependencies.spawnGit(
           'git',
-          ['clone', '--depth', '1', '--', canonicalUrl, cloneDir],
+          [...GIT_CLONE_ARGS, 'clone', '--depth', '1', '--', canonicalUrl, cloneDir],
           { stdio: ['ignore', 'pipe', 'pipe'], env: askpass.env },
         );
         let diagnostic = '';
@@ -766,7 +768,7 @@ export async function pushGitHubBranch(
     return await new Promise((resolve, reject) => {
       const processHandle = dependencies.spawnGit(
         'git',
-        ['push', canonicalUrl, `${branchName}:${branchName}`],
+        hardenGitArgs(['push', canonicalUrl, `${branchName}:${branchName}`]),
         { cwd, stdio: ['ignore', 'pipe', 'pipe'], env: askpass.env },
       );
       let diagnostic = '';
@@ -1615,11 +1617,15 @@ router.post('/', agentLimiter, requireExternalApiEnabled, validateExternalApiKey
     } else if (provider === 'opencode') {
       console.log('Starting OpenCode CLI session');
 
+      // B-1707 (owner ruling 2026-10-28): the same permission inputs the Claude branch
+      // above passes, so OpenCode resolves to exactly the mode Claude would run under.
       await runPermissionExecutionAdapter(permissionExecution, () => spawnOpenCode(message.trim(), {
         projectPath: finalProjectPath,
         cwd: finalProjectPath,
         sessionId: sessionId || null,
-        model: model || providerModels.DEFAULT
+        model: model || providerModels.DEFAULT,
+        permissionMode: 'bypassPermissions',
+        permissionExecution,
       }, writer));
     } else if (provider === 'kimi') {
       // KM-3 (ADR-062): native governed Kimi agent launcher. permissionMode is
@@ -1655,7 +1661,10 @@ router.post('/', agentLimiter, requireExternalApiEnabled, validateExternalApiKey
         cwd: finalProjectPath,
         sessionId: sessionId || null,
         carrier: true,
-        ...(carrierModel ? { model: carrierModel } : {})
+        ...(carrierModel ? { model: carrierModel } : {}),
+        // B-1707: same permission inputs as the Claude branch (owner ruling 2026-10-28).
+        permissionMode: 'bypassPermissions',
+        permissionExecution,
       }, writer));
     }
     assertAgentAccessCurrent(req, workspaceFence, false);
@@ -1729,7 +1738,7 @@ router.post('/', agentLimiter, requireExternalApiEnabled, validateExternalApiKey
           // Create and checkout the new branch locally
           console.log('🔄 Creating local branch...');
           assertAgentAccessCurrent(req, workspaceFence, false);
-          const checkoutProcess = spawn('git', ['checkout', '-b', finalBranchName], {
+          const checkoutProcess = spawn('git', hardenGitArgs(['checkout', '-b', finalBranchName]), {
             cwd: finalProjectPath,
             stdio: 'pipe'
           });
@@ -1751,7 +1760,7 @@ router.post('/', agentLimiter, requireExternalApiEnabled, validateExternalApiKey
                     reject(error);
                     return;
                   }
-                  const checkoutExisting = spawn('git', ['checkout', finalBranchName], {
+                  const checkoutExisting = spawn('git', hardenGitArgs(['checkout', finalBranchName]), {
                     cwd: finalProjectPath,
                     stdio: 'pipe'
                   });
@@ -1796,13 +1805,13 @@ router.post('/', agentLimiter, requireExternalApiEnabled, validateExternalApiKey
             try {
               assertAgentAccessCurrent(req, workspaceFence, false);
               await new Promise((resolve) => {
-                const cfg = spawn('git', ['config', `branch.${finalBranchName}.remote`, 'origin'], { cwd: finalProjectPath, stdio: 'pipe' });
+                const cfg = spawn('git', hardenGitArgs(['config', `branch.${finalBranchName}.remote`, 'origin']), { cwd: finalProjectPath, stdio: 'pipe' });
                 cfg.on('close', () => resolve());
                 cfg.on('error', () => resolve());
               });
               assertAgentAccessCurrent(req, workspaceFence, false);
               await new Promise((resolve) => {
-                const cfg = spawn('git', ['config', `branch.${finalBranchName}.merge`, `refs/heads/${finalBranchName}`], { cwd: finalProjectPath, stdio: 'pipe' });
+                const cfg = spawn('git', hardenGitArgs(['config', `branch.${finalBranchName}.merge`, `refs/heads/${finalBranchName}`]), { cwd: finalProjectPath, stdio: 'pipe' });
                 cfg.on('close', () => resolve());
                 cfg.on('error', () => resolve());
               });

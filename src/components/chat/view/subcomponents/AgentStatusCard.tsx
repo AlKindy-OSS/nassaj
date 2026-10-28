@@ -19,7 +19,7 @@
  * يكون نشطاً، وClaudeStatus يملكه في الحالة العادية.
  */
 
-import { useCallback, useEffect, useId, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ListChecks } from 'lucide-react';
 
@@ -32,11 +32,15 @@ import {
   CollapsibleTrigger,
 } from '../../../../shared/view/ui';
 import SessionProviderLogo from '../../../llm-logo-provider/SessionProviderLogo';
+import { subagentTypeLabel } from '../../tools/subagentTitle';
 import { resolveOverallPercent } from '../../hooks/declaredProgress';
 import type { RunAgent, RunProgress } from '../../hooks/useRunProgress';
+import { mergeSessionAgents, nextRegistryExpiry } from '../../hooks/mergeSessionAgents';
+import type { SessionAgentRow } from '../../hooks/useSessionAgents';
 import type { WorkflowUiDescriptor } from '../../../../stores/workflowStatus';
 
 import ClaudeStatus from './ClaudeStatus';
+import { ACTION_KEYS, DEFAULT_ACTION_WORDS, localizeStatusText, stripTrailingEllipsis } from './runStatusText';
 import { shortModelLabel } from './MessageModelBadge';
 import PercentMeter, { formatPercent } from './PercentMeter';
 import { RunStatusActions, RunStatusIdentityLabel, RunStatusSteerHint } from './RunStatusViewerActions';
@@ -47,17 +51,6 @@ import {
 } from './subagentOutcomeText';
 
 // ── ثوابت مشتركة مع ClaudeStatus ─────────────────────────────────────────────
-const ACTION_KEYS = [
-  'claudeStatus.actions.thinking',
-  'claudeStatus.actions.processing',
-  'claudeStatus.actions.analyzing',
-  'claudeStatus.actions.working',
-  'claudeStatus.actions.computing',
-  'claudeStatus.actions.reasoning',
-];
-const DEFAULT_ACTION_WORDS = [
-  'Thinking', 'Processing', 'Analyzing', 'Working', 'Computing', 'Reasoning',
-];
 const PROVIDER_LABEL_KEYS: Record<string, string> = {
   claude: 'messageTypes.claude',
   codex: 'messageTypes.codex',
@@ -151,7 +144,7 @@ function AgentRow({ agent, frozen }: { agent: RunAgent; frozen: boolean }) {
   const stale = outcome === 'stale';
   const pulse = running && !frozen;
   const contentId = useId();
-  const typeLabel = agent.agentName || agent.type || '—';
+  const typeLabel = subagentTypeLabel(t, agent.agentName || agent.type) || '—';
   const modelLabel = agent.model ? shortModelLabel(agent.model, 32) : '—';
   const effortLabel = agent.effort || '—';
   const toolRows = new Map<
@@ -289,6 +282,23 @@ function AgentRow({ agent, frozen }: { agent: RunAgent; frozen: boolean }) {
             })}
           >
             {t('agentActivity.stale', { defaultValue: 'No signal' })}
+          </span>
+        )}
+
+        {/* ADR-218: a state the server reconstructed (or an end it could not
+            observe) is marked as such, muted, so it never reads as measured. */}
+        {agent.estimated && (
+          <span
+            data-testid="agent-estimated-badge"
+            className={cn(
+              'shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground',
+              !stale && !unsuccessful && !showCurrentTool && 'ms-auto',
+            )}
+            title={t('agentActivity.estimatedTooltip', {
+              defaultValue: 'Rebuilt by the server from the session record, not from a live event.',
+            })}
+          >
+            {t('agentActivity.estimated', { defaultValue: 'Estimated state' })}
           </span>
         )}
 
@@ -436,6 +446,14 @@ type AgentStatusCardProps = {
    */
   workflowAgents?: RunAgent[];
   /**
+   * ADR-218: the server registry's rows for this session (`useSessionAgents`).
+   * Merged with `agents` (stream detail, registry liveness) and deduped against
+   * `workflowAgents`; registry-only rows show agents of earlier turns too.
+   */
+  sessionAgents?: SessionAgentRow[];
+  /** Internal: true when a row on the card comes from a background workflow. */
+  hasWorkflowRows?: boolean;
+  /**
    * The server's honest verdict on the workflow those rows belong to, or null.
    *
    * Without it this card printed the literal word "running" for every surfaced
@@ -479,6 +497,7 @@ function MergedCard({
   runStartedAt = null,
   progress = null,
   workflowStatus = null,
+  hasWorkflowRows = false,
   viewerStarterName = null,
   steerable = false,
   onSteerClick,
@@ -670,18 +689,26 @@ function MergedCard({
   // line can no longer assert life the server would not assert. It falls back to
   // the old wording ONLY when no descriptor arrived (a workflow-less card, or a
   // caller that has not been wired yet) — never to paper over `unknown`.
+  const backgroundText = (): string => {
+    if (hasWorkflowRows) {
+      return workflowStatus
+        ? tCommon(workflowStatus.labelKey)
+        : t('agentActivity.backgroundWorkflow', { defaultValue: 'Background workflow running' });
+    }
+    // Registry rows only (ADR-218): agents of an earlier turn, not a workflow.
+    return agents.some((a) => rowOutcome(a) === 'running')
+      ? t('agentActivity.backgroundAgents', { defaultValue: 'Background agents running' })
+      : t('agentActivity.backgroundAgentsEnded', { defaultValue: 'Background agents finished' });
+  };
   const statusText = isFrozenLoading
     ? t('claudeStatus.frozen', { defaultValue: 'Paused (process frozen)' })
     : backgroundOnly
-      ? workflowStatus
-        ? tCommon(workflowStatus.labelKey)
-        : t('agentActivity.backgroundWorkflow', {
-            defaultValue: 'Background workflow running',
-          })
-      : (
-          status?.text ||
-          actionWords[Math.floor(elapsedTime / 3) % actionWords.length]
-        ).replace(/[.]+$/, '');
+      ? backgroundText()
+      : stripTrailingEllipsis(
+          status?.text
+            ? localizeStatusText(status.text, t)
+            : actionWords[Math.floor(elapsedTime / 3) % actionWords.length],
+        );
 
   const providerLabel = t(
     PROVIDER_LABEL_KEYS[provider] || 'claudeStatus.providers.assistant',
@@ -1043,11 +1070,39 @@ function MergedCard({
  * - agents.length === 0 → <ClaudeStatus> مباشرةً (حالة شائعة، صفر انحدار)
  * - agents.length > 0 → <MergedCard> (البطاقة الموحّدة)
  */
+const NO_WORKFLOW_AGENTS: RunAgent[] = [];
+const NO_SESSION_AGENTS: SessionAgentRow[] = [];
+
+/**
+ * Clock for the registry's "recently ended" window: re-renders once when the
+ * next ended registry-only row is due to leave, never on a tick.
+ */
+function useRegistryClock(sessionAgents: readonly SessionAgentRow[]): number {
+  const [tick, setTick] = useState(0);
+  // Read the clock when the rows change or the scheduled expiry fires — never per second.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const now = useMemo(() => Date.now(), [sessionAgents, tick]);
+  useEffect(() => {
+    const expiry = nextRegistryExpiry(sessionAgents, now);
+    if (expiry === null) return undefined;
+    const timer = setTimeout(() => setTick((value) => value + 1), expiry - now + 50);
+    return () => clearTimeout(timer);
+  }, [sessionAgents, now]);
+  return now;
+}
+
 export default function AgentStatusCard(props: AgentStatusCardProps) {
-  const workflowAgents = props.workflowAgents ?? [];
+  const workflowAgents = props.workflowAgents ?? NO_WORKFLOW_AGENTS;
+  const sessionAgents = props.sessionAgents ?? NO_SESSION_AGENTS;
+  const now = useRegistryClock(sessionAgents);
   // Reply-scoped rows first (they belong to what is happening right now), then
-  // the longer-lived workflow rows.
-  const allAgents = workflowAgents.length > 0 ? [...props.agents, ...workflowAgents] : props.agents;
+  // agents of earlier turns the registry knows, then the workflow rows.
+  const allAgents = useMemo(
+    () => mergeSessionAgents(props.agents, workflowAgents, sessionAgents, now),
+    [props.agents, workflowAgents, sessionAgents, now],
+  );
+  const hasWorkflowRows = workflowAgents.length > 0
+    || allAgents.some((a) => sessionAgents.some((row) => row.key === a.id && row.source === 'workflow'));
 
   if (allAgents.length === 0) {
     return (
@@ -1074,5 +1129,5 @@ export default function AgentStatusCard(props: AgentStatusCardProps) {
   // `isLoading` stays false, which already suppresses the elapsed timer, the
   // animated dots and the STOP button (STOP aborts the SESSION — it cannot stop a
   // detached workflow, so offering it here would be a false promise).
-  return <MergedCard {...props} agents={allAgents} />;
+  return <MergedCard {...props} agents={allAgents} hasWorkflowRows={hasWorkflowRows} />;
 }

@@ -44,6 +44,14 @@ describe('useEditorSidebar session binding', () => {
     rerender({ sessionId: 'real-id' });
     expect(result.current.editingFile?.path).toBe('a.md');
   });
+
+  it('B-1689: carries the chat session id only when the opener passes it', () => {
+    const { result } = setup('s1');
+    act(() => result.current.handleFileOpen('docs/a.md', null, { sessionId: 's1' }));
+    expect(result.current.editingFile?.sessionId).toBe('s1');
+    act(() => result.current.handleFileOpen('docs/b.md'));
+    expect(result.current.editingFile?.sessionId).toBeNull();
+  });
 });
 
 describe('useEditorSidebar file opened outside any session (Files view)', () => {

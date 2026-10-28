@@ -10,7 +10,9 @@
  * queued; after close every enqueue answers turn_not_active.
  */
 
-import type { SteerDeliveryStatus, SteerEvent, SteerRejectCode } from '../../../shared/session-steer.contract.js';
+import type {
+  SteerDeliveryStatus, SteerEvent, SteerImageRef, SteerRejectCode,
+} from '../../../shared/session-steer.contract.js';
 
 // Both bounds are per RUN and SHARED by every sender, the starter's own
 // self-steers included: a busy starter can use up the turn's budget for
@@ -26,6 +28,8 @@ export type SteerItem = {
   text: string;
   wrapped: string;
   uuid: string;
+  /** Store refs of the steer's images (B-1697); absent when it carried none. */
+  images?: SteerImageRef[];
 };
 
 export type SteerRunDeps = {
@@ -112,7 +116,8 @@ export function createSteerRun(deps: SteerRunDeps) {
       accepted += 1;
       if (item.senderUserId !== deps.starterUserId) tainted = true;
       byUuid.set(item.uuid, item);
-      deps.broadcast(event('steer-queued', item, 'queued', { text: item.text }));
+      deps.broadcast(event('steer-queued', item, 'queued',
+        { text: item.text, ...(item.images?.length ? { images: item.images } : {}) }));
       if (waiter) {
         const wake = waiter; waiter = null;
         inFlight.push(item);

@@ -16,6 +16,8 @@ import type { NormalizedMessage } from '../../../../stores/useSessionStore';
 import { resolveOutboxVerdict } from '../../utils/messageOutbox';
 
 import MessageComponent from './MessageComponent';
+import arChat from '../../../../i18n/locales/ar/chat.json';
+import enChat from '../../../../i18n/locales/en/chat.json';
 
 vi.mock('../../../../contexts/ThemeContext', () => ({
   useTheme: () => ({ isDarkMode: false }),
@@ -103,5 +105,56 @@ describe('neutral notice row (B-1624)', () => {
       readErrorDetail: () => null,
     });
     expect(verdict).toBeNull();
+  });
+});
+
+describe('scheduled wake-up notice (B-1699)', () => {
+  const wake = {
+    id: 'wake-1', sessionId: 's', timestamp: '2026-10-27T01:53:00.756Z', provider: 'claude',
+    kind: 'notice', noticeCode: 'scheduled_wakeup', content: 'Scheduled wake-up',
+  } as unknown as NormalizedMessage;
+
+  it('keeps its code and renders the translated line, not the server text', () => {
+    const [chat] = normalizedToChatMessages([wake]);
+    expect(chat.isNotice).toBe(true);
+    expect(chat.noticeCode).toBe('scheduled_wakeup');
+    const line = renderRow(chat).container.querySelector('[data-chat-notice]') as HTMLElement;
+    expect(line.textContent).toBe('chatNotice.scheduledWakeup');
+  });
+
+  it('has an Arabic and an English label', () => {
+    expect(arChat.chatNotice.scheduledWakeup).toBe('استيقاظ مجدول');
+    expect(enChat.chatNotice.scheduledWakeup).toBe('Scheduled wake-up');
+  });
+});
+
+describe('scheduled wake-up hold closed notice (B-1699)', () => {
+  const closed = (reason: string) => ({
+    id: `closed-${reason}`, sessionId: 's', timestamp: '2026-10-27T02:00:00.000Z', provider: 'claude',
+    kind: 'notice', noticeCode: 'scheduled_wakeup_closed', noticeReason: reason,
+    content: `Scheduled wake-up hold ended (${reason})`,
+  } as unknown as NormalizedMessage);
+
+  it('renders the translated reason for every known close reason', () => {
+    for (const reason of ['expired', 'cap', 'total_cap', 'drain', 'listeners_gone', 'quota', 'disabled']) {
+      const [chat] = normalizedToChatMessages([closed(reason)]);
+      expect(chat.noticeReason).toBe(reason);
+      const line = renderRow(chat).container.querySelector('[data-chat-notice]') as HTMLElement;
+      expect(line.textContent).toBe(`chatNotice.wakeupClosed.${reason}`);
+      cleanup();
+    }
+  });
+
+  it('an unknown reason falls back to the server text', () => {
+    const [chat] = normalizedToChatMessages([closed('mystery')]);
+    const line = renderRow(chat).container.querySelector('[data-chat-notice]') as HTMLElement;
+    expect(line.textContent).toBe('Scheduled wake-up hold ended (mystery)');
+  });
+
+  it('every reason has an ar and en label', () => {
+    for (const reason of ['expired', 'cap', 'total_cap', 'drain', 'listeners_gone', 'quota', 'disabled']) {
+      expect(typeof (arChat.chatNotice.wakeupClosed as Record<string, string>)[reason]).toBe('string');
+      expect(typeof (enChat.chatNotice.wakeupClosed as Record<string, string>)[reason]).toBe('string');
+    }
   });
 });

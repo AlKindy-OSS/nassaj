@@ -2,6 +2,8 @@ import { Check, Circle, Compass, TriangleAlert } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 import type { SteerDeliveryStatus } from '../../../shared/session-steer.contract';
+import type { ChatImage } from '../chat/types/types';
+import ChatMessageImage from '../chat/view/subcomponents/ChatMessageImage';
 
 export interface SteerBubbleProps {
   senderName: string;
@@ -11,6 +13,8 @@ export interface SteerBubbleProps {
   formattedTime?: string | null;
   /** تابعٌ لتوجيه سابق من المرسل نفسه: بلا ترويسة، ويكمل الخطّ الرأسي نفسه. */
   isContinuation?: boolean;
+  /** B-1697: صور التوجيه (روابط المسار المصادَق نفسه لصور الرسائل العادية). */
+  images?: ChatImage[];
 }
 
 /**
@@ -31,6 +35,7 @@ export default function SteerBubble({
   contentDir = 'auto',
   formattedTime,
   isContinuation = false,
+  images,
 }: SteerBubbleProps) {
   const { t, i18n } = useTranslation('chat');
 
@@ -83,6 +88,13 @@ export default function SteerBubble({
       <div className="whitespace-pre-wrap break-words text-sm text-foreground" dir={contentDir}>
         {content}
       </div>
+      {images && images.length > 0 && (
+        <div className="mt-2 grid max-w-md grid-cols-2 gap-2" data-steer-images="true">
+          {images.map((img, idx) => (
+            <ChatMessageImage key={img.data || idx} src={img.data} alt={img.name} />
+          ))}
+        </div>
+      )}
     </div>
   );
 }

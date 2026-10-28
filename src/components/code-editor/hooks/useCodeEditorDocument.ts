@@ -39,6 +39,8 @@ export const useCodeEditorDocument = ({ file, projectPath }: UseCodeEditorDocume
   // propagate the identifier.
   const fileProjectId = file.projectId ?? projectPath;
   const filePath = file.path;
+  // B-1689: read and save the chat session's overlay copy when opened from chat.
+  const fileSessionId = file.sessionId ?? null;
   const fileName = file.name;
   const fileDiffNewString = file.diffInfo?.new_string;
   const fileDiffOldString = file.diffInfo?.old_string;
@@ -87,7 +89,7 @@ export const useCodeEditorDocument = ({ file, projectPath }: UseCodeEditorDocume
         const response = await requestWithSecretConfirmation(
           (confirmSecret) => {
             readWithConfirmation = confirmSecret;
-            return api.readFile(fileProjectId, filePath, { confirmSecret });
+            return api.readFile(fileProjectId, filePath, { confirmSecret, sessionId: fileSessionId });
           },
           { fileName },
         );
@@ -117,7 +119,7 @@ export const useCodeEditorDocument = ({ file, projectPath }: UseCodeEditorDocume
     };
 
     loadFileContent();
-  }, [file.diffInfo, file.name, fileDiffNewString, fileDiffOldString, fileName, filePath, fileProjectId]);
+  }, [file.diffInfo, file.name, fileDiffNewString, fileDiffOldString, fileName, filePath, fileProjectId, fileSessionId]);
 
   /** Resolves true only when the content reached the disk (or there was nothing to write). */
   const handleSave = useCallback(async (): Promise<boolean> => {
@@ -139,7 +141,7 @@ export const useCodeEditorDocument = ({ file, projectPath }: UseCodeEditorDocume
       // B-1593: a secrets file opened with confirmation saves with the flag;
       // any other 428 asks the user before writing.
       const response = await requestWithSecretConfirmation(
-        (confirmSecret) => api.saveFile(fileProjectId, filePath, content, { confirmSecret }),
+        (confirmSecret) => api.saveFile(fileProjectId, filePath, content, { confirmSecret, sessionId: fileSessionId }),
         { fileName, alreadyConfirmed: secretAccess === 'confirmed' },
       );
       if (response === SECRET_FILE_DECLINED) {
@@ -172,7 +174,7 @@ export const useCodeEditorDocument = ({ file, projectPath }: UseCodeEditorDocume
     } finally {
       setSaving(false);
     }
-  }, [content, filePath, fileProjectId, previewKind, fileName, secretAccess]);
+  }, [content, filePath, fileProjectId, fileSessionId, previewKind, fileName, secretAccess]);
 
   const handleDownload = useCallback(() => {
     const blob = new Blob([content], { type: 'text/plain' });

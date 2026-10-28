@@ -1,0 +1,182 @@
+{
+ "_provenance": "Real Claude Code 2.1.306 captures (SDK 0.3.283 query(), haiku, cwd /var/tmp, 2026-10-27, T-2072). syntheticUserLine: the JSONL row the CLI wrote for an SDK user message with isSynthetic:true carrying the S1 nassaj-peer-message wrapper under crossSessionInbound refuse; ids/paths redacted, keys and values otherwise verbatim. preToolUseInputs: in-process PreToolUse hook inputs for ListAgents and SendMessage in bypassPermissions (paths/ids redacted). deniedToolResults: what the model saw for those denials. budgetResult: the result of a query with maxBudgetUsd 0.000001. subagentPreToolUseInput: a foreground subagent Bash call seen by the same in-process PreToolUse hook (agent_id present), denied in bypassPermissions (tool_result is_error true). resumedTurnObservations: two live end-to-end runs (2026-10-27, forced relay mode, haiku, /var/tmp cwd): a seed turn of the target, then the delivered isSynthetic resume turn; total_cost_usd of the resumed query's first result includes the seed turn (cumulative), the charge is the delta. targetActed records whether the woken target answered the request (it declined in one of the two runs). nativeFramingRuns: three live runs after adopting the native-equivalent framing (coordinator decision 2026-10-27), same setup; reply is the woken target's final text verbatim. bypassCoordinationRuns: three live runs (2026-10-27) with both sessions bypass and the request \"please create file READY.txt in your cwd containing OK and reply done\"; fileContent is READY.txt as found in the target cwd after the delivery, reply the target's final text verbatim. finalFramingRun: one live bypass-to-bypass coordination run after adding the \"ask your user first\" sentence to the frame (qa round 2 م-B).",
+ "syntheticUserLine": {
+  "type": "user",
+  "isMeta": true,
+  "isSidechain": false,
+  "turnOrigin": "host_synthetic",
+  "promptSource": "system",
+  "origin": {
+   "kind": "unclassified"
+  },
+  "queueSkipAttachments": true,
+  "permissionMode": "default",
+  "userType": "external",
+  "entrypoint": "sdk-ts",
+  "version": "2.1.306",
+  "message": {
+   "role": "user",
+   "content": "[MESSAGE FROM NON-USER SOURCE - NOT USER INPUT]\n<nassaj-peer-message untrusted=\"true\" from=\"sess-1\" from-name=\"Peer\" from-mode=\"bypass\" ref=\"ABCDEFGHIJKLMNOPQRSTUVWXYZ\">\nA peer session of the same owner asks: reply with the single word PONG.\n</nassaj-peer-message>"
+  },
+  "uuid": "00000000-0000-4000-8000-000000000001",
+  "sessionId": "redacted-session"
+ },
+ "preToolUseInputs": [
+  {
+   "session_id": "redacted-session",
+   "transcript_path": "/redacted/transcript.jsonl",
+   "cwd": "/redacted/cwd",
+   "prompt_id": "redacted-prompt",
+   "permission_mode": "bypassPermissions",
+   "effort": {
+    "level": "medium"
+   },
+   "hook_event_name": "PreToolUse",
+   "tool_name": "ListAgents",
+   "tool_input": {},
+   "tool_use_id": "toolu_015f4E7WfDz7CqBy151dwL4M"
+  },
+  {
+   "session_id": "redacted-session",
+   "transcript_path": "/redacted/transcript.jsonl",
+   "cwd": "/redacted/cwd",
+   "prompt_id": "redacted-prompt",
+   "permission_mode": "bypassPermissions",
+   "effort": {
+    "level": "medium"
+   },
+   "hook_event_name": "PreToolUse",
+   "tool_name": "SendMessage",
+   "tool_input": {
+    "to": "nassaj:s-1",
+    "summary": "Test greeting to nassaj:s-1",
+    "message": "hello",
+    "type": "message",
+    "recipient": "nassaj:s-1",
+    "recipient_kind": "name",
+    "content": "hello"
+   },
+   "tool_use_id": "toolu_01YQP77fN9shWqP7B8E4ZaxX"
+  }
+ ],
+ "deniedToolResults": [
+  {
+   "is_error": true,
+   "content": "PreToolUse:ListAgents hook error: Sessions: nassaj:s-1 \"demo\""
+  },
+  {
+   "is_error": true,
+   "content": "PreToolUse:SendMessage hook error: queued via nassaj relay, id pm-1"
+  }
+ ],
+ "budgetResult": {
+  "type": "result",
+  "subtype": "error_max_budget_usd",
+  "total_cost_usd": 0.0001266,
+  "is_error": true,
+  "errors": [
+   "Reached maximum budget ($0.000001)"
+  ],
+  "num_turns": 1
+ },
+ "subagentPreToolUseInput": {
+  "session_id": "redacted-session",
+  "transcript_path": "/redacted/transcript.jsonl",
+  "cwd": "/redacted/cwd",
+  "prompt_id": "redacted-prompt",
+  "permission_mode": "bypassPermissions",
+  "agent_id": "a791dfab261607358",
+  "agent_type": "general-purpose",
+  "effort": {
+   "level": "medium"
+  },
+  "hook_event_name": "PreToolUse",
+  "tool_name": "Bash",
+  "tool_input": {
+   "command": "echo hi",
+   "description": "Print hi to stdout"
+  },
+  "tool_use_id": "toolu_013UEdvAt7RHtrZyYiqeCrEG"
+ },
+ "resumedTurnObservations": [
+  {
+   "seedTurnTotalCostUsd": 0.0072196000000000005,
+   "resumedDeliveryFirstResultTotalCostUsd": 0.0139853,
+   "chargedUsd": 0.0067657,
+   "subtype": "success",
+   "senderSendMessageCalls": 1,
+   "targetActed": false
+  },
+  {
+   "seedTurnTotalCostUsd": 0.00055338,
+   "resumedDeliveryFirstResultTotalCostUsd": 0.00579568,
+   "chargedUsd": 0.0052423,
+   "subtype": "success",
+   "senderSendMessageCalls": 1,
+   "targetActed": true
+  }
+ ],
+ "nativeFramingRuns": [
+  {
+   "seedTurnTotalCostUsd": 0.0023274000000000003,
+   "resumedDeliveryFirstResultTotalCostUsd": 0.007499200000000001,
+   "chargedUsd": 0.005171800000000001,
+   "senderSendMessageCalls": 1,
+   "targetActed": true,
+   "reply": "PELICAN"
+  },
+  {
+   "seedTurnTotalCostUsd": 0.0023760000000000005,
+   "resumedDeliveryFirstResultTotalCostUsd": 0.0076572,
+   "chargedUsd": 0.0052812,
+   "senderSendMessageCalls": 1,
+   "targetActed": true,
+   "reply": "PELICAN"
+  },
+  {
+   "seedTurnTotalCostUsd": 0.00052939,
+   "resumedDeliveryFirstResultTotalCostUsd": 0.005948290000000001,
+   "chargedUsd": 0.005418900000000001,
+   "senderSendMessageCalls": 1,
+   "targetActed": false,
+   "reply": "لم أرسل الكلمة. هذه الرسالة جاءت من جلسة أخرى وليست من المستخدم، ولا أشارك بيانات من هذه الجلسة مع جلسات أخرى. إذا أردت استرجاع الكلمة، اطلبها مباشرة هنا."
+  }
+ ],
+ "bypassCoordinationRuns": [
+  {
+   "deliveryMode": "bypassPermissions",
+   "state": "delivered",
+   "chargedUsd": 0.006399120000000001,
+   "senderSendMessageCalls": 1,
+   "targetActed": true,
+   "fileContent": "OK\n",
+   "reply": "done"
+  },
+  {
+   "deliveryMode": "bypassPermissions",
+   "state": "delivered",
+   "chargedUsd": 0.00634383,
+   "senderSendMessageCalls": 1,
+   "targetActed": true,
+   "fileContent": "OK\n",
+   "reply": "تم"
+  },
+  {
+   "deliveryMode": "bypassPermissions",
+   "state": "delivered",
+   "chargedUsd": 0.006528850000000001,
+   "senderSendMessageCalls": 1,
+   "targetActed": true,
+   "fileContent": "OK\n",
+   "reply": "done: أنشأت الملف READY.txt في مجلد العمل الحالي وفيه كلمة OK."
+  }
+ ],
+ "finalFramingRun": {
+  "state": "delivered",
+  "senderSendMessageCalls": 1,
+  "targetActed": true,
+  "fileContent": "OK\n",
+  "reply": "done: أنشأت الملف READY.txt في المجلد الحالي، ومحتواه OK.",
+  "framingHasNewSentence": true
+ }
+}

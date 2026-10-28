@@ -132,6 +132,21 @@ export function appendLog(job: InternalJob, line: string): void {
   if (job.log.length > MAX_LOG_LINES) job.log.splice(0, job.log.length - MAX_LOG_LINES);
 }
 
+/**
+ * Appends the full sha256 of a downloaded installer (owner decision ADR-215
+ * Q1). appendLog would redact 64 hex chars as a token, so a strictly
+ * validated digest is pushed verbatim behind a fixed label; anything else is
+ * logged as invalid.
+ */
+export function appendDigestLog(job: InternalJob, label: string, sha256: string): void {
+  if (!/^[0-9a-f]{64}$/u.test(sha256)) {
+    appendLog(job, `${label} sha256 [invalid]`);
+    return;
+  }
+  appendLog(job, label);
+  job.log[job.log.length - 1] = `${job.log[job.log.length - 1]} sha256 ${sha256}`;
+}
+
 /** Appends every non-empty stdout/stderr line of a child run. */
 export function appendOutput(job: InternalJob, result: RunResult): void {
   for (const stream of [result.stdout, result.stderr]) {
@@ -214,6 +229,8 @@ const FAILURE_MESSAGES_AR: Readonly<Record<string, string>> = Object.freeze({
   install_failed: 'فشل تثبيت أداة التشغيل.',
   install_timeout: 'تجاوز التثبيت المهلة المحدّدة فأُوقف.',
   script_rejected: 'رُفض ملف التثبيت المنزَّل فلم يُشغَّل.',
+  insufficient_space: 'المساحة الحرّة في مجلد المستخدم لا تكفي للتثبيت.',
+  verifier_unavailable: 'أداة التحقق من التوقيع (gpgv) غير مثبّتة على الخادم، فلم يُثبَّت شيء.',
 });
 
 /**

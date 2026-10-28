@@ -131,6 +131,12 @@ export interface RunAgent {
   childTools?: SubagentChildTool[];
   /** Latest self-reported progress line (declared by the agent, not computed). */
   progress?: DeclaredProgress;
+  /**
+   * ADR-218: the row's state is the server registry's reconstruction (rebuilt
+   * from the transcript, or an end it could not observe), not a live event.
+   * The card marks it so a guess never reads as a measurement.
+   */
+  estimated?: boolean;
 }
 
 export interface RunProgress {

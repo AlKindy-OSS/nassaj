@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 
 import type { SteerEvent } from '../../../shared/session-steer.contract';
 import type { ChatMessage } from '../chat/types/types';
+import { chatImagesFromRefs } from '../chat/utils/chatImageNote';
 
 import type { TrackedSteerInjection } from './steerDuplicateDetection';
 
@@ -64,9 +65,11 @@ export function useSteerQueuedInsertion({
         sessionId: sessionId ?? '',
         at: Date.now(),
       });
+      const images = chatImagesFromRefs(event.images);
       addMessage({
         type: 'user',
         content: event.text,
+        ...(images.length > 0 ? { images } : {}),
         userId: event.sender.userId,
         injected: true,
         deliveryStatus: 'queued',

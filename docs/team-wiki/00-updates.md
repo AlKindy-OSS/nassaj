@@ -1,3 +1,9 @@
+## 2.3.3.0 — 2026-10-28
+
+كل عقدة تجهّز الإصدار الجديد مسبقاً خلال نحو ربع ساعة من صدوره، حتى لو لم يفتح أحد نافذة التحديث. زرّ المالك في الإعدادات يثبّت الآن كل الواجهات، بما فيها Claude من إصداره الموقّع وagy. ونافذة التحديث تعرض للمالك زرّاً لإصلاح ربط فرع الإصدار عند الحاجة. السطور العربية في كتل النص تُقرأ بترتيبها الصحيح، ورُقّعت ثغرتان حرجتان في الاعتماديات.
+
+Every node prepares a new release in advance within about 15 minutes of publication, even if nobody opens the update dialog. The owner button in settings now installs every CLI, including Claude from its signed release and agy. The update dialog offers the owner a button to repair the release-branch link when needed. Arabic lines in prose blocks read in the right order, and two critical dependency advisories are patched.
+
 ## 2.3.2.0 — 2026-10-20
 
 محادثة الفريق صارت داخل المؤلِّف نفسه: زرّ «الفريق» في شريط الأدوات يحوّل الكتابة إلى الفريق بدل النموذج، ورسائل الفريق تظهر داخل المحادثة بترتيبها. المالك يستطيع تثبيت واجهتي codex وopencode الناقصتين بزرّ من تبويب الحساب في الإعدادات. تقدّم الوكلاء يعرض النتيجة الحقيقية لكل وكيل: ناجح أو فاشل أو موقوف أو غير معروف. ونافذة «ما الجديد» تظهر مرة واحدة لكل مستخدم، مع إصلاحات في نافذة التحديث وتسجيل الخروج.

@@ -5,8 +5,9 @@
  * (vendorId, mode) pair and the operator-flag matrix, asserting the same invariants
  * the Codex ceiling test (openai-codex.permission-ceiling.test.ts) proves one CLI over:
  *   1. Default is OFF: no full-access, no network, for any client-chosen mode.
- *   2. A client's bypassPermissions is CAPPED — it reaches a vendor's danger flag
- *      (Kimi --yolo / OpenCode --auto) ONLY behind the operator SERVER flag.
+ *   2. Kimi: a client's bypassPermissions is CAPPED — --yolo only behind the operator
+ *      SERVER flag. OpenCode (B-1707 owner ruling): the input is Claude's effective
+ *      mode and is translated as is; the OPENCODE_ALLOW_FULL_ACCESS gate is retired.
  *   3. Only the exact string 'true' unlocks; '1'/'yes'/'TRUE'/'' do not.
  *   4. plan mode maps to each vendor's read-only surface.
  *   5. Unknown vendor fails closed (no flags, everything OFF).
@@ -22,6 +23,9 @@ import { describe, it } from 'node:test';
 import {
   mapPermissionModeToVendorFlags,
   normalizePermissionMode,
+  OPENCODE_PLAN_PERMISSION,
+  OPENCODE_SKIP_PERMISSIONS_FLAG,
+  SERVER_FLAGS,
 } from './vendor-cli-permissions.js';
 
 type Env = Record<string, string | undefined>;
@@ -142,75 +146,55 @@ describe('mapPermissionModeToVendorFlags — kimi', () => {
 });
 
 // ===========================================================================
-// OPENCODE (carrier) — --agent plan < default < --auto (dangerous)
+// OPENCODE — B-1707 owner ruling: the input is the mode Claude would run under,
+// translated as is (no OpenCode-only grant, no OpenCode-only cage).
 // ===========================================================================
-describe('mapPermissionModeToVendorFlags — opencode', () => {
-  it('plan -> --agent plan (read-only build agent), no full access, network OFF', () => {
+describe('mapPermissionModeToVendorFlags — opencode (Claude parity)', () => {
+  it('plan -> --agent plan + a nassaj OPENCODE_PERMISSION denying edit and bash', () => {
     const r = mapPermissionModeToVendorFlags('opencode', 'plan', {});
     assert.deepEqual(r.flags, ['--agent', 'plan']);
+    assert.deepEqual(JSON.parse(r.permission ?? 'null'), { edit: 'deny', bash: 'deny' });
+    assert.equal(r.permission, OPENCODE_PLAN_PERMISSION);
     assert.equal(r.fullAccess, false);
-    assert.equal(r.network, false);
     assert.equal(r.ceiling, 'plan');
   });
 
-  it('default -> no flag (OpenCode ask/deny default), network OFF', () => {
-    const r = mapPermissionModeToVendorFlags('opencode', 'default', {});
-    assert.deepEqual(r.flags, []);
-    assert.equal(r.fullAccess, false);
-    assert.equal(r.network, false);
-    assert.equal(r.ceiling, 'default');
-  });
-
-  it('acceptEdits -> no flag (no mid-tier flag exists; stays on safe default)', () => {
-    const r = mapPermissionModeToVendorFlags('opencode', 'acceptEdits', {});
-    assert.deepEqual(r.flags, []);
-    assert.equal(r.fullAccess, false);
-    assert.equal(r.network, false);
-  });
-
-  it('bypassPermissions is CAPPED (no --auto) without the operator flag', () => {
+  it('bypassPermissions -> the skip flag with NO operator flag (SL-4 gate retired)', () => {
     const r = mapPermissionModeToVendorFlags('opencode', 'bypassPermissions', {});
-    assert.deepEqual(r.flags, [], 'client bypass must NOT reach the dangerous --auto');
-    assert.equal(r.fullAccess, false);
-    assert.equal(r.network, false);
-  });
-
-  it('bypassPermissions stays capped when OPENCODE_ALLOW_FULL_ACCESS is not exactly "true"', () => {
-    for (const bad of ['1', 'yes', 'TRUE', 'on', '', 'false']) {
-      const r = mapPermissionModeToVendorFlags('opencode', 'bypassPermissions', {
-        OPENCODE_ALLOW_FULL_ACCESS: bad,
-      } as Env);
-      assert.deepEqual(r.flags, [], `OPENCODE_ALLOW_FULL_ACCESS=${JSON.stringify(bad)} must NOT unlock --auto`);
-      assert.equal(r.fullAccess, false);
-    }
-  });
-
-  it('bypassPermissions -> --auto ONLY with OPENCODE_ALLOW_FULL_ACCESS==="true"', () => {
-    const r = mapPermissionModeToVendorFlags('opencode', 'bypassPermissions', {
-      OPENCODE_ALLOW_FULL_ACCESS: 'true',
-    } as Env);
-    assert.deepEqual(r.flags, ['--auto']);
+    assert.deepEqual(r.flags, [OPENCODE_SKIP_PERMISSIONS_FLAG]);
+    assert.equal(OPENCODE_SKIP_PERMISSIONS_FLAG, '--dangerously-skip-permissions');
+    assert.equal(r.permission, null);
     assert.equal(r.fullAccess, true);
-    assert.equal(r.network, true);
     assert.equal(r.ceiling, 'full');
   });
 
-  it('the full-access flag does NOT escalate non-bypass modes', () => {
-    const env = { OPENCODE_ALLOW_FULL_ACCESS: 'true' } as Env;
-    assert.deepEqual(mapPermissionModeToVendorFlags('opencode', 'default', env).flags, []);
-    assert.deepEqual(mapPermissionModeToVendorFlags('opencode', 'acceptEdits', env).flags, []);
-    assert.deepEqual(mapPermissionModeToVendorFlags('opencode', 'plan', env).flags, ['--agent', 'plan']);
+  it('the retired OPENCODE_ALLOW_FULL_ACCESS changes nothing either way', () => {
+    for (const value of [undefined, 'true', 'false']) {
+      const env = { OPENCODE_ALLOW_FULL_ACCESS: value } as Env;
+      assert.deepEqual(mapPermissionModeToVendorFlags('opencode', 'bypassPermissions', env).flags,
+        [OPENCODE_SKIP_PERMISSIONS_FLAG]);
+      assert.deepEqual(mapPermissionModeToVendorFlags('opencode', 'default', env).flags, []);
+    }
+    assert.equal(Object.hasOwn(SERVER_FLAGS, 'OPENCODE_ALLOW_FULL_ACCESS'), false);
   });
 
-  it("'glm' aliases to the OpenCode carrier table", () => {
-    assert.deepEqual(
-      mapPermissionModeToVendorFlags('glm', 'plan', {}),
-      mapPermissionModeToVendorFlags('opencode', 'plan', {}),
-    );
-    assert.deepEqual(
-      mapPermissionModeToVendorFlags('glm', 'bypassPermissions', { OPENCODE_ALLOW_FULL_ACCESS: 'true' } as Env),
-      mapPermissionModeToVendorFlags('opencode', 'bypassPermissions', { OPENCODE_ALLOW_FULL_ACCESS: 'true' } as Env),
-    );
+  it('default / acceptEdits / auto / dontAsk -> no flag and no permission (OpenCode own rules)', () => {
+    for (const mode of ['default', 'acceptEdits', 'auto', 'dontAsk']) {
+      const r = mapPermissionModeToVendorFlags('opencode', mode, {});
+      assert.deepEqual(r.flags, [], mode);
+      assert.equal(r.permission, null, mode);
+      assert.equal(r.fullAccess, false, mode);
+      assert.equal(r.ceiling, 'default', mode);
+    }
+  });
+
+  it("'glm' aliases to the OpenCode table", () => {
+    for (const mode of ['plan', 'bypassPermissions', 'default']) {
+      assert.deepEqual(
+        mapPermissionModeToVendorFlags('glm', mode, {}),
+        mapPermissionModeToVendorFlags('opencode', mode, {}),
+      );
+    }
   });
 });
 
@@ -222,7 +206,6 @@ describe('mapPermissionModeToVendorFlags — fail-closed & robustness', () => {
     for (const v of ['claude', 'agy', 'cursor', '', 'KIMI2', undefined as unknown as string]) {
       const r = mapPermissionModeToVendorFlags(v, 'bypassPermissions', {
         KIMI_ALLOW_FULL_ACCESS: 'true',
-        OPENCODE_ALLOW_FULL_ACCESS: 'true',
       } as Env);
       assert.deepEqual(r.flags, [], `unknown vendor ${JSON.stringify(v)} must emit no flags`);
       assert.equal(r.fullAccess, false);
@@ -236,19 +219,16 @@ describe('mapPermissionModeToVendorFlags — fail-closed & robustness', () => {
     assert.deepEqual(mapPermissionModeToVendorFlags('OpenCode', 'plan', {}).flags, ['--agent', 'plan']);
   });
 
-  it("Kimi's flag does not leak into OpenCode and vice-versa (per-vendor flag isolation)", () => {
-    const bothFlags = { KIMI_ALLOW_FULL_ACCESS: 'true', OPENCODE_ALLOW_FULL_ACCESS: 'true' } as Env;
-    // Kimi honors only its own flag name; OpenCode's flag is irrelevant to it and vice-versa.
-    assert.equal(mapPermissionModeToVendorFlags('kimi', 'bypassPermissions', { OPENCODE_ALLOW_FULL_ACCESS: 'true' } as Env).fullAccess, false);
-    assert.equal(mapPermissionModeToVendorFlags('opencode', 'bypassPermissions', { KIMI_ALLOW_FULL_ACCESS: 'true' } as Env).fullAccess, false);
-    // With both set, each still uses its own gate correctly.
-    assert.deepEqual(mapPermissionModeToVendorFlags('kimi', 'bypassPermissions', bothFlags).flags, ['--yolo']);
-    assert.deepEqual(mapPermissionModeToVendorFlags('opencode', 'bypassPermissions', bothFlags).flags, ['--auto']);
+  it("Kimi's operator flag does not reach OpenCode, and OpenCode's mode does not reach Kimi", () => {
+    const kimiFlag = { KIMI_ALLOW_FULL_ACCESS: 'true' } as Env;
+    assert.deepEqual(mapPermissionModeToVendorFlags('opencode', 'default', kimiFlag).flags, []);
+    assert.equal(mapPermissionModeToVendorFlags('kimi', 'bypassPermissions', {}).fullAccess, false);
+    assert.deepEqual(mapPermissionModeToVendorFlags('kimi', 'bypassPermissions', kimiFlag).flags, ['--yolo']);
   });
 
   it('a junk/unknown client mode never escalates on either vendor', () => {
-    const env = { KIMI_ALLOW_FULL_ACCESS: 'true', OPENCODE_ALLOW_FULL_ACCESS: 'true' } as Env;
-    // 'nonsense' normalizes to 'default' -> safe ceiling on both.
+    const env = { KIMI_ALLOW_FULL_ACCESS: 'true' } as Env;
+    // 'nonsense' normalizes to 'default' -> no escalation on either vendor.
     assert.deepEqual(mapPermissionModeToVendorFlags('kimi', 'nonsense', env).flags, ['--auto']);
     assert.deepEqual(mapPermissionModeToVendorFlags('opencode', 'nonsense', env).flags, []);
     assert.equal(mapPermissionModeToVendorFlags('kimi', 'nonsense', env).fullAccess, false);

@@ -12,3 +12,10 @@ export { buildScopeLivenessResolver } from '@/modules/workflow-supervisor/scope-
 export type { ScopeLivenessResolver } from '@/modules/workflow-supervisor/scope-status.js';
 export { probeUserWorkflowUnits, UserUnitProbeError } from '@/modules/workflow-supervisor/systemd.js';
 export type { UserUnitProbe } from '@/modules/workflow-supervisor/systemd.js';
+// ADR-219 S1 (T-2072): the shared delivery ledger, the pinned transcript proof scan and
+// the session's own permission mode, for the cross-session relay (side-effect free).
+export {
+  ledgerHasDelivery, readLedger, readSessionPermissionMode, scanJsonlForProofFrom,
+  transcriptByteSize, writeDeliveryLedgerEntries,
+} from '@/modules/workflow-supervisor/handoff.js';
+export type { DeliveryKind } from '@/modules/workflow-supervisor/handoff.js';

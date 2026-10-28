@@ -81,7 +81,7 @@ import { createSessionHandoverGate } from '@/modules/websocket/services/session-
 import { describeSteerTurnForViewer, handleSessionSteerWithImages } from '@/modules/session-steer/index.js';
 
 // eslint-disable-next-line boundaries/no-unknown -- steer images reuse the normal prompt's chat-image store.
-import { buildChatImageNote, saveChatImages } from '../../../services/chat-image-store.js';
+import { buildChatImageNote, chatImageRefsFromPaths, saveChatImages } from '../../../services/chat-image-store.js';
 // eslint-disable-next-line boundaries/no-unknown -- ADR-210: display masking is a leaf service shared by every viewer egress.
 import { createBtwDisplaySink, createDisplayReplaySink, maskPendingPermissionsFor } from '../../../services/display-secret-mask.js';
 import { reportWriterLeaseRefusal, withLocalUpdateWriterLease } from '../../../services/update-writer-lease.js';
@@ -192,16 +192,18 @@ function ownedApprovalPredicate(
 
 /**
  * Stores a steer's images through the same chat-image store and path note a
- * normal prompt uses; null (refuse the steer) when any image is rejected.
+ * normal prompt uses, plus the store refs the steer bubble shows (B-1697);
+ * null (refuse the steer) when any image is rejected.
  */
-async function storeSteerImages(images: unknown[]): Promise<string | null> {
+async function storeSteerImages(images: unknown[]) {
   // saveChatImages vets every element itself (data URL, size, type, count).
   const { paths, failures } = await saveChatImages(images as Parameters<typeof saveChatImages>[0]);
   if (failures.length > 0) {
     console.warn('[session-steer] rejected image attachments', { failures });
     return null;
   }
-  return buildChatImageNote(paths) || null;
+  const note = buildChatImageNote(paths);
+  return note ? { note, images: chatImageRefsFromPaths(paths) } : null;
 }
 
 function btwUserKey(userId: string | number | null): string {
@@ -500,6 +502,13 @@ export type ChatWebSocketDependencies = {
    * safely claim the writer without SDK desync risk.
    */
   isPrimarySocketAlive: (sessionId: string) => boolean;
+  /**
+   * ADR-218: unicasts the session's agents snapshot (`session-agents`) to a
+   * viewer that just passed the check-session-status visibility gate; also the
+   * lazy rebuild trigger for a session first opened by a mirror. Optional:
+   * legacy callers/tests that do not wire it simply get no snapshot.
+   */
+  sendSessionAgentsSnapshot?: (sessionId: string, send: (frame: unknown) => void) => Promise<void>;
   /**
    * B-N-ATTACH (PHASE-SR-0): read-only differential replay for agy. Re-emits the
    * buffered payloads with `seq > lastSeq` via `send`, oldest-first, and returns
@@ -3862,6 +3871,9 @@ export function handleChatConnection(
         // seq > lastSeq above, codex/opencode recover through the history path.
         if (sessionId) {
           websocketWriterService.setSocketViewMirror(sessionId, ws as RealtimeClientConnection);
+          // ADR-218: this viewer passed the B-137 gate above; it gets the current
+          // agents snapshot now and later ones through its mirror.
+          void dependencies.sendSessionAgentsSnapshot?.(sessionId, sendRawToThisSocket);
         }
 
         // T-1903 (E2E): a viewer joining a LIVE run — even a brand-new session's

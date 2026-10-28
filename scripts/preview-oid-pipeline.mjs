@@ -18,6 +18,7 @@ import {
 } from 'node:fs';
 import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
+import { hardenGitArgs } from '../shared/git-safety.js';
 import { fileURLToPath } from 'node:url';
 
 const REF_ROOT = 'refs/nassaj/previews/v1';
@@ -29,7 +30,7 @@ const DOMAIN_STATES = {
 };
 
 function git(root, args, options = {}) {
-    const result = spawnSync('git', args, { cwd: root, encoding: 'utf8', ...options });
+    const result = spawnSync('git', hardenGitArgs(args), { cwd: root, encoding: 'utf8', ...options });
     if (result.status !== 0) {
         const detail = String(result.stderr || result.stdout || '').trim();
         throw new Error(`git ${args[0]} failed${detail ? `: ${detail}` : ''}`);
@@ -65,7 +66,7 @@ function stateRef(group, domain, state) {
 }
 
 function readRef(root, ref) {
-    const result = spawnSync('git', ['rev-parse', '--verify', '--quiet', ref], {
+    const result = spawnSync('git', hardenGitArgs(['rev-parse', '--verify', '--quiet', ref]), {
         cwd: root, encoding: 'utf8',
     });
     if (result.status === 1) return null;
@@ -173,7 +174,7 @@ function makeTreeRemovable(directory) {
 
 function extractArchive(root, oid, destination) {
     return new Promise((resolve, reject) => {
-        const archive = spawn('git', ['archive', '--format=tar', oid], { cwd: root, stdio: ['ignore', 'pipe', 'pipe'] });
+        const archive = spawn('git', hardenGitArgs(['archive', '--format=tar', oid]), { cwd: root, stdio: ['ignore', 'pipe', 'pipe'] });
         const extractor = spawn('tar', ['-x', '-f', '-', '-C', destination, '--no-same-owner', '--no-same-permissions'], {
             cwd: root, stdio: ['pipe', 'ignore', 'pipe'],
         });

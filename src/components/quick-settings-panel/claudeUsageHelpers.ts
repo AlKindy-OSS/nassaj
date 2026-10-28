@@ -231,3 +231,16 @@ export function formatClaudeExtraDetailAmounts(
     limit: formatCredits(display.limitCents, display.currency, locale),
   };
 }
+
+/**
+ * ADR-214: نصّ شارة إنفاق Anthropic API في الهيدر — المبلغ بصياغة العملة
+ * (`formatCredits`، بالسنت) أو `null` حين لا بيانات للشهر بعد. `null` ليس صفراً:
+ * الصفر لا يُقال إلا إن أكّد الخادم وجود بيانات (`hasData`) ومجموعها صفر.
+ */
+export function formatApiSpend(
+  spend: { spendCents: number; currency: string; hasData: boolean },
+  locale: string,
+): string | null {
+  if (!spend.hasData) return null;
+  return formatCredits(spend.spendCents, spend.currency, locale);
+}

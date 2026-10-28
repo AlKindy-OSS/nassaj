@@ -346,6 +346,10 @@ export function normalizedToChatMessages(messages: NormalizedMessage[]): ChatMes
       deliveryStatus: msg.deliveryStatus,
       steerClientMsgId: msg.steerClientMsgId,
       steerSenderDisplayName: msg.steerSenderDisplayName,
+      // ADR-219 S1: provenance of a relayed delivery (row marker + live turn id).
+      isSynthetic: msg.isSynthetic,
+      // Trusted only from the server's own marker, never from a clientMsgId a client could craft.
+      peerDeliveryId: typeof msg.peerDeliveryId === 'string' ? msg.peerDeliveryId : undefined,
       // Per-turn model attribution (B-352). Only assistant rows carry it; the
       // footer badge renders it so the reader can see WHICH model answered,
       // which the session-level chip cannot say once a conversation changes
@@ -590,6 +594,8 @@ export function normalizedToChatMessages(messages: NormalizedMessage[]): ChatMes
             content: msg.content,
             timestamp: msg.timestamp,
             isNotice: true,
+            ...(msg.noticeCode ? { noticeCode: msg.noticeCode } : {}),
+            ...(msg.noticeReason ? { noticeReason: msg.noticeReason } : {}),
             ...sharedMetadata,
           });
         }

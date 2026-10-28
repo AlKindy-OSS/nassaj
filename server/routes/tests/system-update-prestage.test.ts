@@ -104,3 +104,33 @@ test('S5: a throwing wake never fails the confirmed consent', async () => {
   getConnection().prepare("UPDATE source_update_jobs SET state = 'restart_queued', worker_fence = 1, activation_identity_sha256 = ?, updated_at = '2026-01-01 00:00:00' WHERE id = ?").run(digest, id);
   assert.equal((await request('owner', `/update/jobs/${id}/confirm`, { expectedVersion: '2.4.0.1', targetDigest: digest })).status, 202);
 });
+
+test('T-2025: /release/latest hands every discovered release to the prestager, for every role', async () => {
+  const seen: Array<Record<string, unknown>> = [];
+  setUpdateRouteHooks({ noteReleaseDiscovered: (release: Record<string, unknown>) => { seen.push(release); } });
+  for (const role of ['owner', 'member']) assert.equal((await request(role, '/release/latest')).status, 200, role);
+  assert.deepEqual(seen.map(release => release.version), ['2.4.0.1', '2.4.0.1']);
+});
+
+test('T-2025: a throwing or rejecting prestager hook never fails the banner', async () => {
+  setUpdateRouteHooks({ noteReleaseDiscovered: () => { throw new Error('boom'); } });
+  assert.equal((await request('member', '/release/latest')).status, 200);
+  setUpdateRouteHooks({ noteReleaseDiscovered: () => Promise.reject(new Error('boom')) });
+  assert.equal((await request('member', '/release/latest')).status, 200);
+});
+
+test('T-2025: the banner reads the node\'s shared discovery when one is wired', async () => {
+  setReleaseDiscoveryForTests(null);
+  try {
+    let calls = 0;
+    setUpdateRouteHooks({ releaseDiscovery: async () => {
+      calls += 1;
+      return { release: { version: '2.4.0.2', tagName: 'v2.4.0.2', htmlUrl: 'https://example.invalid/r' } };
+    } });
+    const { status, body } = await request('member', '/release/latest');
+    assert.deepEqual([status, body.version, calls], [200, '2.4.0.2', 1]);
+    assert.equal(Object.hasOwn(body, 'htmlUrl'), false);
+  } finally {
+    setReleaseDiscoveryForTests(async () => ({ release: { version: '2.4.0.1', tagName: 'v2.4.0.1', htmlUrl: 'https://example.invalid/r' } }));
+  }
+});

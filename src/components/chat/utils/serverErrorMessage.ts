@@ -21,6 +21,10 @@ export const SERVER_ERROR_CODE_KEYS: Record<string, string> = {
   // B-1374 / B-1367: قاطعان قبل أي تشغيل، وسببهما في يد المستخدم.
   attachment_rejected: 'serverError.attachment_rejected',
   opencode_project_config_refused: 'serverError.opencode_project_config_refused',
+  // B-1707: المحرّك رفض الإذن بنفسه في تشغيلٍ لا يستطيع السؤال؛ لم يُسأل أحد.
+  permission_auto_rejected: 'serverError.permission_auto_rejected',
+  // B-1707: نسخة OpenCode المثبّتة رفضت معاملات التشغيل وطبعت دليل الاستخدام؛ لم يعمل شيء.
+  opencode_cli_args_rejected: 'serverError.opencode_cli_args_rejected',
   // B-1298: رموز أخطاء المزوّد المحلي — تصل مباشرةً على إطار kind:'error' أو
   // في حقل providerErrorCode على إطار message_dispatch_unconfirmed.
   provider_auth_failed: 'serverError.provider_auth_failed',
