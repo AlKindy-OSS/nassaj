@@ -115,7 +115,7 @@ describe('provisionUserDirs — agy isolation', () => {
   // token symlinked into its tree. That was the point: the owner never had to
   // re-authenticate. But "owner" meant `role === 'owner'`, which is not one
   // person — this install has two such accounts — so the convenience was a
-  // credential-sharing channel invisible to `provider_sharing`, and any future
+  // credential-sharing channel invisible to the (since retired) sharing policy, and any future
   // promotion to owner would have inherited the token silently.
   it('links NO operator credential for an owner — and reaps one already there', () => {
     const ownerAgy = agyDir(OWNER_ID);

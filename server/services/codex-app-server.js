@@ -19,7 +19,25 @@ import { codexLaunchIdentityFor, spawnReservedCodex } from '../modules/providers
 import { peekCodexRuntimeVerdict } from '../shared/codex-runtime-compat.js';
 
 import { assertLinkModeRunAllowed } from './isolation/link-mode-run-gate.js';
-import { resolveProviderEnv } from './isolation/resolve-provider-env.js';
+import { assertCredentialLinked, resolveModelRunEnv } from './isolation/credential-gate.js';
+
+/**
+ * ADR-152 A1 §3.5 (qa H2): every App Server child runs on the member's Codex
+ * credential (own or granted) — the credential gate admits it before the env
+ * exists, so an unlinked member is refused with CREDENTIAL_NOT_LINKED.
+ */
+const codexModelRunEnv = (userId, provider, baseEnv) => resolveModelRunEnv(userId, provider, baseEnv, 'agent');
+
+/**
+ * The same gate, run FIRST — before any permit, launch identity or spawn — so
+ * the refusal is CREDENTIAL_NOT_LINKED, not a later runtime error. A caller that
+ * injects its own `envResolver` owns the credential decision for that env.
+ * @param {unknown} userId
+ * @param {{ envResolver?: Function }} options
+ */
+function admitCodexCredential(userId, options) {
+  if (!options.envResolver) assertCredentialLinked({ actor: userId, provider: 'codex', mode: 'agent' });
+}
 
 const START_TIMEOUT_MS = 20_000;
 const COMPLETION_TIMEOUT_MS = 5 * 60_000;
@@ -141,11 +159,12 @@ async function executeCodexAppServerRpc(sessionId, userId, method, params = {}, 
   }
 
   const authorizeImpl = options.authorizeImpl || assertSessionAccessible;
-  const envResolver = options.envResolver || resolveProviderEnv;
+  const envResolver = options.envResolver || codexModelRunEnv;
   const accessMode = options.accessMode === 'write' ? 'write' : 'read';
   const session = validateCodexSession(sessionId, userId, accessMode, authorizeImpl);
   // B-1546: refused before any permit or spawn (api_key link mode, no key).
   await assertLinkModeRunAllowed(userId, 'codex');
+  admitCodexCredential(userId, options);
   const permissionExecution = options.permissionExecution !== undefined
     ? options.permissionExecution
     : authorizeImpl !== assertSessionAccessible
@@ -332,7 +351,7 @@ export async function spawnCodexSideQuery(params = {}, callbacks = {}, options =
   const onError = typeof callbacks.onError === 'function' ? callbacks.onError : () => {};
   const onComplete = typeof callbacks.onComplete === 'function' ? callbacks.onComplete : () => {};
   const authorizeImpl = options.authorizeImpl || assertSessionAccessible;
-  const envResolver = options.envResolver || resolveProviderEnv;
+  const envResolver = options.envResolver || codexModelRunEnv;
   const spawnImpl = options.spawnImpl || spawn;
   const governanceImpl = options.governanceImpl || ensureCodexGovernance;
   const sessionId = typeof params.sessionId === 'string' ? params.sessionId.trim() : '';
@@ -532,10 +551,11 @@ export async function spawnCodexSideQuery(params = {}, callbacks = {}, options =
  */
 export async function startCodexCompaction(sessionId, userId, options = {}) {
   const authorizeImpl = options.authorizeImpl || assertSessionAccessible;
-  const envResolver = options.envResolver || resolveProviderEnv;
+  const envResolver = options.envResolver || codexModelRunEnv;
   const session = validateCodexSession(sessionId, userId, 'write', authorizeImpl);
   // B-1546: refused before any permit or spawn (api_key link mode, no key).
   await assertLinkModeRunAllowed(userId, 'codex');
+  admitCodexCredential(userId, options);
   const key = sessionId;
   if (activeCompactions.has(key)) {
     const result = await activeCompactions.get(key).promise;

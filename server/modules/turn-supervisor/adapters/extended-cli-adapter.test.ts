@@ -92,10 +92,25 @@ describe('extended CLI mechanical adapters', () => {
     }), /not pinned and probed/u);
   });
 
+  it('ADR-152 A1 §3.5: with the default (gated) env an unlinked member\'s cell does not probe', async () => {
+    for (const provider of ['opencode', 'qwen'] as const) {
+      const options = {
+        binary: '/fake/bin', executableProbe: async () => true,
+        versionProbe: async () => (provider === 'qwen' ? '0.21.12' : '1.18.40'),
+        opencodeCapabilityProbe: async () => true, qwenCapabilityProbe: async () => true,
+      };
+      assert.equal(await createExtendedCliAdapter(provider, options).probe({ provider, userId: 1 }), false, provider);
+      // Control: the same cell probes once an env resolves (the gate is the only difference).
+      assert.equal(await createExtendedCliAdapter(provider, { ...options, resolveEnv: () => ({}) })
+        .probe({ provider, userId: 1 }), true, `${provider} control`);
+    }
+  });
+
   it('accepts any reporting opencode release but refuses a silent or missing binary', async () => {
     const make = (versionProbe: () => Promise<string>, executableProbe = async () => true, capable = true) =>
       createExtendedCliAdapter('opencode', {
         binary: '/fake/opencode', executableProbe, versionProbe, opencodeCapabilityProbe: async () => capable,
+        resolveEnv: () => ({}),
         createRoleHome: async () => ROLE, cleanupRoleHome: async () => {},
         spawnCapture: async () => ({ code: 0, stdout: 'answer', stderr: '' }),
       });
@@ -143,7 +158,7 @@ describe('extended CLI mechanical adapters', () => {
     const controller = new AbortController(); controller.abort();
     const adapter = createExtendedCliAdapter('qwen', {
       executableProbe: async () => true, versionProbe: async () => '0.21.12',
-      qwenCapabilityProbe: async () => true,
+      qwenCapabilityProbe: async () => true, resolveEnv: () => ({}),
       createRoleHome: async () => ROLE, cleanupRoleHome: async () => {},
       spawnCapture: async () => ({ code: 0, stdout: '', stderr: '' }),
     });

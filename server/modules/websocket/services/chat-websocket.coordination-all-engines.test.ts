@@ -80,14 +80,13 @@ const ENGINES: Array<{ provider: string; messageType: string; dep: string }> = [
 ];
 
 /**
- * ‏deepseek وglm معطَّلان عالمياً (‏T-864 وقرار المالك 2026-07-26 في
- * `shared/disabledProviders.ts`)، فبوّابةُ الرفض تسبق الموزّع ولا يُطلَق لهما
- * مُشعِلٌ أصلاً. توصيلُ المستوى إليهما مبنيٌّ وكامل في `vendor-runtime`، لكن
+ * ‏glm معطَّل عالمياً (قرار المالك 2026-07-26 في `shared/disabledProviders.ts`)،
+ * فبوّابةُ الرفض تسبق الموزّع ولا يُطلَق له مُشعِلٌ أصلاً (ومُشعِل deepseek حُذف
+ * كلياً في T-2088). توصيلُ المستوى إليه مبنيٌّ وكامل في `vendor-runtime`، لكن
  * ادّعاءَ أنه «يصل اليوم» كذبٌ يكشفه أول تشغيل — فيُثبَّت الواقع اختباراً بدل
  * أن يُطمَس. رفعُ التعطيل وحده يُحيي المسار، بلا سطر كودٍ إضافي.
  */
 const GLOBALLY_DISABLED: Array<{ provider: string; messageType: string; dep: string }> = [
-  { provider: 'deepseek', messageType: 'deepseek-command', dep: 'spawnDeepSeek' },
   { provider: 'glm', messageType: 'glm-command', dep: 'spawnGlm' },
   // qwen: disabled 2026-09-28 (owner decision); its launcher stays dormant.
   { provider: 'qwen', messageType: 'qwen-command', dep: 'spawnQwen' },
@@ -97,7 +96,7 @@ const GLOBALLY_DISABLED: Array<{ provider: string; messageType: string; dep: str
 
 const DEP_NAMES = [
   'queryClaudeSDK', 'queryCodex', 'spawnCursor', 'spawnAntigravity',
-  'spawnOpenCode', 'spawnKimi', 'spawnKimiAgent', 'spawnDeepSeek',
+  'spawnOpenCode', 'spawnKimi', 'spawnKimiAgent',
   'spawnGlm', 'spawnQwen',
 ];
 

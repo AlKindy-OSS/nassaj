@@ -1,0 +1,297 @@
+{
+ "provenance": {
+  "task": "T-2086 S3 (ADR-224)",
+  "package": "@deepseek-ai/dsh@0.2.2-rc.1",
+  "node": "v24.18.1",
+  "recordedAt": "2026-11-07",
+  "question": "Does session/resume work when every launch re-derives the profile with --from-default-profile acp?",
+  "argv": [
+   "nassaj-acp",
+   "--from-default-profile",
+   "acp",
+   "--patch",
+   "<NASSAJ_LAYER>"
+  ],
+  "layer": "server/governance/dsh-nassaj-layer.yml with llm-deepseek baseURL pointed at a local fake LLM",
+  "answer": "yes: the second launch resumed the session and its /v1/messages carried the first turn"
+ },
+ "launches": [
+  {
+   "name": "first-launch",
+   "traffic": [
+    {
+     "dir": "client->agent",
+     "msg": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "method": "initialize",
+      "params": {
+       "protocolVersion": 1,
+       "clientCapabilities": {
+        "fs": {
+         "readTextFile": false,
+         "writeTextFile": false
+        },
+        "terminal": false
+       },
+       "clientInfo": {
+        "name": "nassaj",
+        "version": "0"
+       }
+      }
+     }
+    },
+    {
+     "dir": "agent->client",
+     "msg": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": {
+       "protocolVersion": 1,
+       "agentCapabilities": {
+        "mcpCapabilities": {
+         "http": true
+        },
+        "promptCapabilities": {
+         "image": false,
+         "audio": false,
+         "embeddedContext": false
+        },
+        "sessionCapabilities": {
+         "close": {},
+         "list": {},
+         "resume": {}
+        }
+       }
+      }
+     }
+    },
+    {
+     "dir": "client->agent",
+     "msg": {
+      "jsonrpc": "2.0",
+      "id": 2,
+      "method": "session/new",
+      "params": {
+       "cwd": "<WORKSPACE>",
+       "mcpServers": []
+      }
+     }
+    },
+    {
+     "dir": "agent->client",
+     "msg": {
+      "jsonrpc": "2.0",
+      "id": 2,
+      "result": {
+       "configOptions": "<omitted>",
+       "sessionId": "<DSH_SESSION_ID>"
+      }
+     }
+    },
+    {
+     "dir": "client->agent",
+     "msg": {
+      "jsonrpc": "2.0",
+      "id": 3,
+      "method": "session/prompt",
+      "params": {
+       "sessionId": "<DSH_SESSION_ID>",
+       "prompt": [
+        {
+         "type": "text",
+         "text": "first turn alpha"
+        }
+       ]
+      }
+     }
+    },
+    {
+     "dir": "agent->client",
+     "msg": {
+      "jsonrpc": "2.0",
+      "id": 3,
+      "result": {
+       "stopReason": "end_turn"
+      }
+     }
+    },
+    {
+     "dir": "client->agent",
+     "msg": {
+      "jsonrpc": "2.0",
+      "id": 4,
+      "method": "session/close",
+      "params": {
+       "sessionId": "<DSH_SESSION_ID>"
+      }
+     }
+    },
+    {
+     "dir": "agent->client",
+     "msg": {
+      "jsonrpc": "2.0",
+      "id": 4,
+      "result": {}
+     }
+    }
+   ]
+  },
+  {
+   "name": "second-launch-resume",
+   "traffic": [
+    {
+     "dir": "client->agent",
+     "msg": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "method": "initialize",
+      "params": {
+       "protocolVersion": 1,
+       "clientCapabilities": {
+        "fs": {
+         "readTextFile": false,
+         "writeTextFile": false
+        },
+        "terminal": false
+       },
+       "clientInfo": {
+        "name": "nassaj",
+        "version": "0"
+       }
+      }
+     }
+    },
+    {
+     "dir": "agent->client",
+     "msg": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": {
+       "protocolVersion": 1,
+       "agentCapabilities": {
+        "mcpCapabilities": {
+         "http": true
+        },
+        "promptCapabilities": {
+         "image": false,
+         "audio": false,
+         "embeddedContext": false
+        },
+        "sessionCapabilities": {
+         "close": {},
+         "list": {},
+         "resume": {}
+        }
+       }
+      }
+     }
+    },
+    {
+     "dir": "client->agent",
+     "msg": {
+      "jsonrpc": "2.0",
+      "id": 2,
+      "method": "session/resume",
+      "params": {
+       "sessionId": "<DSH_SESSION_ID>",
+       "cwd": "<WORKSPACE>",
+       "mcpServers": []
+      }
+     }
+    },
+    {
+     "dir": "agent->client",
+     "msg": {
+      "jsonrpc": "2.0",
+      "id": 2,
+      "result": {
+       "configOptions": "<omitted>"
+      }
+     }
+    },
+    {
+     "dir": "client->agent",
+     "msg": {
+      "jsonrpc": "2.0",
+      "id": 3,
+      "method": "session/prompt",
+      "params": {
+       "sessionId": "<DSH_SESSION_ID>",
+       "prompt": [
+        {
+         "type": "text",
+         "text": "second turn beta"
+        }
+       ]
+      }
+     }
+    },
+    {
+     "dir": "agent->client",
+     "msg": {
+      "jsonrpc": "2.0",
+      "id": 3,
+      "result": {
+       "stopReason": "end_turn"
+      }
+     }
+    },
+    {
+     "dir": "client->agent",
+     "msg": {
+      "jsonrpc": "2.0",
+      "id": 4,
+      "method": "session/close",
+      "params": {
+       "sessionId": "<DSH_SESSION_ID>"
+      }
+     }
+    },
+    {
+     "dir": "agent->client",
+     "msg": {
+      "jsonrpc": "2.0",
+      "id": 4,
+      "result": {}
+     }
+    }
+   ]
+  }
+ ],
+ "llmRequests": [
+  {
+   "url": "/v1/messages",
+   "bodyKeys": [
+    "model",
+    "stream",
+    "messages",
+    "max_tokens",
+    "thinking",
+    "output_config",
+    "system",
+    "tools"
+   ],
+   "userTexts": [
+    "first turn alpha"
+   ]
+  },
+  {
+   "url": "/v1/messages",
+   "bodyKeys": [
+    "model",
+    "stream",
+    "messages",
+    "max_tokens",
+    "thinking",
+    "output_config",
+    "system",
+    "tools"
+   ],
+   "userTexts": [
+    "first turn alpha",
+    "second turn beta"
+   ]
+  }
+ ]
+}

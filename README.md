@@ -1,13 +1,13 @@
 <div align="center">
   <img src="public/logo.svg" alt="نسّاج" width="64" height="64">
   <h1>نسّاج — nassaj</h1>
-  <p>واجهة ويب وجوّال لتشغيل وكلاء البرمجة من أي مكان: جلساتك ومشاريعك وطرفياتك في مكان واحد، بعربية كاملة الاتجاه.</p>
+  <p>واجهة ويب وجوّال لتشغيل الوكلاء البرمجيين من أي مكان: جلساتك ومشاريعك وطرفياتك في مكان واحد، بعربية كاملة الاتجاه.</p>
   <p><i>A web and mobile UI for coding agents — sessions, projects and terminals in one place, with first-class Arabic/RTL.</i></p>
 </div>
 
 <p align="center">
   <a href="#التثبيت">التثبيت</a> ·
-  <a href="#المزوّدات">المزوّدات</a> ·
+  <a href="#الوكلاء-البرمجيون-المدعومون">الوكلاء البرمجيون</a> ·
   <a href="#الأمان-وتصنيف-النشر">الأمان</a> ·
   <a href="#english">English</a> ·
   <a href="CONTRIBUTING.md">المساهمة</a> ·
@@ -18,25 +18,28 @@
 
 ## ما هو نسّاج
 
-نسّاج واجهة تُدير **وكلاء البرمجة الطرفيين** (‏Claude Code وCodex وغيرهما) من المتصفّح: تفتح جلسة، تتابع بثّها لحظياً، توافق على الأدوات، وتعود إليها من الجوّال. ليس مزوّد ذكاء اصطناعي ولا بديلاً عنه — بل الطبقة التي تجلس فوق الوكلاء المثبَّتة على جهازك، وتشغّل كلاً منها باعتماداته هو.
+نسّاج واجهة تُدير **الوكلاء البرمجيون الطرفيون** (‏Claude Code وCodex وغيرهما) من المتصفّح: تفتح جلسة، تتابع بثّها لحظياً، توافق على الأدوات، وتعود إليها من الجوّال. ليس مزوّد ذكاء اصطناعي ولا بديلاً عنه — بل الطبقة التي تجلس فوق الوكلاء المثبَّتة على جهازك، وتشغّل كلاً منها باعتماداته هو.
 
 هذا المشروع **تفريعة** من [claudecodeui](https://github.com/siteboon/claudecodeui)، وما يميّزه:
 
-- **مزوّدات متعددة خلف نموذج جلسة واحد** — لكلٍّ بيت إعدادات معزول خاص به لكل مستخدم.
+- **وكلاء برمجيون متعددون خلف نموذج جلسة واحد** — لكلٍّ بيت إعدادات معزول خاص به لكل مستخدم.
 - **عزل حقيقي بين المستخدمين** — كل عضو يصادق باعتماده هو؛ لا اعتماد مشترك بين الحسابات.
 - **عربية وRTL في صميم الواجهة** لا كطبقة ترجمة فوقها: اتجاه أساس لكل رسالة، وخطوط عربية مدمجة، وانعكاس منطقي للتخطيط.
-- **مسار إطلاق محكوم** — كل مزوّد يعمل تحت وثيقة حوكمة؛ الافتراضي المحايد في `server/governance/default-AGENTS.md`، وتستبدله بوضع وثيقتك في `~/.claude/AGENTS.md`.
+- **مسار إطلاق محكوم** — كل وكيل برمجي يعمل تحت وثيقة حوكمة؛ الافتراضي المحايد في `server/governance/default-AGENTS.md`، وتستبدله بوضع وثيقتك في `~/.claude/AGENTS.md`.
 - **أدوات تشغيل** — لوحة مشروع حيّة، وويكي فريق، ولوحة أوامر مُصرَّحة، وإعادة تشغيل آمنة لا تقطع جلسة جارية.
 
-## المزوّدات
+## الوكلاء البرمجيون المدعومون
 
-| المزوّد | الاستدعاء |
+| الوكيل البرمجي | الاستدعاء |
 |---|---|
 | Claude Code | ‏Agent SDK رسمي |
 | Codex | ‏Codex SDK |
-| OpenCode · GLM · DeepSeek · Antigravity | ‏CLI محكوم لكلٍّ منها |
+| OpenCode · DeepSeek Harness · Antigravity | ‏CLI محكوم لكلٍّ منها |
 
-كل مزوّد اختياري: يظهر في المنتقي إن كان **مثبَّتاً ومصادَقاً** على الجهاز، ويختفي وإلا. لا يشحن نسّاج مفاتيح ولا يطلبها لنفسه.
+> GLM نموذج يُشغَّل عبر OpenCode بوصفه ناقلاً، وDeepSeek نموذج يقدّمه مزوّده، والوكيل البرمجي
+> المقابل له هو DeepSeek Harness.
+
+كل وكيل برمجي اختياري: يظهر في المنتقي إن كان **مثبَّتاً ومصادَقاً** على الجهاز، ويختفي وإلا. لا يشحن نسّاج مفاتيح ولا يطلبها لنفسه.
 
 ## التثبيت
 
@@ -157,9 +160,10 @@ installed on your machine, each under its own isolated per-user config home and 
 credentials, and puts their sessions, your projects and live terminals in one place.
 Arabic and RTL are first-class throughout, not a translation layer.
 
-**Providers** (each optional, each listed only when installed and authenticated):
-Claude Code, Codex, OpenCode, GLM, DeepSeek,
-Antigravity. nassaj ships no keys and asks for none of its own.
+**Coding agents** (each optional, each listed only when installed and authenticated):
+Claude Code, Codex, OpenCode, DeepSeek Harness,
+Antigravity. GLM runs as a model through OpenCode (as a carrier), and DeepSeek is a model
+provider whose coding agent is DeepSeek Harness. nassaj ships no keys and asks for none of its own.
 
 **Production release install** requires Node 24 on Linux x64 with glibc 2.39 or newer, plus `curl`, `jq`, and `tar`. It needs no checkout, npm, or GitHub token: use the Arabic command block above to resolve `latest` from the public `AlKindy-OSS/nassaj` release channel, verify the standalone installer asset against GitHub's API digest, and pass that exact release receipt and resolved commit to the installer.
 

@@ -26,8 +26,8 @@ import { PROVIDER_UI_CAPABILITIES, getProviderCapabilities } from './providerCap
 const ALL_PROVIDERS = Object.keys(PROVIDER_UI_CAPABILITIES);
 
 describe('coordinationLevel — كل الأجساد السبعة الباقية بعد تقاعد الأربعة (T-1953)', () => {
-  it('الواصف يغطّي سبعة مزوّدين بلا نقصان (cursor/hermes/qwen/kimi تقاعدوا كأجساد)', () => {
-    expect(ALL_PROVIDERS).toHaveLength(7);
+  it('الواصف يغطّي ثمانية مزوّدين بلا نقصان (السبعة + dsh من T-2086)', () => {
+    expect(ALL_PROVIDERS).toHaveLength(8);
   });
 
   it('كل مزوّد يحمل درجة إنفاذ صريحة من الاتحاد المعرَّف', () => {
@@ -37,9 +37,9 @@ describe('coordinationLevel — كل الأجساد السبعة الباقية 
     }
   });
 
-  it('المقود يظهر لكل مزوّد له مُشعِل تشغيل — أي الستة ما عدا sakana', () => {
+  it('المقود يظهر لكل مزوّد له مُشعِل تشغيل — أي السبعة ما عدا sakana', () => {
     const shown = ALL_PROVIDERS.filter((id) => getProviderCapabilities(id).coordinationLevel.supported);
-    expect(shown).toHaveLength(6);
+    expect(shown).toHaveLength(7);
     expect(shown).not.toContain('sakana');
   });
 

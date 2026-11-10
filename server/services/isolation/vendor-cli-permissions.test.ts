@@ -24,7 +24,6 @@ import {
   mapPermissionModeToVendorFlags,
   normalizePermissionMode,
   OPENCODE_PLAN_PERMISSION,
-  OPENCODE_SKIP_PERMISSIONS_FLAG,
   SERVER_FLAGS,
 } from './vendor-cli-permissions.js';
 
@@ -159,10 +158,10 @@ describe('mapPermissionModeToVendorFlags — opencode (Claude parity)', () => {
     assert.equal(r.ceiling, 'plan');
   });
 
-  it('bypassPermissions -> the skip flag with NO operator flag (SL-4 gate retired)', () => {
+  // ADR-226 (was: the skip flag): the parity engine decides bypass, OpenCode gets no flag.
+  it('bypassPermissions -> no flag at all, full ceiling (the parity engine decides)', () => {
     const r = mapPermissionModeToVendorFlags('opencode', 'bypassPermissions', {});
-    assert.deepEqual(r.flags, [OPENCODE_SKIP_PERMISSIONS_FLAG]);
-    assert.equal(OPENCODE_SKIP_PERMISSIONS_FLAG, '--dangerously-skip-permissions');
+    assert.deepEqual(r.flags, []);
     assert.equal(r.permission, null);
     assert.equal(r.fullAccess, true);
     assert.equal(r.ceiling, 'full');
@@ -171,8 +170,7 @@ describe('mapPermissionModeToVendorFlags — opencode (Claude parity)', () => {
   it('the retired OPENCODE_ALLOW_FULL_ACCESS changes nothing either way', () => {
     for (const value of [undefined, 'true', 'false']) {
       const env = { OPENCODE_ALLOW_FULL_ACCESS: value } as Env;
-      assert.deepEqual(mapPermissionModeToVendorFlags('opencode', 'bypassPermissions', env).flags,
-        [OPENCODE_SKIP_PERMISSIONS_FLAG]);
+      assert.deepEqual(mapPermissionModeToVendorFlags('opencode', 'bypassPermissions', env).flags, []);
       assert.deepEqual(mapPermissionModeToVendorFlags('opencode', 'default', env).flags, []);
     }
     assert.equal(Object.hasOwn(SERVER_FLAGS, 'OPENCODE_ALLOW_FULL_ACCESS'), false);

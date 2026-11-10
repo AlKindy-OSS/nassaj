@@ -96,6 +96,8 @@ import { reconcileClaudeSkillsLink } from './claude-skills-link.js';
 import { materializeGovernanceCopy as materializeVendorGovernanceCopy } from './vendor-cli-governance-material.js';
 import { materializeOpenCodeConfig } from './opencode-config-material.js';
 import { QWEN_HOME_SUBDIR, QWEN_SETTINGS_FILENAME } from './qwen-settings-material.js';
+import { SYSTEM_ACTOR_DIRNAME } from './credential-actor.js';
+import { assertNotRealHomeUnderTest } from './test-home-guard.js';
 
 // Per-user isolated config trees are owner-only (0700): under a shared system
 // uid this prevents any other local reader from listing another user's tree.
@@ -183,6 +185,9 @@ const KIMI_CREDENTIAL_FILES = ['auth.json'];
 // abuse). Only these NON-security shared subdirs stay symlinked to the operator
 // (fleet-standard, the same sharing model as .claude/agents|skills).
 const OPENCODE_SHARED_CONFIG_SUBDIRS = ['agent', 'command', 'skills'];
+// The local-model config dir (ADR-LOCAL-INSTR-TIER-001) links only command/ and
+// skills/: its agent/ holds GENERATED cards (no model pin), never the shared dir.
+const OPENCODE_LOCAL_SHARED_CONFIG_SUBDIRS = ['command', 'skills'];
 // The governance filename opencode ingests from its config-home. opencode OBEYS it at
 // the ENFORCED codex/gemini tier, so the GL-5 spawn gate makes it fail-closed.
 const OPENCODE_AGENTS_FILENAME = 'AGENTS.md';
@@ -261,8 +266,9 @@ export function invalidateProvisioned(userId) {
   provisioned.delete(String(userId));
 }
 
-/** Root of all per-user isolated config trees. */
+/** Root of all per-user isolated config trees (refused for a real-home test run, B-1771). */
 function usersRoot() {
+  assertNotRealHomeUnderTest();
   return path.join(os.homedir(), '.nassaj-users');
 }
 
@@ -276,6 +282,19 @@ function usersRoot() {
 export function userConfigDir(userId, sub = '') {
   const base = path.join(usersRoot(), String(userId));
   return sub ? path.join(base, sub) : base;
+}
+
+/**
+ * Links the operator's shared command/ and skills/ into a member's local-model
+ * opencode dir (ADR-LOCAL-INSTR-TIER-001, I5), as provisioning does for `.config`.
+ * Idempotent; a missing operator subdir is skipped.
+ * @param {string} opencodeConfigDir the real `<.config-local>/opencode` dir
+ */
+export function linkOpenCodeLocalSharedConfig(opencodeConfigDir) {
+  const home = os.homedir();
+  for (const sub of OPENCODE_LOCAL_SHARED_CONFIG_SUBDIRS) {
+    ensureSymlink(path.join(home, '.config', 'opencode', sub), path.join(opencodeConfigDir, sub));
+  }
 }
 
 /** Creates a directory (recursive) with restrictive mode if it does not exist. */
@@ -403,8 +422,8 @@ function hardenUserTree(userRoot) {
  *      This install has TWO owner-role accounts, so the convenience was already
  *      a credential-sharing channel, and any future promotion to owner would
  *      have silently inherited four providers' credentials at the next spawn.
- *   2. The channel was invisible to policy: it lives entirely outside
- *      `provider_sharing`, so a provider reading "Isolated" in the UI was still
+ *   2. The channel was invisible to policy: it lived entirely outside the
+ *      (since retired) sharing policy, so a provider reading "Isolated" in the UI was still
  *      running on the operator's account. The settings screen even advertised
  *      it — "your credential is linked automatically as the owner".
  *
@@ -439,6 +458,11 @@ function unlinkForeignCredential(credentialPath) {
  */
 export function provisionUserDirs(userId) {
   if (userId === null || userId === undefined || userId === '') {
+    return;
+  }
+  // ADR-152 A1 §3.4: the system actor's tree is never provisioned with shared
+  // links (it is credential-less and never linkable).
+  if (String(userId) === SYSTEM_ACTOR_DIRNAME) {
     return;
   }
 

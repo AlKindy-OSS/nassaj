@@ -57,7 +57,7 @@ const conflict = (code: string, fence?: Readonly<{ scopeKind: string; reasonCode
 
 function baseDependencies(launches: string[]): Record<string, unknown> {
   return {
-    getSessionProvider: () => null,
+    getSessionProvider: () => null, admitCredentialTurn: () => ({ principalId: 1, grantedBy: null }),
     getActiveClaudeSDKSessions: () => [],
     queryClaudeSDK: async () => { launches.push('claude'); },
   };

@@ -3,6 +3,10 @@
  * carries. The gateway is mocked to hand a chosen handle; `current` is then
  * re-pointed so any re-acquisition would resolve a different executable.
  */
+// B-1771: FIRST import. Run ad hoc with the operator HOME, this test wrote into
+// the real home (member tree or provider state); the sandbox moves HOME first.
+import '@/shared/__tests__/sandbox-home.js';
+
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import fs from 'node:fs';

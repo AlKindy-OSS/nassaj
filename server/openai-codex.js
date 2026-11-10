@@ -41,6 +41,7 @@ import { checkCwdExists, buildCwdMissingPayload } from './shared/cwd-check.js';
 import { mapSpawnError } from './shared/spawn-error.js';
 import { auditLogDb, participantsDb } from './modules/database/index.js';
 import { resolveProviderEnv } from './services/isolation/resolve-provider-env.js';
+import { assertModelRunActor } from './services/isolation/credential-actor.js';
 import { assertLinkModeRunAllowed } from './services/isolation/link-mode-run-gate.js';
 import { isLinkModeRunRefusal } from './modules/providers/services/harness-link-mode.service.js';
 import { beginProviderRun } from './services/provider-run-presence.js';
@@ -943,7 +944,7 @@ async function queryCodexOwned(invocation) {
       // Appended AFTER the isolation resolver so it can never displace a
       // per-user credential var.
       ...codexLaunchOptions({
-        ...resolveProviderEnv(ws?.userId ?? null, 'codex', process.env),
+        ...resolveProviderEnv(assertModelRunActor(ws?.userId), 'codex', process.env),
         [PROCESS_TAG_ENV_VAR]: processRunTag,
       }, launchIdentity),
       // ADR-206 S1: `agents.max_depth = 10` (T-1601) rides every launch but binds v1 models

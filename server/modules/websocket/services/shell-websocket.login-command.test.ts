@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
+import fs from 'node:fs';
+
+import * as shellService from './shell-websocket.service.js';
 import {
   isAllowlistedShellCommand,
-  isClaudeLoginCredentialWriteAllowed,
   isProviderLoginCommand,
   isProviderLoginCommandMismatch,
   isShellCommandPermittedForRole,
@@ -89,26 +91,12 @@ test('B-1260: an empty or non-login command is never a mismatch', () => {
   assert.equal(isProviderLoginCommandMismatch('claude', 'claude --resume abc'), false);
 });
 
-// --- B-1260: credential-write permission (shared vs isolated) ----------------
+// --- ADR-152 A1: no role-based login gate --------------------------------------
 
-test('B-1260: shared claude — a member may NOT run claude auth login', () => {
-  assert.equal(isClaudeLoginCredentialWriteAllowed('claude auth login', 'user', true), false);
-  assert.equal(isClaudeLoginCredentialWriteAllowed('claude auth login', 'member', true), false);
-  assert.equal(isClaudeLoginCredentialWriteAllowed('claude auth login', null, true), false);
-});
-
-test('B-1260: shared claude — owner/admin MAY run claude auth login', () => {
-  assert.equal(isClaudeLoginCredentialWriteAllowed('claude auth login', 'owner', true), true);
-  assert.equal(isClaudeLoginCredentialWriteAllowed('claude auth login', 'admin', true), true);
-});
-
-test('B-1260: isolated claude — any role may link their OWN account', () => {
-  assert.equal(isClaudeLoginCredentialWriteAllowed('claude auth login', 'user', false), true);
-  assert.equal(isClaudeLoginCredentialWriteAllowed('claude auth login', null, false), true);
-});
-
-test('B-1260: the write gate applies ONLY to claude auth login, not other commands', () => {
-  // setup-token prints to stdout and persists nothing to the shared tree.
-  assert.equal(isClaudeLoginCredentialWriteAllowed('claude setup-token', 'user', true), true);
-  assert.equal(isClaudeLoginCredentialWriteAllowed('codex login --device-auth', 'user', true), true);
+test('ADR-152 A1: claude auth login has no role gate — every role links its OWN tree', () => {
+  // The PTY runs with honorGrants:false and claude is always isolated, so the
+  // login writes the caller's own tree; the shared-tree role gate is gone.
+  assert.equal('isClaudeLoginCredentialWriteAllowed' in shellService, false);
+  const source = fs.readFileSync(new URL('./shell-websocket.service.ts', import.meta.url), 'utf8');
+  assert.doesNotMatch(source, /SHARED_CLAUDE_WRITE_ROLES|isClaudeShared|shared_link_admin_only/);
 });

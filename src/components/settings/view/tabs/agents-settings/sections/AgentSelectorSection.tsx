@@ -50,6 +50,7 @@ export const AGENT_NAMES: Record<AgentProvider, string> = {
   glm: 'GLM',
   hermes: 'Hermes',
   sakana: 'Sakana',
+  dsh: 'DeepSeek Harness',
 };
 
 /**

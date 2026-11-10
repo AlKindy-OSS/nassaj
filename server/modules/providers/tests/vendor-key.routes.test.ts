@@ -3,11 +3,11 @@
  *   - POST /company/:companyId/key/conflict (D9 choice);
  *   - POST /vendor-keys/backups/:harness/restore (§3 rollback).
  * Covered: body validation (400), the :harness allowlist (traversal and unknown
- * names), the credential-write gate (403 for a shared tree), no signed-in
- * member (400), the shared rate limit (429), and that one member can never
+ * names), no role gate (every tree is the caller's own, ADR-152 A1), no
+ * signed-in member (400), the shared rate limit (429), and that one member can never
  * restore into another member's tree.
  *
- * Nothing is mocked: real database and sharing policy, real migration runtime,
+ * Nothing is mocked: real database, real migration runtime,
  * real AES store and real harness files, all inside the hermetic sandbox.
  * Each test sends its own client address (`cf-connecting-ip`, trusted from a
  * loopback peer) so the per-IP limiter is exercised only where intended.
@@ -33,7 +33,6 @@ process.env.NASSAJ_UNIFIED_VENDOR_KEYS = '1';
 delete process.env.NASSAJ_TRUSTED_PROXY_HOPS;
 
 const { initializeDatabase, closeConnection, userDb } = await import('@/modules/database/index.js');
-const { setProviderSharingConfig, _resetProviderSharingCache } = await import('@/services/provider-sharing.js');
 const { userConfigDir } = await import('@/services/isolation/provision-user-dirs.js');
 const store = await import('@/services/isolation/provider-secrets-store.js');
 const { vendorKeyMigrationService } = await import('../services/vendor-key-migration.runtime.js');
@@ -41,8 +40,6 @@ const { default: providerRoutes } = await import('../provider.routes.js');
 const { AppError } = await import('@/shared/utils.js');
 
 await initializeDatabase();
-_resetProviderSharingCache();
-setProviderSharingConfig({ claude: 'isolated', codex: 'isolated', opencode: 'shared' });
 store._resetProviderSecretsServerKeyCache();
 
 let server: ReturnType<express.Express['listen']>;
@@ -157,11 +154,11 @@ test('restore: the :harness allowlist refuses traversal and unknown names', asyn
   }
 });
 
-test('restore: a shared tree needs an elevated role (403); no member is a 400', async () => {
-  const member = newMember('route-restore-403');
-  const forbidden = await call(caller(member), restoreRoute('opencode'));
-  assert.equal(forbidden.status, 403);
-  assert.equal(forbidden.body.error?.code, 'CREDENTIAL_WRITE_FORBIDDEN');
+test('restore: a member is never refused by role for their own opencode tree; no member is a 400', async () => {
+  const member = newMember('route-restore-own-opencode');
+  const own = await call(caller(member), restoreRoute('opencode'));
+  assert.notEqual(own.status, 403, 'no role gate: the opencode tree is the member\'s own');
+  assert.notEqual(own.body.error?.code, 'CREDENTIAL_WRITE_FORBIDDEN');
   const anonymous = await call(caller(), restoreRoute('claude'));
   assert.equal(anonymous.status, 400);
   assert.equal(anonymous.body.error?.code, 'MEMBER_REQUIRED');

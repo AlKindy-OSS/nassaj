@@ -118,7 +118,7 @@ export default function McpServers({ selectedProvider, currentProjects }: McpSer
 
   const globalRowLabel = t('mcpServers.addGlobal.label', { defaultValue: 'Global MCP server' });
   const globalRowDescription = t('mcpServers.addGlobal.description', {
-    defaultValue: 'One common stdio or HTTP server, written only to providers compatible with the selected scope and transport.',
+    defaultValue: 'One common stdio or HTTP server, written only to coding agents compatible with the selected scope and transport.',
   });
   const globalActionLabel = t('mcpServers.addGlobal.action', { defaultValue: 'Add global server' });
   const globalModalTitle = t('mcpServers.addGlobal.modalTitle', { defaultValue: 'Add global MCP server' });

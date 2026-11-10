@@ -16,6 +16,7 @@ export const MCP_PROVIDER_NAMES: Record<McpProvider, string> = {
   glm: 'GLM 5.2',
   hermes: 'Hermes',
   sakana: 'Sakana',
+  dsh: 'DeepSeek Harness',
 };
 
 // Codex is user-only: codex-cli 0.147.0 reads $CODEX_HOME/config.toml and ignores
@@ -39,6 +40,8 @@ export const MCP_SUPPORTED_SCOPES: Record<McpProvider, McpScope[]> = {
   glm: [],
   hermes: [],
   sakana: [],
+  // dsh (T-2086): no MCP surface — dsh-nassaj-layer.yml launches it with none.
+  dsh: [],
 };
 
 export const MCP_SUPPORTED_TRANSPORTS: Record<McpProvider, McpTransport[]> = {
@@ -53,6 +56,8 @@ export const MCP_SUPPORTED_TRANSPORTS: Record<McpProvider, McpTransport[]> = {
   glm: [],
   hermes: [],
   sakana: [],
+  // dsh (T-2086): no MCP surface — dsh-nassaj-layer.yml launches it with none.
+  dsh: [],
 };
 
 export const MCP_GLOBAL_SUPPORTED_SCOPES: McpScope[] = ['user', 'project'];
@@ -101,6 +106,7 @@ export const MCP_SUPPORTS_WORKING_DIRECTORY: Record<McpProvider, boolean> = {
   glm: false,
   hermes: false,
   sakana: false,
+  dsh: false,
 };
 
 export const DEFAULT_MCP_FORM: McpFormState = {

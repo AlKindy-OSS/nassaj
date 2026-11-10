@@ -28,7 +28,7 @@
  * لا قاعدة قراءة جديدة في هذا الملف.
  */
 
-import { readdir, realpath, stat } from 'node:fs/promises';
+import { lstat, readdir, realpath, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { createInterface } from 'node:readline';
 
@@ -352,6 +352,44 @@ function findClaudeWatermark(
   return watermarks.get(identity.key) ?? identity.legacy.map((key) => watermarks.get(key)).find(Boolean);
 }
 
+const CLAUDE_REL_KEY = /^claude-rel:([^/]+)\/([^/]+)\/([^/]+)$/;
+
+/**
+ * فهرس مفاتيح `claude-rel` من مستوى مجلّد المشروع (‏`<dir>/<id>.jsonl` أو المجلّد
+ * اليتيم `<dir>/<id>`) بحسب `<rootId>` و`<id>`، يُبنى مرّة من العلامات المائية
+ * المحمّلة أصلاً. مطابقة حرفية للاسم، لا LIKE ولا لاحقة في SQL.
+ */
+function indexClaudeSessionKeys(watermarks: Map<string, LedgerSourceWatermark>): Map<string, string[]> {
+  const index = new Map<string, string[]>();
+  for (const key of watermarks.keys()) {
+    const match = CLAUDE_REL_KEY.exec(key);
+    if (!match) continue;
+    const id = `${match[1]}/${match[3].replace(/\.jsonl$/, '')}`;
+    index.set(id, [...(index.get(id) ?? []), key]);
+  }
+  return index;
+}
+
+const pathExists = (target: string): Promise<boolean> => lstat(target).then(() => true, () => false);
+
+/**
+ * B-1739: مفاتيح الجلسة نفسها تحت مجلّد مشروع **آخر** في الجذر نفسه لم يعد
+ * ملفّها (أو مجلّدها اليتيم) على القرص — أي جلسة نُقلت. تُمرَّر مفاتيحَ مُستبدَلة
+ * فتُبتلع صفوفها (T-1880) بدل أن تبقى بحكم الديمومة وتُحسب مرّتين.
+ * ملفٌّ قديم ما زال موجوداً نسخةٌ حقيقية لا نقل، فلا يُبتلع (السلوك السابق).
+ */
+async function movedSessionKeys(
+  index: Map<string, string[]>, root: ClaudeRootEntry, projectDir: string, sessionId: string,
+): Promise<string[]> {
+  const moved: string[] = [];
+  for (const key of index.get(`${root.rootId}/${sessionId}`) ?? []) {
+    const [, , dir, name] = CLAUDE_REL_KEY.exec(key) ?? [];
+    if (!dir || dir === projectDir) continue;
+    if (!(await pathExists(path.join(root.real, dir, name)))) moved.push(key);
+  }
+  return moved;
+}
+
 /** جذور كلود المحقونة للاختبار، أو جذور الجهاز كلّها مع تهجئات الحوكمة القديمة. */
 function claudeRootCatalog(options: LedgerScanOptions): ClaudeRootEntry[] {
   if (!options.claudeRoots) return resolveClaudeRootCatalog();
@@ -502,6 +540,15 @@ type TranscriptScan = {
 const UNATTRIBUTED_SCAN = (undatedEntries: number, errors: string[]): TranscriptScan =>
   ({ rows: [], undatedEntries, attributed: false, errors });
 
+/** مسار مشروع الجلسة في صفّ `sessions` بنسّاج، أو '' حين لا صفّ أو لا مسار. */
+function registeredProjectPath(sessionId: string): string {
+  try {
+    return sessionsDb.getSessionById(sessionId)?.project_path?.trim() ?? '';
+  } catch {
+    return ''; // قاعدة غير مهيّأة — يُترك القرار لـ`cwd` السجلّ.
+  }
+}
+
 /**
  * سجلّ كلود واحد: ملف الأمّ + كل ملفات الوكلاء الفرعيين تحت مجلّده.
  *
@@ -554,14 +601,11 @@ async function scanClaudeTranscript(
   }, { requireFirst: parent !== null });
   const errors = refusalErrors('claude', visited);
 
-  // احتياط النسبة: صفّ الجلسة في قاعدة نسّاج حين لا `cwd` في السجلّ نفسه —
-  // ولا يُستشار إلا إذا قُرئ ملفٌّ مربوط بمعرّفها فعلاً.
-  if (!projectPath && visited.read > 0) {
-    try {
-      projectPath = sessionsDb.getSessionById(sessionId)?.project_path ?? '';
-    } catch {
-      // لا صفّ — يبقى غير منسوب.
-    }
+  // النسبة: صفّ الجلسة في قاعدة نسّاج أولاً (B-1739: جلسة نُقلت إلى مشروع آخر
+  // يبقى `cwd` سجلّها على مشروعها القديم)، ثم `cwd` السجلّ احتياطاً — ولا يُستشار
+  // الصفّ إلا إذا قُرئ ملفٌّ مربوط بمعرّفها فعلاً.
+  if (visited.read > 0) {
+    projectPath = registeredProjectPath(sessionId) || projectPath;
   }
 
   const ref = projectPath ? resolveProjectRef(projectPath) : null;
@@ -621,7 +665,7 @@ async function scanCodexRollout(root: string, rolloutPath: string): Promise<Tran
     days.add(localDay(timestamp));
   }, { requireFirst: true });
 
-  const ref = visited.read > 0 && projectPath ? resolveProjectRef(projectPath) : null;
+  const ref = visited.read > 0 ? resolveProjectRef(registeredProjectPath(threadId) || projectPath) : null;
   if (!ref) {
     return UNATTRIBUTED_SCAN(undatedEntries, refusalErrors('codex', visited));
   }
@@ -760,6 +804,7 @@ async function runScan(options: LedgerScanOptions): Promise<LedgerScanReport> {
   if (harnesses.includes('claude')) {
     const stats = (report.perHarness.claude ??= emptyHarnessStat());
     const watermarks = projectCostLedgerDb.getSourceWatermarks('claude');
+    const sessionKeys = indexClaudeSessionKeys(watermarks);
     const roots = claudeRootCatalog(options);
 
     for (const root of roots) {
@@ -844,7 +889,12 @@ async function runScan(options: LedgerScanOptions): Promise<LedgerScanReport> {
             const signature = await signatureOf(files);
             const identity = claudeSourceIdentity(root, transcriptPath);
             const known = findClaudeWatermark(watermarks, identity);
-            if (!options.force && known && known.mtimeMs >= signature.mtimeMs && known.sizeBytes === signature.size) {
+            const moved = await movedSessionKeys(sessionKeys, root, projectDir.name, sessionId);
+            // مفتاح منقول باقٍ يُلغي التخطّي مرّةً: تثبيتٌ ازدوج عدّه قبل الإصلاح
+            // وعلامته الجديدة مطابقة للملف يُشفى بالمسح العادي التالي، والابتلاع
+            // يحذف المفتاح القديم فلا يتكرّر المسح بعدها.
+            const unchanged = known && known.mtimeMs >= signature.mtimeMs && known.sizeBytes === signature.size;
+            if (!options.force && unchanged && moved.length === 0) {
               report.skippedUnchanged += 1;
               stats.skipped += 1;
               continue;
@@ -853,7 +903,7 @@ async function runScan(options: LedgerScanOptions): Promise<LedgerScanReport> {
             const scan = await scanClaudeTranscript(root.real, sessionId, files, transcriptPath);
             report.scanned += 1;
             stats.scanned += 1;
-            persist('claude', identity.key, 'claude', signature, scan, identity.legacy);
+            persist('claude', identity.key, 'claude', signature, scan, [...identity.legacy, ...moved]);
           } catch (error) {
             report.errors.push(`claude:${transcriptPath}: ${error instanceof Error ? error.message : String(error)}`);
           }

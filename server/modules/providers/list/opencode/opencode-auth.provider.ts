@@ -17,15 +17,6 @@ type OpenCodeCredentialsStatus = {
   error?: string;
 };
 
-const OPENCODE_ENV_CREDENTIAL_KEYS = [
-  'ANTHROPIC_API_KEY',
-  'OPENAI_API_KEY',
-  'GOOGLE_GENERATIVE_AI_API_KEY',
-  'GEMINI_API_KEY',
-  'GROQ_API_KEY',
-  'OPENROUTER_API_KEY',
-];
-
 export class OpenCodeProviderAuth implements IProviderAuth {
   /**
    * Checks whether the OpenCode CLI is available to the server process.
@@ -102,15 +93,8 @@ export class OpenCodeProviderAuth implements IProviderAuth {
       }
     }
 
-    const envCredential = OPENCODE_ENV_CREDENTIAL_KEYS.find((key) => process.env[key]?.trim());
-    if (envCredential) {
-      return {
-        authenticated: true,
-        email: envCredential,
-        method: 'environment',
-      };
-    }
-
+    // ADR-152 A1 §3.5: a key in the SERVER env is inherited, not this member's
+    // link — only the member's own auth.json counts.
     return {
       authenticated: false,
       email: null,

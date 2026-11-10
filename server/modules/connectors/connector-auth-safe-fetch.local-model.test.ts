@@ -68,8 +68,16 @@ describe('safeFetchLocalModelJson — the resolved address decides', () => {
     assert.deepEqual(await fetchWith('http://ollama.internal:11434/v1/models', '127.0.0.1'), { data: [] });
   });
 
-  it('fetches a tailnet address over http', async () => {
-    assert.deepEqual(await fetchWith('http://100.64.0.5:11434/v1/models', '100.64.0.5'), { data: [] });
+  it('fetches a tailnet address over http when it routes through tailscale', async () => {
+    assert.deepEqual(await safeFetchLocalModelJson('http://100.64.0.5:11434/v1/models', null, {
+      resolver: resolverFor('100.64.0.5', 4), transport: transportOk, routeInterface: async () => 'tailscale0',
+    }), { data: [] });
+  });
+
+  it('refuses 100.64.0.0/10 over http when the route is a carrier uplink (CGNAT)', async () => {
+    await assert.rejects(safeFetchLocalModelJson('http://100.64.0.5:11434/v1/models', null, {
+      resolver: resolverFor('100.64.0.5', 4), transport: transportOk, routeInterface: async () => 'eth0',
+    }), /local_model_address_forbidden/);
   });
 
   it('refuses a name that resolves to a metadata address', async () => {

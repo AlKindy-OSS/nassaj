@@ -88,14 +88,13 @@ export abstract class McpProvider implements IProviderMcp {
    * member's own tree (T-1177).
    *
    * WHY THIS IS A FLAG ON THE WRITER AND NOT A POLICY LOOKUP. The MCP route uses it
-   * to decide whether a plain member may write a user-scoped server. Deriving that
-   * from the sharing policy ALONE is unsound: `isProviderIsolated('opencode')` can
-   * be flipped to true from the admin UI at any moment, while
-   * `resolveOpenCodeConfigPath` still computes `os.homedir()/.config/opencode` with
-   * no userId — so the gate would open onto the OPERATOR's file and silently reopen
-   * B-345. The permission must therefore be conditioned on a property of the code
-   * that performs the write, declared here, next to that code, where anyone
-   * changing the writer is looking. Providers default to `false`: a new provider is
+   * to decide whether a plain member may write a user-scoped server. Spawns are
+   * always isolated per user (ADR-152 A1), but that says nothing about where a
+   * WRITER resolves its file: a writer that still computes the operator's path
+   * would open the gate onto the OPERATOR's file and silently reopen B-345. The
+   * permission must therefore be conditioned on a property of the code that
+   * performs the write, declared here, next to that code, where anyone changing
+   * the writer is looking. Providers default to `false`: a new provider is
    * admin-only until someone proves its writer is per-user.
    */
   readonly writesPerUserConfig: boolean;

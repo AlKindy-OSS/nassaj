@@ -32,7 +32,6 @@ const ZAI_B = 'zai-key-BBBB';
 
 let audits: Audit[] = [];
 let clock = new Date('2026-10-09T00:00:00.000Z');
-let sharedHarnesses = new Set<Harness>();
 let userSeq = 100;
 let lockCalls: string[] = [];
 
@@ -70,9 +69,7 @@ function makeService(keyVersion = 1) {
   return createVendorKeyMigrationService({
     isEnabled: () => store.isUnifiedVendorKeysEnabled(),
     locateHarnessFiles: (userId) => (['claude', 'codex', 'opencode'] as Harness[]).map((harness) => (
-      sharedHarnesses.has(harness)
-        ? { harness, scope: 'shared' as const }
-        : { harness, scope: 'own' as const, path: harnessPath(userId, harness) }
+      { harness, scope: 'own' as const, path: harnessPath(userId, harness) }
     )),
     fingerprint: (value, version) => store.projectionFingerprint(value, version),
     keyVersion,
@@ -119,7 +116,6 @@ beforeEach(() => {
   process.env.NASSAJ_UNIFIED_VENDOR_KEYS = '1';
   audits = [];
   clock = new Date('2026-10-09T00:00:00.000Z');
-  sharedHarnesses = new Set();
   lockCalls = [];
 });
 
@@ -342,18 +338,13 @@ test('flag off: run is a no-op and the store refuses in-flag writes; reads stay 
   assert.equal(store.readVendorLedgerState(userId, 'anthropic').state, 'absent');
 });
 
-test('a shared harness tree is never inventoried or backed up', async () => {
+test('ADR-152 A1: every harness tree is the member\'s own — all are inventoried and backed up', async () => {
   const { userId } = seedAgreeingMember();
-  sharedHarnesses = new Set(['claude', 'codex']);
 
   const result = await makeService().run(userId);
 
-  assert.deepEqual(result.harnesses.filter((h) => h.scope === 'shared').map((h) => h.harness), ['claude', 'codex']);
-  const read = store.readVendorLedgerState(userId, 'anthropic');
-  const entries = read.state === 'ok' ? read.ledger.entries : [];
-  assert.deepEqual(entries.map((e) => e.harness), ['opencode']);
-  assert.deepEqual(store.listHarnessBackups(userId), ['opencode']);
-  assert.equal(store.readVendorLedgerState(userId, 'openai').state, 'absent');
+  assert.deepEqual(result.harnesses.map((h) => h.scope), ['own', 'own', 'own']);
+  assert.deepEqual([...store.listHarnessBackups(userId)].sort(), ['claude', 'codex', 'opencode']);
 });
 
 test('the operator scope and a null user are never migrated', async () => {

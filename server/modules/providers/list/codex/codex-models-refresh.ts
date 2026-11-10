@@ -7,7 +7,6 @@ import {
   type CatalogLaunchScope,
 } from '@/modules/execution-permissions/catalog-launch-scope.js';
 import { resolveProviderEnv } from '@/services/isolation/resolve-provider-env.js';
-import { isProviderIsolated } from '@/services/provider-sharing.js';
 import { resolveCodexMachineRuntime } from '@/shared/codex-executable.js';
 import { readObjectRecord, readOptionalString } from '@/shared/utils.js';
 
@@ -92,7 +91,6 @@ export const readCodexModelsCacheMeta = async (codexHome: string): Promise<Codex
 export type CodexRefreshTarget = { codexHome: string; env: NodeJS.ProcessEnv };
 
 export type CodexRefreshTargetDeps = {
-  isIsolated?: (provider: 'codex') => boolean;
   resolveOwnEnv?: (userId: string | number) => NodeJS.ProcessEnv;
 };
 
@@ -103,8 +101,8 @@ const hasUserId = (userId: string | number | null | undefined): userId is string
 /**
  * Returns a refresh target only when `env` (the picker's resolved env) points at
  * the user's OWN isolated CODEX_HOME. A granted home (another member's
- * credentials) or shared mode (operator ~/.codex) yields null: read-only, never
- * spawn on credentials that are not the requester's.
+ * credentials) yields null: read-only, never spawn on credentials that are not
+ * the requester's.
  */
 export const ownCodexRefreshTarget = (
   userId: string | number | null | undefined,
@@ -112,8 +110,6 @@ export const ownCodexRefreshTarget = (
   deps: CodexRefreshTargetDeps = {},
 ): CodexRefreshTarget | null => {
   if (!hasUserId(userId)) return null;
-  const isIsolated = deps.isIsolated ?? ((provider) => isProviderIsolated(provider));
-  if (!isIsolated('codex')) return null;
   const codexHome = readOptionalString(env.CODEX_HOME);
   if (!codexHome) return null;
   const resolveOwnEnv = deps.resolveOwnEnv

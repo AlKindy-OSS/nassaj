@@ -29,6 +29,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { assertClaudeSpawnEnvAllowed } from '../../services/isolation/claude-spawn-env-guard.js';
+import { localEngineSpawnRefusal } from '../../services/isolation/local-engine-pin.js';
 // eslint-disable-next-line boundaries/dependencies -- ADR-219 ح-1: pure relay spawn constants (no imports); the unit has no database.
 import { relayCliArgsForRelayMode } from '../peer-relay/peer-spawn-constants.js';
 
@@ -119,7 +120,12 @@ async function main(): Promise<void> {
   // B-446: the env the child receives is a copy checked by the iron-rule guard.
   const childEnv: NodeJS.ProcessEnv = { ...process.env };
   try {
-    await assertClaudeSpawnEnvAllowed(childEnv);
+    // ADR-227: no engine verdict reaches this unit, so a local model id would run
+    // on official Anthropic — refused (defence behind the launch route and GATE2).
+    const localRefusal = localEngineSpawnRefusal({ model: a.model, site: 'background task' });
+    if (localRefusal) throw localRefusal;
+    // B-1764: project/local settings at the cwd the child is spawned in below.
+    await assertClaudeSpawnEnvAllowed(childEnv, { cwd: process.cwd() });
   } catch (error) {
     sealGuardRefusal(a.taskDir, stderrPath, error);
   }

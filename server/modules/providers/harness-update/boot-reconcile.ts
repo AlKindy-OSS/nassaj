@@ -25,10 +25,13 @@
  */
 
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 
 import { HARNESS_UPDATE_DESCRIPTORS, type HarnessDescriptor } from './descriptors.js';
 import { removeOrphanInstallDirs } from './install.service.js';
+import { recoverDshUpdatePipeline } from './npm-lock/dsh-pipeline-update.js';
+import { verifyNpmLockTreesAtBoot } from './npm-lock/trust.js';
 import { isHarnessLockedElsewhere } from './harness-lock.js';
 import { pruneHarnessSnapshots } from './harness-retention.js';
 import { autoRollback, completeRestore, markRollbackFailed } from './restore-engine.js';
@@ -232,5 +235,10 @@ export async function reconcileHarnessSnapshots(perCall: Partial<SnapshotRuntime
   }
   // T-2062 (qa C8): no install job survives a restart, so its staging dirs are orphans.
   removeOrphanInstallDirs();
+  // T-2086 S4: full-tree check of every kept npm-lock version, in the
+  // background (~25 s for dsh); launches stay refused `unverified` until done.
+  // T-2091: a crashed dsh pipeline run leaves no staging tree and no stale `checking` status.
+  recoverDshUpdatePipeline(os.homedir());
+  void verifyNpmLockTreesAtBoot();
   return report;
 }

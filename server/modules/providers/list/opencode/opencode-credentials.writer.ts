@@ -2,9 +2,8 @@
  * opencode-credentials.writer — T-866/B2: writes a user's API key into
  * opencode's OWN auth store, `<dataHome>/auth.json`, where `dataHome` is
  * resolved through the central isolation seam (resolveOpenCodeDataHomeForUser →
- * resolveProviderEnv). Under isolation that is
- * `~/.nassaj-users/<userId>/.local/share/opencode/auth.json`; in shared mode it
- * is the operator's dir (the api-key routes gate shared writes to admin/owner).
+ * resolveProviderEnv). For a signed-in user that is always their own
+ * `~/.nassaj-users/<userId>/.local/share/opencode/auth.json` (ADR-152 A1).
  *
  * auth.json record shape is opencode's native `{ "<target>": { "type": "api",
  * "key": "..." } }`. Writes MERGE AT FILE LEVEL: only the requested target is
@@ -29,7 +28,6 @@ import type {
   ProviderCredentialWriterCapability,
 } from '@/shared/interfaces.js';
 import { AppError, readObjectRecord, readOptionalString } from '@/shared/utils.js';
-import { isProviderIsolated } from '@/services/provider-sharing.js';
 
 import { resolveOpenCodeDataHomeForUser } from './opencode-home.js';
 
@@ -111,24 +109,9 @@ export class OpenCodeCredentialsWriter implements IProviderCredentialWriter {
   /**
    * auth.json path inside the user's resolved opencode data home.
    *
-   * ── T-1043 (شرط legal-compliance-advisor ١ في ADR-076) ────────────────────
-   *
-   * `resolveOpenCodeDataHomeForUser` returns the OPERATOR's shared dir whenever
-   * opencode is not isolated — and opencode ships `shared` by default. So a
-   * member pasting their personal vendor key here would write it into a file
-   * every other member's spawn reads, while the UI tells them it is stored for
-   * their account alone. Three separate harms, not one:
-   *
-   *   • a member's secret is disclosed to people they never authorized;
-   *   • their key is then SPENT by others, silently — there are no server-side
-   *     quotas for non-Anthropic vendors, so nothing surfaces the drain;
-   *   • toward the vendor it is a confidentiality breach by us, since their
-   *     terms bind the key to its holder.
-   *
-   * Fail-closed: refuse the write and name the remedy. A deliberate TEAM key is
-   * a different act with its own gate (elevated role + audit + a UI badge that
-   * tells the member they are on an operator key) — it must never be reachable
-   * by a member pasting into a field labelled "your key".
+   * Every write lands in the REQUESTER's own tree, whatever their role: opencode
+   * is always isolated (ADR-152 A1), so no member's key is ever written into a
+   * file another member's spawn reads, and no role may write another's tree.
    *
    * ── B-1251 (`honorGrants: false`) ─────────────────────────────────────────
    *
@@ -147,27 +130,6 @@ export class OpenCodeCredentialsWriter implements IProviderCredentialWriter {
     );
   }
 
-  /**
-   * Gate for WRITES only — never for reads or deletes.
-   *
-   * A member who stored a key before this guard existed must still be able to
-   * SEE that it is there and REMOVE it; refusing those would trap the very
-   * secret the guard exists to protect, and leave the only exit through the
-   * filesystem. So `isConfigured` and `deleteApiKey` keep resolving the path
-   * unconditionally, and only the act that ADDS a secret to a shared file stops.
-   */
-  private assertWritableScope(userId: string | number | null | undefined): void {
-    const scoped = userId ?? null;
-    if (scoped !== null && scoped !== '' && !isProviderIsolated('opencode')) {
-      throw new AppError(
-        'Refusing to store a personal opencode key while opencode is in shared mode: '
-        + "the file is the operator's and every member would read it. "
-        + 'Isolate opencode first, or have an owner set a team key deliberately.',
-        { code: 'CREDENTIAL_SHARED_SCOPE_REFUSED', statusCode: 409 },
-      );
-    }
-  }
-
   async setApiKey(
     userId: string | number | null | undefined,
     apiKey: string,
@@ -184,7 +146,6 @@ export class OpenCodeCredentialsWriter implements IProviderCredentialWriter {
     // all). Refused BEFORE any path resolution or file read, so a rejected paste
     // leaves no trace at all.
     assertNotClaudeSubscriptionToken(apiKey, 'opencode');
-    this.assertWritableScope(userId);
     const resolvedTarget = this.resolveTarget(target);
     const filePath = this.authFilePath(userId);
     // Merge: read-modify-write so entries for OTHER opencode providers survive.

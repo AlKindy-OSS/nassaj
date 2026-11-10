@@ -4,6 +4,7 @@ import path from 'node:path';
 import TOML from '@iarna/toml';
 
 import { resolveProviderEnv } from '@/services/isolation/resolve-provider-env.js';
+import { resolvedKnob } from '@/services/isolation/resolved-knob.js';
 import type { IProviderModels } from '@/shared/interfaces.js';
 import type {
   ProviderChangeActiveModelInput,
@@ -19,7 +20,6 @@ import {
   writeProviderSessionActiveModelChange,
 } from '@/shared/utils.js';
 
-import { operatorCodexHome } from './codex-home.js';
 import { codexModelsRefresher, ownCodexRefreshTarget } from './codex-models-refresh.js';
 
 // Snapshot of the locally installed `codex` CLI's own live catalog
@@ -60,8 +60,8 @@ const CODEX_CONFIG_FILE = 'config.toml';
  * and configured default instead of the operator's.
  */
 const resolveCodexHome = (userId?: string | number | null): string => {
-  const env = resolveProviderEnv(userId ?? null, 'codex', process.env);
-  return readOptionalString(env.CODEX_HOME) ?? operatorCodexHome();
+  const env = resolveProviderEnv(userId, 'codex', process.env);
+  return resolvedKnob(env, 'CODEX_HOME');
 };
 
 const isCodexCachedModel = (value: unknown): value is CodexCachedModel => {
@@ -119,13 +119,13 @@ export class CodexProviderModels implements IProviderModels {
   /**
    * Reads the user's cached Codex model catalog. `userId` is resolved through the
    * central B-136 resolver so an isolated user's OWN models_cache.json is read
-   * (B-152); omitted/null (system/anon/platform) reads the operator ~/.codex —
-   * unchanged from the single-user behavior.
+   * (B-152). With no member the resolver refuses (ADR-152 A1 §3.4) and the static
+   * fallback catalog is served — never the operator's ~/.codex.
    */
   async getSupportedModels(userId?: string | number | null): Promise<ProviderModelsDefinition> {
     try {
-      const env = resolveProviderEnv(userId ?? null, 'codex', process.env);
-      const codexHome = readOptionalString(env.CODEX_HOME) ?? operatorCodexHome();
+      const env = resolveProviderEnv(userId, 'codex', process.env);
+      const codexHome = resolvedKnob(env, 'CODEX_HOME');
       // Only a real user whose resolved home is their OWN isolated CODEX_HOME
       // triggers a refresh (same env for spawn); granted/shared/anonymous reads stay read-only.
       const target = ownCodexRefreshTarget(userId, env);
@@ -146,9 +146,9 @@ export class CodexProviderModels implements IProviderModels {
 
   async getCurrentActiveModel(): Promise<ProviderCurrentActiveModel> {
     try {
-      // No userId is carried on the active-model interface, so this reads the
-      // operator config.toml (safe fallback, unchanged pre-B-152 behavior). The
-      // per-user config is honored on getSupportedModels, which the picker uses.
+      // No member is carried on the active-model interface, so no codex home can be
+      // read (ADR-152 A1 §3.4: never the operator's config.toml). The resolver
+      // refuses and the catch below answers the default model.
       const raw = await readFile(path.join(resolveCodexHome(null), CODEX_CONFIG_FILE), 'utf8');
       const parsed = readObjectRecord(TOML.parse(raw));
       const model = readOptionalString(parsed?.model);

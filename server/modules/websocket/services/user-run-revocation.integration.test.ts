@@ -186,7 +186,7 @@ const PROVIDER_COMMANDS: Record<string, string> = {
 };
 
 const chatDependencies = {
-  getSessionProvider: () => null,
+  getSessionProvider: () => null, admitCredentialTurn: () => ({ principalId: 1, grantedBy: null }),
   getActiveClaudeSDKSessions: () => [],
   authorizeProviderExecution: () => ({
     kind: 'authorized' as const,

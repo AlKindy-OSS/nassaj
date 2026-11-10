@@ -6,7 +6,7 @@ import { CODEX_SINGLE_AGENT_CONFIG, codexConfigArgv } from '@/modules/providers/
 // eslint-disable-next-line boundaries/dependencies
 import { isSpawnBlockedForRunProvider } from '@/modules/providers/harness-update/spawn-admission.js';
 import { assertLinkModeRunAllowed } from '@/services/isolation/link-mode-run-gate.js';
-import { resolveProviderEnv } from '@/services/isolation/resolve-provider-env.js';
+import { resolveModelRunEnv } from '@/services/isolation/credential-gate.js';
 import {
   acquireCodexLaunchIdentity,
   assertCodexIdentityUnchanged,
@@ -169,7 +169,8 @@ export function createCodexCliAdapter(options: CodexCliAdapterOptions = {}): Tur
   const assertUnchanged = options.assertUnchanged ?? assertCodexIdentityUnchanged;
   const assertCompatible = options.assertCompatible ?? assertCodexRuntimeCompatible;
   const cwd = options.cwd ?? process.cwd();
-  const resolveEnv = options.resolveEnv ?? ((userId) => resolveProviderEnv(userId, 'codex', process.env));
+  // ADR-152 A1 §3.5: the credential gate admits the turn before the env exists.
+  const resolveEnv = options.resolveEnv ?? ((userId) => resolveModelRunEnv(userId, 'codex', process.env, 'agent'));
   const governanceProbe = options.governanceProbe ?? ((userId) => ensureCodexGovernance(userId).ok);
   const executableProbe = options.executableProbe ?? machineCodexAvailable;
   const run = options.spawnCapture ?? spawnCapture;

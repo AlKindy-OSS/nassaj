@@ -25,11 +25,11 @@ test('low-level shared vendor primitives structurally reject Qwen without touchi
   assert.throws(() => getSharedVendorKey('qwen'), /no shared credential slot/);
   assert.throws(() => deleteSharedVendorKey('qwen'), /no shared credential slot/);
   setProviderKey(7, 'qwen', 'sk-sp-personal-key');
-  assert.deepEqual(resolveSlotKey(7, 'qwen', { sharedFallback: true }), {
+  assert.deepEqual(resolveSlotKey(7, 'qwen'), {
     key: 'sk-sp-personal-key',
     scope: 'user',
   });
-  assert.equal(resolveSlotKey(null, 'qwen', { sharedFallback: true }), null);
+  assert.equal(resolveSlotKey(null, 'qwen'), null);
   assert.equal(
     fs.existsSync(path.join(home, '.nassaj-provider-secrets')),
     false,

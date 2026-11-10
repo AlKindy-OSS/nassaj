@@ -26,6 +26,7 @@ import {
   assertNoSettingsOverrideArgv,
   isEngineRoutedEnv,
 } from './engine-anthropic-credential-guard.js';
+import { assertClaudeSettingsRoutingAllowed, isEngineRoutedVerdict } from './claude-spawn-env-guard.js';
 import { requestManagedClaudeBroker } from './managed-claude-launch-broker.js';
 import { resolveClaudeRunProfileOrThrow } from './resolve-claude-run-profile.js';
 import {
@@ -88,11 +89,15 @@ function assertEngineLaunchSafe(
   env: NodeJS.ProcessEnv,
   childArgv: readonly string[],
   engineHosts?: Set<string> | null,
+  engineOrigins?: Set<string> | null,
 ): void {
-  const pinned = (engineHosts instanceof Set && engineHosts.size > 0) || isEngineRoutedEnv(env);
+  // ADR-227: a local-engine verdict (engineOrigins) is engine routing too.
+  const pinned = isEngineRoutedVerdict({ engineHosts, engineOrigins }) || isEngineRoutedEnv(env, engineOrigins ?? null);
   if (!pinned) return;
   assertNoSettingsOverrideArgv(childArgv);
-  assertNoAnthropicCredentialForEngine(env, { cwd: process.cwd() });
+  assertNoAnthropicCredentialForEngine(env, {
+    cwd: process.cwd(), localEngine: engineOrigins instanceof Set && engineOrigins.size > 0,
+  });
 }
 
 type LauncherDeps = {
@@ -162,9 +167,18 @@ export async function runManagedClaudeLauncher(
     if (typeof launch !== 'string' || !profileEnv || typeof profileEnv !== 'object') {
       throw new Error('BROKER_RESPONSE_INVALID');
     }
+    // ADR-227: a local-engine verdict's origins only make the checks below
+    // stricter (engine-pinned, no settings route at all), never looser.
+    const engineOrigins = Array.isArray(authorization.engineOrigins)
+      ? new Set((authorization.engineOrigins as unknown[]).filter((value): value is string => typeof value === 'string'))
+      : null;
     // B-1541: the broker checked the terminal's registered cwd; the child runs in
     // THIS process's cwd (the shell may have moved), so re-check here before start.
-    assertEngineLaunchSafe(profileEnv as NodeJS.ProcessEnv, childArgv);
+    assertEngineLaunchSafe(profileEnv as NodeJS.ProcessEnv, childArgv, null, engineOrigins);
+    // B-1764: the same move could land in a project whose settings re-route the
+    // CLI. The broker already vetted the spawn env with its engine verdict, so
+    // only the settings channel is re-read here.
+    assertClaudeSettingsRoutingAllowed(profileEnv as NodeJS.ProcessEnv, { cwd: process.cwd(), engineOrigins });
     await requestManagedClaudeBroker(sourceEnv, 'start', { launch });
     const spawnImpl = deps.spawnImpl ?? spawn;
     return new Promise<number>((resolve, reject) => {
@@ -205,7 +219,7 @@ export async function runManagedClaudeLauncher(
     // The child below is spawned without `cwd`, so it inherits this one.
     cwd: process.cwd(),
   });
-  assertEngineLaunchSafe(profile.env, childArgv, profile.engineHosts);
+  assertEngineLaunchSafe(profile.env, childArgv, profile.engineHosts, profile.engineOrigins);
 
   const spawnImpl = deps.spawnImpl ?? spawn;
   const permissionExecution = deps.permissionExecution !== undefined

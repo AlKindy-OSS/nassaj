@@ -91,6 +91,8 @@ export const sessionSynchronizerService = {
       // Qwen uses the shared nassaj-owned transcript synchronizer.
       qwen: 0,
       sakana: 0,
+      // dsh (T-2086): no synchronizer registered yet; its history is read on demand.
+      dsh: 0,
     };
     const failures: string[] = [];
 

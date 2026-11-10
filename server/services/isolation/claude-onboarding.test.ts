@@ -335,22 +335,21 @@ describe('getClaudeConnectionStatus', () => {
   });
 });
 
-describe('B-1087: shared policy reads the operator dir, not the isolated one', () => {
+describe('B-1087 / ADR-152 A1: the card reads the member\'s own dir, never the operator\'s', () => {
   const operatorDir = path.join(sandboxHome, '.claude');
 
-  it('resolves the isolated dir under the isolated policy and the operator dir under shared', () => {
-    assert.equal(resolveClaudeStatusDir(2001, true), userConfigDir(2001, '.claude'));
-    assert.equal(resolveClaudeStatusDir(2001, false), operatorDir);
+  it('resolves the member\'s own dir', () => {
+    assert.equal(resolveClaudeStatusDir(2001), userConfigDir(2001, '.claude'));
   });
 
-  it('reports connected under shared when only the operator dir holds a live OAuth link', async () => {
+  it('reports not connected when only the operator dir holds a live OAuth link', async () => {
     fs.mkdirSync(operatorDir, { recursive: true });
     fs.writeFileSync(
       path.join(operatorDir, '.credentials.json'),
       JSON.stringify({ claudeAiOauth: { accessToken: 'sk-ant-oat01-operator', refreshToken: 'r', expiresAt: Date.now() + 3_600_000 } })
     );
     makeClaudeDir(2002);
-    assert.equal((await getClaudeConnectionStatus(2002, { isolated: false })).connected, true);
-    assert.equal((await getClaudeConnectionStatus(2002, { isolated: true })).connected, false);
+    assert.equal((await getClaudeConnectionStatus(2002)).connected, false);
   });
 });
+

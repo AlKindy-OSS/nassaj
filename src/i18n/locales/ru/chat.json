@@ -148,7 +148,7 @@
     "ariaLabel": "Автоматическое системное сообщение"
   },
   "sessionNotResumable": {
-    "message": "Этот сеанс не удалось возобновить — он больше не существует у провайдера.",
+    "message": "Этот сеанс не удалось возобновить — его больше нет у агента для программирования.",
     "startNew": "Начать новый сеанс"
   },
   "tools": {
@@ -418,7 +418,7 @@
   },
   "providerSelection": {
     "title": "Выберите вашего AI-ассистента",
-    "description": "Выберите провайдера для начала нового разговора",
+    "description": "Выберите агента для программирования, чтобы начать новый разговор",
     "selectModel": "Выбрать модель",
     "providerInfo": {
       "anthropic": "от Anthropic",
@@ -430,11 +430,11 @@
       "codex": "Готов использовать Codex с {{model}}. Начните вводить сообщение ниже.",
       "antigravity": "Готово к работе с Antigravity (agy) на {{model}}. Введите сообщение ниже.",
       "opencode": "Готов использовать OpenCode с {{model}}. Начните вводить сообщение ниже.",
-      "default": "Выберите провайдера выше для начала",
+      "default": "Выберите агента для программирования выше, чтобы начать",
       "kimi": "Готов использовать Kimi с {{model}}. Начните вводить сообщение ниже.",
       "deepseek": "Готов использовать DeepSeek с {{model}}. Начните вводить сообщение ниже.",
       "glm": "Готов использовать GLM с {{model}}. Начните вводить сообщение ниже.",
-      "claudeEngine": "Готов: движок Claude работает на {{provider}} с {{model}}. Начните вводить сообщение ниже."
+      "claudeEngine": "Готов: агент для программирования Claude работает на {{provider}} с {{model}}. Начните вводить сообщение ниже."
     },
     "antigravity": {
       "activeModel": "Активная модель",
@@ -447,10 +447,10 @@
       "button": "Обновить модели и статус авторизации",
       "refreshing": "Обновление…"
     },
-    "providerUnavailable": "Провайдер недоступен",
+    "providerUnavailable": "Агент для программирования недоступен",
     "signIn": "Войти",
     "addApiKey": "Добавьте API ключ {{provider}} для подключения",
-    "engineOnVendor": "Движок Claude на {{provider}}"
+    "engineOnVendor": "Агент Claude на {{provider}}"
   },
   "session": {
     "continue": {
@@ -602,7 +602,7 @@
     "turns_few": "{{count}} хода",
     "turns_many": "{{count}} ходов",
     "turns_other": "{{count}} хода",
-    "harnessLine": "Оболочка: {{harness}}",
+    "harnessLine": "Агент для программирования: {{harness}}",
     "olderModels_one": "{{count}} прежняя модель",
     "olderModels_few": "{{count}} прежние модели",
     "olderModels_many": "{{count}} прежних моделей",

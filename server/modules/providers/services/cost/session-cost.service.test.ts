@@ -38,7 +38,6 @@ import {
   subscriptionConfigService,
   type ProviderAuthProbe,
 } from '@/modules/providers/services/cost/subscription-config.service.js';
-import { _resetProviderSharingCache, setProviderSharingConfig } from '@/services/provider-sharing.js';
 
 import {
   claudeHeaderLine,
@@ -94,7 +93,6 @@ async function withEnvironment(run: (environment: Environment) => Promise<void>)
   await initializeDatabase();
   subscriptionConfigService._resetCaches();
   sessionCostService._resetCache();
-  _resetProviderSharingCache();
 
   const userId = userDb.createUser('cost-user', 'hash', 'owner').id;
   const claudeDir = path.join(claudeProjectsRoot(), path.basename(root));
@@ -138,7 +136,6 @@ async function withEnvironment(run: (environment: Environment) => Promise<void>)
   } finally {
     subscriptionConfigService._resetCaches();
     sessionCostService._resetCache();
-    _resetProviderSharingCache();
     closeConnection();
     if (previousDatabasePath === undefined) {
       delete process.env.DATABASE_PATH;
@@ -1209,7 +1206,7 @@ test('سجلّ اختفى من القرص يُخفض «مكتمل» بدل أن 
   });
 });
 
-test('العزل يحصر المجموع في محادثات صاحب الاشتراك؛ والمشترك يجمعها كلّها', async () => {
+test('العزل يحصر المجموع في محادثات صاحب الاشتراك دائماً (لا وضع مشترك، ADR-152 A1)', async () => {
   await withEnvironment(async (environment) => {
     subscriptionConfigService.update('claude', { anchorDay: 20 }, environment.userId);
 
@@ -1227,16 +1224,15 @@ test('العزل يحصر المجموع في محادثات صاحب الاشت
     assert.equal(isolated.sessions, 1, 'المعزول يرى اشتراكه هو');
     near(isolated.totalUsd, CLAUDE_PARENT_USD, 'مجموع المعزول');
 
-    // اشتراك واحد للجميع ⇒ المجموع واحد لا يُقسَّم على المستخدمين.
-    setProviderSharingConfig({ claude: 'shared' });
+    // لا سياسة تجعل مجموع غيره مجموعه: بعد مسح الكاش يبقى الرقم رقمه.
     sessionCostService._resetCache();
 
-    const [shared] = await sessionCostService.getSubscriptionCosts(environment.userId, {
+    const [again] = await sessionCostService.getSubscriptionCosts(environment.userId, {
       probeAuth: CLAUDE_ONLY_PROBE,
       now: NOW_IN_CYCLE,
     });
-    assert.equal(shared.sessions, 2);
-    near(shared.totalUsd, CLAUDE_PARENT_USD * 2, 'مجموع المشترك');
+    assert.equal(again.sessions, 1, 'محادثة غيره لا تدخل مجموعه');
+    near(again.totalUsd, CLAUDE_PARENT_USD, 'مجموع المعزول بعد المسح');
   });
 });
 

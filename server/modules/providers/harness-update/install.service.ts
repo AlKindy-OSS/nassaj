@@ -43,6 +43,10 @@ import {
   type ScriptInstallSource,
 } from './install-sources.js';
 import { acquireHarnessLease, releaseHarnessLease } from './lease.js';
+import { installNpmLockTarget, type NpmLockContext } from './npm-lock/npm-lock-install.js';
+import { activeNpmLockSource } from './npm-lock/npm-lock-source.js';
+import { currentVersion, NpmLockError, type NpmLockInstallSource } from './npm-lock/pins.js';
+import { npmLockLaunchRefusal } from './npm-lock/trust.js';
 import type { AssetInstallOptions, ReleaseAssetSpec } from './opencode-asset.js';
 import { downloadVerified, fetchAllowed } from './opencode-asset.js';
 import { readCapped } from './bounded-fetch.js';
@@ -172,6 +176,7 @@ async function defaultVerifyInstalled(
     return runtime.version;
   }
   if (id === 'claude') return verifyClaudeInstalled(deps, expectedVersion);
+  if (id === 'dsh') return verifyNpmLockInstalled(deps, expectedVersion);
   if (id === 'antigravity') {
     // M-1: the vendor script ends with `agy install || true`; only the
     // registry resolver plus a parsed --version prove the install.
@@ -195,6 +200,24 @@ async function verifyClaudeInstalled(deps: InstallDeps, expectedVersion?: string
   if (fs.realpathSync(launcher) !== fs.realpathSync(versionFile)) {
     throw Object.assign(new Error('launcher elsewhere'), { code: 'launcher_mismatch' });
   }
+  const version = parseVersionOutput(await deps.runVersion(launcher, ['--version']));
+  if (version !== expectedVersion) throw Object.assign(new Error('version mismatch'), { code: 'version_mismatch' });
+  return version;
+}
+
+/**
+ * T-2086 S4: the registry launcher is the link to `<v>`'s entry, the tree of
+ * `<v>` holds a `verified` full-manifest verdict, and `dsh --version` is `<v>`.
+ */
+async function verifyNpmLockInstalled(deps: InstallDeps, expectedVersion?: string): Promise<string> {
+  const source = activeNpmLockSource();
+  if (!expectedVersion) throw Object.assign(new Error('no pin'), { code: 'release_unknown' });
+  const launcher = resolveHarnessBinary('dsh');
+  if (currentVersion(source, deps.home()) !== expectedVersion) {
+    throw Object.assign(new Error('launcher elsewhere'), { code: 'launcher_mismatch' });
+  }
+  const refusal = npmLockLaunchRefusal(launcher, deps.home());
+  if (refusal) throw Object.assign(new Error(refusal), { code: refusal });
   const version = parseVersionOutput(await deps.runVersion(launcher, ['--version']));
   if (version !== expectedVersion) throw Object.assign(new Error('version mismatch'), { code: 'version_mismatch' });
   return version;
@@ -355,6 +378,8 @@ async function runInstall(job: InternalJob, id: InstallableHarnessId, deps: Inst
     setJob(job, { phase: 'downloading', percent: 15 });
     if (source.kind === 'asset') {
       await installOpencodeAsset(job, deps);
+    } else if (source.kind === 'npm-lock') {
+      facts.manifestVersion = await installByNpmLock(job, source, deps);
     } else if (source.kind === 'signed-manifest') {
       assertFreeSpace(source.minFreeBytes, [deps.home(), deps.stagingParent], deps);
       await installBySignedManifest(job, source, deps, facts, arm);
@@ -399,6 +424,35 @@ async function verifyOrFail(id: InstallableHarnessId, deps: InstallDeps, expecte
   } catch (error) {
     const code = (error as { code?: unknown } | null)?.code;
     throw new InstallError('verify_failed', typeof code === 'string' ? code : 'unverified');
+  }
+}
+
+/** The npm-lock flow context of one install job (allow-list env, live log). */
+function npmLockContext(job: InternalJob, deps: InstallDeps): NpmLockContext {
+  return {
+    home: deps.home(),
+    runCommand: deps.runCommand,
+    runVersion: deps.runVersion,
+    buildEnv: (home) => buildInstallEnv(deps.cleanEnv(), home),
+    stagingParent: deps.stagingParent,
+    log: (line) => appendLog(job, line),
+    onLine: (line) => appendLog(job, line),
+  };
+}
+
+/**
+ * T-2086 S4 (dsh): preflight (node floor, free space) → `npm ci` of the
+ * reviewed lock → full-tree manifest check → launcher link. Returns the pin.
+ */
+async function installByNpmLock(job: InternalJob, source: NpmLockInstallSource, deps: InstallDeps): Promise<string> {
+  setJob(job, { phase: 'installing', percent: 30 });
+  try {
+    return (await installNpmLockTarget(source, npmLockContext(job, deps))).toVersion;
+  } catch (error) {
+    if (error instanceof NpmLockError) {
+      throw new InstallError(error.jobCode as HarnessInstallJobErrorCode, error.causeCode);
+    }
+    throw new InstallError('install_failed', 'npm_lock_exception');
   }
 }
 

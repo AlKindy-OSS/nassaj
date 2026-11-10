@@ -36,11 +36,11 @@ test('user-scoped Codex MCP configuration is isolated by authenticated user', as
     scope: 'user',
     transport: 'stdio',
     command: 'example-mcp',
-    userId: 'user-a',
+    userId: '11',
   });
 
-  const userA = await provider.listServersForScope('user', { userId: 'user-a' });
-  const userB = await provider.listServersForScope('user', { userId: 'user-b' });
+  const userA = await provider.listServersForScope('user', { userId: '11' });
+  const userB = await provider.listServersForScope('user', { userId: '12' });
 
   assert.deepEqual(userA.map((server) => server.name), ['private-a']);
   assert.deepEqual(userB, []);
@@ -48,7 +48,7 @@ test('user-scoped Codex MCP configuration is isolated by authenticated user', as
 
 test('Codex MCP upserts serialize the whole RMW transaction and preserve all 20 entries', async () => {
   const provider = new CodexMcpProvider();
-  const userId = 'concurrent-user';
+  const userId = '31';
 
   await Promise.all(Array.from({ length: 20 }, (_, index) => provider.upsertServer({
     name: `server-${index}`,
@@ -68,7 +68,7 @@ test('Codex MCP upserts serialize the whole RMW transaction and preserve all 20 
 
 test('Codex MCP mixed removes and upserts do not resurrect or drop entries', async () => {
   const provider = new CodexMcpProvider();
-  const userId = 'mixed-concurrent-user';
+  const userId = '32';
   await Promise.all(Array.from({ length: 20 }, (_, index) => provider.upsertServer({
     name: `original-${index}`,
     scope: 'user',
@@ -103,7 +103,7 @@ test('Codex MCP mixed removes and upserts do not resurrect or drop entries', asy
 
 test('Codex MCP atomic replacement preserves unrelated TOML and enforces 0600', async () => {
   const provider = new CodexMcpProvider();
-  const userId = 'mode-user';
+  const userId = '33';
   const codexDir = path.join(root, userId, '.codex');
   const configPath = path.join(codexDir, 'config.toml');
   await mkdir(codexDir, { recursive: true });
@@ -127,7 +127,7 @@ test('Codex MCP atomic replacement preserves unrelated TOML and enforces 0600', 
 
 test('Codex MCP creates a new private config directory with mode 0700', async () => {
   const provider = new CodexMcpProvider();
-  const userId = 'new-directory-user';
+  const userId = '34';
   const codexDir = path.join(root, userId, '.codex');
 
   await provider.upsertServer({
@@ -144,7 +144,7 @@ test('Codex MCP creates a new private config directory with mode 0700', async ()
 
 test('Codex MCP refuses a symlinked config directory without chmodding its target', async () => {
   const provider = new CodexMcpProvider();
-  const userId = 'symlink-directory-user';
+  const userId = '37';
   const userRoot = path.join(root, userId);
   const externalDir = path.join(root, 'external-config-target');
   await mkdir(userRoot, { recursive: true });
@@ -181,7 +181,7 @@ test('Codex MCP rejects project scope because the real CLI does not read workspa
       transport: 'stdio',
       command: 'node',
       workspacePath,
-      userId: 'project-user',
+      userId: '35',
     }),
     (error: unknown) => (
       typeof error === 'object'
@@ -192,7 +192,7 @@ test('Codex MCP rejects project scope because the real CLI does not read workspa
   );
 
   assert.deepEqual(
-    await provider.listServersForScope('project', { workspacePath, userId: 'project-user' }),
+    await provider.listServersForScope('project', { workspacePath, userId: '35' }),
     [],
   );
 });
@@ -206,7 +206,7 @@ test('real Codex reader sees user scope and ignores workspace .codex config', as
   }
 
   const provider = new CodexMcpProvider();
-  const userId = 'real-reader-user';
+  const userId = '36';
   const workspacePath = path.join(root, 'real-reader-workspace');
   await mkdir(path.join(workspacePath, '.codex'), { recursive: true });
   await writeFile(

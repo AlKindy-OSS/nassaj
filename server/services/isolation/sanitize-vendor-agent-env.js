@@ -105,8 +105,8 @@ export const NASSAJ_HOST_SECRET_EXACT_DENY = Object.freeze([
   'INTERNAL_SHARED_SECRET',
   'API_KEY', // middleware/auth.js validateApiKey — the global gate key.
   //          EXACT only: the hosted-vendor keys KIMI_API_KEY / DEEPSEEK_API_KEY /
-  //          GLM_API_KEY / GEMINI_API_KEY must survive (they are the injected,
-  //          per-user credential the target provider needs).
+  //          GLM_API_KEY must survive (they are the injected, per-user credential
+  //          the target provider needs).
   //
   // B-378 — the two below are INHERITED Anthropic credentials, and they are here
   // because "EXACT only" left them behind: `API_KEY` does not match
@@ -141,6 +141,14 @@ export const NASSAJ_HOST_SECRET_EXACT_DENY = Object.freeze([
   // inherits either. Mirrors OPENCODE_SPAWN_VENDOR_KEY_ENVS (drift-tested).
   'NASSAJ_MOONSHOT_API_KEY',
   'NASSAJ_DEEPSEEK_API_KEY',
+  // ADR-152 A1 §3.5: inherited credentials the resolver NEVER injects, so no
+  // child may carry them at all (the resolver also pre-strips them).
+  'CLAUDE_CODE_OAUTH_TOKEN',
+  'OPENAI_API_KEY',
+  'CODEX_API_KEY',
+  'GEMINI_API_KEY',
+  'GOOGLE_API_KEY',
+  'CURSOR_API_KEY',
 ]);
 
 /**

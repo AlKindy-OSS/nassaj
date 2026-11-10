@@ -44,7 +44,7 @@
 import * as database from '../../modules/database/index.js';
 
 /**
- * Providers a member may delegate: every KNOWN_PROVIDER (provider-sharing.js).
+ * Providers a member may delegate: every KNOWN_PROVIDER (known-providers.js).
  * Spelled out rather than derived so this file pulls in no policy module on the
  * spawn path; credential-grants.test.ts pins the two lists against each other.
  */

@@ -10,11 +10,14 @@
  *   POST /:id/restore-compatible  (owner, rate-limited) {acks?}   — opencode only
  *   POST /:id/rollback            (owner, rate-limited) {jobId, scope, acks?}
  *   POST /:id/recovery            (owner, rate-limited) {action: retry|acknowledge}
+ *   POST /:id/integration-hold/clear (owner, rate-limited) {version?} — dsh only (T-2091)
  *   GET  /:id/snapshots           (owner, rate-limited)
  *   GET  /update-jobs/:jobId      (owner)
  *   GET  /autoupdate-settings     (owner)
  *   PUT  /autoupdate-settings     (owner)
  */
+
+import os from 'node:os';
 
 import express, { type Request, type Response } from 'express';
 
@@ -33,6 +36,7 @@ import {
 } from './version-status.service.js';
 import { getHarnessUpdateJob, startHarnessUpdate } from './update.service.js';
 import { startHarnessInstall } from './install.service.js';
+import { clearDshUpdateHold } from './npm-lock/dsh-pipeline-update.js';
 import {
   listHarnessSnapshots,
   startManualRollback,
@@ -225,6 +229,19 @@ router.post(
       return;
     }
     res.json(result);
+  }),
+);
+
+// POST clear of a held dsh update candidate (owner only; dsh only, else 404): the owner's explicit retry.
+router.post(
+  '/:id/integration-hold/clear',
+  requireRole('owner'),
+  ownerActionLimiter,
+  actionHandler(async (req: Request, res: Response) => {
+    const id = requireHarnessId(req);
+    if (id !== 'dsh') throw new AppError('No integration hold for this harness.', { code: 'UNKNOWN_HARNESS', statusCode: 404 });
+    const version = bodyOf(req).version;
+    res.json({ cleared: clearDshUpdateHold(os.homedir(), typeof version === 'string' ? version : undefined) });
   }),
 );
 

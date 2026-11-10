@@ -24,7 +24,7 @@
  */
 
 import assert from 'node:assert/strict';
-import { after, beforeEach, describe, it } from 'node:test';
+import { after, describe, it } from 'node:test';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -73,10 +73,6 @@ const { materializeGovernanceCopy, neutralGovernanceSource, CODEX_AGENTS_FILENAM
 const { materializeGeminiGovernance } = await import(
   '@/services/isolation/gemini-governance-material.js'
 );
-const { setProviderSharingConfig, getProviderSharingConfig } = await import(
-  '@/services/provider-sharing.js'
-);
-const DEFAULT_SHARING = getProviderSharingConfig();
 const { createApiSuccessResponse } = await import('@/shared/utils.js');
 const { providerGovernanceService } = await import('./provider-governance.service.js');
 
@@ -90,9 +86,9 @@ function legacy(desc: {
   return { status, enforced, mechanism };
 }
 
-// A fresh, empty sandboxed DB ⇒ the DEFAULT sharing policy: claude/codex isolated,
-// opencode shared (provider-sharing DEFAULT_CONFIG). The service consults this policy
-// to resolve each user's effective provider home read-only.
+// Every provider is isolated per authenticated user (ADR-152 A1); only an
+// anonymous (null) caller resolves the operator home. The service derives each
+// effective home read-only from the same rule.
 await initializeDatabase();
 
 const SOURCE = neutralGovernanceSource();
@@ -215,23 +211,15 @@ describe('provider-governance — claude (present-not-enforced, link-followed)',
 });
 
 describe('provider-governance — opencode (fingerprint identity COPY, fail-closed enforced — GL-5/GL-7)', () => {
-  // ADR-105 flipped opencode's DEFAULT to 'isolated', so getGovernance now resolves
-  // its config-home inside the per-user tree and ignores XDG_CONFIG_HOME. The cases
-  // below are about the ARTIFACT — is this AGENTS.md an authentic 0444 copy, a
-  // symlink, a drifted file — not about which home it sits in, so they pin the
-  // shared mode and keep using the XDG helper. Home RESOLUTION under the new
-  // default has its own case at the end of this block.
-  beforeEach(() => {
-    setProviderSharingConfig({ ...DEFAULT_SHARING, opencode: 'shared' });
-  });
+  // opencode is isolated for every authenticated user, so getGovernance resolves
+  // a member's config-home inside the per-user tree (ADR-152 A1). The cases below
+  // are about the ARTIFACT — an authentic 0444 copy, a symlink, a drifted file —
+  // each judged in its own member's config-home.
 
-  /** Points opencode's shared XDG_CONFIG_HOME at a fresh per-case dir and returns its
-   *  config-home (<XDG>/opencode) + AGENTS.md path. */
-  function opencodeHomeIn(caseName: string): { home: string; gov: string } {
-    const xdg = path.join(sandbox, `xdg-${caseName}`);
-    const home = path.join(xdg, 'opencode');
+  /** A fresh member config-home (<tree>/.config/opencode) + AGENTS.md path. */
+  function opencodeHomeIn(userId: number): { home: string; gov: string } {
+    const home = userConfigDir(userId, path.join('.config', 'opencode'));
     ensureDir(home);
-    process.env.XDG_CONFIG_HOME = xdg;
     return { home, gov: path.join(home, CODEX_AGENTS_FILENAME) };
   }
 
@@ -239,7 +227,7 @@ describe('provider-governance — opencode (fingerprint identity COPY, fail-clos
     // Under GL-5 opencode's AGENTS.md is a real per-user COPY (never a symlink) — the
     // SAME artifact + identity check codex uses. materializeGovernanceCopy writes
     // <home>/AGENTS.md; the SERVICE never does this (only the test may).
-    const { home } = opencodeHomeIn('oc-governed');
+    const { home } = opencodeHomeIn(7201);
     assert.equal(materializeGovernanceCopy(home), true, 'setup: real 0444 copy materialized');
 
     const desc = providerGovernanceService.getGovernance('opencode', 7201);
@@ -250,7 +238,6 @@ describe('provider-governance — opencode (fingerprint identity COPY, fail-clos
   // ADR-105 default, two members never share an opencode governance home, so one
   // member's AGENTS.md can neither attest nor taint the other's.
   it('isolated (the default): each member is judged at their OWN config-home', () => {
-    setProviderSharingConfig({ ...DEFAULT_SHARING, opencode: 'isolated' });
 
     const mine = userConfigDir(7290, path.join('.config', 'opencode'));
     ensureDir(mine);
@@ -266,7 +253,7 @@ describe('provider-governance — opencode (fingerprint identity COPY, fail-clos
     // Post-GL-5 a symlink is no longer legitimate: it is the write-through vector the
     // per-user COPY closes, so the badge rejects it exactly as ensureOpenCodeGovernance
     // does — and the read must not repair it into a copy.
-    const { gov } = opencodeHomeIn('oc-symlink');
+    const { gov } = opencodeHomeIn(7204);
     fs.symlinkSync(SOURCE, gov);
     assert.equal(fs.lstatSync(gov).isSymbolicLink(), true, 'precondition: planted a symlink');
 
@@ -276,7 +263,7 @@ describe('provider-governance — opencode (fingerprint identity COPY, fail-clos
   });
 
   it('READ-ONLY: a drifted AGENTS.md is ungoverned AND the drifted bytes are left untouched', () => {
-    const { gov } = opencodeHomeIn('oc-drift');
+    const { gov } = opencodeHomeIn(7202);
     const drifted = 'project-local agents, not nassaj governance\n';
     fs.writeFileSync(gov, drifted);
     assert.equal(providerGovernanceService.getGovernance('opencode', 7202).status, 'ungoverned');
@@ -284,58 +271,48 @@ describe('provider-governance — opencode (fingerprint identity COPY, fail-clos
   });
 
   it('is ungoverned when AGENTS.md is absent', () => {
-    opencodeHomeIn('oc-missing'); // dir exists, no AGENTS.md
+    opencodeHomeIn(7203); // dir exists, no AGENTS.md
     assert.equal(providerGovernanceService.getGovernance('opencode', 7203).status, 'ungoverned');
+  });
+
+  it('ADR-152 A1: a caller with no member reads the system tree — never the operator config', () => {
+    const operator = path.join(sandbox, 'xdg-operator');
+    ensureDir(path.join(operator, 'opencode'));
+    process.env.XDG_CONFIG_HOME = operator;
+    assert.equal(materializeGovernanceCopy(path.join(operator, 'opencode')), true, 'setup: an authentic operator copy');
+    assert.equal(providerGovernanceService.getGovernance('opencode', null).status, 'ungoverned');
   });
 });
 
 describe('provider-governance — antigravity/agy (GEMINI.md, present-not-enforced)', () => {
   // agy ingests $HOME/.gemini/GEMINI.md — established by canary probe on the real
-  // binary (T-1185), not by reading docs. Two homes, two honest rules: the SHARED
-  // home holds the neutral SOURCE itself (a link into the governance repo), the
-  // ISOLATED home must hold a real 0444 copy of it.
+  // binary (T-1185), not by reading docs. A member's home must hold a real 0444
+  // copy of the neutral source; a caller with no member reads the system tree and
+  // never the operator's own GEMINI.md (ADR-152 A1).
   const GEMINI_SOURCE = path.join(sandboxHome, '.gemini', 'GEMINI.md');
 
   /** A user's isolated .gemini/GEMINI.md path (same derivation the service uses). */
   function geminiMd(userId: number): string {
     return userConfigDir(userId, path.join('.gemini', 'GEMINI.md'));
   }
-  /** Flip agy's sharing policy for one case and restore it after. */
-  function withAgySharing(mode: 'shared' | 'isolated', fn: () => void): void {
-    setProviderSharingConfig({ ...DEFAULT_SHARING, agy: mode });
-    try {
-      fn();
-    } finally {
-      setProviderSharingConfig({ ...DEFAULT_SHARING });
-    }
-  }
-
-  it('SHARED home: a present non-empty GEMINI.md (link-followed) is governed', () => {
+  it('ADR-152 A1: a caller with no member never reads the operator GEMINI.md (system tree ⇒ ungoverned)', () => {
     ensureDir(path.dirname(GEMINI_SOURCE));
     fs.writeFileSync(path.join(NASSAJ_CORE, 'GEMINI.md'), neutralContent);
     fs.rmSync(GEMINI_SOURCE, { force: true });
     // Production topology: ~/.gemini/GEMINI.md is a LINK into the governance repo.
     fs.symlinkSync(path.join(NASSAJ_CORE, 'GEMINI.md'), GEMINI_SOURCE);
 
-    withAgySharing('shared', () => {
-      assert.deepEqual(legacy(providerGovernanceService.getGovernance('antigravity', 8101)), {
-        status: 'governed',
-        enforced: false,
-        mechanism: 'gemini-md',
-      });
-    });
+    assert.equal(providerGovernanceService.getGovernance('antigravity', null).status, 'ungoverned');
   });
 
-  it('SHARED home: no GEMINI.md at all ⇒ ungoverned (never a fabricated pass)', () => {
+  it('no member and no GEMINI.md at all ⇒ ungoverned (never a fabricated pass)', () => {
     const saved = fs.readlinkSync(GEMINI_SOURCE);
     fs.rmSync(GEMINI_SOURCE, { force: true });
     try {
-      withAgySharing('shared', () => {
-        assert.equal(
-          providerGovernanceService.getGovernance('antigravity', 8102).status,
-          'ungoverned',
-        );
-      });
+      assert.equal(
+        providerGovernanceService.getGovernance('antigravity', null).status,
+        'ungoverned',
+      );
     } finally {
       fs.symlinkSync(saved, GEMINI_SOURCE);
     }
@@ -344,24 +321,20 @@ describe('provider-governance — antigravity/agy (GEMINI.md, present-not-enforc
   it('ISOLATED user: an authentic 0444 COPY matching the source is governed', () => {
     const USER = 8103;
     assert.equal(materializeGeminiGovernance(userConfigDir(USER, '.gemini')), true);
-    withAgySharing('isolated', () => {
-      assert.deepEqual(legacy(providerGovernanceService.getGovernance('antigravity', USER)), {
-        status: 'governed',
-        enforced: false,
-        mechanism: 'gemini-md',
-      });
+    assert.deepEqual(legacy(providerGovernanceService.getGovernance('antigravity', USER)), {
+      status: 'governed',
+      enforced: false,
+      mechanism: 'gemini-md',
     });
   });
 
   it('ISOLATED user: MISSING material is ungoverned — the fail-open this task closed', () => {
     // Before T-1185 provisioning planted no GEMINI.md at all, so flipping agy to
     // isolated launched every session with zero governance, silently.
-    withAgySharing('isolated', () => {
-      assert.equal(
-        providerGovernanceService.getGovernance('antigravity', 8104).status,
-        'ungoverned',
-      );
-    });
+    assert.equal(
+      providerGovernanceService.getGovernance('antigravity', 8104).status,
+      'ungoverned',
+    );
   });
 
   it('READ-ONLY: an isolated symlink (write-through vector) is ungoverned and left untouched', () => {
@@ -370,13 +343,11 @@ describe('provider-governance — antigravity/agy (GEMINI.md, present-not-enforc
     ensureDir(path.dirname(gov));
     fs.symlinkSync(GEMINI_SOURCE, gov);
 
-    withAgySharing('isolated', () => {
-      assert.equal(
-        providerGovernanceService.getGovernance('antigravity', USER).status,
-        'ungoverned',
-        'agy runs --dangerously-skip-permissions: a link into the source is never governance',
-      );
-    });
+    assert.equal(
+      providerGovernanceService.getGovernance('antigravity', USER).status,
+      'ungoverned',
+      'agy runs --dangerously-skip-permissions: a link into the source is never governance',
+    );
     assert.equal(fs.lstatSync(gov).isSymbolicLink(), true, 'the check must not self-heal');
   });
 
@@ -386,12 +357,10 @@ describe('provider-governance — antigravity/agy (GEMINI.md, present-not-enforc
     ensureDir(path.dirname(gov));
     fs.writeFileSync(gov, 'تعليمات مزوَّرة\n', { mode: 0o444 });
 
-    withAgySharing('isolated', () => {
-      assert.equal(
-        providerGovernanceService.getGovernance('antigravity', USER).status,
-        'ungoverned',
-      );
-    });
+    assert.equal(
+      providerGovernanceService.getGovernance('antigravity', USER).status,
+      'ungoverned',
+    );
     assert.equal(fs.readFileSync(gov, 'utf8'), 'تعليمات مزوَّرة\n');
   });
 });
@@ -585,12 +554,10 @@ describe('ADR-093 §2.2 — the six reasons, each from a real on-disk situation'
     const saved = fs.existsSync(GEMINI_SOURCE) ? fs.readlinkSync(GEMINI_SOURCE) : null;
     fs.rmSync(GEMINI_SOURCE, { force: true });
     try {
-      setProviderSharingConfig({ ...DEFAULT_SHARING, agy: 'isolated' });
       const [home] = providerGovernanceService.getGovernance('antigravity', 8201).sources;
       assert.equal(home.status, 'ungoverned');
       assert.equal(home.reason, 'source_absent', 'blame the missing source, not the user');
     } finally {
-      setProviderSharingConfig({ ...DEFAULT_SHARING });
       if (saved !== null) fs.symlinkSync(saved, GEMINI_SOURCE);
     }
   });
@@ -715,16 +682,6 @@ describe('ADR-093 — READ-ONLY still holds for every new channel', () => {
 
 const { resolveGovernanceLinkPlan } = await import('./provider-governance.service.js');
 
-/** Flips agy's sharing policy for one case and restores it after. */
-function withAgySharing(mode: 'shared' | 'isolated', fn: () => void): void {
-  setProviderSharingConfig({ ...DEFAULT_SHARING, agy: mode });
-  try {
-    fn();
-  } finally {
-    setProviderSharingConfig({ ...DEFAULT_SHARING });
-  }
-}
-
 describe('ADR-093 §4.1 — which engines have a link action at all', () => {
 
   it('claude has none: its channel is a symlink to the live source ON PURPOSE', () => {
@@ -742,22 +699,18 @@ describe('ADR-093 §4.1 — which engines have a link action at all', () => {
     }
   });
 
-  it('shared agy has none — the file it reads IS the neutral source', () => {
-    withAgySharing('shared', () => {
-      const plan = resolveGovernanceLinkPlan('antigravity', 9501);
-      assert.equal(plan.linkable, false);
-      assert.equal(plan.refusal, 'shared_source_is_the_file');
-    });
+  it('agy for an anonymous caller has none — the operator file IS the neutral source', () => {
+    const plan = resolveGovernanceLinkPlan('antigravity', null);
+    assert.equal(plan.linkable, false);
+    assert.equal(plan.refusal, 'shared_source_is_the_file');
   });
 
-  it('isolated agy CAN be linked, into the user\'s own .gemini', () => {
-    withAgySharing('isolated', () => {
-      const plan = resolveGovernanceLinkPlan('antigravity', 9502);
-      assert.equal(plan.linkable, true);
-      assert.equal(plan.linkScope, 'user');
-      assert.equal(plan.home, userConfigDir(9502, '.gemini'));
-      assert.equal(plan.filename, 'GEMINI.md');
-    });
+  it('agy CAN be linked by a member, into their own .gemini', () => {
+    const plan = resolveGovernanceLinkPlan('antigravity', 9502);
+    assert.equal(plan.linkable, true);
+    assert.equal(plan.linkScope, 'user');
+    assert.equal(plan.home, userConfigDir(9502, '.gemini'));
+    assert.equal(plan.filename, 'GEMINI.md');
   });
 
   it('codex/opencode/kimi are linkable, each at the home its LAUNCH path resolves', () => {

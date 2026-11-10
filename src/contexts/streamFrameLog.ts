@@ -5,6 +5,11 @@ export type StreamSnapshot = {
   ended: boolean;
   frame: any;
   incomplete?: boolean;
+  /**
+   * Durable id shared by every delta of this reply (OpenCode's history part id),
+   * `null` once deltas disagree. Absent for generated or missing ids.
+   */
+  textId?: string | null;
 };
 
 export type StreamFrame = StreamSnapshot & {
@@ -35,6 +40,33 @@ function trackRun(
   const keys = Object.keys(next);
   for (const key of keys.slice(0, Math.max(0, keys.length - MAX_TRACKED_RUNS))) delete next[key];
   return next;
+}
+
+// generateMessageId() output (`<prefix>_<uuid>`): a per-event id, never a transcript row.
+const GENERATED_ID = /_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function durableDeltaId(frame: any): string | undefined {
+  const id = frame?.id;
+  return typeof id === 'string' && id && !GENERATED_ID.test(id) ? id : undefined;
+}
+
+/** Next `textId` for a stream frame: one id across all deltas, or `null` on a mismatch. */
+function nextTextId(prior: StreamSnapshot | undefined, frame: any, continues: boolean) {
+  const inherited = continues ? prior?.textId : undefined;
+  if (frame?.kind !== 'stream_delta') return inherited;
+  const id = durableDeltaId(frame);
+  if (!continues || !prior?.text) return id;
+  return inherited === id ? inherited : null;
+}
+
+/**
+ * Id of a finished reply: the assistant `text` frame's own id, else the durable
+ * id its deltas share (so it matches the history row, B-1751), else a
+ * session-scoped synthetic id.
+ */
+export function streamFinalId(sessionId: string, entry: StreamSnapshot): string {
+  if (entry.frame?.kind === 'text') return entry.frame.id;
+  return typeof entry.textId === 'string' ? entry.textId : `stream_${sessionId}_${entry.seq}`;
 }
 
 /** الحدّ: إدخال واحد فقط لكل جلسة، مع تقليم الأقدم. */
@@ -113,11 +145,14 @@ export function applyStreamFrame(
   const completed = [...(prior?.completed ?? [])];
   if (startsNext && prior.text) {
     completed.push({ seq: prior.seq, text: prior.text, ended: true, frame: prior.frame,
-      ...(prior.incomplete ? { incomplete: true } : {}) });
+      ...(prior.incomplete ? { incomplete: true } : {}),
+      ...(prior.textId !== undefined ? { textId: prior.textId } : {}) });
   }
+  const continues = Boolean(prior && !prior.ended && !changedRun);
+  const textId = isPersistableAssistantText ? undefined : nextTextId(prior, frame, continues);
   const delta = kind === 'stream_delta' && typeof frame.content === 'string' ? frame.content : '';
   const text = kind === 'stream_delta'
-    ? `${prior && !prior.ended && !changedRun ? prior.text : ''}${delta}`
+    ? `${continues ? prior!.text : ''}${delta}`
     : isPersistableAssistantText ? frame.content : (prior?.text ?? '');
   const next = new Map(previous) as Map<string, StreamFrame> & Pick<StreamFrameMap, 'evictedHeads'>;
   const evictedHeads = new Map(previous.evictedHeads);
@@ -129,6 +164,7 @@ export function applyStreamFrame(
       ? { runSequences: trackRun(runSequences, run, serverSequence) }
       : prior?.runSequences ? { runSequences: prior.runSequences } : {}),
     seq, text, ended: kind === 'stream_end' || isPersistableAssistantText,
+    ...(textId !== undefined ? { textId } : {}),
     frame: prior && !changedRun && !startsNext && !isPersistableAssistantText
       ? { ...frame,
         ...(run == null && priorRun ? { responseToMessageId: priorRun } : {}),

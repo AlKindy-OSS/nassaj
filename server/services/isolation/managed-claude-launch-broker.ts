@@ -15,6 +15,7 @@ import util from 'node:util';
 import type { PermissionChildIdentity } from '@/modules/database/index.js';
 import { readRuntimeProcessIdentity, type PermissionExecutionHandle } from '@/modules/execution-permissions/index.js';
 
+import { isEngineRoutedVerdict } from './claude-spawn-env-guard.js';
 import { assertNoSettingsOverrideArgv, isEngineRoutedEnv } from './engine-anthropic-credential-guard.js';
 import type { ManagedClaudeTerminalMode } from './managed-claude-terminal-env.js';
 
@@ -121,7 +122,7 @@ async function authorize(record: Registration, pid: unknown, startTicks: unknown
   });
   // B-1541: `--settings` / `--setting-sources` would hand an engine-pinned child
   // settings no file shows. The wrapper re-checks too (cwd may have moved).
-  if ((profile.engineHosts instanceof Set && profile.engineHosts.size > 0) || isEngineRoutedEnv(profile.env)) {
+  if (isEngineRoutedVerdict(profile) || isEngineRoutedEnv(profile.env, profile.engineOrigins ?? null)) {
     assertNoSettingsOverrideArgv(argv as string[]);
   }
   const execution = authorizeRuntimeUserProviderEffect({
@@ -132,7 +133,7 @@ async function authorize(record: Registration, pid: unknown, startTicks: unknown
   });
   const launch = crypto.randomUUID();
   pending.set(launch, { registration: record, env: profile.env, execution, expiresAt: Date.now() + 30_000, started: false, identity: null });
-  return { launch, env: profile.env };
+  return { launch, env: profile.env, engineOrigins: profile.engineOrigins ? [...profile.engineOrigins] : [] };
 }
 function start(record: Registration, pid: unknown, startTicks: unknown, launch: unknown): Record<string, unknown> {
   // validate() re-proves the caller is a live descendant of the registered pty

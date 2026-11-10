@@ -53,6 +53,7 @@ import {
   providerSecretsKeyGeneratedAt,
   resetProviderSecretsKeyCacheForTests,
 } from './provider-secrets-key-manager.js';
+import { assertNotRealHomeUnderTest } from './test-home-guard.js';
 
 const ALGORITHM = 'aes-256-gcm';
 const IV_BYTES = 12;
@@ -147,8 +148,9 @@ function decrypt(envelope) {
   }
 }
 
-/** Root of all per-user isolated config trees (mirrors provision-user-dirs). */
+/** Root of all per-user isolated config trees (mirrors provision-user-dirs, B-1771 guard). */
 function usersRoot() {
+  assertNotRealHomeUnderTest();
   return path.join(os.homedir(), '.nassaj-users');
 }
 
@@ -231,6 +233,7 @@ function assertLocalModelScope(scope) {
 }
 
 function secretsDir(scope) {
+  assertNotRealHomeUnderTest();
   if (scope === SYSTEM_SECRET_SCOPE) {
     return path.join(os.homedir(), '.nassaj-provider-secrets');
   }
@@ -251,7 +254,10 @@ function listKeysFiles() {
   } catch {
     members = [];
   }
-  for (const member of members) files.push(path.join(usersRoot(), member, '.provider-secrets', 'keys.json'));
+  // The credential-less system tree (ADR-152 A1 §3.4) is not a member.
+  for (const member of members.filter((name) => name !== '.system')) {
+    files.push(path.join(usersRoot(), member, '.provider-secrets', 'keys.json'));
+  }
   return files.filter((file) => fs.existsSync(file));
 }
 
@@ -299,6 +305,8 @@ function readKeysFile(userId) {
  * @returns {{ state: 'absent'|'ok'|'unreadable', keys: Record<string, string> }}
  */
 function readKeysFileState(userId) {
+  // Outside the try: a real-home test run is refused loudly, not read as "unreadable".
+  assertNotRealHomeUnderTest();
   let raw;
   try {
     raw = fs.readFileSync(keysFilePath(userId), 'utf8');
@@ -1259,6 +1267,22 @@ export function listProviderKeys(userId) {
 // scope invites `?? SHARED` at the call site, which is the exact idiom T-1260
 // removes.
 // ---------------------------------------------------------------------------
+
+/**
+ * @internal Only the retire_provider_sharing_v1 migration (ADR-152 A1 §3.2).
+ * Lists the vendor slots that hold an entry in the operator-wide store, by
+ * PRESENCE only: nothing is decrypted, and no value or digest leaves here.
+ * Throws when the store exists but cannot be read, so the caller can record
+ * "unknown" instead of a false "none".
+ * @returns {string[]}
+ */
+export function listSharedVendorKeyPresence() {
+  const { state, keys } = readKeysFileState(SHARED_VENDOR_SCOPE);
+  if (state === 'unreadable') {
+    throw new Error('operator-wide vendor key store is unreadable');
+  }
+  return VENDOR_SECRET_PROVIDERS.filter((provider) => typeof keys[provider] === 'string' && keys[provider].length > 0);
+}
 
 /**
  * @internal Only services/isolation/provider-slot-key.js may call this.

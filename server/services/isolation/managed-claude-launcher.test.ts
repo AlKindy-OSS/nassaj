@@ -362,3 +362,35 @@ test('B-1541 non-brokered: the official path keeps --settings and a stored key',
     assert.equal(calls.length, 1);
   });
 });
+
+test('ADR-227 non-brokered: a local-engine launch is engine-pinned (B-1541 and --settings refused)', async () => {
+  await inProject(async ({ project, configDir }) => {
+    const localDeps = (spawnImpl: never) => ({
+      permissionExecution: null,
+      authorizeSession: () => ({} as never),
+      resolveProfile: async () => ({
+        env: {
+          PATH: '/usr/bin', CLAUDE_CONFIG_DIR: configDir, HOME: configDir,
+          ANTHROPIC_BASE_URL: 'http://127.0.0.1:18080', ANTHROPIC_AUTH_TOKEN: 'nassaj-local-no-key',
+        },
+        effectiveEngine: 'local:x',
+        engineHosts: new Set<string>(),
+        engineOrigins: new Set(['http://127.0.0.1:18080']),
+        pin: {},
+      }) as never,
+      spawnImpl,
+    });
+    const neverSpawn = (() => { throw new Error('must not spawn'); }) as never;
+    await assert.rejects(
+      launcher.runManagedClaudeLauncher(['-r', 'sess-1', '--settings=/var/tmp/s.json'], contractEnv(), localDeps(neverSpawn)),
+      (error: Error & { code?: string }) => error.code === 'ENGINE_ANTHROPIC_CREDENTIAL_EXPOSED',
+    );
+    const calls: Array<{ bin: string; argv: string[]; options: Record<string, unknown> }> = [];
+    assert.equal(await launcher.runManagedClaudeLauncher(['-r', 'sess-1'], contractEnv(), localDeps(fakeSpawn(calls))), 0);
+    writeLocalKey(project);
+    await assert.rejects(
+      launcher.runManagedClaudeLauncher(['-r', 'sess-1'], contractEnv(), localDeps(neverSpawn)),
+      (error: Error & { code?: string }) => error.code === 'ENGINE_ANTHROPIC_CREDENTIAL_EXPOSED',
+    );
+  });
+});

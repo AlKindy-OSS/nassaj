@@ -216,7 +216,7 @@ describe('routes: engine catalogs, key status and key slots answer 200', () => {
       const stored = await call('GET', `/api/providers/${engine}/api-key`);
       assert.equal(stored.status, 200);
       assert.equal(stored.body.data?.configured, true);
-      assert.equal(stored.body.data?.writable, true);
+      assert.equal('writable' in (stored.body.data ?? {}), false, 'no role gate rides along (ADR-152 A1)');
 
       const afterSet = await call('GET', `/api/providers/${engine}/auth/status`);
       assert.equal(afterSet.status, 200);

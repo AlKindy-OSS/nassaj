@@ -8,7 +8,7 @@
  * or written. No DB (userId=null short-circuits resolveProviderEnv before any DB call).
  *
  * Proves:
- *  - the pure resolvers (config-home for an anonymous id, neutral source, filename).
+ *  - the pure resolvers (config-home for a member, refusal for an anonymous id, neutral source).
  *  - ensureOpenCodeGovernance MATERIALIZES a real, read-only (0444) COPY — never a
  *    symlink — of the neutral source into the opencode config-home, and is idempotent.
  *  - it is FAIL-CLOSED: with NO neutral source it THROWS VendorGovernanceMissingError
@@ -67,8 +67,9 @@ function seedNeutralSource(): string {
 }
 
 describe('GL-5 — pure resolvers', () => {
-  it('resolves the anonymous config-home to ~/.config/opencode', () => {
-    assert.equal(resolveOpenCodeConfigHomeForUser(null), path.join(tempHome, '.config', 'opencode'));
+  it('resolves a member config-home inside their tree; an anonymous id is refused (ADR-152 A1)', () => {
+    assert.equal(resolveOpenCodeConfigHomeForUser(7), path.join(tempHome, '.nassaj-users', '7', '.config', 'opencode'));
+    assert.throws(() => resolveOpenCodeConfigHomeForUser(null), { code: 'CREDENTIAL_ACTOR_REQUIRED' });
   });
 
   it('resolves the neutral source to ~/.claude/AGENTS.md and filename AGENTS.md', () => {
@@ -81,10 +82,10 @@ describe('GL-5 — ensureOpenCodeGovernance materializes a governed COPY', () =>
   it('writes a real, read-only 0444 copy matching the neutral source (idempotent)', () => {
     seedNeutralSource();
 
-    const result = ensureOpenCodeGovernance(null);
+    const result = ensureOpenCodeGovernance(7);
     assert.equal(result.ok, true);
 
-    const copyPath = path.join(tempHome, '.config', 'opencode', OPENCODE_AGENTS_FILENAME);
+    const copyPath = path.join(tempHome, '.nassaj-users', '7', '.config', 'opencode', OPENCODE_AGENTS_FILENAME);
     const st = lstatSync(copyPath);
     assert.ok(st.isFile(), 'materialized governance must be a real file');
     assert.ok(!st.isSymbolicLink(), 'governance must be a COPY, never a symlink');
@@ -92,7 +93,7 @@ describe('GL-5 — ensureOpenCodeGovernance materializes a governed COPY', () =>
     assert.equal(readFileSync(copyPath, 'utf8'), GOVERNANCE_TEXT);
 
     // Idempotent: a second call is a no-op fast path (already authentic).
-    const again = ensureOpenCodeGovernance(null);
+    const again = ensureOpenCodeGovernance(7);
     assert.equal(again.ok, true);
     assert.equal(readFileSync(copyPath, 'utf8'), GOVERNANCE_TEXT);
   });
@@ -103,7 +104,7 @@ describe('GL-5 — fail-closed', () => {
     // No ~/.claude/AGENTS.md seeded → cannot govern → fail-closed.
     let caught: unknown;
     try {
-      ensureOpenCodeGovernance(null);
+      ensureOpenCodeGovernance(7);
     } catch (err) {
       caught = err;
     }

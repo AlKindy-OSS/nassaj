@@ -11,7 +11,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { after, beforeEach, test } from 'node:test';
+import { after, beforeEach, test, mock } from 'node:test';
 
 const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-usage-verify-'));
 const ORIGINAL_DB = process.env.DATABASE_PATH;
@@ -23,6 +23,24 @@ process.env.CLAUDE_CONFIG_DIR = path.join(sandbox, '.claude');
 fs.mkdirSync(process.env.CLAUDE_CONFIG_DIR, { recursive: true });
 const credPath = path.join(process.env.CLAUDE_CONFIG_DIR, '.credentials.json');
 
+// ADR-152 A1 §3.4: a credential reader/writer needs a member. The resolver is
+// stubbed so member MEMBER maps onto this suite's sandbox tree, and any other
+// actor is refused exactly like the real resolver.
+const MEMBER = 7;
+{
+  const realResolver = await import('../../../services/isolation/resolve-provider-env.js');
+  mock.module(new URL('../../../services/isolation/resolve-provider-env.js', import.meta.url).href, {
+    namedExports: {
+      ...realResolver,
+      resolveProviderEnv: (actor: unknown, _provider: string, env: NodeJS.ProcessEnv = process.env) => {
+        if (actor !== MEMBER && actor !== String(MEMBER)) {
+          throw Object.assign(new Error('CREDENTIAL_ACTOR_REQUIRED'), { code: 'CREDENTIAL_ACTOR_REQUIRED', statusCode: 500 });
+        }
+        return { ...env, ...{ HOME: process.env.HOME, CLAUDE_CONFIG_DIR: process.env.CLAUDE_CONFIG_DIR ?? `${process.env.HOME}/.claude`, CODEX_HOME: process.env.CODEX_HOME ?? `${process.env.HOME}/.codex`, XDG_DATA_HOME: process.env.XDG_DATA_HOME ?? `${process.env.HOME}/.local/share`, XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME ?? `${process.env.HOME}/.config`, KIMI_CODE_HOME: `${process.env.HOME}/.kimi` } };
+      },
+    },
+  });
+}
 const { initializeDatabase, closeConnection } = await import('@/modules/database/index.js');
 initializeDatabase();
 const { claudeUsageService } = await import('./claude-usage.service.js');
@@ -69,40 +87,40 @@ beforeEach(() => writeCredential());
 
 test('a usage call that succeeds means the login is valid', async () => {
   scriptFetch([{ status: 200, body: { five_hour: null } }]);
-  assert.equal(await claudeUsageService.verifyLink(null), 'valid');
+  assert.equal(await claudeUsageService.verifyLink(MEMBER), 'valid');
 });
 
 test('a refused token whose refresh is refused too is rejected', async () => {
   const { calls } = scriptFetch([{ status: 401 }, { status: 400, body: { error: 'invalid_grant' } }]);
-  assert.equal(await claudeUsageService.verifyLink(null), 'rejected');
+  assert.equal(await claudeUsageService.verifyLink(MEMBER), 'rejected');
   assert.equal(calls.length, 2, 'one usage call, one refresh attempt');
 });
 
 test('a rate limit is unknown, never rejected', async () => {
   scriptFetch([{ status: 429 }]);
-  assert.equal(await claudeUsageService.verifyLink(null), 'unknown');
+  assert.equal(await claudeUsageService.verifyLink(MEMBER), 'unknown');
 });
 
 test('a network failure during refresh is unknown, never rejected', async () => {
   scriptFetch([{ status: 401 }, 'network-error']);
-  assert.equal(await claudeUsageService.verifyLink(null), 'unknown');
+  assert.equal(await claudeUsageService.verifyLink(MEMBER), 'unknown');
 });
 
 test('no credential file is unknown (the on-disk check already says so)', async () => {
   fs.rmSync(credPath);
   const { calls } = scriptFetch([]);
-  assert.equal(await claudeUsageService.verifyLink(null), 'unknown');
+  assert.equal(await claudeUsageService.verifyLink(MEMBER), 'unknown');
   assert.equal(calls.length, 0);
 });
 
 test('a verdict is reused for the same token and re-checked after re-login', async () => {
   const first = scriptFetch([{ status: 401 }, { status: 400 }]);
-  assert.equal(await claudeUsageService.verifyLink(null), 'rejected');
-  assert.equal(await claudeUsageService.verifyLink(null), 'rejected');
+  assert.equal(await claudeUsageService.verifyLink(MEMBER), 'rejected');
+  assert.equal(await claudeUsageService.verifyLink(MEMBER), 'rejected');
   assert.equal(first.calls.length, 2, 'second call served from the verdict cache');
 
   writeCredential();
   const second = scriptFetch([{ status: 200, body: {} }]);
-  assert.equal(await claudeUsageService.verifyLink(null), 'valid');
+  assert.equal(await claudeUsageService.verifyLink(MEMBER), 'valid');
   assert.equal(second.calls.length, 1, 'a new token is checked at once');
 });

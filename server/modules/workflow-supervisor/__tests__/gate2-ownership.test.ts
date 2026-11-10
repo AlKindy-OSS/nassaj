@@ -213,3 +213,39 @@ test('isProjectPathOwnedOrMemberedBy: strict ownership semantics (no public bypa
     );
   });
 });
+
+test('ADR-227 GATE2: a local-pinned conversation or a local model is DENIED before any env is built', async () => {
+  await withDb(async () => {
+    const owner = createUser('owner');
+    const projectPath = '/tmp/local-proj';
+    projectsDb.createProjectPath(projectPath, null, owner);
+    const pins: Record<string, string> = { 'conv-local': `local:0b9c6a3e-6f1e-4c41-9a4e-2f1b9e0c7d11:${owner}:${'d'.repeat(32)}` };
+    const deps = (spy: ReturnType<typeof spyResolver>, readEnginePin = (id: string) => pins[id] ?? null) => ({
+      isOwnedOrMembered: realOwnership, resolveEnv: spy.resolveEnv, readEnginePin,
+    });
+
+    /** A schema_version "2" DurableTask: the only intent shape that names a conversation. */
+    const task = (conversationId: string, model: string | null = null) => ({
+      schema_version: '2', taskId: 'task-1', userId: owner, projectPath, conversationId, originMessageId: 'msg-1',
+      spec: { scriptOrPrompt: 'do work', model, effort: null, handoffPolicy: 'card-only', leafOnly: true },
+      requestedAt: new Date().toISOString(),
+    });
+    for (const blob of [task('conv-local'), task('conv-official', 'nassaj_local_abc/gpt-oss-20b'),
+      makeIntent({ userId: owner, projectPath, model: 'nassaj_local_abc/gpt-oss-20b' })]) {
+      const spy = spyResolver();
+      const res = authorizeLaunch(blob, deps(spy));
+      assert.equal(res.allow, false, JSON.stringify(blob));
+      assert.match((res as { reason: string }).reason, /LOCAL_ENGINE_SPAWN_UNSUPPORTED/u);
+      assert.equal(spy.calls.length, 0);
+    }
+
+    const failing = spyResolver();
+    const unreadable = authorizeLaunch(task('conv-x'),
+      deps(failing, () => { throw new Error('db down'); }));
+    assert.equal(unreadable.allow, false, 'an unreadable pin fails closed');
+
+    const ok = spyResolver();
+    const allowed = authorizeLaunch(task('conv-official'), deps(ok));
+    assert.equal(allowed.allow, true, 'a non-local conversation still launches');
+  });
+});

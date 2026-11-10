@@ -51,7 +51,7 @@ import {
   type CSSProperties,
 } from 'react';
 import { createPortal } from 'react-dom';
-import { Check, ChevronDown } from 'lucide-react';
+import { Check, ChevronDown, Settings } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 import { engineProviderLabel } from '../../../../../shared/engineProviders';
@@ -60,9 +60,20 @@ import { cn } from '../../../../lib/utils';
 import { useUnifiedKeysEnabled } from '../../../provider-auth/hooks/useLinkMode';
 import { useVendorKeyStatuses } from '../../../provider-auth/hooks/useVendorKeyStatuses';
 import type { EngineProvider } from '../../hooks/engineProviderSession';
+import { LOCAL_ENGINE } from '../../../../../shared/localEngine';
+import { usePaletteOps } from '../../../../contexts/PaletteOpsContext';
+import { useClaudeLocalOverlay } from '../../hooks/useClaudeLocalOverlay';
 
 import { engineModelLabel, resolveEffectiveEngine } from './engineGuard';
 import { rowsForBody, type PickerRow } from './modelPickerRows';
+import {
+  isLocalChat,
+  localChatServer,
+  localModelLabel,
+  localPickerBlocks,
+  type LocalChatContext,
+} from './localOverlayRows';
+import { localBlockHeading, localBlockText, localServerText } from './localModelText';
 
 /** نتيجة مكتملة بعد اختيار نموذج أو مسح تثبيت. */
 type SwitcherResult =
@@ -161,6 +172,22 @@ export default function InlineModelSwitcher({
   // ADR-200 S9: unlinked vendor cells are absent from the list in the unified mode.
   const hideUnlinked = useUnifiedKeysEnabled();
 
+  // B-251: هل يوجد sessionId؟ يحدّد نطاق التبديل قبل الاختيار.
+  const hasSession = typeof sessionId === 'string' && sessionId.trim().length > 0;
+
+  // ADR-227: محادثة على خادم محلي تُعرف بختمها أو بمعرّف نموذجها المحلي — فلا
+  // يُستنبَط محرّكها من الكتالوج (لا كتالوج للنماذج المحلية) ولا يغيب بغياب الختم.
+  const localCtx: LocalChatContext = {
+    isNewChat: !hasSession,
+    chatEngine: engineProvider ?? null,
+    chatModel: currentModel,
+  };
+  const chatIsLocal = isClaudeBody && isLocalChat(localCtx);
+  const localOverlay = useClaudeLocalOverlay(isClaudeBody && (isOpen || chatIsLocal));
+  const localBlocks = isClaudeBody ? localPickerBlocks(localOverlay ?? [], localCtx) : [];
+  const localRows = localBlocks.flatMap((block) => block.rows);
+  const { openSettings } = usePaletteOps();
+
   // صفّ locked = محرّك بلا مفتاح مخزَّن: يبقى مخفياً هنا (مساره الإعدادات، لا
   // مبدّل وسط المحادثة). وصفّ بلا model لا يُرسَل أصلاً. وجود تعريف كتالوج لا
   // يثبت وجود المفتاح: الكتالوج قد يكون مضمّناً أو مستعاداً من cache، لذلك لا
@@ -175,16 +202,20 @@ export default function InlineModelSwitcher({
 
   // إن وُفِّرت قائمة مفضّلة، تُرتَّب صفوفها أولاً (تعديل غير بنيوي — B-Fav).
   // الصفوف المفضّلة تُقدَّم أولاً بنفس ترتيب الإضافة (FIFO)، ثم ما تبقّى.
+  // ADR-227: محادثة محلية لا تنتقل إلى Anthropic ولا إلى مورّد — صفوفها المحلية وحدها.
+  const switchableRows = chatIsLocal ? [] : baseRows;
   const rows = favorites && favorites.length > 0
     ? [
-        ...baseRows.filter((r) => favorites.includes(r.key)),
-        ...baseRows.filter((r) => !favorites.includes(r.key)),
+        ...switchableRows.filter((r) => favorites.includes(r.key)),
+        ...switchableRows.filter((r) => !favorites.includes(r.key)),
       ]
-    : baseRows;
+    : switchableRows;
 
   // B-ENG + B-311: المحرّك العامل فعلاً — الختم العميلي إن وُجد، وإلا مستنبَطاً
   // من النموذج الفعّال. منطقه المشترك مع لوحة /models في engineGuard.ts.
-  const effectiveEngine = resolveEffectiveEngine(engineProvider, provider, currentModel, catalog);
+  const effectiveEngine = chatIsLocal
+    ? LOCAL_ENGINE
+    : resolveEffectiveEngine(engineProvider, provider, currentModel, catalog);
 
   // الصفّ الجاري = تطابق النموذج **والمحرّك** معاً. المطابقة على النموذج وحده
   // كانت تكفي حين كان المعروض محوراً واحداً؛ الآن قد يظهر المعرّف نفسه تحت
@@ -196,13 +227,12 @@ export default function InlineModelSwitcher({
   // اسم النموذج المعروض: من كتالوج المحرّك حين تكون الجلسة محرَّكة، فصفوف
   // المحرّك مُرشَّحة من `rows` فلا يجدها currentRow ويظهر المعرّف خاماً (ADR-073 §6).
   const engineRowLabel =
-    effectiveEngine && !currentRow
-      ? engineModelLabel(catalog, effectiveEngine, currentModel)
-      : undefined;
+    effectiveEngine === LOCAL_ENGINE
+      ? localModelLabel(localOverlay ?? [], currentModel) ?? currentModel.slice(currentModel.indexOf('/') + 1)
+      : effectiveEngine && !currentRow
+        ? engineModelLabel(catalog, effectiveEngine, currentModel)
+        : undefined;
   const displayLabel = abbreviateModel(currentRow?.label || engineRowLabel || currentModel);
-
-  // B-251: هل يوجد sessionId؟ يحدّد نطاق التبديل قبل الاختيار.
-  const hasSession = typeof sessionId === 'string' && sessionId.trim().length > 0;
 
   // B-252: إظهار خيار المسح فقط حين جلسة قائمة + تثبيت موجود + callback متاح.
   const showClearOption = hasSession && sessionModelChanged && typeof onClearSessionModel === 'function' && !lastResult;
@@ -352,9 +382,13 @@ export default function InlineModelSwitcher({
 
   // B-352: المحرّك لم يعد سبب تعطيل. يبقى التعطيل لأسبابه الحقيقية وحدها:
   // بثٌّ جارٍ، عملية تبديل/مسح قائمة، أو لا صفوف أصلاً.
-  const isDisabled = disabled || isSwitching || isClearing || rows.length === 0;
+  const isDisabled = disabled || isSwitching || isClearing || (rows.length === 0 && localRows.length === 0);
   // اسم المحرّك العامل — يُعرض في رأس القائمة وفي التلميح ليعرف المستخدم أين هو.
-  const activeEngineName = effectiveEngine ? engineProviderLabel(effectiveEngine) : null;
+  // المحلي باسم خادمه لا بمعرّف التثبيت الخام (ADR-227).
+  const localServer = chatIsLocal && localOverlay !== null ? localChatServer(localOverlay, localCtx) : null;
+  const activeEngineName = effectiveEngine === LOCAL_ENGINE
+    ? (localServer ? localServerText(t, localServer) : t('localModels.engineShort', { defaultValue: 'Local' }))
+    : effectiveEngine ? engineProviderLabel(effectiveEngine) : null;
 
   return (
     <div className={cn('relative', className)} ref={containerRef}>
@@ -375,7 +409,7 @@ export default function InlineModelSwitcher({
             ? t('inlineModelSwitcher.switching')
             : isClearing
               ? t('inlineModelSwitcher.clearing')
-              : rows.length === 0
+              : rows.length === 0 && localRows.length === 0
                 ? t('inlineModelSwitcher.noModels')
                 : activeEngineName
                   // ADR-073 §6: الاسم من مصدر واحد — لا يُبنى من معرّف السلك.
@@ -477,7 +511,7 @@ export default function InlineModelSwitcher({
           </div>
 
           <div className="min-h-0 overflow-y-auto p-1">
-            {rows.length === 0 ? (
+            {rows.length === 0 && localRows.length === 0 ? (
               <p className="px-3 py-2 text-xs text-muted-foreground">
                 {t('inlineModelSwitcher.noModels')}
               </p>
@@ -546,6 +580,69 @@ export default function InlineModelSwitcher({
                 );
               })
             )}
+
+            {localBlocks.map((block) => (
+              <Fragment key={block.providerId}>
+                <div
+                  role="presentation"
+                  dir="auto"
+                  className="px-2.5 pb-1 pt-2 text-[10px] font-semibold tracking-wider text-muted-foreground/70"
+                >
+                  {localBlockHeading(t, block.serverLabel)}
+                </div>
+                {block.rows.map((row) => {
+                  const isSelected = row.model === currentModel && effectiveEngine === LOCAL_ENGINE;
+                  const reason = row.blocked ? localBlockText(t, row.blocked) : null;
+                  return (
+                    <div key={row.key} className="flex items-center gap-1" data-local-blocked={row.blocked ?? undefined}>
+                      <button
+                        type="button"
+                        role="option"
+                        aria-selected={isSelected}
+                        aria-disabled={row.blocked !== null}
+                        disabled={row.blocked !== null || isSwitching || isClearing}
+                        onClick={() => void handleSelectModel(row)}
+                        className={cn(
+                          'relative flex min-w-0 flex-1 cursor-pointer select-none items-center gap-2 rounded-lg px-2.5 py-1.5 text-sm outline-none',
+                          'transition-colors duration-150 motion-reduce:transition-none',
+                          'hover:bg-accent hover:text-accent-foreground',
+                          'focus-visible:bg-accent focus-visible:text-accent-foreground',
+                          'disabled:pointer-events-none disabled:opacity-60',
+                          isSelected && 'bg-accent text-accent-foreground',
+                        )}
+                      >
+                        <div className="min-w-0 flex-1 text-start">
+                          <div className="truncate text-sm font-medium leading-none">{row.label}</div>
+                          {reason && (
+                            <div className="mt-0.5 line-clamp-2 text-[11px] text-muted-foreground" dir="auto">
+                              {reason}
+                            </div>
+                          )}
+                        </div>
+                        <Check
+                          className={cn('h-3.5 w-3.5 shrink-0 text-primary', isSelected ? 'opacity-100' : 'opacity-0')}
+                          aria-hidden="true"
+                        />
+                      </button>
+                      {row.fixInSettings && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            closeDropdown();
+                            openSettings('agents', { tab: 'agents', localModels: true });
+                          }}
+                          aria-label={t('localModels.openSettings', { defaultValue: 'Server settings' })}
+                          title={t('localModels.openSettings', { defaultValue: 'Server settings' })}
+                          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+                        >
+                          <Settings className="h-3.5 w-3.5" aria-hidden="true" />
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
+              </Fragment>
+            ))}
 
             {/* B-252 خيار «اتبع الافتراضي الحالي» — جلسة قائمة + تثبيت موجود */}
             {showClearOption && (

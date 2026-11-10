@@ -32,7 +32,7 @@ test('actual dispatch persists private native proof, strips public live/replay f
         runWriter.send(attachCodexCompletionProof({ kind: 'complete', sessionId, provider: 'codex', clientMsgId: options.clientMsgId }, proof) as never);
       },
       queryClaudeSDK: async () => {}, spawnCursor: async () => {}, spawnAntigravity: async () => {},
-      spawnKimi: async () => {}, spawnDeepSeek: async () => {}, spawnGlm: async () => {}, spawnOpenCode: async () => {},
+      spawnKimi: async () => {}, spawnGlm: async () => {}, spawnOpenCode: async () => {},
       getSessionProvider: () => 'codex', getActiveClaudeSDKSessions: () => [],
     } as never;
     const message = { command: 'same request', options: { clientMsgId: 'native-client', coordinationLevel: 'direct' } } as never;

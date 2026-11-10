@@ -37,7 +37,6 @@ import type { Server } from 'node:http';
 import express from 'express';
 
 import { closeConnection, initializeDatabase, userDb } from '@/modules/database/index.js';
-import { setProviderSharingConfig } from '@/services/provider-sharing.js';
 import { AppError } from '@/shared/utils.js';
 
 import providerRouter from './provider.routes.js';
@@ -103,6 +102,8 @@ const userCodexAgents = (userId: number): string =>
   path.join(sandboxHome, '.nassaj-users', String(userId), '.codex', 'AGENTS.md');
 const userKimiAgents = (userId: number): string =>
   path.join(sandboxHome, '.nassaj-users', String(userId), '.kimi', 'AGENTS.md');
+const userOpencodeAgents = (userId: number): string =>
+  path.join(sandboxHome, '.nassaj-users', String(userId), '.config', 'opencode', 'AGENTS.md');
 const operatorOpencodeAgents = (): string =>
   path.join(sandboxHome, '.config', 'opencode', 'AGENTS.md');
 
@@ -133,10 +134,6 @@ before(async () => {
 
   memberUser = userDb.createUser('gov_member', 'hash', 'user') as TestUser;
   ownerUser = { ...(userDb.createUser('gov_owner', 'hash', 'user') as TestUser), role: 'owner' };
-
-  // Pin the policy this test reasons about: codex isolated (per-user home),
-  // opencode + agy shared (operator home).
-  setProviderSharingConfig({ codex: 'isolated', opencode: 'shared', agy: 'shared' });
 
   const app = express();
   app.use(express.json());
@@ -226,33 +223,25 @@ test('T-1953: kimi is retired as a body — its link is refused and nothing is w
   assert.equal(fs.existsSync(userKimiAgents(memberUser.id)), false, 'no file lands in the member KIMI_CODE_HOME');
 });
 
-test('a SHARED provider is owner-only, and the refusal writes NOTHING', async () => {
+test('ADR-152 A1: an opencode member links their OWN tree — there is no shared operator home', async () => {
   const advertised = await channelsOf('opencode', memberUser);
-  assert.equal(advertised[0].linkable, false, 'no button may be offered to a member');
-  assert.equal(advertised[0].linkRefusal, 'owner_required');
+  assert.equal(advertised[0].linkable, true);
+  assert.equal(advertised[0].linkScope, 'user');
 
-  const refused = await call('POST', '/api/providers/opencode/governance/link', memberUser);
-  assert.equal(refused.status, 403);
-  assert.equal(
-    (refused.json.error as { code: string }).code,
-    'GOVERNANCE_LINK_FORBIDDEN',
-    'the endpoint refuses independently of the hidden button',
-  );
-  assert.equal(
-    fs.existsSync(operatorOpencodeAgents()),
-    false,
-    'a refused link must not touch the operator home',
-  );
+  const response = await call('POST', '/api/providers/opencode/governance/link', memberUser);
+  assert.equal(response.status, 200);
+  assertAuthenticCopy(userOpencodeAgents(memberUser.id), neutralSource());
+  assert.equal(fs.existsSync(operatorOpencodeAgents()), false, 'the operator home is never written');
 });
 
-test('the OWNER may link the shared operator home', async () => {
+test('ADR-152 A1: the OWNER links their own tree too, never the operator home', async () => {
   const advertised = await channelsOf('opencode', ownerUser);
-  assert.equal(advertised[0].linkable, true);
-  assert.equal(advertised[0].linkScope, 'operator');
+  assert.equal(advertised[0].linkScope, 'user');
 
   const response = await call('POST', '/api/providers/opencode/governance/link', ownerUser);
   assert.equal(response.status, 200);
-  assertAuthenticCopy(operatorOpencodeAgents(), neutralSource());
+  assertAuthenticCopy(userOpencodeAgents(ownerUser.id), neutralSource());
+  assert.equal(fs.existsSync(operatorOpencodeAgents()), false, 'the operator home is never written');
 });
 
 test('an anonymous caller is refused everywhere and writes nothing', async () => {
@@ -275,43 +264,23 @@ test('claude has NO link action — the endpoint refuses it directly (§4.1)', a
   assert.equal((refused.json.error as { code: string }).code, 'GOVERNANCE_LINK_UNAVAILABLE');
 });
 
-test('shared agy has NO link action: the file it reads IS the source', async () => {
-  const [home, project] = await channelsOf('antigravity', ownerUser);
-  assert.equal(home.linkable, false);
-  assert.equal(home.linkRefusal, 'shared_source_is_the_file');
-  assert.equal(project.linkable, false);
-  assert.equal(project.linkRefusal, 'project_scoped');
+test('an agy user CAN link — into their own .gemini, never the operator\'s', async () => {
+  // The agy source is ~/.gemini/GEMINI.md; establish the operator source first.
+  const source = path.join(sandboxHome, '.gemini', 'GEMINI.md');
+  fs.mkdirSync(path.dirname(source), { recursive: true });
+  fs.writeFileSync(source, '# neutral gemini governance\n');
 
-  const refused = await call('POST', '/api/providers/antigravity/governance/link', ownerUser);
-  assert.equal(refused.status, 400);
-  assert.equal(
-    fs.existsSync(path.join(sandboxHome, '.gemini', 'GEMINI.md')),
-    false,
-    'a refused link must create nothing',
-  );
-});
+  const advertised = await channelsOf('antigravity', memberUser);
+  assert.equal(advertised[0].linkable, true);
+  assert.equal(advertised[0].linkScope, 'user');
 
-test('an ISOLATED agy user CAN link — into their own .gemini, never the operator\'s', async () => {
-  setProviderSharingConfig({ codex: 'isolated', opencode: 'shared', agy: 'isolated' });
-  try {
-    // The agy source is ~/.gemini/GEMINI.md; establish the operator source first.
-    const source = path.join(sandboxHome, '.gemini', 'GEMINI.md');
-    fs.mkdirSync(path.dirname(source), { recursive: true });
-    fs.writeFileSync(source, '# neutral gemini governance\n');
+  const response = await call('POST', '/api/providers/antigravity/governance/link', memberUser);
+  assert.equal(response.status, 200);
 
-    const advertised = await channelsOf('antigravity', memberUser);
-    assert.equal(advertised[0].linkable, true);
-    assert.equal(advertised[0].linkScope, 'user');
-
-    const response = await call('POST', '/api/providers/antigravity/governance/link', memberUser);
-    assert.equal(response.status, 200);
-
-    const target = path.join(sandboxHome, '.nassaj-users', String(memberUser.id), '.gemini', 'GEMINI.md');
-    assertAuthenticCopy(target, source);
-    assert.equal((response.json.data as { status: string }).status, 'governed');
-  } finally {
-    setProviderSharingConfig({ codex: 'isolated', opencode: 'shared', agy: 'shared' });
-  }
+  const target = path.join(sandboxHome, '.nassaj-users', String(memberUser.id), '.gemini', 'GEMINI.md');
+  assertAuthenticCopy(target, source);
+  assert.equal((response.json.data as { status: string }).status, 'governed');
+  assert.equal(fs.existsSync(path.join(sandboxHome, '.gemini', 'AGENTS.md')), false);
 });
 
 test('an engine with no mechanism has no action at all', async () => {

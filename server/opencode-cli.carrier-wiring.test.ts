@@ -14,12 +14,21 @@
 // B-1349: FIRST import — HOME becomes a /var/tmp sandbox before anything reads it.
 import { SANDBOX_HOME } from '@/shared/__tests__/sandbox-home.js';
 import assert from 'node:assert/strict';
+import { FAKE_OPENCODE_PARITY_PRELUDE, installManagedClaudePlugins } from '@/shared/__tests__/fake-opencode-parity.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { after, before, beforeEach, describe, it } from 'node:test';
 
+// ADR-152 A1 §3.4: an opencode run needs a signed-in member (id 7), recorded
+// against a real schema.
+{
+  const memberDb = await import('@/modules/database/index.js');
+  await memberDb.initializeDatabase();
+  memberDb.getConnection().prepare("INSERT OR IGNORE INTO users (id, username, password_hash) VALUES (7, 'member-7', 'x')").run();
+}
+
 type Frame = { kind?: string; code?: string; content?: string };
-type Writer = { userId: null; sessionId: string | null; send(m: Frame): void; setSessionId(id: string): void };
+type Writer = { userId: number; sessionId: string | null; send(m: Frame): void; setSessionId(id: string): void };
 
 const scratch = fs.mkdtempSync(path.join(fs.realpathSync('/var/tmp'), 'oc-wiring-'));
 const dumpPath = path.join(scratch, 'spawn.json');
@@ -44,7 +53,7 @@ function freshProject(name: string): string {
 async function run(cwd: string, extra: Record<string, unknown> = {}) {
   const frames: Frame[] = [];
   const writer: Writer = {
-    userId: null,
+    userId: 7,
     sessionId: null,
     send(m) { frames.push(m); },
     setSessionId(id) { this.sessionId = id; },
@@ -59,6 +68,7 @@ async function run(cwd: string, extra: Record<string, unknown> = {}) {
 
 before(async () => {
   fs.writeFileSync(fakeBin, `#!${process.execPath}
+${FAKE_OPENCODE_PARITY_PRELUDE}
 const fs = require('fs');
 const env = {};
 for (const k of ${JSON.stringify(ENV_KEYS)}) env[k] = process.env[k] ?? null;
@@ -66,6 +76,7 @@ fs.writeFileSync(${JSON.stringify(dumpPath)}, JSON.stringify({ argv: process.arg
 console.log(JSON.stringify({ type: 'text', sessionID: 'oc-wiring-1', text: 'ok' }));
 console.log(JSON.stringify({ type: 'step_finish', sessionID: 'oc-wiring-1' }));
 `, { mode: 0o755 });
+  installManagedClaudePlugins(SANDBOX_HOME, 7);
   // The governance gate needs the neutral source it copies into the opencode config home.
   fs.mkdirSync(path.join(SANDBOX_HOME, '.claude'), { recursive: true });
   fs.writeFileSync(path.join(SANDBOX_HOME, '.claude', 'AGENTS.md'), '# neutral governance\n');
@@ -96,7 +107,10 @@ describe('B-1367 carrier wiring', () => {
     assert.equal(spawned.env.OPENCODE_DISABLE_PROJECT_CONFIG, '1');
     assert.equal(spawned.env.OPENCODE_CONFIG, null);
     assert.equal(spawned.env.OPENCODE_CONFIG_DIR, null);
-    assert.equal(spawned.env.OPENCODE_CONFIG_CONTENT, null);
+    // ADR-226: the only inline config is nassaj's own (plugin first, lsp/formatter off), never the inherited one.
+    assert.deepEqual(Object.keys(JSON.parse(spawned.env.OPENCODE_CONFIG_CONTENT ?? '{}')).sort(), ['formatter', 'lsp', 'plugin']);
+    assert.match(JSON.parse(spawned.env.OPENCODE_CONFIG_CONTENT ?? '{}').plugin[0],
+      /^file:\/\/.*\/nassaj-parity-[0-9a-f]{32}\/nassaj-claude-parity\.js$/);
   });
 
   it('never starts the carrier over a planted project provider api, with a dedicated code', async () => {

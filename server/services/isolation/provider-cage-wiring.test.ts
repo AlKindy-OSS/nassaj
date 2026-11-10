@@ -73,12 +73,8 @@ function lstatAbsent(): never {
   throw err;
 }
 
-/**
- * deps where every probed path "exists" (records probes for assertions).
- * The sharing policy is injected (all providers isolated) so no test ever
- * touches the real database through the default isProviderIsolated.
- */
-function allExist(isolated: (p: string) => boolean = () => true) {
+/** deps where every probed path "exists" (records probes for assertions). */
+function allExist() {
   const probed: string[] = [];
   return {
     probed,
@@ -90,7 +86,6 @@ function allExist(isolated: (p: string) => boolean = () => true) {
         return true;
       },
       lstatSync: lstatAbsent as unknown as typeof import('node:fs').lstatSync,
-      isProviderIsolated: isolated,
     },
   };
 }
@@ -220,7 +215,6 @@ describe('flag OFF — byte-identical passthrough', () => {
     const cmdRef = '/usr/bin/opencode';
     const argsRef = ['run', '--format', 'json'];
     let fsTouched = 0;
-    let policyRead = 0;
     let homedirRead = 0;
     let realpathRead = 0;
     const out = resolveCagedLaunch(
@@ -239,17 +233,12 @@ describe('flag OFF — byte-identical passthrough', () => {
           realpathRead += 1;
           return p;
         }) as unknown as (p: string) => string,
-        isProviderIsolated: () => {
-          policyRead += 1;
-          return true;
-        },
       },
     );
     // byte-identical off path: SAME references out, and zero disk/DB introspection
     assert.equal(out.cmd, cmdRef, 'cmd must be the SAME reference (out.cmd === cmdRef)');
     assert.equal(out.args, argsRef, 'args must be the SAME array reference (out.args === argsRef)');
     assert.equal(fsTouched, 0, 'flag off must not stat anything (hot path untouched)');
-    assert.equal(policyRead, 0, 'flag off must not consult the sharing policy');
     assert.equal(homedirRead, 0, 'flag off must not resolve homedir');
     assert.equal(realpathRead, 0, 'flag off must not realpath anything');
   });
@@ -326,7 +315,6 @@ describe('flag ON — caged launch shape', () => {
       ...FAKE_BWRAP,
       homedir: () => HOME,
       existsSync: (p: string) => p === USERS_ROOT, // only the root exists
-      isProviderIsolated: () => true,
     };
     const out = resolveCagedLaunch(
       { userId: 99, provider: 'agy', cmd: 'agy', args: [], cwd: '/proj' },
@@ -349,7 +337,6 @@ describe('flag ON — caged launch shape', () => {
       ...FAKE_BWRAP,
       homedir: () => HOME,
       existsSync: () => false, // neither root nor cwd exist
-      isProviderIsolated: () => true,
     };
     const out = resolveCagedLaunch(
       { userId: 1, provider: 'claude', cmd: 'claude', args: ['x'], cwd: '/proj' },
@@ -370,7 +357,6 @@ describe('flag ON — caged launch shape', () => {
         homedir: () => HOME,
         existsSync: () => true,
         lstatSync: lstatAbsent as unknown as typeof import('node:fs').lstatSync,
-        isProviderIsolated: () => true,
       },
     );
     assert.deepEqual(out, { cmd: 'claude', args: ['x'] }, 'missing bwrap must not block the spawn');
@@ -527,18 +513,15 @@ describe('cageMountPlan (T-898)', () => {
     );
   });
 
-  it('SHARED-mode agy (admin policy): its own token stays readable + rw; everything else masked', () => {
-    const { deps } = allExist((p) => p !== 'agy'); // agy shared, others isolated
+  it('ADR-152 A1: agy never earns a waiver — its operator token stays masked', () => {
+    const { deps } = allExist();
     const plan = cageMountPlan({ provider: 'agy', userId: 7 }, deps);
-    assert.ok(!plan.maskFiles.includes(CRED.agyToken), 'shared-mode agy must keep its own token');
-    assert.ok(plan.writePaths.includes(CRED.agyToken), 'token must be rw (refresh persistence)');
+    assert.ok(plan.maskFiles.includes(CRED.agyToken), 'the operator agy token is masked for every launch');
+    assert.ok(!plan.writePaths.includes(CRED.agyToken), 'and never handed out read-write');
     assert.ok(
-      plan.writePaths.includes(path.join(HOME, '.gemini', 'antigravity-cli')),
-      'shared-mode agy runs on the operator state dir',
+      !plan.writePaths.includes(path.join(HOME, '.gemini', 'antigravity-cli')),
+      'no launch runs on the operator agy state dir',
     );
-    for (const f of [CRED.claudeCred, CRED.claudeJson, CRED.codexAuth, CRED.hermesAuth, CRED.opencodeAuth]) {
-      assert.ok(plan.maskFiles.includes(f), `${f} must be masked inside the agy cage`);
-    }
   });
 
   it('existsSync-filters everything: nothing to mask/bind on a bare host', () => {
@@ -582,17 +565,16 @@ describe('buildCagedSdkSpawn — flag ON', () => {
 // not just the right argv.
 // ---------------------------------------------------------------------------
 
-// The integration paths inject ONLY the sharing policy (all isolated): the real
-// default would read the live app_config database from a unit test. Everything
-// else (homedir, fs, bwrap resolution) is the real thing.
-const REAL_WITH_POLICY = { isProviderIsolated: () => true };
+// The integration paths inject nothing: homedir, fs and bwrap resolution are the
+// real thing (every launch is isolated, ADR-152 A1, so no policy is read).
+const REAL_DEPS = {};
 
 function realBwrapUsable(): boolean {
   // Reuse the module's own resolver via a caged probe: build an argv and try it.
   setCage(true);
   const probe = resolveCagedLaunch(
     { userId: null, provider: 'claude', cmd: 'true', args: [], cwd: undefined },
-    REAL_WITH_POLICY,
+    REAL_DEPS,
   );
   if (probe.cmd === 'true') return false; // passthrough ⇒ no bwrap resolved
   const res = spawnSync(probe.cmd, probe.args, { encoding: 'utf8' });
@@ -628,20 +610,15 @@ describe('resolveCagedLaunch — per-mode (SL-6)', () => {
     assert.equal(out.cmd, '/opt/codex/bwrap');
   });
 
-  it('passes a kimi CHAT / omitted-mode launch through byte-identically (no fs, no policy)', () => {
+  it('passes a kimi CHAT / omitted-mode launch through byte-identically (no fs)', () => {
     setCage(true);
     let fsTouched = 0;
-    let policyRead = 0;
     const argsRef = ['stream'];
     const probeDeps = {
       ...FAKE_BWRAP,
       homedir: () => HOME,
       existsSync: () => {
         fsTouched += 1;
-        return true;
-      },
-      isProviderIsolated: () => {
-        policyRead += 1;
         return true;
       },
     };
@@ -657,7 +634,6 @@ describe('resolveCagedLaunch — per-mode (SL-6)', () => {
     );
     assert.equal(omitted.args, argsRef, 'omitted mode must return the SAME args reference');
     assert.equal(fsTouched, 0, 'the exempt chat path must not stat anything');
-    assert.equal(policyRead, 0, 'the exempt chat path must not consult the sharing policy');
   });
 });
 
@@ -679,7 +655,7 @@ describe('kimi agent credential mask (SL-6)', () => {
   });
 
   it('ISOLATED kimi agent: masks its OWN config-home credential + every other provider credential', () => {
-    const { deps } = allExist(); // all providers isolated ⇒ no waiver for anyone
+    const { deps } = allExist(); // every launch is isolated ⇒ no waiver for anyone
     const plan = cageMountPlan({ provider: 'kimi', userId: 7 }, deps);
     // kimi's own operator credential is masked (its per-user key lives in the tree)
     assert.ok(plan.maskFiles.includes(kimiCred), 'the kimi operator credential must be masked');
@@ -726,7 +702,7 @@ describe('resolveCagedLaunch — real cage integration', () => {
       setCage(true);
       const out = resolveCagedLaunch(
         { userId: null, provider: 'claude', cmd: 'sh', args: ['-c', 'echo CAGED_OK'], cwd: undefined },
-        REAL_WITH_POLICY,
+        REAL_DEPS,
       );
       const res = spawnSync(out.cmd, out.args, { encoding: 'utf8' });
       assert.equal(res.status, 0, res.stderr);

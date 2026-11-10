@@ -68,7 +68,6 @@ function makeDependencies() {
       queryCodex: spawn('codex'),
       spawnAntigravity: spawn('antigravity'),
       spawnKimi: spawn('kimi'),
-      spawnDeepSeek: spawn('deepseek'),
       spawnGlm: spawn('glm'),
       spawnOpenCode: spawn('opencode'),
       getSessionProvider: () => null,

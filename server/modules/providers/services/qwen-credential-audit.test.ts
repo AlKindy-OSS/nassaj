@@ -70,7 +70,7 @@ test('per-provider path: set and delete each write exactly one row, without the 
 });
 
 test('company path: a Token Plan key saves without sk-sp- or consent, one row, never the key', async () => {
-  const result = await companyCredentialsService.setKey(member.id, 'alibaba-cloud', KEY, { isElevated: false });
+  const result = await companyCredentialsService.setKey(member.id, 'alibaba-cloud', KEY, {});
   assert.equal(result.configured, true, JSON.stringify(result.slots));
   const rows = newQwenRows();
   assert.equal(rows.length, 1);
@@ -114,7 +114,7 @@ test('stored legacy coding_plan records show legacy_profile and their delete wor
     assert.equal((await providerCredentialsService.getStatus(member.id, 'qwen')).configured, true);
 
     baseline = auditLogDb.recent(1000).length;
-    const removed = await companyCredentialsService.deleteKey(member.id, 'alibaba-cloud', { isElevated: false });
+    const removed = await companyCredentialsService.deleteKey(member.id, 'alibaba-cloud', {});
     assert.equal(removed.configured, false);
     assert.equal(newQwenRows()[0]?.action, 'qwen_credential_deleted');
     assert.equal((await qwenSlot())?.configured, false);
@@ -124,7 +124,7 @@ test('stored legacy coding_plan records show legacy_profile and their delete wor
 
 test('re-saving over a legacy record replaces it with a Token Plan profile', async () => {
   setProviderKey(member.id, 'qwen', LEGACY_KEY);
-  await companyCredentialsService.setKey(member.id, 'alibaba-cloud', KEY, { isElevated: false });
+  await companyCredentialsService.setKey(member.id, 'alibaba-cloud', KEY, {});
   assert.equal(providerSecretsService.getQwenProfile(member.id)?.plan, 'token_plan');
   assert.equal((await qwenSlot())?.status, undefined);
 });

@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "reviewedSiteDigest": "sha256:18ade2e6609529d77567b72bc28c413fc3c8b6909ba83026b37134a1c7081928",
+  "reviewedSiteDigest": "sha256:5854451e5d76c9578a9cdb49ca6284499c7b9989625aea8c924afde715e4decf",
   "exact": {
     "server/services/document-share-preview.js#child_process.spawn#1": {
       "classification": "bounded_local_compute",
@@ -463,6 +463,51 @@
       "gate": "execFile without a shell; fixed --version argv; env is cleanSpawnEnv() (PATH/HOME/locale passthrough only, no server secrets); 5000 ms timeout; output matched against a line-anchored X.Y.Z only and never executed; failures fail closed to null and are not cached; 10 min cache; no host mutation",
       "adapter": "defaultExec",
       "test": "peer-policy.test.ts and permission inventory classification gate"
+    },
+    "server/modules/providers/list/dsh/dsh-acp-runtime.js#child_process.spawn#1": {
+      "classification": "provider_effect_enclosed",
+      "owner": "DeepSeek Harness (dsh) ACP runtime, T-2086/ADR-224",
+      "purpose": "spawn",
+      "actorSource": "enclosing WS caller (runtime#ws.dsh, writer.userId of the authenticated socket)",
+      "gate": "prepareDshLaunch before spawn: own deepseek key (CREDENTIAL_NOT_LINKED), governance_missing, sha256-pinned Nassaj patch layer last naming the sha256-pinned Nassaj policy plugin (T-2089: every tool call decided over fd 3), exact allow-list env sanitized last, absolute node >= 24.9.0, shell false, detached group kill; admission: Claude permission parity (T-2089: every Claude mode; the per-turn parity engine decides each tool call over fd 3 with Claude hooks, rules and mode; UserPromptSubmit hooks run before spawn and a block spawns nothing; unsupported deny/ask, non-command hooks, unreadable enabled plugins and Claude sandbox refuse; the policy plugin handshake (T-2091 capability probes P1 public tools API, P2 guard gate, P4 channel) must pass before session/new; a call bypassing the guard ends the turn; an undecided result kills the group), session_busy, starter-only resume, harness-update lease; detached group SIGKILL after exit; caller ADR-134 LaunchPermit (runtime#ws.dsh)",
+      "adapter": "spawnDsh",
+      "test": "server/modules/providers/list/dsh/__tests__/dsh-acceptance.test.ts and dsh-launch.test.ts and server/services/permission-parity/__tests__/parity-acceptance.test.ts"
+    },
+    "server/services/permission-parity/claude-hook-runner.js#child_process.spawn#1": {
+      "classification": "provider_effect_enclosed",
+      "owner": "Claude-policy parity hook runner for the DeepSeek Harness, T-2089/ADR-225",
+      "purpose": "claude_hook",
+      "actorSource": "the dsh turn of the authenticated member (parity engine created for that turn); commands come only from Claude settings sources and enabled plugins Claude itself loads for him",
+      "gate": "only type:command hooks (other types refuse the launch); /bin/sh -c the configured command, cwd the turn cwd (never tmpfs), env = the member OWN Claude env (honorGrants false) + CLAUDE_PROJECT_DIR (+ CLAUDE_PLUGIN_ROOT for plugin hooks), TMPDIR off tmpfs, host secrets stripped last; detached group, SIGKILL of the group on timeout (Claude timeout, default 60 s) and on the 1 MiB output cap (a normal close leaves the hook children alone, like Claude); allowManagedHooksOnly honored; stdout capped at 1 MiB; per-runner and global concurrency caps",
+      "adapter": "createClaudeHookRunner",
+      "test": "server/services/permission-parity/__tests__/claude-hook-runner.test.ts and parity-acceptance.test.ts"
+    },
+    "server/modules/providers/list/dsh/dsh-dump-config-check.js#child_process.spawnSync#1": {
+      "classification": "provider_effect_enclosed",
+      "owner": "DeepSeek Harness DSH_PATH override semantic check, T-2091/ADR-225",
+      "purpose": "spawn",
+      "actorSource": "the enclosing dsh turn (runtime#ws.dsh) after prepareDshLaunch, only when the operator set DSH_PATH",
+      "gate": "runs the exact prepared launch (absolute node, the override script, the pinned Nassaj layer, the exact allow-list env, cwd the member dsh home) with --dump-config only (prints the composed profile and exits; no session, no model call); shell false, 30 s timeout, 8 MiB output cap; once per (override sha256, layer pin); a missing or altered security row refuses the turn (dsh_override_unverified)",
+      "adapter": "assertDshOverrideSemantics",
+      "test": "server/modules/providers/list/dsh/__tests__/dsh-launch.test.ts and dsh-acceptance.test.ts"
+    },
+    "server/modules/providers/harness-update/npm-lock/dsh-contract-run.js#child_process.spawnSync#1": {
+      "classification": "release_infrastructure_effect",
+      "owner": "dsh update pipeline offline contract suite, T-2091/ADR-225",
+      "actorSource": "the owner update job (harness lease held, live-session gate passed) for an exact staged candidate; no member input",
+      "adapter": "runDshContractSuite",
+      "test": "server/modules/providers/harness-update/npm-lock/dsh-pipeline.real.test.ts and dsh-update-acceptance.test.ts",
+      "purpose": "dsh_contract_dump_config",
+      "gate": "the staged candidate entry under the absolute verified node, argv nassaj-acp --from-default-profile acp --patch <pinned production layer> --dump-config only (prints the composed profile and exits); fake key, a sandbox HOME/DSH_HOME under the staging dir, exact env; shell false, 60 s timeout, 8 MiB output cap"
+    },
+    "server/modules/providers/harness-update/npm-lock/dsh-contract-run.js#child_process.spawn#1": {
+      "classification": "release_infrastructure_effect",
+      "owner": "dsh update pipeline offline contract suite, T-2091/ADR-225",
+      "actorSource": "the owner update job (harness lease held, live-session gate passed) for an exact staged candidate; no member input",
+      "adapter": "runDshContractSuite",
+      "test": "server/modules/providers/harness-update/npm-lock/dsh-pipeline.real.test.ts and dsh-update-acceptance.test.ts",
+      "purpose": "dsh_contract_turn",
+      "gate": "the staged candidate run with the TEST layer (the pinned production layer with only the LLM row pointed at an in-process 127.0.0.1 fake LLM; one-row diff asserted; refused by prepareDshLaunch pin) and the pinned policy plugin; fake key, sandbox HOME/workspace under the staging dir, exact env, fd 3 to the real broker + parity engine (bypass mode, WebFetch/WebSearch denied); detached group SIGKILL in finally, 120 s turn timeout; no member data, no network"
     }
   },
   "rules": [
@@ -485,16 +530,6 @@
       "gate": "all exported launchers receive authorization in their route/WS adapters",
       "adapter": "server composition",
       "test": "inventory plus route/WS permission tests"
-    },
-    {
-      "prefix": "server/deepseek-cli.js#provider_launcher.import#",
-      "classification": "composition_binding",
-      "owner": "DeepSeek vendor adapter",
-      "purpose": "dependency_wiring",
-      "actorSource": "enclosing WS/REST caller",
-      "gate": "caller ADR-134 permit",
-      "adapter": "vendor runtime alias",
-      "test": "vendor runtime and WS tests"
     },
     {
       "prefix": "server/glm-cli.js#provider_launcher.import#",

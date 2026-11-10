@@ -10,6 +10,7 @@ import {
 import type {
   ProviderAuthStatus,
   ProviderAuthStatusMap,
+  ProviderGrantor,
 } from '../types';
 
 type ProviderAuthStatusPayload = {
@@ -19,7 +20,17 @@ type ProviderAuthStatusPayload = {
   method?: string | null;
   error?: string | null;
   linkExpiry?: { expiresAt: string; daysLeft: number } | null;
+  grantedBy?: { userId?: unknown; username?: unknown } | null;
 };
+
+/** A well-formed grantor, or null (absent, malformed, or the member's own credential). */
+function readGrantor(value: ProviderAuthStatusPayload['grantedBy']): ProviderGrantor | null {
+  if (!value || typeof value !== 'object') return null;
+  const { userId, username } = value;
+  if (typeof userId !== 'number' || !Number.isSafeInteger(userId) || userId <= 0) return null;
+  if (typeof username !== 'string' || !username.trim()) return null;
+  return { userId, username: username.trim() };
+}
 
 type ProviderAuthStatusApiResponse = {
   success: boolean;
@@ -36,21 +47,26 @@ const toErrorMessage = (error: unknown): string => (
 const toProviderAuthStatus = (
   payload: ProviderAuthStatusPayload,
   fallbackError: string | null = null,
-): ProviderAuthStatus => ({
-  authenticated: Boolean(payload.authenticated),
-  // fail-open: if the backend does not return installed, default to true so the
-  // provider remains visible rather than being silently hidden.
-  installed: payload.installed !== false,
-  email: payload.email ?? null,
-  method: payload.method ?? null,
-  error: payload.error ?? fallbackError,
-  loading: false,
-  // The request itself succeeded (HTTP 200) — this is a confirmed state, not a
-  // failed check. error may still be populated (e.g. "Not installed") but that
-  // is a legitimate negative state, not a request failure.
-  checkFailed: false,
-  linkExpiry: payload.linkExpiry ?? null,
-});
+): ProviderAuthStatus => {
+  const grantedBy = readGrantor(payload.grantedBy);
+  return {
+    authenticated: Boolean(payload.authenticated),
+    // fail-open: if the backend does not return installed, default to true so the
+    // provider remains visible rather than being silently hidden.
+    installed: payload.installed !== false,
+    // ADR-152 A1 §3.9: a grantee never sees another person's email, even if sent.
+    email: grantedBy ? null : payload.email ?? null,
+    grantedBy,
+    method: payload.method ?? null,
+    error: payload.error ?? fallbackError,
+    loading: false,
+    // The request itself succeeded (HTTP 200) — this is a confirmed state, not a
+    // failed check. error may still be populated (e.g. "Not installed") but that
+    // is a legitimate negative state, not a request failure.
+    checkFailed: false,
+    linkExpiry: payload.linkExpiry ?? null,
+  };
+};
 
 type UseProviderAuthStatusOptions = {
   initialLoading?: boolean;

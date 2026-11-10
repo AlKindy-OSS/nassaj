@@ -34,7 +34,7 @@ import {
   type SessionTranscriptResult,
   type TranscriptRefusal,
 } from '@/modules/providers/shared/session-transcript.js';
-import { isProviderIsolated } from '@/services/provider-sharing.js';
+import { KNOWN_PROVIDERS } from '@/services/isolation/known-providers.js';
 import type {
   BillingAnchorSource,
   SessionCostMeasurement,
@@ -1062,16 +1062,16 @@ async function isMetered(
 /**
  * نطاق المحادثات المنسوبة لمستخدم في اشتراك مزوّد.
  *
- * مزوّد **معزول** يعني أن لكل مستخدم اعتماده واشتراكه، فما يُحسب له محادثاته
- * هو (‏participants أو كاتب رسالة). مزوّد **مشترك** يعني اشتراكاً واحداً
- * للجميع، فالمجموع كل محادثات المزوّد — وتقسيمه على المستخدمين يُنقص المجموع
- * الوحيد الذي له معنى.
+ * كل مزوّد في `KNOWN_PROVIDERS` معزول دائماً (ADR-152 A1): لكل مستخدم اعتماده
+ * واشتراكه، فما يُحسب له محادثاته هو (‏participants أو كاتب رسالة). مفتاح
+ * خارج تلك القائمة (‏antigravity مثلاً) لا نطاق له هنا كما كان، وبطاقة
+ * الاشتراك تحجب مبلغه عن غير المالك/المدير (subscription-visibility.ts).
  *
  * حدّ معروف: النسبة على مستوى المحادثة لا الطلب. محادثة كتب فيها اثنان تُحسب
  * لكليهما كاملةً — البديل نسبة كل طلب إلى اعتماد بعينه، وهي غير مسجَّلة أصلاً.
  */
 function sessionScope(provider: string, userId: string | number | null): Set<string> | null {
-  if (!isProviderIsolated(provider)) {
+  if (!(KNOWN_PROVIDERS as readonly string[]).includes(provider)) {
     return null;
   }
   const numericId = numericUserId(userId);
@@ -1173,9 +1173,8 @@ async function scanTranscriptCycle(
   const cycleStartMs = cycle.start.getTime();
   const window: UsageWindow = { since: cycleStartMs, until: cycle.end.getTime() };
   const scope = sessionScope(provider, userId);
-  // النسبة تُطبَّق حيث يُطبَّق النطاق: مزوّد **معزول** لكل مستخدم اعتماده،
-  // فلكل مستخدم رقمه. ومزوّد **مشترك** اشتراكه واحد ⇒ مجموع الجهاز هو الرقم
-  // الوحيد ذو المعنى، وقسمته تُنقصه (القرار الموصوف في `sessionScope`).
+  // النسبة تُطبَّق حيث يُطبَّق النطاق: مزوّد معزول لكل مستخدم اعتماده، فلكل
+  // مستخدم رقمه (القرار الموصوف في `sessionScope`).
   const attributedTo = scope === null ? null : numericUserId(userId);
 
   const costs: SessionCost[] = [];

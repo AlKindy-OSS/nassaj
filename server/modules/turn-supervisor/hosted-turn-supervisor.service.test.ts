@@ -94,3 +94,30 @@ test('Claude runtime arms direct/delegate/review only through its SDK capability
     provider: 'claude', mode: 'chat', coordinationLevel: 'delegate',
   }), false);
 });
+
+test('ADR-227: an armed Claude cell refuses a local model and a local-pinned session, never runs them on Anthropic', async () => {
+  const hosted = createHostedVendorAdapter({
+    resolveCredential: () => null,
+    fetchImpl: async () => { throw new Error('hosted adapter must not run'); },
+  });
+  const claude = createClaudeSdkTurnAdapter({
+    enabled: () => true,
+    getAuthStatus: async () => ({ installed: true, authenticated: true }),
+    resolveEnvironment: () => ({ PATH: process.env.PATH }),
+    queryFactory: () => { throw new Error('must not spawn Claude'); },
+  });
+  const pins: Record<string, string> = { 'local-chat': `local:0b9c6a3e-6f1e-4c41-9a4e-2f1b9e0c7d11:7:${'e'.repeat(32)}` };
+  const armed = new HostedTurnSupervisorRuntime({
+    NASSAJ_TURN_SUPERVISOR_CLAUDE_CHAT_SDK_MECHANICAL: '1',
+  }, hosted, claude, (sessionId) => pins[sessionId] ?? null);
+  assert.equal(armed.supports({
+    provider: 'claude', mode: 'chat', coordinationLevel: 'direct', model: 'nassaj_local_abc/gpt-oss-20b',
+  }), false, 'the WS layer then refuses explicitly (hosted_turn_supervisor_unsupported)');
+  await assert.rejects(
+    armed.execute({
+      provider: 'claude', mode: 'chat', coordinationLevel: 'direct', model: 'sonnet', prompt: 'p',
+      userId: 7, clientMsgId: 'm1', sessionId: 'local-chat', onSession: () => {},
+    }),
+    (error: Error & { code?: string }) => error.code === 'LOCAL_ENGINE_UNSUPPORTED',
+  );
+});

@@ -139,6 +139,8 @@ beforeEach(() => {
 function makeWs() {
   const forwarded: any[] = [];
   return {
+    // ADR-152 A1 §3.4: an agy run needs a signed-in member.
+    userId: 7,
     forwarded,
     send(msg: any) {
       forwarded.push(msg);

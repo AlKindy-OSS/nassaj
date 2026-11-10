@@ -77,6 +77,19 @@ describe('message fork failure and navigation boundaries', () => {
     expect(h.onForked).toHaveBeenCalledExactlyOnceWith('correct');
   });
 
+  it('T-2083: a CREDENTIAL_NOT_LINKED refusal hands the parsed refusal to onError', () => {
+    const h = forkHarness();
+    act(() => h.result.current.forkFromMessage('saved'));
+    const { requestId } = h.request();
+    act(() => h.rerender({ sessionId: 'source', latestMessage: {
+      type: 'message-fork-error', requestId, code: 'CREDENTIAL_NOT_LINKED', message: 'not linked',
+      credential: { code: 'CREDENTIAL_NOT_LINKED', provider: 'codex', reason: 'not_linked', settingsAgent: 'x' },
+    } }));
+    expect(h.onError).toHaveBeenCalledExactlyOnceWith('CREDENTIAL_NOT_LINKED', 'not linked', {
+      provider: 'codex', reason: 'not_linked', grantorUsername: null, settingsAgent: 'codex',
+    });
+  });
+
   it('retries registration using the same request and server-attested target only on a click', () => {
     const h = forkHarness();
     act(() => h.result.current.forkFromMessage('saved'));

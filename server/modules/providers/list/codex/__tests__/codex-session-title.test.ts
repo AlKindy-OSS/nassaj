@@ -19,15 +19,12 @@ process.env.HOME = sandboxHome;
 process.env.DATABASE_PATH = path.join(sandbox, 'test-db.sqlite');
 
 const { initializeDatabase, closeConnection, sessionsDb } = await import('@/modules/database/index.js');
-const { setProviderSharingConfig, _resetProviderSharingCache } = await import('@/services/provider-sharing.js');
 const { operatorCodexHome } = await import('@/modules/providers/list/codex/codex-home.js');
 const { CodexSessionSynchronizer } = await import(
   '@/modules/providers/list/codex/codex-session-synchronizer.provider.js'
 );
 
 await initializeDatabase();
-_resetProviderSharingCache();
-setProviderSharingConfig({ claude: 'isolated', codex: 'shared', agy: 'shared', cursor: 'shared' });
 
 after(() => {
   closeConnection();

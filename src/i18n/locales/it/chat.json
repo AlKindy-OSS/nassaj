@@ -148,7 +148,7 @@
     "ariaLabel": "Messaggio di sistema automatico"
   },
   "sessionNotResumable": {
-    "message": "Questa sessione non può essere ripresa — non esiste più presso il provider.",
+    "message": "Questa sessione non può essere ripresa — non è più disponibile nell'agente di programmazione.",
     "startNew": "Avvia una nuova sessione"
   },
   "tools": {
@@ -416,7 +416,7 @@
   },
   "providerSelection": {
     "title": "Scegli il tuo assistente AI",
-    "description": "Seleziona un provider per iniziare una nuova conversazione",
+    "description": "Seleziona un agente di programmazione per iniziare una nuova conversazione",
     "selectModel": "Seleziona modello",
     "providerInfo": {
       "anthropic": "di Anthropic",
@@ -428,11 +428,11 @@
       "codex": "Pronto a usare Codex con {{model}}. Inizia a digitare il tuo messaggio qui sotto.",
       "antigravity": "Pronto per Antigravity (agy) con {{model}}. Inizia a scrivere il tuo messaggio qui sotto.",
       "opencode": "Pronto a usare OpenCode con {{model}}. Inizia a digitare il tuo messaggio qui sotto.",
-      "default": "Seleziona un provider sopra per iniziare",
+      "default": "Seleziona un agente di programmazione sopra per iniziare",
       "kimi": "Pronto a usare Kimi con {{model}}. Inizia a digitare il tuo messaggio qui sotto.",
       "deepseek": "Pronto a usare DeepSeek con {{model}}. Inizia a digitare il tuo messaggio qui sotto.",
       "glm": "Pronto a usare GLM con {{model}}. Inizia a digitare il tuo messaggio qui sotto.",
-      "claudeEngine": "Pronto: il motore Claude gira su {{provider}} con {{model}}. Inizia a digitare il tuo messaggio qui sotto."
+      "claudeEngine": "Pronto: l'agente di programmazione Claude gira su {{provider}} con {{model}}. Inizia a digitare il tuo messaggio qui sotto."
     },
     "antigravity": {
       "activeModel": "Modello attivo",
@@ -445,10 +445,10 @@
       "button": "Aggiorna modelli e stato autenticazione",
       "refreshing": "Aggiornamento…"
     },
-    "providerUnavailable": "Provider non disponibile",
+    "providerUnavailable": "Agente di programmazione non disponibile",
     "signIn": "Accedi",
     "addApiKey": "Aggiungi la chiave API {{provider}} per abilitarlo",
-    "engineOnVendor": "Motore Claude su {{provider}}"
+    "engineOnVendor": "Agente Claude su {{provider}}"
   },
   "session": {
     "continue": {
@@ -598,7 +598,7 @@
     "subagentsSection": "Sottoagenti",
     "turns_one": "{{count}} turno",
     "turns_other": "{{count}} turni",
-    "harnessLine": "Harness: {{harness}}",
+    "harnessLine": "Agente di programmazione: {{harness}}",
     "olderModels_one": "{{count}} modello precedente",
     "olderModels_other": "{{count}} modelli precedenti"
   },

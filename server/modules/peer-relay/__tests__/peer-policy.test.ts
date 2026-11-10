@@ -7,7 +7,7 @@ import test from 'node:test';
 
 import { createCliVersionReader, defaultExec, parseCliVersion } from '../peer-cli-version.js';
 import {
-  chargeFromTotals, decideS1Acl, effectiveHop, isThrottled, modeCategory, nextHop, quotaPercent, schedulingDenied,
+  chargeFromTotals, decideIntake, effectiveHop, isThrottled, modeCategory, nextHop, quotaPercent, schedulingDenied,
 } from '../peer-policy.js';
 
 test('mode categories: bypass, auto, plan and acceptEdits are their own; default and dontAsk are prompting', () => {
@@ -18,14 +18,16 @@ test('mode categories: bypass, auto, plan and acceptEdits are their own; default
   for (const mode of ['default', 'dontAsk', undefined, 'weird']) assert.equal(modeCategory(mode), 'prompting');
 });
 
-test('test 10: S1 ACL — only the same user in the same category is queued', () => {
-  const base = { senderUserId: 1, senderMode: 'bypass', targetUserId: 1, targetMode: 'bypass', senderCanWriteTarget: true } as const;
-  assert.deepEqual(decideS1Acl(base), { ok: true });
-  assert.deepEqual(decideS1Acl({ ...base, targetUserId: 2 }), { ok: false, cause: 'cross_user' });
-  assert.deepEqual(decideS1Acl({ ...base, targetUserId: null }), { ok: false, cause: 'cross_user' });
-  assert.deepEqual(decideS1Acl({ ...base, targetMode: 'prompting' }), { ok: false, cause: 'mode_mismatch' });
-  assert.deepEqual(decideS1Acl({ ...base, targetMode: null }), { ok: false, cause: 'mode_unknown' }, 'no record: fail closed');
-  assert.deepEqual(decideS1Acl({ ...base, senderCanWriteTarget: false, targetUserId: 2 }), { ok: false, cause: 'unwritable' });
+test('test 10 (P2a-min): same user + same category queued; cross-member same category held; rest refused', () => {
+  const base = { senderUserId: 1, senderMode: 'bypass', targetUserId: 1, targetMode: 'bypass', senderCanWriteTarget: true,
+    platform: false } as const;
+  assert.deepEqual(decideIntake(base), { kind: 'queue' });
+  assert.deepEqual(decideIntake({ ...base, targetUserId: 2 }), { kind: 'hold', causes: 'cross_member' });
+  assert.deepEqual(decideIntake({ ...base, targetUserId: 2, platform: true }), { kind: 'refuse', cause: 'cross_user' });
+  assert.deepEqual(decideIntake({ ...base, targetUserId: null }), { kind: 'refuse', cause: 'owner_unknown' });
+  assert.deepEqual(decideIntake({ ...base, targetMode: 'prompting' }), { kind: 'refuse', cause: 'mode_mismatch' });
+  assert.deepEqual(decideIntake({ ...base, targetMode: null }), { kind: 'refuse', cause: 'mode_unknown' }, 'no record: fail closed');
+  assert.deepEqual(decideIntake({ ...base, senderCanWriteTarget: false, targetUserId: 2 }), { kind: 'refuse', cause: 'unwritable' });
 });
 
 test('test 13: hop is max(run, agent origin) + 1, capped at 4; scheduling is denied whenever it is > 0', () => {

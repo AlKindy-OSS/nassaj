@@ -406,3 +406,30 @@ test('B-156 + B-157: an Arabic oversize batch (the amplifier) also loses nothing
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test('ADR-227: a local-pinned conversation resumes on its server origin and model', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'inj-local-'));
+  const env = envFor(root);
+  try {
+    const input = inputFor(root, 'conv-local', [mkTask(root, 'loc1')]);
+    const stub = makeStub(input.jsonlPath);
+    const origins = new Set(['http://127.0.0.1:18080']);
+    const result = await injectForConversation({
+      env,
+      runResumeTurn: stub.run,
+      resolveProfile: async (profile: { baseEnv?: NodeJS.ProcessEnv }) => ({
+        env: { ...(profile.baseEnv ?? {}), ANTHROPIC_BASE_URL: 'http://127.0.0.1:18080' },
+        effectiveEngine: 'local:x',
+        engineHosts: new Set<string>(),
+        engineOrigins: origins,
+        local: { model: 'gpt-oss-20b' },
+        pin: { storedEngine: 'local:x' },
+      }) as never,
+    }, input);
+    assert.equal(result.event, 'delivered');
+    assert.equal(stub.calls[0]!.engineOrigins, origins, 'the runner re-checks the exact origin');
+    assert.equal(stub.calls[0]!.model, 'gpt-oss-20b', 'never the injector Claude model on a local server');
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

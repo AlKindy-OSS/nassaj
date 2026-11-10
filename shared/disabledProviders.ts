@@ -10,11 +10,16 @@
  * This file lives in the top-level `shared/` directory on purpose: it is the
  * only tree compiled into BOTH bundles (the server tsconfig includes
  * `../shared/**` and emits it into `dist-server/shared/`; the Vite root is the
- * project root so the client imports it directly). For `deepseek` and `glm`
- * (never retired bodies), disabling — not deleting — keeps upstream sync and
- * reversibility: to re-enable, remove the id from this list; their provider
- * implementations, `resolve-provider-env` cases and `<provider>-cli.js` files
- * stay in place as dormant code. `hermes`, `qwen`, `cursor` and `kimi` are
+ * project root so the client imports it directly). For `glm` (never a retired
+ * body), disabling — not deleting — keeps upstream sync and reversibility: to
+ * re-enable, remove the id from this list; its provider implementation,
+ * `resolve-provider-env` case and `glm-cli.js` stay in place as dormant code.
+ * `deepseek` is not retired either, but its standalone launcher
+ * (`deepseek-cli.js`) was deleted (T-2088): removing the id here no longer
+ * starts a body run — dispatch answers "no runtime handler". The id stays live
+ * as the Claude engine, the OpenCode `deepseek/*` vendor, the vendor key slot,
+ * the hosted turn supervisor target and the history reader. `hermes`, `qwen`,
+ * `cursor` and `kimi` are
  * DIFFERENT: they are also in `shared/retiredProviders.ts` now, so the server
  * refuses them with `provider_removed` before this list is ever consulted,
  * and (for hermes) the body's server code was deleted outright. They remain
@@ -59,9 +64,9 @@
  * `cursor` and `kimi` are disabled, and `deepseek` loses its "coming soon"
  * settings tile (owner decision 2026-09-29): all three are hidden from every
  * surface and new runs are refused at the dispatch seam. Launchers, provider
- * modules and auth wiring stay as dormant code; historical sessions stay
- * listable and readable. For `deepseek` alone, re-enabling is removing the id
- * from this list; `cursor` and `kimi` are also retired bodies (see above) —
+ * modules and auth wiring stay as dormant code (deepseek's launcher excepted,
+ * see above); historical sessions stay listable and readable. `cursor` and
+ * `kimi` are also retired bodies (see above) —
  * re-enabling either needs the id removed from `RETIRED_PROVIDER_IDS` first.
  *
  * NOTE: the provider registry itself is NOT filtered — `resolveProvider` must

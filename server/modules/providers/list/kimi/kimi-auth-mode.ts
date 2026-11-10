@@ -62,9 +62,8 @@ export async function hasValidKimiSubscription(
 export async function detectKimiAuthMode(
   userId: string | number | null,
 ): Promise<'api_key' | 'subscription_oauth' | 'both' | null> {
-  // `sharedFallback: false` preserved: this reports how THIS member is connected,
-  // and an org key is not a member's api_key credential.
-  const hasKey = resolveSlotKey(credentialPrincipalId(userId, 'kimi'), 'kimi', { sharedFallback: false }) !== null;
+  // How THIS member (or their grantor) is connected; the install-wide slot is inert.
+  const hasKey = resolveSlotKey(credentialPrincipalId(userId, 'kimi'), 'kimi') !== null;
   const hasSubscription = await hasValidKimiSubscription(userId ?? null);
 
   if (hasKey && hasSubscription) return 'both';

@@ -37,7 +37,7 @@ test('agy writer emits the native mcp_config.json schema in the caller HOME', as
     command: 'false',
     args: ['one'],
     env: { CANARY: 'value' },
-    userId: 'user-a',
+    userId: '11',
   });
   await provider.upsertServer({
     name: 'http-canary',
@@ -45,16 +45,16 @@ test('agy writer emits the native mcp_config.json schema in the caller HOME', as
     transport: 'http',
     url: 'https://example.test/mcp',
     headers: { 'X-Canary': 'value' },
-    userId: 'user-a',
+    userId: '11',
   });
 
-  const configPath = path.join(root, 'user-a', '.gemini', 'config', 'mcp_config.json');
+  const configPath = path.join(root, '11', '.gemini', 'config', 'mcp_config.json');
   const config = JSON.parse(await readFile(configPath, 'utf8')) as Record<string, unknown>;
   const servers = config.mcpServers as Record<string, Record<string, unknown>>;
   assert.equal(servers['stdio-canary']?.command, 'false');
   assert.equal(servers['http-canary']?.serverUrl, 'https://example.test/mcp');
   assert.equal((await stat(configPath)).mode & 0o777, 0o600);
-  assert.deepEqual(await provider.listServersForScope('user', { userId: 'user-b' }), []);
+  assert.deepEqual(await provider.listServersForScope('user', { userId: '12' }), []);
 });
 
 test('agy project MCP is refused because the real reader has no project contract', async () => {
@@ -66,7 +66,7 @@ test('agy project MCP is refused because the real reader has no project contract
       transport: 'stdio',
       command: 'false',
       workspacePath: path.join(root, 'workspace'),
-      userId: 'user-a',
+      userId: '11',
     }),
     (error: unknown) => (
       typeof error === 'object'
@@ -86,7 +86,7 @@ test('real agy reader discovers the per-user native writer output', async (t) =>
   }
 
   const provider = new AntigravityMcpProvider();
-  const userId = 'real-reader-user';
+  const userId = '18';
   await provider.upsertServer({
     name: 'reader_canary',
     scope: 'user',

@@ -14,7 +14,7 @@
  * times: a reader and a writer that agree by convention instead of by construction.
  * Testing "the file was written" would have passed in all three. The test that
  * actually holds is the one asserting that the path the writer picks is the path the
- * reader picks, for the same user, under BOTH sharing policies.
+ * reader picks, for a member and for the anonymous (operator) caller alike.
  *
  * The fixture is derived from a REAL `.claude.json` (53 top-level keys, secrets
  * redacted), not hand-written: the 2026-06-28 reconcile incident shipped green tests
@@ -33,19 +33,19 @@ const FIXTURE = path.join(HERE, '__fixtures__', 'claude-config.real-shape.json')
 let root = '';
 let ClaudeMcpProvider: typeof import('../claude-mcp.provider.js').ClaudeMcpProvider;
 
-/** Mirrors resolveProviderEnv: a config dir per user when isolated, nothing when shared. */
+/** Mirrors resolveProviderEnv: a config dir per user, nothing for the anonymous caller. */
 const isolatedConfigDir = (userId: string | number | null): string =>
   path.join(root, String(userId ?? 'operator'), '.claude');
 
-/** userId 'shared-user' stands in for the `provider_sharing: shared` policy. */
-const isShared = (userId: string | number | null): boolean => String(userId) === 'shared-user';
+/** The anonymous (operator) caller: resolveProviderEnv sets no CLAUDE_CONFIG_DIR. */
+const isAnonymous = (userId: string | number | null): boolean => userId === null;
 
 before(async () => {
   root = await mkdtemp(path.join(os.tmpdir(), 'claude-mcp-isolation-'));
   mock.module('@/services/isolation/resolve-provider-env.js', {
     namedExports: {
       resolveProviderEnv: (userId: string | number | null, _provider: string, env: NodeJS.ProcessEnv) =>
-        (isShared(userId)
+        (isAnonymous(userId)
           ? { ...env }
           : { ...env, CLAUDE_CONFIG_DIR: isolatedConfigDir(userId) }),
     },
@@ -64,39 +64,39 @@ test('user-scoped Claude MCP config lands in the writing member tree only', asyn
     scope: 'user',
     transport: 'stdio',
     command: 'example-mcp',
-    userId: 'user-a',
+    userId: '11',
   });
 
-  const userA = await provider.listServersForScope('user', { userId: 'user-a' });
-  const userB = await provider.listServersForScope('user', { userId: 'user-b' });
+  const userA = await provider.listServersForScope('user', { userId: '11' });
+  const userB = await provider.listServersForScope('user', { userId: '12' });
 
   assert.deepEqual(userA.map((server) => server.name), ['private-a']);
   assert.deepEqual(userB, []);
 });
 
-test('writer path equals the path loadMcpConfig reads, isolated and shared alike', async () => {
+test('writer path equals the path loadMcpConfig reads, for a member and the anonymous caller alike', async () => {
   const provider = new ClaudeMcpProvider();
   await provider.upsertServer({
     name: 'parity',
     scope: 'user',
     transport: 'http',
     url: 'https://example.test/mcp',
-    userId: 'user-parity',
+    userId: '14',
   });
 
   // The reader's expression, restated: path.join(CLAUDE_CONFIG_DIR || homedir, '.claude.json').
-  const readerPath = path.join(isolatedConfigDir('user-parity'), '.claude.json');
+  const readerPath = path.join(isolatedConfigDir('14'), '.claude.json');
   const written = JSON.parse(await readFile(readerPath, 'utf8')) as { mcpServers?: Record<string, unknown> };
   assert.ok(written.mcpServers?.parity, 'the server must be at the exact path the reader opens');
 
-  // Shared policy: no CLAUDE_CONFIG_DIR, so BOTH sides must fall back to the operator
+  // Anonymous caller: no CLAUDE_CONFIG_DIR, so BOTH sides must fall back to the operator
   // home. This is the half that silently broke — assert the fallback, not just the var.
   const sharedProvider = new ClaudeMcpProvider();
   const operatorFile = path.join(os.homedir(), '.claude.json');
   const before = await readFile(operatorFile, 'utf8').catch(() => null);
   try {
-    const listed = await sharedProvider.listServersForScope('user', { userId: 'shared-user' });
-    assert.ok(Array.isArray(listed), 'shared policy must resolve to the operator file, not throw');
+    const listed = await sharedProvider.listServersForScope('user', { userId: null });
+    assert.ok(Array.isArray(listed), 'the anonymous caller must resolve to the operator file, not throw');
   } finally {
     if (before !== null) {
       assert.equal(await readFile(operatorFile, 'utf8'), before, 'a read must never mutate the operator file');
@@ -113,18 +113,18 @@ test('local scope writes under projects[cwd].mcpServers — the key the reader m
     transport: 'stdio',
     command: 'example-mcp',
     workspacePath,
-    userId: 'user-local',
+    userId: '13',
   });
 
   const config = JSON.parse(
-    await readFile(path.join(isolatedConfigDir('user-local'), '.claude.json'), 'utf8'),
+    await readFile(path.join(isolatedConfigDir('13'), '.claude.json'), 'utf8'),
   ) as { projects?: Record<string, { mcpServers?: Record<string, unknown> }> };
   assert.ok(config.projects?.[workspacePath]?.mcpServers?.['local-one']);
 });
 
 test('an upsert preserves every other key of a real-shaped config, and writes it 0600', async () => {
   const provider = new ClaudeMcpProvider();
-  const userId = 'user-fixture';
+  const userId = '16';
   const configDir = isolatedConfigDir(userId);
   const configPath = path.join(configDir, '.claude.json');
   await mkdir(configDir, { recursive: true });
@@ -155,7 +155,7 @@ test('an upsert preserves every other key of a real-shaped config, and writes it
 
 test('removing a server leaves the rest of the config untouched', async () => {
   const provider = new ClaudeMcpProvider();
-  const userId = 'user-remove';
+  const userId = '17';
   await provider.upsertServer({ name: 'keep', scope: 'user', transport: 'stdio', command: 'a', userId });
   await provider.upsertServer({ name: 'drop', scope: 'user', transport: 'stdio', command: 'b', userId });
   await provider.removeServer({ name: 'drop', scope: 'user', userId });

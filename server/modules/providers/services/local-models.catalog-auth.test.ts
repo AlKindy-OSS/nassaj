@@ -32,8 +32,9 @@ const buildDeps = (over: {
   repository: {
     get: () => SERVER,
     updateModels: () => true,
-    list: () => [], count: () => 0, save: () => {}, remove: () => {},
+    list: () => [], count: () => 0, save: () => {}, remove: () => {}, setVerifiedAddresses: () => true,
   },
+  resolvePrivate: async () => ({ address: '127.0.0.1', family: 4 }),
   config: {
     get: (key: string) => key === 'local_models.enabled' ? 'true'
       : key === 'local_models.consent_version' ? LOCAL_MODELS_CONSENT_VERSION : undefined,
@@ -121,6 +122,10 @@ describe('LocalModelsService.catalog — B-1298(a) auth probe', () => {
     await createLocalModelsService(deps as never).catalog(7, 'srv-1', false);
     assert.deepEqual(urls, [
       'http://127.0.0.1:8080/v1/chat/completions',
+      'http://127.0.0.1:8080/v1/models',
+      // B-1755: the llama.cpp window probe lives at the server root.
+      'http://127.0.0.1:8080/props',
+      // ADR-227 / T-2098: the Claude-body address check, on the vetted literal.
       'http://127.0.0.1:8080/v1/models',
     ]);
   });

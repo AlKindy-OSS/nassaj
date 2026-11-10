@@ -61,6 +61,7 @@ import { providerAuthService } from './modules/providers/services/provider-auth.
 import { providerModelsService } from './modules/providers/services/provider-models.service.js';
 import { createTurnTimer, settleTurnTiming } from './modules/providers/services/turn-timing.service.js';
 import { participantsDb } from './modules/database/index.js';
+import { assertModelRunActor } from './services/isolation/credential-actor.js';
 import { resolveProviderEnv } from './services/isolation/resolve-provider-env.js';
 import { verifyVendorBinaryDigest, VendorBinaryIntegrityError } from './services/isolation/vendor-binary-integrity.js';
 import { resolveHarnessBinary } from './shared/harness-binaries.js';
@@ -230,7 +231,8 @@ export function prepareKimiAgentLaunch(params, deps = {}) {
   const governanceSourceFn = deps.neutralGovernanceSource ?? neutralGovernanceSource;
 
   // (1) Per-user env: injects KIMI_API_KEY (value) + isolates KIMI_CODE_HOME (agent mode).
-  const resolvedEnv = resolveEnvFn(userId, 'kimi', baseEnv, 'agent');
+  // ADR-152 A1 §3.4: a kimi agent run is a model run — a member or refused.
+  const resolvedEnv = resolveEnvFn(assertModelRunActor(userId), 'kimi', baseEnv, 'agent');
 
   // (2) Digest pin on the FINAL resolved path (throws on drift/unverifiable when armed).
   // The binary comes from the harness registry (server env only): the member

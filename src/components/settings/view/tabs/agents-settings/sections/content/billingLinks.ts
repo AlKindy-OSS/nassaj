@@ -24,4 +24,6 @@ export const BILLING_LINKS: Record<AgentProvider, string> = {
   hermes:      'https://portal.nousresearch.com',
   qwen:        'https://bailian.console.alibabacloud.com',
   sakana:      'https://console.sakana.ai/billing',
+  // dsh spends the member's DeepSeek key: same top-up page as deepseek.
+  dsh:         'https://platform.deepseek.com/top-up',
 };

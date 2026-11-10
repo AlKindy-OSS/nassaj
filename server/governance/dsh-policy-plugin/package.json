@@ -1,0 +1,11 @@
+{
+  "name": "nassaj-dsh-policy-plugin",
+  "version": "2.0.0",
+  "private": true,
+  "description": "Nassaj policy plugin for the DeepSeek Harness (T-2091, ADR-225); loaded from the Nassaj --patch layer, sha256-pinned in dsh-launch.js",
+  "type": "module",
+  "main": "index.mjs",
+  "engines": {
+    "dsh": ">=0.2.2-rc.1 <1.0.0"
+  }
+}

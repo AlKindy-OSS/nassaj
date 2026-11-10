@@ -153,6 +153,8 @@ function makeWs() {
   const raw = {};
   const forwarded: any[] = [];
   return {
+    // ADR-152 A1 §3.4: an agy run needs a signed-in member.
+    userId: 7,
     ws: raw,
     forwarded,
     send(msg: any) {
@@ -239,7 +241,7 @@ test('resumed conversation surfaces only the new transcript reply, not the stdou
 
   const brainUUID = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
   const logsDir = path.join(
-    HOME_DIR, '.gemini', 'antigravity-cli', 'brain', brainUUID, '.system_generated', 'logs',
+    HOME_DIR, '.nassaj-users', '7', '.gemini', 'antigravity-cli', 'brain', brainUUID, '.system_generated', 'logs',
   );
   await mkdir(logsDir, { recursive: true });
   const transcriptPath = path.join(logsDir, 'transcript.jsonl');

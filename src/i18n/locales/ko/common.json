@@ -336,7 +336,7 @@
   "governanceBadge": {
     "ungoverned": "거버넌스 미적용",
     "tooltip": {
-      "none": "이 세션은 Nassaj 거버넌스 밖에서 실행 중입니다 — 프로바이더 설정을 확인하세요"
+      "none": "이 세션은 Nassaj 거버넌스 밖에서 실행 중입니다 — 코딩 에이전트 설정을 확인하세요"
     }
   },
   "mermaidZoom": {

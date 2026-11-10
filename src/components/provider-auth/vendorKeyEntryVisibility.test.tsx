@@ -13,8 +13,11 @@
  *
  * THE RULE. Absent ≠ denied. A field the server does not know about means the
  * server predates it, and the correct degradation is its OLD behaviour — allow
- * the write and let the 403 speak if it comes. Only an explicit `false` is a
- * refusal.
+ * the write and let the 403 speak if it comes.
+ *
+ * ADR-152 A1 (T-2083) retired the field itself: every key slot is the caller's
+ * own, so there is no "shared, an admin sets it" refusal left to render, and
+ * the client ignores `writable` even when an older server still sends it.
  *
  * These tests drive the real hook against a stubbed fetch, because the bug lived
  * exactly in the gap between what the server sends and what the component reads:
@@ -72,7 +75,7 @@ describe('vendor key entry visibility across a client/server version skew (B-367
     ).toBeNull();
   });
 
-  it('an explicit `writable: false` still refuses, and says why', async () => {
+  it('ADR-152 A1: a stale `writable: false` no longer hides the box (every slot is the caller\'s own)', async () => {
     serverAnswers({
       provider: 'opencode',
       configured: false,
@@ -82,12 +85,9 @@ describe('vendor key entry visibility across a client/server version skew (B-367
 
     render(<VendorsSettingsTab />);
 
-    await waitFor(() => expect(screen.queryAllByText(/only an owner or admin/i).length)
+    await waitFor(() => expect(screen.queryAllByPlaceholderText('Paste API key').length)
       .toBeGreaterThan(0));
-    expect(
-      screen.queryAllByPlaceholderText('Paste API key'),
-      'a refused slot must not render a box that fails on submit',
-    ).toHaveLength(0);
+    expect(screen.queryAllByText(/only an owner or admin|shared across the team/i)).toHaveLength(0);
   });
 
   it('an explicit `writable: true` renders the box', async () => {

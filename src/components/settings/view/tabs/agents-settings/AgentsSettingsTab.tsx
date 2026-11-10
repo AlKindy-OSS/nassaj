@@ -176,6 +176,11 @@ export default function AgentsSettingsTab({
       authStatus: providerAuthStatus.sakana,
       onLogin: () => onProviderLogin('sakana'),
     },
+    // dsh (T-2086): its account is the DeepSeek key slot, so it reports that status.
+    dsh: {
+      authStatus: providerAuthStatus.dsh,
+      onLogin: () => onProviderLogin('dsh'),
+    },
   }), [
     onProviderLogin,
     providerAuthStatus.claude,
@@ -185,6 +190,7 @@ export default function AgentsSettingsTab({
     providerAuthStatus.deepseek,
     providerAuthStatus.glm,
     providerAuthStatus.sakana,
+    providerAuthStatus.dsh,
   ]);
 
   return (

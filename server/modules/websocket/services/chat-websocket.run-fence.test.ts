@@ -107,7 +107,7 @@ async function dispatch(
     messageType,
     { type: messageType, command: 'hello', options: { cwd: projectPath, ...options } } as never,
     writer,
-    { getSessionProvider: () => null, authorizeProviderExecution: authorized, ...dependencies } as never,
+    { getSessionProvider: () => null, admitCredentialTurn: () => ({ principalId: 1, grantedBy: null }), authorizeProviderExecution: authorized, ...dependencies } as never,
     user.id,
     Object.freeze({ id: user.id, role: user.role, authenticationKind: 'session', authorizationGeneration: 1 }),
   );
@@ -209,7 +209,7 @@ for (const branch of BRANCHES) {
 }
 
 for (const [provider, key, mode] of [
-  ['deepseek', 'spawnDeepSeek', 'chat'], ['cursor', 'spawnCursor', 'chat'],
+  ['cursor', 'spawnCursor', 'chat'],
   ['kimi', 'spawnKimi', 'chat'], ['kimi', 'spawnKimiAgent', 'agent'],
 ] as const) {
   test(`test 5 [${provider} ${mode}]: a disabled or retired provider is refused before admission — no arm, no launch`, async () => {
@@ -355,7 +355,7 @@ test('qa H2: a member removed during a streaming POST /api/agent run gets the pr
       {
         clients: [], refreshPresence: () => undefined, terminateShells: () => 0,
         abortTurn: (id: string, userId: number) => abortSessionTurn({
-          getSessionProvider: () => 'opencode',
+          getSessionProvider: () => 'opencode', admitCredentialTurn: () => ({ principalId: 1, grantedBy: null }),
           abortOpenCodeSession: (target: string) => { aborted.push(target); return true; },
         } as never, id, null, userId),
       },
@@ -381,7 +381,7 @@ function btwHarness(user: User, overrides: Record<string, unknown> = {}) {
   handleChatConnection(ws as never, {
     user: { id: user.id, role: user.role, authenticationKind: 'session', authorizationGeneration: 1 },
   } as never, {
-    getSessionProvider: () => 'claude',
+    getSessionProvider: () => 'claude', admitCredentialTurn: () => ({ principalId: 1, grantedBy: null }),
     getActiveClaudeSDKSessions: () => [],
     authorizeProviderExecution: authorized,
     spawnClaudeSideQuery: (_params: unknown, callbacks: Record<string, (...args: never[]) => void>) => {

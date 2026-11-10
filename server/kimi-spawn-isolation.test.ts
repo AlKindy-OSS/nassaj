@@ -74,6 +74,8 @@ const {
   KIMI_SIBLING_VENDOR_KEYS,
 } = await import('./kimi-agent-cli.js');
 const { sanitizeVendorAgentEnv } = await import('./services/isolation/sanitize-vendor-agent-env.js');
+/** A resolver stand-in for cases about the cage, digest and governance, not identity. */
+const passThroughEnv = (_userId: unknown, _provider: unknown, env: Record<string, string>) => ({ ...env });
 const { VendorBinaryIntegrityError } = await import('./services/isolation/vendor-binary-integrity.js');
 const { VendorGovernanceMissingError } = await import('./services/isolation/vendor-cli-governance.js');
 
@@ -187,9 +189,9 @@ describe('kimi seam order — sanitizeVendorAgentEnv is the LAST step (M-3)', ()
 
   it('the launch binary is the registry kimi; a member KIMI_PATH is ignored (T-1873)', () => {
     const prepared = prepareKimiAgentLaunch(
-      { userId: null, command: 'x', model: 'kimi-k2.6', cwd: sandboxHome,
+      { userId: 7, command: 'x', model: 'kimi-k2.6', cwd: sandboxHome,
         baseEnv: { ...hostileBaseEnv(), KIMI_PATH: '/opt/evil/kimi' } },
-      { resolveCagedLaunch: (spec: { cmd: string; args: string[] }) => ({ cmd: spec.cmd, args: spec.args }) },
+      { resolveCagedLaunch: (spec: { cmd: string; args: string[] }) => ({ cmd: spec.cmd, args: spec.args }), resolveProviderEnv: passThroughEnv },
     );
     assert.equal(prepared.binaryPath, path.join(sandboxHome, '.kimi-code', 'bin', 'kimi'));
   });
@@ -200,16 +202,17 @@ describe('kimi seam order — sanitizeVendorAgentEnv is the LAST step (M-3)', ()
 // ---------------------------------------------------------------------------
 describe('kimi child env after the cage — no ANTHROPIC_/CLAUDE_ leak (M-2/M-3)', () => {
   it('a real child spawned with the seam env sees no leaks but keeps the target key', () => {
-    // userId=null ⇒ resolveProviderEnv returns baseEnv unchanged (no fs/provision);
-    // governance materializes into ~/.kimi from the seeded neutral source; pin OFF.
+    // The resolver is a pass-through here (this case is about the CAGE and the
+    // agent sanitizer, not identity); governance materializes into ~/.kimi from
+    // the seeded neutral source; pin OFF.
     const prepared = prepareKimiAgentLaunch({
-      userId: null,
+      userId: 7,
       command: 'probe',
       model: 'kimi-k2.6',
       permissionMode: 'default',
       cwd: sandboxHome,
       baseEnv: hostileBaseEnv(),
-    });
+    }, { resolveProviderEnv: passThroughEnv });
 
     // Prove the env produced by the seam is the ACTUAL child env: launch a real
     // node child with exactly this env and read back its process.env.
@@ -239,7 +242,7 @@ describe('kimi digest pin — a drifted binary REFUSES the launch (SL-7/M-4)', (
     assert.throws(
       () =>
         prepareKimiAgentLaunch({
-          userId: null,
+          userId: 7,
           command: 'x',
           model: 'kimi-k2.6',
           cwd: sandboxHome,
@@ -250,7 +253,7 @@ describe('kimi digest pin — a drifted binary REFUSES the launch (SL-7/M-4)', (
             KIMI_PATH: fakeBin,
             NASSAJ_VENDOR_BINARY_PIN: 'true', // arm the pin
           },
-        }),
+        }, { resolveProviderEnv: passThroughEnv }),
       (err: unknown) => {
         assert.ok(err instanceof VendorBinaryIntegrityError, 'must be a VendorBinaryIntegrityError');
         assert.equal((err as InstanceType<typeof VendorBinaryIntegrityError>).vendorId, 'kimi');
@@ -269,10 +272,10 @@ describe('kimi governance gate — an unattested launch is REFUSED (SL-2)', () =
     assert.throws(
       () =>
         prepareKimiAgentLaunch(
-          { userId: null, command: 'x', model: 'kimi-k2.6', cwd: sandboxHome, baseEnv: hostileBaseEnv() },
+          { userId: 7, command: 'x', model: 'kimi-k2.6', cwd: sandboxHome, baseEnv: hostileBaseEnv() },
           // Point the neutral source at a nonexistent file so governance cannot be
           // materialized/attested — the gate must refuse (fail-closed).
-          { neutralGovernanceSource: () => path.join(sandbox, 'no-such-AGENTS.md') },
+          { neutralGovernanceSource: () => path.join(sandbox, 'no-such-AGENTS.md'), resolveProviderEnv: passThroughEnv },
         ),
       (err: unknown) => {
         assert.ok(err instanceof VendorGovernanceMissingError, 'must be a VendorGovernanceMissingError');

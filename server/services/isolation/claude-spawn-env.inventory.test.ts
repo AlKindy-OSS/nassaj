@@ -30,9 +30,9 @@ const SERVER_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '
 const CLAUDE_SPAWN_SITES: ReadonlyArray<{ file: string; guard: RegExp }> = [
   { file: 'claude-sdk.js', guard: /resolveClaudeRunProfileOrThrow\(/ },
   { file: 'services/isolation/managed-claude-launcher.ts', guard: /resolveClaudeRunProfileOrThrow\)\(/ },
-  { file: 'modules/providers/list/claude/claude-catalog.client.ts', guard: /assertAnthropicBaseUrlAllowed\(/ },
-  { file: 'modules/turn-supervisor/adapters/claude-sdk-adapter.ts', guard: /assertAnthropicBaseUrlAllowed\(/ },
-  { file: 'modules/workflow-supervisor/task-runner.ts', guard: /await assertClaudeSpawnEnvAllowed\(childEnv\)/ },
+  { file: 'modules/providers/list/claude/claude-catalog.client.ts', guard: /await assertClaudeSpawnEnvAllowed\(probeEnv, \{ cwd: probeCwd \}\)/ },
+  { file: 'modules/turn-supervisor/adapters/claude-sdk-adapter.ts', guard: /await assertClaudeSpawnEnvAllowed\(env, \{ cwd: process\.cwd\(\) \}\)/ },
+  { file: 'modules/workflow-supervisor/task-runner.ts', guard: /await assertClaudeSpawnEnvAllowed\(childEnv, \{ cwd: process\.cwd\(\) \}\)/ },
   { file: 'modules/workflow-supervisor/resume-turn-runner.ts', guard: /await assertClaudeSpawnEnvAllowed\(params\.env/ },
 ];
 
@@ -105,6 +105,7 @@ test('the shared guard refuses a competitor route and allows official Anthropic'
 });
 
 test('the resume runner refuses a competitor-routed env before spawning claude', async (t) => {
+  // eslint-disable-next-line boundaries/dependencies -- the spawn site itself is the unit under test.
   const { defaultRunResumeTurn, WORKFLOW_CLAUDE_BIN_ENV } = await import('@/modules/workflow-supervisor/resume-turn-runner.js');
   // A real executable that would leave a marker if the runner ever started it.
   const scratch = fs.mkdtempSync(path.join(process.env.TMPDIR || os.tmpdir(), 'b446-'));

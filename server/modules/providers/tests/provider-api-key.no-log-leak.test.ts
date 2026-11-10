@@ -1,3 +1,21 @@
+// ADR-152 A1 §3.4: a credential reader/writer needs a member. The resolver is
+// stubbed so member MEMBER maps onto this suite's sandbox tree, and any other
+// actor is refused exactly like the real resolver.
+const MEMBER = 7;
+{
+  const realResolver = await import('../../../services/isolation/resolve-provider-env.js');
+  mock.module(new URL('../../../services/isolation/resolve-provider-env.js', import.meta.url).href, {
+    namedExports: {
+      ...realResolver,
+      resolveProviderEnv: (actor: unknown, _provider: string, env: NodeJS.ProcessEnv = process.env) => {
+        if (actor !== MEMBER && actor !== String(MEMBER)) {
+          throw Object.assign(new Error('CREDENTIAL_ACTOR_REQUIRED'), { code: 'CREDENTIAL_ACTOR_REQUIRED', statusCode: 500 });
+        }
+        return { ...env, ...{ HOME: process.env.HOME, CLAUDE_CONFIG_DIR: process.env.CLAUDE_CONFIG_DIR ?? `${process.env.HOME}/.claude`, CODEX_HOME: process.env.CODEX_HOME ?? `${process.env.HOME}/.codex`, XDG_DATA_HOME: process.env.XDG_DATA_HOME ?? `${process.env.HOME}/.local/share`, XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME ?? `${process.env.HOME}/.config`, KIMI_CODE_HOME: `${process.env.HOME}/.kimi` } };
+      },
+    },
+  });
+}
 // Fixture must initialize an empty DB before the router module graph can open a connection.
 // eslint-disable-next-line import-x/order
 import { principal } from './codex-credential-principal.fixture.js';
@@ -28,7 +46,7 @@ import { type AddressInfo } from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import fs from 'node:fs/promises';
-import { after, before, test } from 'node:test';
+import { after, before, test, mock } from 'node:test';
 
 import express, { type NextFunction, type Request, type Response } from 'express';
 
@@ -201,7 +219,7 @@ test('every credential writer keeps the key out of logs across a set + delete li
       const set = await writer.setApiKey(1, KEY, undefined, principal);
       // The status object the service returns to the route must be key-free too.
       assert.ok(!JSON.stringify(set).includes(KEY), 'a writer echoed the key in its status');
-      const del = await writer.deleteApiKey(null);
+      const del = await writer.deleteApiKey(MEMBER);
       assert.ok(!JSON.stringify(del).includes(KEY), 'a writer echoed the key on delete');
     }
     // Fourth surface: the vendor writer, driven through the real route/service.

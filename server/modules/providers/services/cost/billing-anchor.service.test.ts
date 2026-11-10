@@ -261,3 +261,31 @@ test('لا يُعاد أي توكن في نتيجة الاكتشاف', async () 
     assert.equal(JSON.stringify(anchor).includes('eyJ'), false);
   });
 });
+
+// ---------------------------------------------------------------------------
+// qa M4 (ADR-152 A1 §3.9): a resolver refusal never reads the operator's trees
+// ---------------------------------------------------------------------------
+
+test('qa M4: a refused env (no member) yields no anchor and never reads ~/.claude or ~/.codex', async () => {
+  await withTempRoot(async (root) => {
+    const previousHome = process.env.HOME;
+    process.env.HOME = root;
+    try {
+      // The operator's own subscription data, which must stay unread.
+      await writeJson(path.join(root, '.claude', '.claude.json'), {
+        oauthAccount: { subscriptionCreatedAt: '2026-03-21T04:00:00.000Z', organizationType: 'claude_pro' },
+      });
+      await writeJson(path.join(root, '.codex', 'auth.json'), {
+        tokens: { id_token: fakeIdToken({ [OPENAI_AUTH]: { chatgpt_plan_type: 'pro',
+          chatgpt_subscription_active_start: '2026-03-21T04:00:00Z' } }) },
+      });
+      const refuse = () => { throw Object.assign(new Error('no member'), { code: 'CREDENTIAL_ACTOR_REQUIRED' }); };
+      for (const provider of ['claude', 'codex']) {
+        billingAnchorService._resetCache();
+        assert.equal(await billingAnchorService.discover(provider, null, { resolveEnv: refuse }), null, provider);
+      }
+    } finally {
+      if (previousHome === undefined) delete process.env.HOME; else process.env.HOME = previousHome;
+    }
+  });
+});

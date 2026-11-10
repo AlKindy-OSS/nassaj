@@ -30,3 +30,9 @@ export function isPeerTurnStart(
   if (message.type === 'user' || !id || !inboundIds.has(id)) return false;
   return !(prev && prev.type !== 'user' && prev.peerDeliveryId === id);
 }
+
+/** Short local time of an epoch-ms instant, or null when it is not a valid date. */
+export const timeOf = (ms: number, locale: string): string | null => {
+  const date = new Date(ms);
+  return Number.isNaN(date.getTime()) ? null : date.toLocaleTimeString(locale, { hour: 'numeric', minute: '2-digit' });
+};

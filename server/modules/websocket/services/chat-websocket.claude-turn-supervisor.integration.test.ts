@@ -43,7 +43,7 @@ function harness(options: { enabled: boolean; supported?: boolean }) {
   const dependencies = {
     queryClaudeSDK: legacy, queryCodex: legacy, spawnCursor: legacy,
     spawnAntigravity: legacy, spawnOpenCode: legacy,
-    spawnKimi: legacy, spawnDeepSeek: legacy, spawnGlm: legacy,
+    spawnKimi: legacy, spawnGlm: legacy,
     getSessionProvider: () => null,
     hostedTurnSupervisor: {
       enabled() { calls.enabled += 1; return options.enabled; },

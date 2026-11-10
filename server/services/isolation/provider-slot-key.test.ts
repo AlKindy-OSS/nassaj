@@ -10,21 +10,16 @@ import {
   setProviderKey,
   setSharedVendorKey,
 } from '@/services/isolation/provider-secrets-store.js';
+import { SYSTEM_ACTOR } from '@/services/isolation/credential-actor.js';
 import { resolveSlotKey } from '@/services/isolation/provider-slot-key.js';
 
 /**
- * T-1260 acceptance: ZERO behavioural change, proven on the WHOLE matrix rather
- * than on the two paths the first draft assumed were the only ones.
+ * ADR-152 A1 §3.8 (D1): the install-wide vendor slot is INERT. A member gets
+ * their own key or nothing; a missing or system actor gets nothing; a stored
+ * install-wide key is never handed out, whoever asks.
  *
- * The matrix is (member key present?) × (shared key present?) × (sharedFallback?)
- * × (member id vs no identity) = 24 cells, and each cell asserts BOTH the key
- * handed out and the scope it came from — because wave C's disclosure contract
- * reads `scope` from this same call, and a right key with a wrong provenance is
- * the bug that shipped as B-362.
- *
- * The expectations below are the pre-refactor semantics written out longhand:
- *   sharedFallback:false ≡ getProviderKey(userId ?? SYSTEM_SCOPE, slot)
- *   sharedFallback:true  ≡ that, then getProviderKey(SYSTEM_SCOPE, slot)
+ * The matrix is (member key present?) × (install-wide key present?) ×
+ * (member id vs no identity) = 8 cells, each asserting the key AND its scope.
  */
 
 function withSandbox(): { homeDir: string; restore: () => void } {
@@ -53,38 +48,24 @@ const MEMBER = '7';
 type Cell = {
   member: boolean;
   shared: boolean;
-  sharedFallback: boolean;
   identified: boolean;
-  expect: { key: string; scope: 'user' | 'shared' } | null;
+  expect: { key: string; scope: 'user' } | null;
 };
 
 const MATRIX: Cell[] = [];
 for (const member of [false, true]) {
   for (const shared of [false, true]) {
-    for (const sharedFallback of [false, true]) {
-      for (const identified of [false, true]) {
-        // Pre-refactor truth table, derived from the two idioms, not from the
-        // implementation under test.
-        let expect: Cell['expect'] = null;
-        if (!identified) {
-          // `userId ?? SYSTEM_SCOPE` collapsed to the shared store for BOTH
-          // idioms when there was no identity — fallback never entered into it.
-          expect = shared ? { key: 'sk-shared', scope: 'shared' } : null;
-        } else if (member) {
-          expect = { key: 'sk-member', scope: 'user' };
-        } else if (sharedFallback && shared) {
-          expect = { key: 'sk-shared', scope: 'shared' };
-        }
-        MATRIX.push({ member, shared, sharedFallback, identified, expect });
-      }
+    for (const identified of [false, true]) {
+      // Only the member's own key ever resolves (D1): no identity, no key.
+      const expect: Cell['expect'] = identified && member ? { key: 'sk-member', scope: 'user' } : null;
+      MATRIX.push({ member, shared, identified, expect });
     }
   }
 }
 
 for (const cell of MATRIX) {
   const label =
-    `member=${cell.member} shared=${cell.shared} `
-    + `fallback=${cell.sharedFallback} identified=${cell.identified}`;
+    `member=${cell.member} install-wide=${cell.shared} identified=${cell.identified}`;
 
   test(`resolveSlotKey matrix — ${label}`, () => {
     const sandbox = withSandbox();
@@ -92,9 +73,7 @@ for (const cell of MATRIX) {
       if (cell.member) setProviderKey(MEMBER, 'glm', 'sk-member');
       if (cell.shared) setSharedVendorKey('glm', 'sk-shared');
 
-      const actual = resolveSlotKey(cell.identified ? MEMBER : null, 'glm', {
-        sharedFallback: cell.sharedFallback,
-      });
+      const actual = resolveSlotKey(cell.identified ? MEMBER : null, 'glm');
 
       assert.deepEqual(actual, cell.expect);
     } finally {
@@ -107,8 +86,7 @@ test('resolveSlotKey: a member key never leaks to a different member', () => {
   const sandbox = withSandbox();
   try {
     setProviderKey('7', 'glm', 'sk-member-7');
-    assert.equal(resolveSlotKey('8', 'glm', { sharedFallback: false }), null);
-    assert.equal(resolveSlotKey('8', 'glm', { sharedFallback: true }), null);
+    assert.equal(resolveSlotKey('8', 'glm'), null);
   } finally {
     sandbox.restore();
   }
@@ -119,7 +97,7 @@ test('resolveSlotKey: an unknown slot id resolves to null, it does not throw', (
   try {
     setProviderKey(MEMBER, 'glm', 'sk-member');
     assert.equal(
-      resolveSlotKey(MEMBER, 'opencode' as 'glm', { sharedFallback: true }),
+      resolveSlotKey(MEMBER, 'opencode' as 'glm'),
       null,
     );
   } finally {
@@ -133,7 +111,21 @@ test("resolveSlotKey: '' is a call-site bug and still throws, as the store alway
     // Not folded into "no identity": B-342 was a hardcoded empty scope reading a
     // directory that did not exist and reporting "no key" forever. Absorbing ''
     // here would restore exactly that silence.
-    assert.throws(() => resolveSlotKey('', 'glm', { sharedFallback: true }), TypeError);
+    assert.throws(() => resolveSlotKey('', 'glm'), TypeError);
+  } finally {
+    sandbox.restore();
+  }
+});
+
+test('resolveSlotKey: the system actor and undefined get null, even with an install-wide key (D1)', () => {
+  const sandbox = withSandbox();
+  try {
+    for (const slot of ['kimi', 'deepseek', 'glm', 'qwen'] as const) {
+      if (slot !== 'qwen') setSharedVendorKey(slot, `sk-install-wide-${slot}`);
+      assert.equal(resolveSlotKey(SYSTEM_ACTOR as never, slot), null, slot);
+      assert.equal(resolveSlotKey(undefined, slot), null, slot);
+      assert.equal(resolveSlotKey(null, slot), null, slot);
+    }
   } finally {
     sandbox.restore();
   }

@@ -12,7 +12,6 @@ import {
 } from '@/modules/providers/list/antigravity/antigravity-project-registry.js';
 import { AntigravitySessionSynchronizer } from '@/modules/providers/list/antigravity/antigravity-session-synchronizer.provider.js';
 import { normalizeSessionName } from '@/shared/utils.js';
-import { _resetProviderSharingCache, setProviderSharingConfig } from '@/services/provider-sharing.js';
 
 const SESSION_UUID = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
 const ANTIGRAVITY_PLACEHOLDER_PROJECT_PATH = '/__antigravity__';
@@ -640,8 +639,6 @@ test('2.3.1.0: by default an isolated member\'s brain is NOT indexed; the operat
       await writeTranscript(brainDir, SESSION_UUID, MEMBER_FIRST_LINE);
     },
     async (sync, brainDir) => {
-      _resetProviderSharingCache();
-      setProviderSharingConfig({ agy: 'isolated' });
       try {
         const member = userDb.createUser('agy-member-off', 'hash', 'user');
         const home = path.resolve(brainDir, '..', '..', '..');
@@ -655,7 +652,6 @@ test('2.3.1.0: by default an isolated member\'s brain is NOT indexed; the operat
         assert.equal(await sync.synchronizeFile(memberTranscript), null, 'watcher refuses it too');
         assert.equal(sessionsDb.getSessionById(MEMBER_UUID) ?? null, null);
       } finally {
-        _resetProviderSharingCache();
       }
     },
   );
@@ -666,8 +662,6 @@ test('B-227 (opt-in): an isolated member\'s agy brain is indexed, from their own
     async () => {},
     async (_sync, brainDir) => {
       const sync = memberIndexingSync();
-      _resetProviderSharingCache();
-      setProviderSharingConfig({ agy: 'isolated' });
       const member = userDb.createUser('agy-member', 'hash', 'user');
       const home = path.resolve(brainDir, '..', '..', '..');
       const transcriptPath = await writeTranscript(memberBrainDir(home, member.id), MEMBER_UUID, MEMBER_FIRST_LINE);
@@ -679,25 +673,6 @@ test('B-227 (opt-in): an isolated member\'s agy brain is indexed, from their own
 
       // The watcher path: a member transcript is accepted file-by-file too.
       assert.equal(await sync.synchronizeFile(transcriptPath), MEMBER_UUID);
-      _resetProviderSharingCache();
-    },
-  );
-});
-
-test('B-227 (opt-in): with agy shared by policy, member trees are not scanned', async () => {
-  await withSyncFixture(
-    async () => {},
-    async (_sync, brainDir) => {
-      const sync = memberIndexingSync();
-      _resetProviderSharingCache();
-      setProviderSharingConfig({ agy: 'shared' });
-      const member = userDb.createUser('agy-shared-member', 'hash', 'user');
-      const home = path.resolve(brainDir, '..', '..', '..');
-      await writeTranscript(memberBrainDir(home, member.id), MEMBER_UUID, MEMBER_FIRST_LINE);
-
-      assert.equal(await sync.synchronize(), 0);
-      assert.equal(sessionsDb.getSessionById(MEMBER_UUID) ?? null, null);
-      _resetProviderSharingCache();
     },
   );
 });
@@ -724,8 +699,6 @@ test('B-227 (opt-in): a disabled member is not indexed, and no member tree is cr
     async () => {},
     async (_sync, brainDir) => {
       const sync = memberIndexingSync();
-      _resetProviderSharingCache();
-      setProviderSharingConfig({ agy: 'isolated' });
       const home = path.resolve(brainDir, '..', '..', '..');
       const disabled = userDb.createUser('agy-disabled', 'hash', 'user');
       userDb.setStatus(disabled.id, 'disabled');
@@ -739,7 +712,6 @@ test('B-227 (opt-in): a disabled member is not indexed, and no member tree is cr
         false,
         'no tree is provisioned for a member who never ran agy',
       );
-      _resetProviderSharingCache();
     },
   );
 });
@@ -749,8 +721,6 @@ test('B-227 (opt-in): one member that fails to resolve does not drop the others'
     async () => {},
     async (_sync, brainDir) => {
       const sync = memberIndexingSync();
-      _resetProviderSharingCache();
-      setProviderSharingConfig({ agy: 'isolated' });
       const home = path.resolve(brainDir, '..', '..', '..');
       const good = userDb.createUser('agy-good', 'hash', 'user');
       await writeTranscript(memberBrainDir(home, good.id), MEMBER_UUID, MEMBER_FIRST_LINE);
@@ -761,7 +731,6 @@ test('B-227 (opt-in): one member that fails to resolve does not drop the others'
         assert.equal(await sync.synchronize(), 1, 'the good member is still indexed');
       } finally {
         (userDb as { listUsers: typeof original }).listUsers = original;
-        _resetProviderSharingCache();
       }
     },
   );
@@ -771,8 +740,6 @@ test('B-227 (opt-in): per-file events reuse the brain-dir enumeration until it e
   await withSyncFixture(
     async () => {},
     async (_sync, brainDir) => {
-      _resetProviderSharingCache();
-      setProviderSharingConfig({ agy: 'isolated' });
       let clock = 1_000_000;
       const sync = new AntigravitySessionSynchronizer(() => clock, true);
       const home = path.resolve(brainDir, '..', '..', '..');
@@ -791,7 +758,6 @@ test('B-227 (opt-in): per-file events reuse the brain-dir enumeration until it e
         assert.equal(enumerations, 2, 'an expired enumeration is taken again');
       } finally {
         (userDb as { listUsers: typeof original }).listUsers = original;
-        _resetProviderSharingCache();
       }
     },
   );

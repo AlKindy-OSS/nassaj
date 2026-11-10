@@ -90,7 +90,6 @@ function makeDeps() {
     spawnAntigravity: spawn('antigravity'),
     spawnOpenCode: spawn('opencode'),
     spawnKimi: spawn('kimi'),
-    spawnDeepSeek: spawn('deepseek'),
     spawnGlm: spawn('glm'),
     getSessionProvider: () => null,
   } as unknown as Parameters<typeof dispatchProviderCommand>[3];

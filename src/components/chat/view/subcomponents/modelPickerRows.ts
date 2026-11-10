@@ -31,6 +31,7 @@ import {
   type EligibleEngineProviderId,
 } from '../../../../../shared/engineProviders';
 import { engineKeySlot, type EngineAxisId } from '../../../../../shared/bodyEngineMatrix';
+import type { LOCAL_ENGINE } from '../../../../../shared/localEngine';
 import { vendorForSlot } from '../../../../../shared/vendors';
 import type { LLMProvider, ProviderModelOption, ProviderModelsDefinition } from '../../../../types/app';
 
@@ -52,8 +53,10 @@ export type PickerRow = {
    * The engine to pin when this row is picked, or null for the body's own
    * engine. Only ever set on Claude rows — ADR-073 §4 forbids launching another
    * body on a custom engine before that body's config guard exists.
+   * `local` (ADR-227) marks a row of the member's own local model server; it is
+   * never an eligible vendor engine.
    */
-  engineProvider: EligibleEngineProviderId | null;
+  engineProvider: EligibleEngineProviderId | typeof LOCAL_ENGINE | null;
   /** No key stored: selecting opens settings instead of choosing a model. */
   locked: boolean;
   /**
@@ -113,7 +116,9 @@ export function engineCredentialDestination(
  * `glm` المقفولة — لو ظهرت — تقود إلى حساب OpenCode لا إلى صفحةٍ بلا بلاطة.
  */
 export function bodyCredentialDestination(body: string): CredentialDestination | null {
-  return destinationForSlot({ provider: body });
+  // dsh (T-2086) spends the member's DeepSeek key — the server's credential
+  // gate checks provider 'deepseek' — so its locked group leads to that slot.
+  return destinationForSlot({ provider: body === 'dsh' ? 'deepseek' : body });
 }
 
 /**
@@ -142,6 +147,7 @@ const NATIVE_ENGINE: Partial<Record<LLMProvider, { key: string; vars: Record<str
   antigravity: { key: 'subscription', vars: { engine: 'Antigravity' } },
   hermes: { key: 'subscription', vars: { engine: 'Nous' } },
   kimi: { key: 'native', vars: { engine: 'Moonshot' } },
+  dsh: { key: 'apiKey', vars: { engine: 'DeepSeek' } },
 };
 
 /**

@@ -17,9 +17,19 @@ const EXPECTED = new Set([
   'server/modules/providers/list/codex/codex-models.provider.ts',
   'server/modules/providers/list/opencode/opencode-models.provider.ts',
   'server/modules/providers/list/qwen/qwen.provider.ts',
+  // ADR-227 (T-2098): read-only getSessionEnginePin, so a local-pinned conversation
+  // is refused at spawn sites that cannot run a local engine; they never write a pin.
+  'server/modules/turn-supervisor/hosted-turn-supervisor.service.ts',
+  'server/modules/workflow-supervisor/launch.route.ts',
+  'server/modules/workflow-supervisor/supervisor.ts',
+  // T-2087 context guard: read-only (getChangedActiveModel / getSessionEnginePin).
+  'server/modules/context-guard/index.ts',
+  'server/modules/context-guard/claude-compaction-model.ts',
 ]);
 const APP_CONFIG_WRITERS = new Set([
   'server/modules/database/migrations.ts',
+  // ADR-152 A1 §3.2 (T-2083): deletes the retired provider-sharing key, once.
+  'server/modules/database/provider-sharing-retirement.migration.ts',
   'server/modules/database/repositories/app-config.ts',
   'server/modules/database/repositories/engine-restamp-intent.db.ts',
   // T-1946: the API key SSO window (key 'api_keys.sso_attestation_window_days').

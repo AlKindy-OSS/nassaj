@@ -81,7 +81,6 @@ function fakeDependencies(emit: (writer: { send(p: unknown): void }) => void) {
     spawnAntigravity: spawn,
     spawnKimi: spawn,
     spawnKimiAgent: spawn,
-    spawnDeepSeek: spawn,
     spawnOpenCode: spawn,
     spawnGlm: spawn,
     spawnQwen: spawn,

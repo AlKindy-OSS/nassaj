@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 
 import { confirmDialog } from '../../../shared/dialogs/dialogService';
+import { LOCAL_ENGINE, isLocalModelId } from '../../../../shared/localEngine';
 import { useConversationCost } from '../hooks/useConversationCost';
 import { ConversationCostContext } from '../context/ConversationCostContext';
 import { TurnCostContext } from '../context/TurnCostContext';
@@ -29,6 +30,8 @@ import { buildQuickReplyGate } from '../utils/quickReplyEligibility';
 import { classifyPendingQuestions } from '../utils/pendingQuestionState';
 import { hasOutboxDeliveryEvidence, verifyOutboxReceipt } from '../utils/messageOutbox';
 import { authenticatedFetch } from '../../../utils/api';
+import { COMPACT_COMMAND, guardModelSwitch } from '../utils/contextGuard';
+import { useContextFitNotice } from '../hooks/useContextFitNotice';
 import { useBtwSideChannel } from '../hooks/useBtwSideChannel';
 import { useSessionSteer } from '../../session-steer/useSessionSteer';
 import { isDuplicateSteerInjectionMatch } from '../../session-steer/steerDuplicateDetection';
@@ -88,6 +91,7 @@ import CommandResultModal from './subcomponents/CommandResultModal';
 import BtwOverlay from './subcomponents/BtwOverlay';
 import SessionHeaderControls from './subcomponents/SessionHeaderControls';
 import { useInternalSessionChat } from '../../internal-session-chat/useInternalSessionChat';
+import type { CredentialNotLinkedInfo } from '../../credential-link/credentialNotLinked';
 
 
 type PendingViewSession = {
@@ -241,6 +245,8 @@ function ChatInterface({
     setDeepSeekModel,
     glmModel,
     setGlmModel,
+    dshModel,
+    setDshModel,
     permissionMode,
     pendingPermissionRequests,
     setPendingPermissionRequests,
@@ -311,13 +317,14 @@ function ChatInterface({
     if (dp === 'kimi') return kimiModel;
     if (dp === 'deepseek') return deepseekModel;
     if (dp === 'glm') return glmModel;
+    if (dp === 'dsh') return dshModel;
     // Retired bodies (cursor/hermes/qwen, T-1953) can still be `displayProvider`
     // for a historical session (__provider), but never take a new turn — this
     // value only seeds "the model that would apply to a first turn", which is
     // moot for them. Falls through to the Claude default like any unknown id.
     return claudeModel;
   }, [displayProvider, claudeModel, codexModel,
-      antigravityModel, opencodeModel, kimiModel, deepseekModel, glmModel]);
+      antigravityModel, opencodeModel, kimiModel, deepseekModel, glmModel, dshModel]);
 
   const {
     historyError,
@@ -480,6 +487,10 @@ function ChatInterface({
     );
   }, [engineProvider, displayProvider, sessionCurrentModel, providerModelCatalog]);
 
+  const {
+    notice: contextFitNotice, show: showContextFitNotice, dismiss: dismissContextFitNotice,
+  } = useContextFitNotice(currentSessionId ?? selectedSession?.id ?? null);
+
   // T-1028 / B-247 / B-249: تبديل نموذج الجلسة — تفاؤلي ثم مصالحة مع الخادم.
   // يستعمل displayProvider لا provider العام (B-247) وsetSessionCurrentModel
   // للتحديث الفوري (B-249 optimistic).
@@ -506,6 +517,24 @@ function ChatInterface({
   ): Promise<{ scope: 'session' | 'default'; model: string }> => {
     const sid = currentSessionId || selectedSession?.id || null;
     const previousModel = sessionCurrentModel;
+    const engineAxisMoves =
+      engine !== undefined && sid && engine !== readSessionEngineProvider(sid)
+      // ADR-227: a model change inside a local chat stays on its server — not an
+      // engine move, even on a browser that lost the chat's local stamp.
+      && !(engine === LOCAL_ENGINE && isLocalModelId(previousModel));
+
+    // T-2087 / ADR-223: warn before pinning a model too small for the
+    // conversation. Advisory and fail-open; the server refuses the turn itself.
+    // Cancel keeps the current model and sends nothing. An engine move is not a
+    // pin on this session's record, so it is not measured (no false
+    // "couldn't verify" line); the server still guards the next turn.
+    if (sid && !engineAxisMoves && model !== previousModel) {
+      const proceed = await guardModelSwitch({
+        fetcher: authenticatedFetch, provider: displayProvider, sessionId: sid, model, t,
+        confirm: confirmDialog, onUnknown: (line) => showContextFitNotice(`${sid}:${model}`, line),
+      });
+      if (!proceed) return { scope: 'session', model: previousModel };
+    }
 
     // تحديث تفاؤلي: المستخدم يرى أثر نقرته فوراً
     setSessionCurrentModel(model);
@@ -516,8 +545,6 @@ function ChatInterface({
     // ويفوز به (ADR-088)، و`null` في الحمولة تعني «لا إشارة» لا «رسمي» — وهذه
     // الفجوة التعبيرية بعينها هي ما جعل اختيار Opus على جلسة GLM يبقى على z.ai
     // (B-433). فالنقل يمرّ بالعقد الخادمي، والختم العميلي يتبعه لا يسبقه.
-    const engineAxisMoves =
-      engine !== undefined && sid && engine !== readSessionEngineProvider(sid);
     if (engineAxisMoves && sid) {
       try {
         const moved = await restampSessionEngine(
@@ -570,7 +597,7 @@ function ChatInterface({
     }
   }, [selectProviderModel, restampSessionEngine, t, displayProvider, currentSessionId, selectedSession?.id,
       sessionCurrentModel, setSessionCurrentModel, selectClaudeEngineProvider,
-      setEngineProvider]);
+      setEngineProvider, showContextFitNotice]);
 
   /**
    * B-252: يمسح تثبيت النموذج الصريح للجلسة (DELETE endpoint).
@@ -711,7 +738,17 @@ function ChatInterface({
     (forkedSessionId: string) => onNavigateToSession?.(forkedSessionId),
     [onNavigateToSession],
   );
-  const handleMessageForkError = useCallback((code: string, message?: string) => {
+  // T-2083: a reply fork refused because no account is linked keeps a notice
+  // with the way out until dismissed or the conversation changes.
+  const [credentialNotice, setCredentialNotice] = useState<CredentialNotLinkedInfo | null>(null);
+  const dismissCredentialNotice = useCallback(() => setCredentialNotice(null), []);
+  const credentialNoticeSessionId = currentSessionId ?? selectedSession?.id ?? null;
+  useEffect(() => { setCredentialNotice(null); }, [credentialNoticeSessionId]);
+  const handleMessageForkError = useCallback((code: string, message?: string, credential?: CredentialNotLinkedInfo) => {
+    if (credential) {
+      setCredentialNotice(credential);
+      return;
+    }
     // Codes are intentionally rendered locally. The server's message is only
     // a fallback for a newer code the current client does not know yet.
     handleServerError(t(`messageFork.errors.${code}`, {
@@ -820,6 +857,7 @@ function ChatInterface({
     kimiModel,
     deepseekModel,
     glmModel,
+    dshModel,
     isLoading,
     canAbortSession,
     tokenBudget,
@@ -1072,6 +1110,19 @@ function ChatInterface({
   const handleRejectedSendRestore = useCallback((text: string) => {
     setInput((current) => (current.trim() ? current : text));
   }, [setInput]);
+
+  // T-2087 / ADR-223: the two ways out of a context guard refusal. The refused
+  // message stays in its outbox card; neither action sends anything by itself.
+  const handleContextGuardSwitchBack = useCallback((model: string) => {
+    void handleChangeSessionModel(model).catch(() => {
+      handleServerError(t('serverError.unknown'));
+    });
+  }, [handleChangeSessionModel, handleServerError, t]);
+  const handleContextGuardCompact = useCallback(() => {
+    // Never overwrite what the user is typing; an empty box gets the command.
+    setInput((current) => (current.trim() ? current : COMPACT_COMMAND));
+    textareaRef.current?.focus();
+  }, [setInput, textareaRef]);
 
   const {
     requestStreamGapRecovery: resumeStreamRecovery,
@@ -1420,6 +1471,8 @@ function ChatInterface({
           setDeepSeekModel={setDeepSeekModel}
           glmModel={glmModel}
           setGlmModel={setGlmModel}
+          dshModel={dshModel}
+          setDshModel={setDshModel}
           providerModelCatalog={providerModelCatalog}
           providerModelsLoading={providerModelsLoading}
           providerModelsRefreshing={providerModelsRefreshing}
@@ -1600,11 +1653,17 @@ function ChatInterface({
           isWsConnected={isConnected}
           executingCommand={executingCommand}
           sendError={sendError ?? serverError}
+          credentialNotice={credentialNotice}
+          onDismissCredentialNotice={dismissCredentialNotice}
           outboxEntries={outboxEntries}
           onOutboxRetry={retryOutboxEntry}
           onOutboxEdit={editOutboxEntry}
           onOutboxDelete={deleteOutboxEntry}
           onOutboxVerify={verifyOutboxEntry}
+          onContextGuardSwitchBack={handleContextGuardSwitchBack}
+          onContextGuardCompact={handleContextGuardCompact}
+          contextFitNotice={contextFitNotice}
+          onDismissContextFitNotice={dismissContextFitNotice}
           sessionCurrentModel={sessionCurrentModel}
           providerModelCatalog={providerModelCatalog}
           onChangeSessionModel={handleChangeSessionModel}

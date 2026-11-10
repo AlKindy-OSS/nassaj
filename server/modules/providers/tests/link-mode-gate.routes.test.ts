@@ -180,7 +180,7 @@ test('company route: includeSubscription cannot bypass the gate; other slots sti
 
 test('company service (fan-out loop) reports the same refusal for codex', async () => {
   const result = await companyCredentialsService.setKey(user, 'openai', OPENAI, {
-    isElevated: true, includeSubscription: true, authenticatedPrincipal: { id: user },
+    includeSubscription: true, authenticatedPrincipal: { id: user },
   });
   const codex = result.slots.find((slot) => slot.provider === 'codex');
   assert.equal(codex?.outcome, 'kept_on_subscription');

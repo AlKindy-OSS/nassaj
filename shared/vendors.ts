@@ -21,8 +21,7 @@
  * surface lives. It is NOT an authorization or capability oracle: whether a
  * write is permitted, and by what method, stays with the live backend
  * descriptor (`GET /:provider/api-key/capability`), because that answer depends
- * on runtime policy (`requiresElevatedRole` → `isProviderIsolated`) which no
- * static table can know. A declaration that promises what it cannot enforce is
+ * on the live writers and registry, which no static table can know. A declaration that promises what it cannot enforce is
  * the failure this project already paid for once.
  *
  * WHY `shared/`: same reason as `engineProviders.ts` and `bodyEngineMatrix.ts` —
@@ -587,8 +586,8 @@ export type VendorKeyConsumer = {
   /** Only Claude's native consumer may ever hold a subscription token (B-1252). */
   acceptsSubscriptionToken: boolean;
   keyOwner: VendorKeyOwner;
-  /** Falls back to the operator-wide slot when the owner holds no key. */
-  sharedFallback: boolean;
+  // No fallback field: since ADR-152 A1 §3.8 (D1) no consumer reads the
+  // install-wide slot, so there is nothing per consumer to declare.
 };
 
 export type VendorKeyRow = {
@@ -611,7 +610,6 @@ const DELEGATE_TOOL: VendorKeyConsumer = {
   evidence: { write: 'measured', turn: 'unverified' },
   acceptsSubscriptionToken: false,
   keyOwner: 'credential_principal',
-  sharedFallback: false,
 };
 
 /** The Claude engine-pin cell: the caller's key as `ANTHROPIC_AUTH_TOKEN`. */
@@ -624,7 +622,6 @@ function enginePin(status: VendorKeyConsumer['status'], turn: VendorKeyEvidence)
     evidence: { write: 'measured', turn },
     acceptsSubscriptionToken: false,
     keyOwner: 'caller',
-    sharedFallback: true,
   };
 }
 
@@ -642,7 +639,6 @@ function openCodeFile(
     evidence: { write: 'measured', turn },
     acceptsSubscriptionToken: false,
     keyOwner: 'credential_principal',
-    sharedFallback: false,
   };
 }
 
@@ -659,7 +655,6 @@ function openCodeSpawn(env: string, write: VendorKeyEvidence = 'none'): VendorKe
     evidence: { write, turn: 'unverified' },
     acceptsSubscriptionToken: false,
     keyOwner: 'sender',
-    sharedFallback: false,
   };
 }
 
@@ -673,7 +668,6 @@ function hostedRun(harness: 'kimi' | 'deepseek' | 'glm', env: string): VendorKey
     evidence: { write: 'measured', turn: 'unverified' },
     acceptsSubscriptionToken: false,
     keyOwner: 'credential_principal',
-    sharedFallback: false,
   };
 }
 
@@ -688,7 +682,6 @@ function nativeFile(provider: 'claude' | 'codex'): VendorKeyConsumer {
     evidence: { write: 'measured', turn: 'unverified' },
     acceptsSubscriptionToken: provider === 'claude',
     keyOwner: 'credential_principal',
-    sharedFallback: false,
   };
 }
 

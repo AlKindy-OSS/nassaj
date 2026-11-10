@@ -12,6 +12,11 @@ import {
   resolveOutboxFenceReasonKey,
 } from '../../utils/serverErrorMessage';
 import { outboxRetryMode, readOutboxImages, type OutboxEntry } from '../../utils/messageOutbox';
+import CredentialNotLinkedNotice from '../../../credential-link/CredentialNotLinkedNotice';
+import { CREDENTIAL_NOT_LINKED } from '../../../credential-link/credentialNotLinked';
+import { CONTEXT_GUARD_REFUSAL_CODE } from '../../utils/contextGuard';
+import { DSH_GUARD_REASON_CODE, DSH_STARTING_CODE } from '../../utils/dshRefusal';
+import ContextGuardRefusalNotice from './ContextGuardRefusalNotice';
 import ContinueHerePanel from './ContinueHerePanel';
 import CoordinationLevelBadge from './CoordinationLevelBadge';
 
@@ -21,6 +26,10 @@ interface OutboxCardProps {
   onEdit: (entryId: string) => void;
   onDelete: (entryId: string) => void;
   onVerify: (entryId: string) => void;
+  /** T-2087: pins the model the conversation ran on before the refused switch. */
+  onContextGuardSwitchBack?: (model: string) => void;
+  /** T-2087: puts `/compact` in the composer. */
+  onContextGuardCompact?: () => void;
 }
 
 /** أطول ما يُعرض من نصّ الرسالة داخل البطاقة قبل الطيّ. */
@@ -37,7 +46,9 @@ const PREVIEW_LIMIT = 320;
  * الأوّل **«تحقّق» لا «أعد الإرسال»**: قد تكون الجولة نجحت، وإعادةُ الإرسال
  * حينها إرسالٌ مزدوج — والمستخدم لا يملك ما يميّز الحالتين.
  */
-export default function OutboxCard({ entry, onRetry, onEdit, onDelete, onVerify }: OutboxCardProps) {
+export default function OutboxCard({
+  entry, onRetry, onEdit, onDelete, onVerify, onContextGuardSwitchBack, onContextGuardCompact,
+}: OutboxCardProps) {
   const { t } = useTranslation('chat');
   const { user } = useAuth();
   const { openSettings } = usePaletteOps();
@@ -91,6 +102,25 @@ export default function OutboxCard({ entry, onRetry, onEdit, onDelete, onVerify 
   );
   const hasNewConversationAction = fenceActions.some((action) => action.kind === 'new_conversation');
   const reviewUnlockAction = fenceActions.find((action) => action.kind === 'review_unlock');
+  // T-2083: a turn refused because no account is linked says which one and how
+  // to link it, in place of the bare reason line.
+  const credentialRefusal = !isDelivered && !isUnconfirmed && entry.reasonCode === CREDENTIAL_NOT_LINKED
+    ? entry.credential ?? { provider: null, reason: 'not_linked' as const, grantorUsername: null, settingsAgent: null }
+    : null;
+  // T-2087: a turn refused because the pinned model cannot hold the
+  // conversation explains it from its payload, with the two ways out.
+  const contextGuardRefusal = !isDelivered && !isUnconfirmed && entry.reasonCode === CONTEXT_GUARD_REFUSAL_CODE
+    ? entry.contextGuard ?? null
+    : null;
+  const hasRefusalNotice = Boolean(credentialRefusal || contextGuardRefusal);
+  // T-2086: dsh's install check had not finished yet — a "starting up, try
+  // again" state in the waiting tone, not a failure.
+  const isStarting = !isDelivered && !isUnconfirmed && entry.reasonCode === DSH_STARTING_CODE;
+  // T-2089: a blocked prompt carries the guard's own reason; it is shown in its
+  // own isolated block, not folded into the localized sentence.
+  const guardReason = !isDelivered && !isUnconfirmed && entry.reasonCode === DSH_GUARD_REASON_CODE
+    ? entry.reasonDetail ?? null
+    : null;
 
   /**
    * السبب يُترجَم عند العرض من **الرمز** المحفوظ، لا من نصٍّ مترجَم وقت الفشل:
@@ -114,7 +144,8 @@ export default function OutboxCard({ entry, onRetry, onEdit, onDelete, onVerify 
     // توجيهاً صريحاً بدل بطاقةٍ ساكنة بلا مخرج.
     const memberHint = !isOwner && isPermanentlyBlocked && !hasNewConversationAction
       ? ` ${t('outbox.reason.fenceMemberHint')}` : '';
-    return (entry.reasonDetail ? `${headline} (${entry.reasonDetail})` : headline) + memberHint;
+    const inlineDetail = entry.reasonDetail && entry.reasonCode !== DSH_GUARD_REASON_CODE;
+    return (inlineDetail ? `${headline} (${entry.reasonDetail})` : headline) + memberHint;
   }, [
     entry.reasonCode, entry.reasonDetail, entry.retryBlockCode, entry.fence, isUnconfirmed,
     isDelivered, isOwner, isPermanentlyBlocked, hasNewConversationAction, t,
@@ -131,17 +162,34 @@ export default function OutboxCard({ entry, onRetry, onEdit, onDelete, onVerify 
       className={`mx-auto mb-2 max-w-4xl rounded-lg border px-3 py-2 text-sm ${
         isDelivered
           ? 'border-border bg-background text-foreground'
-          : isUnconfirmed
+          : isUnconfirmed || isStarting
           ? 'border-amber-300/60 bg-amber-50 text-amber-800 dark:border-amber-600/40 dark:bg-amber-900/15 dark:text-amber-200'
           : 'border-red-300/60 bg-red-50 text-red-700 dark:border-red-600/40 dark:bg-red-900/15 dark:text-red-300'
       }`}
     >
       <div className="flex items-start justify-between gap-2">
         <span className="font-medium">
-          {isDelivered ? t('outbox.titleDelivered') : isUnconfirmed ? t('outbox.titleUnconfirmed') : t('outbox.titleFailed')}
+          {isDelivered ? t('outbox.titleDelivered')
+            : isUnconfirmed ? t('outbox.titleUnconfirmed')
+              : isStarting ? t('outbox.titleStarting') : t('outbox.titleFailed')}
         </span>
-        <span className="min-w-0 break-words text-xs opacity-80">{reason}</span>
+        {!hasRefusalNotice && <span className="min-w-0 break-words text-xs opacity-80">{reason}</span>}
       </div>
+
+      {guardReason && (
+        <p className="mt-1 whitespace-pre-wrap break-words rounded bg-background/60 px-2 py-1 text-xs">
+          <bdi data-testid="outbox-guard-reason">{guardReason}</bdi>
+        </p>
+      )}
+      {credentialRefusal && <CredentialNotLinkedNotice info={credentialRefusal} className="mt-2" />}
+      {contextGuardRefusal && (
+        <ContextGuardRefusalNotice
+          info={contextGuardRefusal}
+          onSwitchBack={onContextGuardSwitchBack}
+          onCompact={onContextGuardCompact}
+          className="mt-2"
+        />
+      )}
 
       <CoordinationLevelBadge level={entry.intent.coordinationLevel} className="mt-2" />
 

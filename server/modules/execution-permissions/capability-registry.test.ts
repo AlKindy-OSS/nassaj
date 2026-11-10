@@ -94,8 +94,11 @@ test('measured Antigravity is classified but remains non-parity on forbidden sur
   );
   assert.ok(candidate);
   assert.equal(evaluateParity(CLAUDE_REFERENCE_VECTOR_V1, candidate).kind, 'deny');
-  assert.equal(PERMISSION_UNAVAILABLE_BODIES.length, 8);
+  assert.equal(PERMISSION_UNAVAILABLE_BODIES.length, 9);
   assert.ok(PERMISSION_UNAVAILABLE_BODIES.some(item => item.body === 'cursor'));
+  // T-2086: dsh has no v1 measurement contract, so enforce denies it like deepseek.
+  assert.deepEqual(PERMISSION_UNAVAILABLE_BODIES.find(item => item.body === 'dsh')?.reasonCode,
+    'NO_V1_MEASUREMENT_CONTRACT');
 });
 
 test('unavailable-body records reject malformed reasons, dates, and extra keys', () => {

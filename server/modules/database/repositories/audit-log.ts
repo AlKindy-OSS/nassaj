@@ -16,6 +16,13 @@ export type AuditAction =
   // ADR-219 S1 (T-2072): cross-session relay decisions (no message text).
   | 'peer_relay_intake_failed'
   | 'peer_relay_unregistered_agent_send'
+  // ADR-219 P2a-min (T-2074): hold lifecycle (ids, actor and hash only; no message text).
+  | 'peer_relay_hold_created'
+  | 'peer_relay_hold_approved'
+  | 'peer_relay_hold_rejected'
+  | 'peer_relay_hold_reheld'
+  | 'peer_relay_prompt_decided'
+  | 'peer_relay_hold_repointed'
   | 'local_models_settings_updated'
   | 'local_model_server_changed'
   | 'document_share_created'
@@ -54,6 +61,11 @@ export type AuditAction =
   | 'password_reset'
   | 'avatar_updated'
   | 'admin_provider_sharing_update'
+  // ADR-152 A1 (T-2083): the one-time retirement of the install-wide sharing
+  // policy, and the owner's acknowledgement of its notice. Retained past the
+  // 90-day prune (RETAINED_AUDIT_ACTIONS).
+  | 'provider_sharing_retired'
+  | 'provider_sharing_notice_acknowledged'
   // T-1675: user-to-user credential delegation. A grant lets another member
   // spend the owner's subscription, so both ends of its life are recorded —
   // who offered it to whom, and who ended it. Metadata carries ids only.
@@ -175,6 +187,10 @@ export type AuditAction =
   // refused. Metadata { engine, vendor, model, code? }; never the key or prompt.
   | 'spawn_vendor_execution_allowed'
   | 'spawn_vendor_execution_rejected'
+  // ADR-221 I1: the OpenCode parity plugin dir was not intact; quarantined and re-staged.
+  | 'opencode_parity_plugin_quarantined'
+  // ADR-226 L4: NASSAJ_PROVIDER_CAGE is set but no longer wraps OpenCode (once per server process).
+  | 'opencode_provider_cage_not_applied'
   | 'qwen_credential_set'
   | 'qwen_credential_deleted'
   // ADR-200 S4: a member switched a harness between subscription and API key.

@@ -40,7 +40,6 @@ for (const name of ['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'CLAUDE_CODE_OA
 }
 
 const { initializeDatabase, closeConnection, userDb, credentialGrantsDb } = await import('@/modules/database/index.js');
-const { setProviderSharingConfig, _resetProviderSharingCache } = await import('@/services/provider-sharing.js');
 const { userConfigDir } = await import('@/services/isolation/provision-user-dirs.js');
 const store = await import('@/services/isolation/provider-secrets-store.js');
 const { resolveClaudeRunProfileOrThrow } = await import('@/services/isolation/resolve-claude-run-profile.js');
@@ -169,8 +168,6 @@ const runCodexCompaction = (userId: number) => startCodexCompaction('rungate-ses
 
 beforeEach(() => {
   process.env[FLAG] = '1';
-  _resetProviderSharingCache();
-  setProviderSharingConfig({ claude: 'isolated', codex: 'isolated' });
   spawns.claude = 0;
   spawns.codex = 0;
   spawns.appServer = 0;
@@ -225,12 +222,11 @@ describe('B-1546: Claude run paths', () => {
     assert.ok(profile.env);
   });
 
-  it('G1 H-1: on a shared tree the operator record governs every member', async () => {
-    setProviderSharingConfig({ claude: 'shared' });
+  it('G1 H-1 / ADR-152 A1: the operator record never governs a member — their own does', async () => {
     claudeTree(null, false);
     setMode(null, 'claude', 'api_key');
-    await assert.rejects(runClaudeProfile(owner.id), isKeyMissing);
-    setMode(null, 'claude', 'subscription');
+    claudeTree(owner.id, true);
+    setMode(owner.id, 'claude', 'subscription');
     await runClaudeProfile(owner.id);
   });
 

@@ -23,11 +23,9 @@
  * for a subscription-mode harness with 409 `LINK_MODE_SUBSCRIPTION` under a
  * per-(user, harness) lock. With the flag off it is a pass-through.
  *
- * Authorization shape (enforced by the route via `requiresElevatedRole`): a
- * write is "shared-scoped" — it touches the OPERATOR's credentials rather than
- * an isolated per-user tree — exactly when the provider is NOT isolated per the
- * provider-sharing policy. Those writes are restricted to owner/admin; isolated
- * writes are per-user (userId comes from the caller's token only).
+ * Authorization shape: every write lands in the caller's OWN tree or key slot
+ * (userId comes from the caller's token only). There is no shared-scoped write
+ * and no role that may write another person's credential (ADR-152 A1).
  */
 
 import { providerRegistry } from '@/modules/providers/provider.registry.js';
@@ -45,7 +43,6 @@ import {
   providerSecretsService,
   type QwenCredentialAuditContext,
 } from '@/modules/providers/services/provider-secrets.service.js';
-import { isProviderIsolated } from '@/services/provider-sharing.js';
 import { isUnifiedVendorKeysEnabled, isVendorSecretProvider } from '@/services/isolation/provider-secrets-store.js';
 import type {
   IProviderCredentialWriter,
@@ -167,25 +164,6 @@ export const providerCredentialsService = {
       return { method: 'native_file' };
     }
     return { method: 'none' };
-  },
-
-  /**
-   * True when configuring this provider writes the OPERATOR's shared
-   * credentials (provider marked 'shared'/unknown in the sharing policy) rather
-   * than an isolated per-user tree — the route restricts those to owner/admin.
-   * Vendors default 'isolated'. Qwen is additionally hard-pinned to isolated
-   * by provider-sharing because Coding Plan is personal-only (ADR-101).
-   */
-  requiresElevatedRole(provider: string): boolean {
-    // Vendor keys are ALWAYS stored per-user in the encrypted store (keyed by
-    // userId), so configuring one never touches shared operator credentials —
-    // no elevated role, and no DB read on this hot validation path.
-    if (isVendorSecretProvider(provider)) {
-      return false;
-    }
-    // A facet write is shared-scoped (hits the operator's own credential file)
-    // exactly when the provider is not isolated per the sharing policy.
-    return !isProviderIsolated(provider);
   },
 
   async setKey(

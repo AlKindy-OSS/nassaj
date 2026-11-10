@@ -16,7 +16,11 @@
  * "engine = GLM, model = a Claude id", the picker's check mark never matched its
  * own selection, and the chat claimed an engine it was not asking a model of.
  */
-import type { FallbackCatalogProvider } from '../../../constants/providerModelFallbacks';
+import {
+  sanitizeStoredModel,
+  type FallbackCatalogProvider,
+} from '../../../constants/providerModelFallbacks';
+import { LOCAL_ENGINE, isLocalModelId } from '../../../../shared/localEngine';
 
 import type { EngineProvider } from './engineProviderSession';
 
@@ -26,6 +30,20 @@ import type { EngineProvider } from './engineProviderSession';
  * @param engineProvider the engaged engine, or null on the official Claude path.
  * @returns the engine id while one is engaged, `'claude'` otherwise.
  */
-export function claudeSlotCatalogProvider(engineProvider: EngineProvider): FallbackCatalogProvider {
+export function claudeSlotCatalogProvider(engineProvider: EngineProvider): FallbackCatalogProvider | null {
+  // ADR-227: a local server's models live in no shipped catalog — the overlay
+  // route is their only source — so no catalog governs the slot (null).
+  if (engineProvider === LOCAL_ENGINE) return null;
   return engineProvider ?? 'claude';
+}
+
+/**
+ * Sanitizes a stored `claude-model` value for the engaged engine. On the local
+ * engine (ADR-227) a local model id is kept as is (the spawn vets it); anything
+ * else falls back to the Claude catalog, exactly like the official path.
+ */
+export function sanitizeClaudeSlotModel(engineProvider: EngineProvider, raw: string | null): string {
+  const catalog = claudeSlotCatalogProvider(engineProvider);
+  if (catalog === null) return isLocalModelId(raw) ? raw : sanitizeStoredModel('claude', raw);
+  return sanitizeStoredModel(catalog, raw);
 }

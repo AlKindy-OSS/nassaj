@@ -12,8 +12,8 @@
  *     *_BASE_URL and any unknown host, accepts the official host, accepts an
  *     engine host only when passed via ctx, honors the Bedrock/Vertex and
  *     operator-list escape hatches, and vets ctx.extraValues (settings.json) too.
- *   - collectSettingsBaseUrls reads the settings.json channel Claude Code reads
- *     and degrades to [] on a missing/corrupt file.
+ *   - assertClaudeSpawnEnvAllowed vets the settings channel Claude Code reads and
+ *     refuses a corrupt settings file (B-1764: fail-closed, no longer degrade-safe).
  *
  * Runner: node:test + node:assert/strict.
  */
@@ -30,7 +30,7 @@ import {
   applyClaudeEngineProviderEnvOrThrow,
 } from '@/services/isolation/apply-claude-engine-provider-env.js';
 import { assertAnthropicBaseUrlAllowed } from '@/services/isolation/anthropic-base-url-guard.js';
-import { collectSettingsBaseUrls } from '@/services/isolation/collect-settings-base-urls.js';
+import { assertClaudeSpawnEnvAllowed } from '@/services/isolation/claude-spawn-env-guard.js';
 import {
   ELIGIBLE_ENGINE_PROVIDERS,
   ENGINE_PROVIDERS,
@@ -161,23 +161,22 @@ test('apply: engine provider WITH a key injects BOTH base URL and token, returns
   }
 });
 
-// ── T-1208: the ORG key fallback ──────────────────────────────────────────────
+// ── ADR-152 A1 §3.8 (D1): the install-wide key is inert ─────────────────────
 //
-// nassaj is the vendor's customer (one account, one bill, an API metered by
-// consumption), and its members are users inside this app rather than seats at
-// the vendor. So a member with no key of their own must run on the org key —
-// while a member who HAS one is never silently billed to the org. Three tests,
-// one per branch, because the ORDER is the whole guarantee.
+// T-1208 once fell back to the operator-wide slot for a member with no key.
+// That spent one account on everyone's work without its owner's consent, so the
+// fallback is retired: the caller's own key, or `missing_key`. One test per
+// branch.
 
-test('org key: a member with NO personal key runs on the operator-wide key', () => {
+test('org key: a member with NO personal key is refused, the install-wide key is never used', () => {
   const sandbox = withSandbox();
   try {
     setSharedVendorKey('glm', 'sk-org-glm');
     const env: NodeJS.ProcessEnv = {};
     const verdict = applyClaudeEngineProviderEnv(env, '7', 'glm');
-    assert.equal(verdict.status, 'applied');
-    assert.equal(env.ANTHROPIC_AUTH_TOKEN, 'sk-org-glm');
-    assert.equal(env.ANTHROPIC_BASE_URL, PROVIDER_ANTHROPIC_ENDPOINT.glm);
+    assert.deepEqual(verdict, { status: 'unavailable', provider: 'glm', reason: 'missing_key' });
+    assert.equal(env.ANTHROPIC_AUTH_TOKEN, undefined);
+    assert.equal(env.ANTHROPIC_BASE_URL, undefined);
   } finally {
     sandbox.restore();
   }
@@ -190,7 +189,7 @@ test('org key: a member WITH a personal key keeps it — the org key never overr
     setProviderKey('7', 'glm', 'sk-user7-glm');
     const env: NodeJS.ProcessEnv = {};
     applyClaudeEngineProviderEnv(env, '7', 'glm');
-    // Own key wins: a user who brings their own credential is not billed to the org.
+    // Own key only: the install-wide key never overrides or substitutes.
     assert.equal(env.ANTHROPIC_AUTH_TOKEN, 'sk-user7-glm');
   } finally {
     sandbox.restore();
@@ -200,7 +199,7 @@ test('org key: a member WITH a personal key keeps it — the org key never overr
 test('org key: with NEITHER a personal nor an org key the engine is still refused', () => {
   const sandbox = withSandbox();
   try {
-    // The fallback must not soften B-222: no key anywhere ⇒ refuse, inject nothing.
+    // B-222: no key ⇒ refuse, inject nothing.
     const env: NodeJS.ProcessEnv = {};
     const verdict = applyClaudeEngineProviderEnv(env, '7', 'glm');
     assert.deepEqual(verdict, { status: 'unavailable', provider: 'glm', reason: 'missing_key' });
@@ -391,36 +390,40 @@ test('guard: end-to-end — engine env produced by apply passes its own host set
   }
 });
 
-// ── B-ENG-3b: collectSettingsBaseUrls ─────────────────────────────────────────
+// ── B-ENG-3b / B-1764: the settings channel Claude Code reads ───────────────
 
-test('collect: returns *_BASE_URL values from settings.env, [] when absent', async () => {
+test('settings: a base URL in the member settings.json is refused, an official one passes', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'nassaj-settings-'));
+  const ctx = { cwd: dir, managedSettingsDir: path.join(dir, 'managed') };
   try {
-    // No settings.json yet → degrade-safe [].
-    assert.deepEqual(await collectSettingsBaseUrls({ CLAUDE_CONFIG_DIR: dir }), []);
+    // No settings.json yet → nothing to refuse.
+    await assert.doesNotReject(assertClaudeSpawnEnvAllowed({ CLAUDE_CONFIG_DIR: dir }, ctx));
 
-    fs.writeFileSync(
-      path.join(dir, 'settings.json'),
-      JSON.stringify({
-        env: {
-          ANTHROPIC_BASE_URL: 'https://api.anthropic.com',
-          NOT_A_BASE: 'ignored',
-          OTHER_BASE_URL: 'https://x.example',
-        },
-      }),
+    fs.writeFileSync(path.join(dir, 'settings.json'), JSON.stringify({
+      env: { ANTHROPIC_BASE_URL: 'https://api.anthropic.com', NOT_A_BASE: 'ignored' },
+    }));
+    await assert.doesNotReject(assertClaudeSpawnEnvAllowed({ CLAUDE_CONFIG_DIR: dir }, ctx));
+
+    fs.writeFileSync(path.join(dir, 'settings.json'), JSON.stringify({
+      env: { OTHER_BASE_URL: 'https://x.example' },
+    }));
+    await assert.rejects(
+      assertClaudeSpawnEnvAllowed({ CLAUDE_CONFIG_DIR: dir }, ctx),
+      (err: { code?: string }) => err.code === 'ANTHROPIC_BASE_URL_NOT_ALLOWED',
     );
-    const values = (await collectSettingsBaseUrls({ CLAUDE_CONFIG_DIR: dir })).sort();
-    assert.deepEqual(values, ['https://api.anthropic.com', 'https://x.example']);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
 
-test('collect: a corrupt settings.json degrades to [] (never throws)', async () => {
+test('settings: a corrupt settings.json refuses the spawn (fail-closed)', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'nassaj-settings-bad-'));
   try {
     fs.writeFileSync(path.join(dir, 'settings.json'), '{ this is : not json');
-    assert.deepEqual(await collectSettingsBaseUrls({ CLAUDE_CONFIG_DIR: dir }), []);
+    await assert.rejects(
+      assertClaudeSpawnEnvAllowed({ CLAUDE_CONFIG_DIR: dir }, { cwd: dir, managedSettingsDir: path.join(dir, 'managed') }),
+      (err: { code?: string }) => err.code === 'ANTHROPIC_BASE_URL_NOT_ALLOWED',
+    );
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

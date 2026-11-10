@@ -290,23 +290,6 @@ function DeleteNotes({ results }: { results: readonly CompanySlotResult[] }) {
 
 export type CompanyKeyState = { configured: boolean; loading: boolean };
 
-/** B-362/B-367: a refusal is STATED (`=== false`: silence is not a refusal), never a box that 403s. */
-function NotWritableNotice({ company }: { company: string }) {
-  const { t } = useTranslation('settings');
-  return (
-    <SettingsCard tone="info">
-      <p className="text-[13px] leading-relaxed text-muted-foreground">
-        {t('vendors.company.notWritable', {
-          company,
-          defaultValue:
-            '{{company}} credentials are shared across the team, so only an owner or admin '
-            + 'can set them here. Ask them to add the key — once stored, you can use it.',
-        })}
-      </p>
-    </SettingsCard>
-  );
-}
-
 export default function CompanyCredentialCard({
   company,
   onKeyState,
@@ -318,7 +301,7 @@ export default function CompanyCredentialCard({
   const { t } = useTranslation('settings');
   const navigation = useSettingsNavigation();
   const companyKey = useCompanyKey(company.id);
-  const { slots, projections, migrationConflict, configured, loading, saving, failure, writable } = companyKey;
+  const { slots, projections, migrationConflict, configured, loading, saving, failure } = companyKey;
   const isAlibaba = company.id === 'alibaba-cloud';
   const actions = useVendorCardActions(companyKey, isAlibaba);
 
@@ -342,8 +325,6 @@ export default function CompanyCredentialCard({
   const draftFilled = actions.draftKey.trim().length > 0;
   const busy = saving || loading;
   const inputId = `company-api-key-${company.id}`;
-
-  if (writable === false) return <NotWritableNotice company={company.name} />;
 
   return (
     <div data-company={company.id} className="space-y-2 py-2.5">

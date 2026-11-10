@@ -140,15 +140,20 @@ test('tool: an unknown provider is rejected as a tool_result error and makes no 
 
 // ── no-key path ───────────────────────────────────────────────────────────────
 
-test('tool: an engine provider with no stored key errors and makes no network call', async () => {
+test('tool: an engine provider with no stored key is refused by the credential gate, no network call', async () => {
   const sandbox = withSandbox();
   const f = stubFetch(async () => jsonResponse({ content: [] }));
   try {
     const handle = delegateHandler(buildVendorDelegateMcp('1'));
     const result = await handle({ provider: 'kimi', prompt: 'hi' });
     assert.equal(result.isError, true);
-    assert.match(result.content[0].text, /No API key configured for kimi/);
+    // ADR-152 A1 §3.5: delegate_to_vendor is an entry point of the gate.
+    assert.match(result.content[0].text, /^CREDENTIAL_NOT_LINKED: no kimi credential is linked/);
     assert.equal(f.calls.length, 0, 'no fetch without a key');
+    // A missing member is refused the same way, never an install-wide key.
+    const anonymous = await delegateHandler(buildVendorDelegateMcp(null as never))({ provider: 'kimi', prompt: 'hi' });
+    assert.equal(anonymous.isError, true);
+    assert.equal(f.calls.length, 0);
   } finally {
     f.restore();
     sandbox.restore();

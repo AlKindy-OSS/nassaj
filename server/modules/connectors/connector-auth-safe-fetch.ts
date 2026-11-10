@@ -1,3 +1,4 @@
+import { execFile } from 'node:child_process';
 import { isIP } from 'node:net';
 
 import {
@@ -6,6 +7,7 @@ import {
   type DcrPkceSpec,
   type ProviderAuthSpec,
 } from '../../../shared/connector-auth-registry.js';
+/* eslint-disable boundaries/dependencies -- net/ is a barrel-less leaf of shared transport primitives (ADR-194 D7); pre-existing imports. */
 import {
   addressKey,
   hostInterfaceAddresses,
@@ -28,6 +30,7 @@ import {
   type PinnedResponse,
   type PinnedTransport,
 } from '../net/pinned-transport.js';
+/* eslint-enable boundaries/dependencies */
 
 /*
  * Thin wrapper over the shared pinned engine (ADR-194 D7): it keeps its spec
@@ -206,8 +209,12 @@ const normalizeHeaders = (
   return normalized;
 };
 
+/** Name of the interface the kernel routes `address` through, or null when unknown. */
+export type RouteInterfaceLookup = (address: string) => Promise<string | null>;
+
 export type SafeProviderFetchDependencies = Readonly<{
   resolver?: SafeFetchResolver;
+  routeInterface?: RouteInterfaceLookup;
   transport?: SafeFetchTransport;
   timeoutMs?: number;
   maxRedirects?: number;
@@ -347,6 +354,44 @@ const isPrivateInferenceAddress = (address: string): boolean => {
   return (words[0] & 0xfe00) === 0xfc00;
 };
 
+/** True for 100.64.0.0/10 (shared address space: tailnets AND carrier-grade NAT). */
+const isSharedAddressSpace = (address: string): boolean => {
+  if (isIP(address) !== 4) return false;
+  const [a, b] = address.split('.').map(Number);
+  return a === 100 && b >= 64 && b <= 127;
+};
+
+/** Interface names a tailnet route leaves through (`tailscale0`, …). */
+const TAILNET_INTERFACE = /^tailscale\d*$/u;
+const ROUTE_LOOKUP_TIMEOUT_MS = 2_000;
+
+/** Production route lookup: `ip -j route get <address>`; null on any failure. */
+const defaultRouteInterface: RouteInterfaceLookup = address => new Promise(resolve => {
+  execFile('ip', ['-j', 'route', 'get', address], { timeout: ROUTE_LOOKUP_TIMEOUT_MS }, (error, stdout) => {
+    if (error) return resolve(null);
+    try {
+      const dev = (JSON.parse(stdout) as Array<{ dev?: unknown }>)[0]?.dev;
+      resolve(typeof dev === 'string' ? dev : null);
+    } catch {
+      resolve(null);
+    }
+  });
+});
+
+/**
+ * T-2098 qa item 6: 100.64.0.0/10 is a tailnet only when this host routes it through
+ * a tailscale interface; the same range is carrier-grade NAT on an ISP uplink, which
+ * is NOT private. Fails closed: an unknown route is not a tailnet.
+ */
+const isTailnetRoute = async (address: string, routeInterface: RouteInterfaceLookup): Promise<boolean> => {
+  try {
+    const dev = await routeInterface(address);
+    return typeof dev === 'string' && TAILNET_INTERFACE.test(dev);
+  } catch {
+    return false;
+  }
+};
+
 /**
  * ADR-163 / B-1268: local inference permits private networks but rejects metadata
  * hosts, the nassaj port, privileged loopback ports, and plaintext http toward a
@@ -395,26 +440,57 @@ const localAddressForbidden = (address: string): boolean => {
 const resolveLocalModelAddress = async (
   url: URL,
   resolver: SafeFetchResolver,
-): Promise<Readonly<{ address: string; family: 4 | 6 }>> => {
+  options: Readonly<{ requirePrivate?: boolean; routeInterface?: RouteInterfaceLookup }> = {},
+): Promise<Readonly<{ address: string; family: 4 | 6; addresses: readonly string[] }>> => {
   const hostname = url.hostname.replace(/^\[|\]$/gu, '');
   const answers = await withTimeout(resolver(hostname), DEFAULT_TIMEOUT_MS, connectorErrors);
   const port = localModelPort(url);
+  const privateOnly = url.protocol === 'http:' || options.requirePrivate === true;
   const forbidden = (address: string): boolean => localAddressForbidden(address)
     || (port < PRIVILEGED_PORT_CEILING && isLoopbackAddress(address))
-    || (url.protocol === 'http:' && !isPrivateInferenceAddress(address));
+    || (privateOnly && !isPrivateInferenceAddress(address));
   if (!answers.length || answers.some(answer => forbidden(answer.address) || isIP(answer.address) !== answer.family)) {
     throw new ConnectorSafeFetchError('local_model_address_forbidden');
   }
-  return answers[0];
+  if (privateOnly) {
+    const routeInterface = options.routeInterface ?? defaultRouteInterface;
+    for (const answer of answers) {
+      if (isSharedAddressSpace(answer.address) && !(await isTailnetRoute(answer.address, routeInterface))) {
+        throw new ConnectorSafeFetchError('local_model_address_forbidden');
+      }
+    }
+  }
+  // `addresses`: the whole vetted answer set (T-2098: a round-robin name stays valid).
+  return { address: answers[0].address, family: answers[0].family, addresses: answers.map(answer => answer.address) };
 };
+
+/**
+ * ADR-227 / T-2098: the Claude body may run on a local model server only when every
+ * resolved address is PRIVATE (loopback, RFC1918, tailnet 100.64.0.0/10 routed via tailscale, IPv6
+ * ULA/loopback) — over https too, unlike the connector rule above, which accepts a
+ * public https endpoint. Applies validateLocalModelUrl first. Throws
+ * ConnectorSafeFetchError('local_model_address_forbidden') otherwise. The spawn passes
+ * the returned literal address to the CLI (sh3), so the CLI never resolves the name.
+ */
+export async function resolvePrivateLocalModelAddress(rawUrl: string,
+  dependencies: Pick<SafeProviderFetchDependencies, 'resolver' | 'routeInterface'> = {},
+): Promise<Readonly<{ url: URL; address: string; family: 4 | 6; addresses: readonly string[] }>> {
+  const url = validateLocalModelUrl(rawUrl);
+  const target = await resolveLocalModelAddress(url, dependencies.resolver ?? defaultResolver, {
+    requirePrivate: true, routeInterface: dependencies.routeInterface,
+  });
+  return { url, address: target.address, family: target.family, addresses: target.addresses };
+}
 
 /** Pinned DNS + shared bounded transport/parser; redirects are never followed. */
 export async function safeFetchLocalModelJson(rawUrl: string, apiKey?: string | null,
-  dependencies: Pick<SafeProviderFetchDependencies, 'resolver' | 'transport'> = {}): Promise<Record<string, unknown>> {
+  dependencies: Pick<SafeProviderFetchDependencies, 'resolver' | 'transport' | 'routeInterface'> = {}): Promise<Record<string, unknown>> {
   const url = validateLocalModelUrl(rawUrl);
   if (apiKey && /[\r\n]/u.test(apiKey)) throw new ConnectorSafeFetchError('local_model_key_invalid');
   const deadline = Date.now() + DEFAULT_TIMEOUT_MS;
-  const target = await resolveLocalModelAddress(url, dependencies.resolver ?? defaultResolver);
+  const target = await resolveLocalModelAddress(url, dependencies.resolver ?? defaultResolver, {
+    routeInterface: dependencies.routeInterface,
+  });
   const abort = new AbortController();
   let response: SafeFetchResponse | undefined;
   try {
@@ -450,11 +526,13 @@ export async function safeFetchLocalModelJson(rawUrl: string, apiKey?: string | 
  * and never surfaces the provider's raw response.
  */
 export async function safeProbeLocalModelAuth(rawUrl: string, apiKey?: string | null,
-  dependencies: Pick<SafeProviderFetchDependencies, 'resolver' | 'transport'> = {}): Promise<{ status: number }> {
+  dependencies: Pick<SafeProviderFetchDependencies, 'resolver' | 'transport' | 'routeInterface'> = {}): Promise<{ status: number }> {
   const url = validateLocalModelUrl(rawUrl);
   if (apiKey && /[\r\n]/u.test(apiKey)) throw new ConnectorSafeFetchError('local_model_key_invalid');
   const deadline = Date.now() + DEFAULT_TIMEOUT_MS;
-  const target = await resolveLocalModelAddress(url, dependencies.resolver ?? defaultResolver);
+  const target = await resolveLocalModelAddress(url, dependencies.resolver ?? defaultResolver, {
+    routeInterface: dependencies.routeInterface,
+  });
   const abort = new AbortController();
   let response: SafeFetchResponse | undefined;
   try {

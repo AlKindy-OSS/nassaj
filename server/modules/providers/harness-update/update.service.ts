@@ -67,6 +67,7 @@ import {
   UPDATE_TIMEOUT_MS,
   type UnregisteredLaunch,
 } from './run-command.js';
+import { startNpmLockUpdate } from './npm-lock/npm-lock-jobs.js';
 import { recordJobVersionChange } from './version-drift.js';
 import { isHarnessPinRefused, invalidateInstalledVersion } from './version-status.service.js';
 import {
@@ -212,6 +213,7 @@ export async function startHarnessUpdate(
     });
   }
   const rt = runtimeFromDeps(options.deps ?? {});
+  if (descriptor.installMethod === 'npm-lock') return startNpmLockUpdate(descriptor, rt, { userId, trigger });
   if (descriptor.snapshot) return startSnapshotUpdate(descriptor, { rt, userId, trigger, acks: options.acks });
   return startLegacyUpdate(descriptor, rt, options.deps ?? {}, userId, trigger);
 }

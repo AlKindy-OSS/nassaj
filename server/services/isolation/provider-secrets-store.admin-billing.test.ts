@@ -131,7 +131,7 @@ test('spawn-env guard: only the spend service reads the Admin key', () => {
 
   for (const resolver of [
     'server/services/isolation/resolve-provider-env.js',
-    'server/services/isolation/resolve-provider-env-strict.js',
+    'server/services/isolation/credential-gate.js',
     'server/services/isolation/provider-slot-key.js',
   ]) {
     const text = fs.readFileSync(resolver, 'utf8');

@@ -49,7 +49,7 @@ test('getStatus reports installed=false when the agy binary is missing', async (
       /* no agy binary, no brain dir */
     },
     async (auth) => {
-      const status = await auth.getStatus();
+      const status = await auth.getStatus(7);
       assert.equal(status.provider, 'antigravity');
       assert.equal(status.installed, false);
       assert.equal(status.authenticated, false);
@@ -69,7 +69,7 @@ test('getStatus reports authenticated=false when agy exists but the brain direct
       // brain directory does not exist yet — readdir will throw and hasBrainSession returns false
     },
     async (auth) => {
-      const status = await auth.getStatus();
+      const status = await auth.getStatus(7);
       assert.equal(status.installed, true);
       assert.equal(status.authenticated, false);
       assert.match(status.error ?? '', /No sessions found/);
@@ -84,13 +84,13 @@ test('getStatus reports authenticated=true when at least one brain UUID folder e
       await mkdir(binDir, { recursive: true });
       await writeFile(path.join(binDir, 'agy'), '#!/usr/bin/env node\n', { encoding: 'utf8', mode: 0o755 });
 
-      const brainDir = path.join(homeDir, '.gemini', 'antigravity-cli', 'brain');
+      const brainDir = path.join(homeDir, '.nassaj-users', '7', '.gemini', 'antigravity-cli', 'brain');
       await mkdir(path.join(brainDir, 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'), {
         recursive: true,
       });
     },
     async (auth) => {
-      const status = await auth.getStatus();
+      const status = await auth.getStatus(7);
       assert.equal(status.installed, true);
       assert.equal(status.authenticated, true);
       assert.equal(status.method, 'google-oauth');
@@ -106,12 +106,12 @@ test('getStatus surfaces the Google client_email when ADC credentials are presen
       await mkdir(binDir, { recursive: true });
       await writeFile(path.join(binDir, 'agy'), '#!/usr/bin/env node\n', { encoding: 'utf8', mode: 0o755 });
 
-      const brainDir = path.join(homeDir, '.gemini', 'antigravity-cli', 'brain');
+      const brainDir = path.join(homeDir, '.nassaj-users', '7', '.gemini', 'antigravity-cli', 'brain');
       await mkdir(path.join(brainDir, 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'), {
         recursive: true,
       });
 
-      const adcDir = path.join(homeDir, '.config', 'gcloud');
+      const adcDir = path.join(homeDir, '.nassaj-users', '7', '.config', 'gcloud');
       await mkdir(adcDir, { recursive: true });
       await writeFile(
         path.join(adcDir, 'application_default_credentials.json'),
@@ -120,7 +120,7 @@ test('getStatus surfaces the Google client_email when ADC credentials are presen
       );
     },
     async (auth) => {
-      const status = await auth.getStatus();
+      const status = await auth.getStatus(7);
       assert.equal(status.email, 'user@example.com');
       assert.equal(status.authenticated, true);
     },
@@ -134,12 +134,12 @@ test('getStatus falls back to .gemini/oauth_creds.json when ADC is missing', asy
       await mkdir(binDir, { recursive: true });
       await writeFile(path.join(binDir, 'agy'), '#!/usr/bin/env node\n', { encoding: 'utf8', mode: 0o755 });
 
-      const brainDir = path.join(homeDir, '.gemini', 'antigravity-cli', 'brain');
+      const brainDir = path.join(homeDir, '.nassaj-users', '7', '.gemini', 'antigravity-cli', 'brain');
       await mkdir(path.join(brainDir, 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'), {
         recursive: true,
       });
 
-      const geminiDir = path.join(homeDir, '.gemini');
+      const geminiDir = path.join(homeDir, '.nassaj-users', '7', '.gemini');
       await mkdir(geminiDir, { recursive: true });
       await writeFile(
         path.join(geminiDir, 'oauth_creds.json'),
@@ -148,7 +148,7 @@ test('getStatus falls back to .gemini/oauth_creds.json when ADC is missing', asy
       );
     },
     async (auth) => {
-      const status = await auth.getStatus();
+      const status = await auth.getStatus(7);
       assert.equal(status.email, 'gemini-user@example.com');
     },
   );
@@ -161,12 +161,12 @@ test('getStatus falls back to the agy CLI log when no credential files exist', a
       await mkdir(binDir, { recursive: true });
       await writeFile(path.join(binDir, 'agy'), '#!/usr/bin/env node\n', { encoding: 'utf8', mode: 0o755 });
 
-      const brainDir = path.join(homeDir, '.gemini', 'antigravity-cli', 'brain');
+      const brainDir = path.join(homeDir, '.nassaj-users', '7', '.gemini', 'antigravity-cli', 'brain');
       await mkdir(path.join(brainDir, 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'), {
         recursive: true,
       });
 
-      const logDir = path.join(homeDir, '.gemini', 'antigravity-cli', 'log');
+      const logDir = path.join(homeDir, '.nassaj-users', '7', '.gemini', 'antigravity-cli', 'log');
       await mkdir(logDir, { recursive: true });
       // Older log has a stale identity; the newest file must win.
       await writeFile(
@@ -181,7 +181,7 @@ test('getStatus falls back to the agy CLI log when no credential files exist', a
       );
     },
     async (auth) => {
-      const status = await auth.getStatus();
+      const status = await auth.getStatus(7);
       assert.equal(status.email, 'agy-user@example.com');
       assert.equal(status.authenticated, true);
     },
@@ -195,17 +195,17 @@ test('getStatus returns null email when credential files contain unparseable JSO
       await mkdir(binDir, { recursive: true });
       await writeFile(path.join(binDir, 'agy'), '#!/usr/bin/env node\n', { encoding: 'utf8', mode: 0o755 });
 
-      const brainDir = path.join(homeDir, '.gemini', 'antigravity-cli', 'brain');
+      const brainDir = path.join(homeDir, '.nassaj-users', '7', '.gemini', 'antigravity-cli', 'brain');
       await mkdir(path.join(brainDir, 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'), {
         recursive: true,
       });
 
-      const adcDir = path.join(homeDir, '.config', 'gcloud');
+      const adcDir = path.join(homeDir, '.nassaj-users', '7', '.config', 'gcloud');
       await mkdir(adcDir, { recursive: true });
       await writeFile(path.join(adcDir, 'application_default_credentials.json'), 'not json', 'utf8');
     },
     async (auth) => {
-      const status = await auth.getStatus();
+      const status = await auth.getStatus(7);
       assert.equal(status.email, null);
       assert.equal(status.authenticated, true);
     },
@@ -216,7 +216,7 @@ test('getStatus always returns the documented ProviderAuthStatus shape', async (
   await withFakeHome(
     () => undefined,
     async (auth) => {
-      const status = await auth.getStatus();
+      const status = await auth.getStatus(7);
       assert.equal(status.provider, 'antigravity');
       assert.equal(typeof status.installed, 'boolean');
       assert.equal(typeof status.authenticated, 'boolean');

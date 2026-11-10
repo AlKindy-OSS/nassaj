@@ -336,7 +336,7 @@
   "governanceBadge": {
     "ungoverned": "未受治理",
     "tooltip": {
-      "none": "此会话运行在 Nassaj 治理之外 — 请检查提供商设置"
+      "none": "此会话运行在 Nassaj 治理之外 — 请检查编程智能体设置"
     }
   },
   "mermaidZoom": {

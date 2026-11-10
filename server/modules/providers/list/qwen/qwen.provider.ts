@@ -11,6 +11,7 @@ import { VendorMcpProvider } from '@/modules/providers/shared/vendor/vendor-mcp.
 import { VendorSessionSynchronizer } from '@/modules/providers/shared/vendor/vendor-session-synchronizer.provider.js';
 import { VendorSessionsProvider } from '@/modules/providers/shared/vendor/vendor-sessions.provider.js';
 import { resolveProviderEnv } from '@/services/isolation/resolve-provider-env.js';
+import { resolvedKnob } from '@/services/isolation/resolved-knob.js';
 import type {
   IProviderAuth,
   IProviderModels,
@@ -133,7 +134,7 @@ class QwenSkills extends SkillsProvider {
   }
 
   private homeFor(userId?: string | number | null): string {
-    return resolveProviderEnv(userId ?? null, 'qwen', process.env).HOME ?? process.cwd();
+    return resolvedKnob(resolveProviderEnv(userId, 'qwen', process.env), 'HOME');
   }
 
   protected async getSkillSources(

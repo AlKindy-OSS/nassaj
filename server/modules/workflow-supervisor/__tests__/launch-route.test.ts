@@ -11,10 +11,15 @@
  * Identity always comes from req.user (the JWT), never the body.
  */
 
+// B-1771: FIRST import — HOME, CLAUDE_CONFIG_DIR and every provider credential env
+// move into a sandbox before any module resolves a home. Run ad hoc with the
+// operator HOME, this test once replaced (and then deleted) user 1's live login.
+import '@/shared/__tests__/sandbox-home.js';
+
 import assert from 'node:assert/strict';
 import type { AddressInfo } from 'node:net';
-import { mkdtemp, readdir, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
+import os, { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
@@ -22,11 +27,14 @@ import express from 'express';
 
 import {
   closeConnection,
+  getConnection,
   initializeDatabase,
   projectsDb,
+  sessionsDb,
   userDb,
 } from '@/modules/database/index.js';
 import launchRouter from '@/modules/workflow-supervisor/launch.route.js';
+import { assertOutsideRealCredentials } from '@/shared/__tests__/real-credential-guard.js';
 
 type Ctx = {
   ownerId: number;
@@ -48,6 +56,13 @@ async function setup(): Promise<Ctx> {
 
   const ownerId = userDb.createUser('owner', 'hash', 'owner').id;
   const strangerId = userDb.createUser('stranger', 'hash', 'user').id;
+  try {
+    await linkClaude(ownerId);
+  } catch (error) {
+    closeConnection();
+    await rm(tempRoot, { recursive: true, force: true });
+    throw error;
+  }
   const projectPath = path.join(tempRoot, 'proj');
   projectsDb.createProjectPath(projectPath, null, ownerId);
 
@@ -84,8 +99,28 @@ async function setup(): Promise<Ctx> {
       delete process.env.WORKFLOW_SUPERVISOR;
       delete process.env.WORKFLOW_SUPERVISOR_STATE_DIR;
       await rm(tempRoot, { recursive: true, force: true });
+      await rm(memberRoot(ownerId), { recursive: true, force: true });
     },
   };
+}
+
+/** The member's tree under the SANDBOX home; refuses the real account's tree (B-1771). */
+function memberRoot(userId: number): string {
+  const root = path.join(os.homedir(), '.nassaj-users', String(userId));
+  assertOutsideRealCredentials(root);
+  return root;
+}
+
+/** A linked Claude account in the member's own tree (ADR-152 A1 §3.5 gate). */
+async function linkClaude(userId: number): Promise<void> {
+  const dir = path.join(memberRoot(userId), '.claude');
+  await mkdir(dir, { recursive: true });
+  await writeFile(path.join(dir, '.credentials.json'), JSON.stringify({ claudeAiOauth: { accessToken: 'sk-ant-oat01-test' } }));
+}
+
+/** Removes a member's own Claude link. */
+async function unlinkClaude(userId: number): Promise<void> {
+  await rm(path.join(memberRoot(userId), '.claude', '.credentials.json'), { force: true });
 }
 
 async function post(ctx: Ctx, body: unknown): Promise<Response> {
@@ -177,6 +212,47 @@ test('launch route: missing scriptOrPrompt => 400; relative projectPath => 400',
     assert.equal(relPath.status, 400);
 
     assert.equal(await intentCount(ctx.stateDir, ctx.ownerId), 0, 'no intent from invalid requests');
+  } finally {
+    await ctx.close();
+  }
+});
+
+test('launch route: ADR-152 A1 — an owner with no linked Claude credential => 409 CREDENTIAL_NOT_LINKED + ZERO intent', async () => {
+  const ctx = await setup();
+  try {
+    process.env.WORKFLOW_SUPERVISOR = '1';
+    ctx.setActingUser(ctx.ownerId);
+    await unlinkClaude(ctx.ownerId);
+    const res = await post(ctx, goodBody(ctx.projectPath));
+    assert.equal(res.status, 409);
+    const json = (await res.json()) as { error?: { code?: string } };
+    assert.equal(json.error?.code, 'CREDENTIAL_NOT_LINKED');
+    assert.equal(await intentCount(ctx.stateDir, ctx.ownerId), 0, 'no intent for an unlinked member');
+  } finally {
+    await ctx.close();
+  }
+});
+
+test('ADR-227: a local-pinned conversation or a local model => 409 + ZERO intent, never an Anthropic task', async () => {
+  const ctx = await setup();
+  try {
+    process.env.WORKFLOW_SUPERVISOR = '1';
+    ctx.setActingUser(ctx.ownerId);
+    getConnection().prepare(
+      "INSERT INTO sessions (session_id, provider, project_path, jsonl_path) VALUES ('conv-local', 'claude', NULL, '/var/tmp/x.jsonl')",
+    ).run();
+    sessionsDb.setSessionEnginePin('conv-local', `local:0b9c6a3e-6f1e-4c41-9a4e-2f1b9e0c7d11:${ctx.ownerId}:${'c'.repeat(32)}`,
+      'server_verdict');
+    for (const body of [
+      { ...goodBody(ctx.projectPath), conversationId: 'conv-local' },
+      { ...goodBody(ctx.projectPath), model: 'nassaj_local_abc/gpt-oss-20b' },
+    ]) {
+      const res = await post(ctx, body);
+      assert.equal(res.status, 409);
+      const json = (await res.json()) as { error?: { code?: string } };
+      assert.equal(json.error?.code, 'LOCAL_ENGINE_SPAWN_UNSUPPORTED');
+    }
+    assert.equal(await intentCount(ctx.stateDir, ctx.ownerId), 0);
   } finally {
     await ctx.close();
   }

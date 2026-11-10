@@ -32,15 +32,12 @@ for (const name of ['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'CLAUDE_CODE_OA
 }
 
 const { initializeDatabase, closeConnection, userDb } = await import('@/modules/database/index.js');
-const { setProviderSharingConfig, _resetProviderSharingCache } = await import('@/services/provider-sharing.js');
 const { userConfigDir } = await import('@/services/isolation/provision-user-dirs.js');
 const store = await import('@/services/isolation/provider-secrets-store.js');
 const { harnessLinkModeService } = await import('../services/harness-link-mode.runtime.js');
 const { vendorKeyFanoutService } = await import('../services/vendor-key-fanout.runtime.js');
 
 await initializeDatabase();
-_resetProviderSharingCache();
-setProviderSharingConfig({ claude: 'isolated', codex: 'isolated', opencode: 'isolated' });
 store._resetProviderSecretsServerKeyCache();
 
 after(() => {
@@ -101,7 +98,7 @@ async function saveThenSwitch(member: Member, harness: 'claude' | 'codex') {
     ? ['anthropic', ANTHROPIC_KEY, ANTHROPIC_SLOTS] as const
     : ['openai', OPENAI_KEY, OPENAI_SLOTS] as const;
   const saved = await vendorKeyFanoutService.save(member.id, vendorId, key, {
-    isElevated: false, slots, authenticatedPrincipal: member.principal,
+    slots, authenticatedPrincipal: member.principal,
   });
   assert.equal(outcomeOf(saved, harness), 'kept_on_subscription');
   assert.equal(ledgerEntry(member.id, vendorId, harness), undefined, 'nothing written, nothing ledgered');
@@ -127,7 +124,7 @@ test('B-1574 D1: Claude — save on subscription → switch to api_key → delet
   const { saved, switched } = await saveThenSwitch(member, 'claude');
   assert.equal(readJson(claudeSettings(member.id)).env.ANTHROPIC_API_KEY, ANTHROPIC_KEY);
 
-  const removed = await vendorKeyFanoutService.remove(member.id, 'anthropic', { isElevated: false, slots: ANTHROPIC_SLOTS });
+  const removed = await vendorKeyFanoutService.remove(member.id, 'anthropic', { slots: ANTHROPIC_SLOTS });
   assert.equal(outcomeOf(removed, 'claude'), 'removed', 'nassaj owns what its switch wrote');
   assert.equal(store.getCanonicalVendorKey(member.id, 'anthropic'), null);
   const settings = readJson(claudeSettings(member.id));
@@ -149,7 +146,7 @@ test('B-1574 D1+D2: Codex — save on subscription → switch to api_key → del
   assert.equal(linked.OPENAI_API_KEY, OPENAI_KEY);
   assert.deepEqual(linked.tokens, CODEX_TOKENS, 'tokens kept by the switch');
 
-  const removed = await vendorKeyFanoutService.remove(member.id, 'openai', { isElevated: false, slots: OPENAI_SLOTS });
+  const removed = await vendorKeyFanoutService.remove(member.id, 'openai', { slots: OPENAI_SLOTS });
   assert.equal(outcomeOf(removed, 'codex'), 'removed');
   assert.equal(store.getCanonicalVendorKey(member.id, 'openai'), null);
   assert.deepEqual(readJson(codexAuth(member.id)), original, 'auth_mode back to "chatgpt", tokens intact');
@@ -177,6 +174,6 @@ test('B-1574 D1: switching back to subscription removes the key and drops its le
   assert.equal(readJson(codexAuth(member.id)).auth_mode, 'chatgpt');
 
   // The AES records survive a mode switch; a later delete has nothing left to remove.
-  const removed = await vendorKeyFanoutService.remove(member.id, 'anthropic', { isElevated: false, slots: ANTHROPIC_SLOTS });
+  const removed = await vendorKeyFanoutService.remove(member.id, 'anthropic', { slots: ANTHROPIC_SLOTS });
   assert.equal(outcomeOf(removed, 'claude'), 'absent');
 });

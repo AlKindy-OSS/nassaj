@@ -43,7 +43,8 @@ export type HarnessBinaryId =
   | 'cursor'
   | 'opencode'
   | 'qwen'
-  | 'kimi';
+  | 'kimi'
+  | 'dsh';
 
 /** How one harness binary is located. */
 export interface HarnessBinarySpec {
@@ -98,6 +99,11 @@ export const HARNESS_BINARY_SPECS: Readonly<Record<HarnessBinaryId, HarnessBinar
     overrideEnv: 'KIMI_PATH',
     measured: (home) => path.join(home, '.kimi-code', 'bin', 'kimi'),
   },
+  // T-2086/ADR-224: the DeepSeek Harness (@deepseek-ai/dsh), a Node CLI. The
+  // measured path is the npm user-prefix bin (`~/.local/bin`); its official
+  // install and preflight land in T-2086 S4. The launcher runs it through an
+  // absolute, version-checked node (dsh-launch.js), never a PATH lookup.
+  dsh: { command: 'dsh', overrideEnv: 'DSH_PATH', measured: localBin('dsh') },
 });
 
 /** Every harness id the registry resolves, in a stable order. */

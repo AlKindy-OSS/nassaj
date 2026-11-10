@@ -72,7 +72,6 @@ function dependencies(input: {
     spawnAntigravity: unused,
     spawnOpenCode: unused,
     spawnKimi: unused,
-    spawnDeepSeek: unused,
     spawnGlm: unused,
   } as never;
 }

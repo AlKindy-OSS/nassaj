@@ -504,7 +504,8 @@ test('T-1910: codex, glm and kimi readers send only valid GET descriptors to all
   const previousHome = process.env.HOME;
   try {
     process.env.HOME = home;
-    const credentials = path.join(home, '.kimi-code', 'credentials');
+    // B-1744: the member's own Kimi login (never the operator's ~/.kimi-code).
+    const credentials = path.join(home, '.nassaj-users', '7', '.kimi', 'credentials');
     mkdirSync(credentials, { recursive: true });
     const writeKimi = (secondsLeft: number) => writeFileSync(path.join(credentials, 'kimi-code.json'),
       JSON.stringify({ access_token: 'kimi-token', expires_at: Math.floor(Date.now() / 1000) + secondsLeft }));
@@ -520,11 +521,11 @@ test('T-1910: codex, glm and kimi readers send only valid GET descriptors to all
     // Kimi refuses a near-expiry token instead of refreshing it: nothing is sent.
     writeKimi(30);
     providerQuotaService.__resetCache();
-    await providerQuotaService.getWindows('kimi', null, { read });
+    await providerQuotaService.getWindows('kimi', 7, { read });
     assert.equal(descriptors.length, 2);
     writeKimi(3_600);
     providerQuotaService.__resetCache();
-    await providerQuotaService.getWindows('kimi', null, { read });
+    await providerQuotaService.getWindows('kimi', 7, { read });
     assert.deepEqual(descriptors.map(descriptor => [descriptor.method, new URL(descriptor.url).origin]), [
       ['GET', 'https://chatgpt.com'], ['GET', 'https://api.z.ai'], ['GET', 'https://api.kimi.com'],
     ]);

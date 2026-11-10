@@ -70,6 +70,28 @@ describe('server background lifecycle', () => {
     ]);
   });
 
+  it('starts the credential-file watcher with the others and stops it on shutdown (B-1771)', async () => {
+    const events: string[] = [];
+    const lifecycle = createServerBackgroundLifecycle({
+      prepareTurnSupervisor: async () => {},
+      startTurnSupervisorWatchdogs: () => {},
+      stopTurnSupervisorWatchdogs: async () => {},
+      initializeSessionsWatcher: async () => {},
+      closeSessionsWatcher: async () => {},
+      startCostLedgerScheduler: () => {},
+      stopCostLedgerScheduler: () => {},
+      startCredentialFileWatcher: async () => { events.push('credentials:start'); throw new Error('boom'); },
+      stopCredentialFileWatcher: async () => { events.push('credentials:stop'); },
+      logger: { error: () => { events.push('logged'); } },
+    });
+    await lifecycle.prepare();
+    lifecycle.start();
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(events, ['credentials:start', 'logged'], 'a watcher failure is logged, never fatal');
+    await lifecycle.stop();
+    assert.deepEqual(events, ['credentials:start', 'logged', 'credentials:stop']);
+  });
+
   it('refuses to start before supervisor recovery has completed', () => {
     const lifecycle = createServerBackgroundLifecycle({
       prepareTurnSupervisor: async () => {},

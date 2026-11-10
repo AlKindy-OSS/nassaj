@@ -30,15 +30,16 @@ const RESTRICTED = ['getSharedVendorKey', 'setSharedVendorKey', 'deleteSharedVen
 /**
  * Paths allowed to name them, relative to `server/`:
  *   • the store that defines them;
- *   • the ONE read door — the resolver that owns member-vs-shared precedence;
- *   • the ONE write door — the service that stores a vendor key, where wave B
- *     hangs the elevated-role check and the audit row.
- * Tests are allowed too: proving precedence requires arranging a shared key.
+ *   • the ONE write door — the service that stores a vendor key;
+ *   • the display mask, which READS the inert install-wide keys only to redact
+ *     them from text (ADR-152 A1 §3.8: no run spends them any more).
+ * The resolver no longer reads the install-wide slot at all (D1). Tests are
+ * allowed too: proving the slot is inert requires arranging a key in it.
  */
 const ALLOWED = new Set([
   'services/isolation/provider-secrets-store.js',
-  'services/isolation/provider-slot-key.js',
   'modules/providers/services/provider-secrets.service.ts',
+  'services/display-secret-mask.ts',
 ]);
 
 const isTestFile = (relative: string): boolean =>
@@ -58,7 +59,7 @@ function* walk(dir: string): Generator<string> {
   }
 }
 
-test('T-1260: the shared vendor slot is reachable only through resolveSlotKey', () => {
+test('T-1260 / ADR-152 A1 §3.8: no runtime path reads the install-wide vendor slot', () => {
   const offenders: string[] = [];
 
   for (const file of walk(SERVER_ROOT)) {
@@ -78,8 +79,7 @@ test('T-1260: the shared vendor slot is reachable only through resolveSlotKey', 
   assert.deepEqual(
     offenders,
     [],
-    'These files reach the operator-wide vendor slot directly. Use '
-      + 'resolveSlotKey(userId, slot, { sharedFallback }) instead — whether a member '
-      + "spends the org's key is one decision, made in one place (T-1260).",
+    'These files reach the install-wide vendor slot directly. It is inert '
+      + '(ADR-152 A1 §3.8): use resolveSlotKey(principal, slot) for a member\'s own key.',
   );
 });

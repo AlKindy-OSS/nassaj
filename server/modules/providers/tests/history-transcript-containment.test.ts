@@ -17,7 +17,7 @@ import test from 'node:test';
 
 import { getConnection, initializeDatabase, participantsDb, sessionsDb, userDb } from '@/modules/database/index.js';
 
-import { getAgyBrainDir } from '../list/antigravity/agy-brain-dir.js';
+import { AGY_BRAIN_UNDER_HOME } from '../list/antigravity/agy-brain-layout.js';
 import { AntigravitySessionsProvider } from '../list/antigravity/antigravity-sessions.provider.js';
 import { CodexSessionsProvider } from '../list/codex/codex-sessions.provider.js';
 import { HistoryBudgetError } from '../services/history-budget.service.js';
@@ -180,7 +180,7 @@ const AGY_IDS: Record<Layout, string> = {
 for (const layout of ['valid', 'outside', 'symlink', 'missing'] as const) {
   test(`agy history: ${layout} stored path`, async () => {
     const sessionId = AGY_IDS[layout];
-    const file = place(layout, path.join(getAgyBrainDir(null), sessionId, '.system_generated', 'logs', 'transcript.jsonl'),
+    const file = place(layout, path.join(SANDBOX_HOME, AGY_BRAIN_UNDER_HOME, sessionId, '.system_generated', 'logs', 'transcript.jsonl'),
       'antigravity.jsonl');
     sessionsDb.createSession(sessionId, 'antigravity', '/home/operator/Project/General', undefined, undefined, undefined, file);
 

@@ -226,7 +226,7 @@ function AgentsPanel({
               <bdi className="break-words text-[11px] text-muted-foreground">
                 {t('participants.harnessLine', {
                   harness: harnessName,
-                  defaultValue: 'Harness: {{harness}}',
+                  defaultValue: 'Coding agent: {{harness}}',
                 })}
               </bdi>
             )}

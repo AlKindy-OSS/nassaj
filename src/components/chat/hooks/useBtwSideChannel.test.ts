@@ -25,6 +25,7 @@ type Frame = {
   code?: string;
   message?: string;
   forkedSessionId?: string;
+  credential?: unknown;
 } | null;
 interface Props {
   sessionId: string | null;
@@ -143,6 +144,31 @@ describe('useBtwSideChannel', () => {
     expect(result.current.activeBtw?.status).toBe('error');
     expect(result.current.activeBtw?.errorCode).toBe('busy');
     expect(result.current.activeBtw?.errorMessage).toBe('مشغول');
+  });
+
+  it('T-2083: btw-error CREDENTIAL_NOT_LINKED keeps the parsed refusal (and the code-only case)', () => {
+    const { result, rerender, sendMessage } = mountHook();
+    act(() => result.current.startBtwQuery('hi'));
+    const btwId = sentBtwId(sendMessage);
+    act(() => rerender({
+      sessionId: 's1',
+      latestMessage: {
+        type: 'btw-error', btwId, code: 'CREDENTIAL_NOT_LINKED', message: 'not linked',
+        credential: { code: 'CREDENTIAL_NOT_LINKED', provider: 'codex', reason: 'not_linked', settingsAnchor: 'agents/codex' },
+      },
+      sendMessage,
+    }));
+    expect(result.current.activeBtw?.errorCode).toBe('CREDENTIAL_NOT_LINKED');
+    expect(result.current.activeBtw?.errorCredential).toEqual({
+      provider: 'codex', reason: 'not_linked', grantorUsername: null, settingsAgent: 'codex',
+    });
+
+    act(() => result.current.startBtwQuery('again'));
+    const second = (sendMessage.mock.calls.at(-1)?.[0] as { btwId?: string } | undefined)?.btwId ?? '';
+    act(() => rerender({
+      sessionId: 's1', latestMessage: { type: 'btw-error', btwId: second, code: 'CREDENTIAL_NOT_LINKED' }, sendMessage,
+    }));
+    expect(result.current.activeBtw?.errorCredential?.provider).toBeNull();
   });
 
   it('fallback: بلا أي ردّ btw-* خلال نافذة السماح → error timeout', () => {

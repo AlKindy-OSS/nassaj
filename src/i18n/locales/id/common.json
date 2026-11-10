@@ -336,7 +336,7 @@
   "governanceBadge": {
     "ungoverned": "Tanpa tata kelola",
     "tooltip": {
-      "none": "Sesi ini berjalan di luar tata kelola Nassaj — periksa pengaturan penyedia"
+      "none": "Sesi ini berjalan di luar tata kelola Nassaj — periksa pengaturan agen koding"
     }
   },
   "onboarding": {

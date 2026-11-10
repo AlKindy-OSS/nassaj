@@ -25,7 +25,7 @@
 import type { PeerMessageRow } from '@/modules/database/index.js';
 
 import { chargeFromTotals, modeCategory, PEER_QUOTA_DEFER_PERCENT } from './peer-policy.js';
-import { createPeerDeliveryTurn, VERIFIED_RELAY_CLI_VERSIONS, type PeerDeliveryTurn, type PeerTurnResult } from './peer-run.js';
+import { createPeerDeliveryTurn, isVerifiedRelayCliVersion, type PeerDeliveryTurn, type PeerTurnResult } from './peer-run.js';
 import { buildPeerWrapper, isPeerDeliveryProof } from './peer-wire.js';
 
 const TICK_MS = 5000;
@@ -76,6 +76,18 @@ export type PeerDispatcherDependencies = {
   runTurn: (row: PeerMessageRow, turn: PeerDeliveryTurn, permissionMode: string) => Promise<PeerTurnOutcome>;
   publish: (row: PeerMessageRow) => void;
   log: (level: 'info' | 'warn' | 'error', msg: string, meta: Record<string, unknown>) => void;
+  /**
+   * ADR-219 P2: the gate of a row promoted from a hold, given the mode read once;
+   * true ⇒ it stopped the row (approval expired, or re-held on an owner/mode change).
+   * Absent ⇒ every hold row is refused (fail closed).
+   */
+  holdGate?: (row: PeerMessageRow, mode: string) => boolean;
+  /** The sending member's display name for frame F2. */
+  memberName?: (userId: number) => string;
+  /** Hold expiry and cancellations, run at the start of every pass. */
+  sweep?: () => void;
+  /** A row promoted from a hold ended refused/failed here: its hold returns to held (ت-9). */
+  onHoldRowEnded?: (row: PeerMessageRow, cause: string) => void;
 };
 
 function isProven(deps: PeerDispatcherDependencies, row: PeerMessageRow): boolean {
@@ -111,9 +123,21 @@ function publishById(deps: PeerDispatcherDependencies, id: string): void {
   if (row) deps.publish(row);
 }
 
+/** A terminal end of a hold row hands its hold back (ت-9); never throws into the dispatcher. */
+function releaseHold(deps: PeerDispatcherDependencies, row: PeerMessageRow, to: RowState, cause: string): void {
+  if (!row.hold_id || (to !== 'refused' && to !== 'failed')) return;
+  try {
+    deps.onHoldRowEnded?.(row, cause);
+  } catch (error) {
+    deps.log('error', 'peer hold release failed', { id: row.id, error: error instanceof Error ? error.message : String(error) });
+  }
+}
+
 function end(deps: PeerDispatcherDependencies, row: PeerMessageRow, to: RowState, cause: string,
   nextAttemptAt: number | null = null): void {
-  if (deps.transition(row.id, row.state, to, { cause, nextAttemptAt, nowMs: deps.now() })) publishById(deps, row.id);
+  if (!deps.transition(row.id, row.state, to, { cause, nextAttemptAt, nowMs: deps.now() })) return;
+  publishById(deps, row.id);
+  releaseHold(deps, row, to, cause);
 }
 
 type GateVerdict = { go: false } | { go: true; mode: string; jsonlPath: string };
@@ -131,9 +155,13 @@ async function gate(deps: PeerDispatcherDependencies, row: PeerMessageRow): Prom
   if (!jsonlPath) { end(deps, row, 'failed', 'no_transcript'); return { go: false }; }
   const version = await deps.cliVersion().catch(() => null);
   if (version === null) return { go: false };
-  if (!VERIFIED_RELAY_CLI_VERSIONS.has(version)) { end(deps, row, 'refused', 'unverified_cli'); return { go: false }; }
+  if (!isVerifiedRelayCliVersion(version)) { end(deps, row, 'refused', 'unverified_cli'); return { go: false }; }
   const mode = deps.sessionMode(row.to_session_id, row.to_user_id);
   if (mode === null) { end(deps, row, 'refused', 'mode_unknown'); return { go: false }; }
+  if (row.hold_id) {
+    if (!deps.holdGate) { end(deps, row, 'refused', 'hold_gate_unavailable'); return { go: false }; }
+    if (deps.holdGate(row, mode)) return { go: false };
+  }
   if (modeCategory(mode) !== row.from_mode) { end(deps, row, 'refused', 'mode_mismatch_at_delivery'); return { go: false }; }
   const percent = row.to_user_id === null ? null : await deps.quotaPercent(row.to_user_id).catch(() => null);
   if (percent !== null && percent >= PEER_QUOTA_DEFER_PERCENT) {
@@ -168,7 +196,8 @@ async function settle(deps: PeerDispatcherDependencies, claimed: PeerMessageRow,
     deps.transition(claimed.id, 'delivering', 'queued', { cause: 'session_busy', nextAttemptAt: nowMs + BUSY_RETRY_MS,
       nowMs, refundAttempt: true });
   } else if (outcome.permanent || claimed.attempts >= MAX_ATTEMPTS) {
-    deps.transition(claimed.id, 'delivering', 'failed', { cause: outcome.code ?? 'no_delivery_proof', nowMs });
+    const cause = outcome.code ?? 'no_delivery_proof';
+    if (deps.transition(claimed.id, 'delivering', 'failed', { cause, nowMs })) releaseHold(deps, claimed, 'failed', cause);
   } else {
     deps.transition(claimed.id, 'delivering', 'queued', { cause: outcome.code ?? (outcome.started ? 'no_delivery_proof' : 'not_started'),
       nextAttemptAt: nowMs + RETRY_BACKOFF_MS, nowMs });
@@ -195,8 +224,10 @@ async function runClaimed(deps: PeerDispatcherDependencies, claimed: PeerMessage
 export async function deliverPeerRow(deps: PeerDispatcherDependencies, row: PeerMessageRow): Promise<void> {
   const verdict = await gate(deps, row);
   if (!verdict.go) return;
+  // Frame from the row, never from text: a row promoted from a hold is F2 (reviewed).
+  const frame = row.hold_id ? { kind: 'reviewed' as const, memberName: deps.memberName?.(row.from_user_id) ?? 'member' } : undefined;
   const wrapped = buildPeerWrapper({ fromSessionId: row.from_session_id, fromName: deps.senderName(row.from_session_id),
-    fromMode: row.from_mode, ref: row.ref_token, body: row.body });
+    fromMode: row.from_mode, ref: row.ref_token, body: row.body, frame });
   if (!wrapped) { end(deps, row, 'failed', 'invalid_attributes'); return; }
   // Both baselines before the turn: the total delta first, the cost ledger for a missing/negative one.
   const costs: Costs = { baseline: deps.costBaseline(row.to_session_id),
@@ -214,6 +245,8 @@ export type PeerDispatcher = {
   start: () => void;
   /** Drain: claim nothing from now on (in-flight delivery finishes). */
   pause: () => void;
+  /** Undoes pause (the test seam's resume; production never pauses and resumes). */
+  resume: () => void;
   stop: () => void;
   /** Asks for a tick soon (a row was queued). */
   kick: () => void;
@@ -238,6 +271,11 @@ export function createPeerDispatcher(deps: PeerDispatcherDependencies): PeerDisp
   let timer: ReturnType<typeof setInterval> | null = null;
   // One row per target (listDeliverable), at most BATCH concurrent deliveries.
   const pass = async (): Promise<void> => {
+    try {
+      deps.sweep?.();
+    } catch (error) {
+      deps.log('error', 'peer hold sweep failed', { error: error instanceof Error ? error.message : String(error) });
+    }
     const rows = deps.listDeliverable(deps.now(), BATCH);
     await Promise.all(rows.map((row) => (paused ? undefined : deliverPeerRow(deps, row))));
   };
@@ -261,6 +299,7 @@ export function createPeerDispatcher(deps: PeerDispatcherDependencies): PeerDisp
       timer.unref?.();
     },
     pause: () => { paused = true; },
+    resume: () => { paused = false; },
     stop: () => {
       paused = true;
       if (timer) clearInterval(timer);

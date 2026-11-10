@@ -24,8 +24,20 @@ const patchHomeDir = (nextHomeDir: string): (() => void) => {
   };
 };
 
-const writeTokenFile = async (homeDir: string, accessToken: string | null): Promise<void> => {
-  const dir = path.join(homeDir, '.gemini', 'antigravity-cli');
+/**
+ * ADR-152 A1 §3.4: the catalog runs on the asking MEMBER's agy tree. A caller
+ * with no member gets the degraded catalog and no fetch — never the operator's
+ * ~/.gemini token.
+ */
+const MEMBER = 7;
+
+const writeTokenFile = async (
+  homeDir: string,
+  accessToken: string | null,
+  owner: 'member' | 'operator' = 'member',
+): Promise<void> => {
+  const base = owner === 'member' ? path.join(homeDir, '.nassaj-users', String(MEMBER)) : homeDir;
+  const dir = path.join(base, '.gemini', 'antigravity-cli');
   await fs.mkdir(dir, { recursive: true });
   const payload =
     accessToken === null
@@ -83,6 +95,25 @@ test('parseCatalog: returns null for unusable bodies', () => {
 
 // ---------------- getAntigravityModelCatalog (integration) ----------------
 
+test('ADR-152 A1: a caller with no member never fetches on the operator\'s ~/.gemini token', async () => {
+  __resetAntigravityCatalogCircuit();
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'agy-catalog-operator-'));
+  const restoreHome = patchHomeDir(tempRoot);
+  await writeTokenFile(tempRoot, 'operator-token', 'operator');
+  const restoreFetch = stubFetch(async () => {
+    throw new Error('fetch must not run on the operator token');
+  });
+  try {
+    assert.deepEqual(await getAntigravityModelCatalog(null), { ...ANTIGRAVITY_FALLBACK_MODELS, degraded: true });
+    assert.deepEqual(await getAntigravityModelCatalog(MEMBER), { ...ANTIGRAVITY_FALLBACK_MODELS, degraded: true },
+      'a member without their own agy link does not reach the operator token either');
+  } finally {
+    restoreFetch();
+    restoreHome();
+    await fs.rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
 test('getAntigravityModelCatalog: falls back when no token file exists', async () => {
   __resetAntigravityCatalogCircuit();
   const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'agy-catalog-notoken-'));
@@ -112,7 +143,7 @@ test('getAntigravityModelCatalog: returns live catalog on a successful fetch', a
     }),
   );
   try {
-    const result = await getAntigravityModelCatalog(null);
+    const result = await getAntigravityModelCatalog(MEMBER);
     assert.ok(result.OPTIONS.some((o) => o.value === 'gemini-9-pro'));
     // A live fetch is authoritative — it must NOT be flagged degraded, so the
     // provider-models cache keeps it under the normal long TTL.
@@ -138,12 +169,12 @@ test('getAntigravityModelCatalog: falls back on HTTP error and opens the breaker
     // Threshold is 3 consecutive failures; the 4th call must be short-circuited
     // by the open breaker and not hit fetch again.
     for (let i = 0; i < 3; i += 1) {
-      const result = await getAntigravityModelCatalog(null);
+      const result = await getAntigravityModelCatalog(MEMBER);
       assert.deepEqual(result, { ...ANTIGRAVITY_FALLBACK_MODELS, degraded: true });
     }
     assert.equal(calls, 3);
 
-    const afterOpen = await getAntigravityModelCatalog(null);
+    const afterOpen = await getAntigravityModelCatalog(MEMBER);
     assert.deepEqual(afterOpen, { ...ANTIGRAVITY_FALLBACK_MODELS, degraded: true });
     assert.equal(calls, 3, 'breaker must be open: no further fetch calls');
   } finally {
@@ -160,16 +191,16 @@ test('B-1284: the catalog breaker tracks the failing identity and a success dele
   __resetAntigravityCatalogCircuit();
   const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'agy-catalog-identity-'));
   const restoreHome = patchHomeDir(tempRoot);
-  await writeTokenFile(tempRoot, 'operator-token');
+  await writeTokenFile(tempRoot, 'member-token');
   let fail = true;
   const restoreFetch = stubFetch(async () => (fail
     ? new Response('unauthorized', { status: 401 })
     : new Response(JSON.stringify({ models: [{ modelId: 'gemini-9-pro' }] }), { status: 200 })));
   try {
-    await getAntigravityModelCatalog(null);
+    await getAntigravityModelCatalog(MEMBER);
     assert.equal(__antigravityCatalogCircuitSize(), 1, 'the failing identity is tracked');
     fail = false;
-    const live = await getAntigravityModelCatalog(null);
+    const live = await getAntigravityModelCatalog(MEMBER);
     assert.ok(live.OPTIONS.some((o) => o.value === 'gemini-9-pro'));
     assert.equal(__antigravityCatalogCircuitSize(), 0, 'success deletes the entry, so the map never grows');
   } finally {

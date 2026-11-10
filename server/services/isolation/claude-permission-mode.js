@@ -18,7 +18,7 @@
  * Claude applies layers 1–2 here and layer 3 inside its own CLI; a harness that
  * mirrors Claude calls resolveClaudeEffectivePermissionMode, which applies all three.
  */
-import { claudeSpawnSettingsFiles, readJsonObject } from './engine-anthropic-credential-guard.js';
+import { readClaudeSpawnSettings } from './claude-spawn-settings.js';
 import { resolveSettingsDefaultMode } from './claude-settings-default-mode.js';
 
 /**
@@ -52,22 +52,9 @@ export function resolveClaudeRequestedPermissionMode(options = {}) {
  * @returns {boolean}
  */
 export function isClaudeBypassDisabledBySettings(env, cwd, ctx = {}) {
-  let files;
-  try {
-    files = claudeSpawnSettingsFiles(env, cwd, ctx.managedSettingsDir);
-  } catch {
-    return true;
-  }
-  for (const { file, label } of files) {
-    let settings;
-    try {
-      settings = readJsonObject(file, label);
-    } catch {
-      return true;
-    }
-    if (settings?.permissions?.disableBypassPermissionsMode === 'disable') return true;
-  }
-  return false;
+  // ADR-221: the shared reader (one classification of every source for all mirrors).
+  return readClaudeSpawnSettings(env, cwd, ctx).some(({ status, settings }) => status === 'unreadable'
+    || settings?.permissions?.disableBypassPermissionsMode === 'disable');
 }
 
 /**

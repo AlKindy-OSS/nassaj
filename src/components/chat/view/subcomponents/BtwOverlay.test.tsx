@@ -19,6 +19,9 @@ vi.mock('react-i18next', () => ({
   }),
 }));
 
+const openSettings = vi.fn();
+vi.mock('../../../../contexts/PaletteOpsContext', () => ({ usePaletteOps: () => ({ openSettings }) }));
+
 import type { BtwState } from '../../hooks/useBtwSideChannel';
 import BtwOverlay from './BtwOverlay';
 
@@ -60,6 +63,21 @@ describe('BtwOverlay', () => {
     render(<BtwOverlay state={state} onClose={() => {}} />);
     const alert = screen.getByRole('alert');
     expect(alert.textContent).toContain('btw.errors.timeout');
+  });
+
+  it('T-2083: CREDENTIAL_NOT_LINKED shows the not-linked notice; an action closes the overlay first', () => {
+    const onClose = vi.fn();
+    const state: BtwState = {
+      btwId: 'b1', forkStatus: 'idle', question: 'سؤال', answer: '', status: 'error',
+      errorCode: 'CREDENTIAL_NOT_LINKED', errorMessage: 'raw server text',
+      errorCredential: { provider: 'claude', reason: 'not_linked', grantorUsername: null, settingsAgent: 'claude' },
+    };
+    render(<BtwOverlay state={state} onClose={onClose} />);
+    const notice = screen.getByTestId('credential-not-linked');
+    expect(notice.textContent).not.toContain('raw server text');
+    fireEvent.click(screen.getByRole('button', { name: /credential\.actions\.linkOwn/ }));
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(openSettings).toHaveBeenCalledWith('agents', { tab: 'agents', agent: 'claude', category: 'account' });
   });
 
   it('B-1647: btw_forbidden maps to its own localized message', () => {

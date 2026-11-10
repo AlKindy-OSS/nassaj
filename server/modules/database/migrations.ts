@@ -75,6 +75,7 @@ import {
 } from '@/modules/database/internal-session-chat-flag.js';
 
 import { migrateLocalModelServers } from './local-model-servers.migration.js';
+import { retireProviderSharing } from './provider-sharing-retirement.migration.js';
 import { migrateSsoOidc } from './sso-oidc-config.migration.js';
 import { migrateUserIdentities } from './user-identities.migration.js';
 import { migrateUsernameLowerUniqueIndex } from './users-username-lower.migration.js';
@@ -3129,6 +3130,11 @@ export const runMigrations = (db: Database) => {
     // existing migration; its FKs need sessions and users only.
     migrateInternalSessionChat(db);
 
+    // ADR-152 A1 §3.2 (T-2083): retire the install-wide sharing policy (retire_provider_sharing_v1).
+    // Needs app_config, users and audit_log. Never throws; inside the connector
+    // fence it defers and initializeDatabase runs it right after the fence.
+    retireProviderSharing(db);
+
     // Refresh the query planner's statistics (sqlite_stat1). Without them SQLite
     // plans on defaults alone and picks indexes on its own guesswork — which is
     // how the sidebar query ended up choosing a two-value boolean index over the
@@ -3154,7 +3160,23 @@ export const runMigrations = (db: Database) => {
 const AUDIT_LOG_RETENTION_DAYS = 90;
 
 /**
- * Prunes audit_log rows older than the retention horizon (T-182, qa-critic D-3).
+ * Audit actions kept past the retention horizon (ADR-152 A1 §3.2): the evidence
+ * of who shared whose credential, and when the install-wide policy was retired.
+ * Pruning them would erase the only record of past credential sharing.
+ */
+export const RETAINED_AUDIT_ACTIONS: readonly string[] = Object.freeze([
+  'provider_sharing_retired',
+  'admin_provider_sharing_update',
+  'provider_sharing_notice_acknowledged',
+  'credential_grant_created',
+  'credential_grant_revoked',
+  'credential_grant_declined',
+  'credential_grant_accepted',
+]);
+
+/**
+ * Prunes audit_log rows older than the retention horizon (T-182, qa-critic D-3),
+ * except the RETAINED_AUDIT_ACTIONS.
  * The audit log is append-only and grows unbounded otherwise; this bounds it to
  * a rolling 90-day window. Called once at boot after runMigrations (best-effort:
  * a prune failure must never block startup). Parameterized + guarded by
@@ -3166,9 +3188,10 @@ export const pruneAuditLog = (db: Database): void => {
       return;
     }
     const cutoff = `-${AUDIT_LOG_RETENTION_DAYS} days`;
+    const placeholders = RETAINED_AUDIT_ACTIONS.map(() => '?').join(', ');
     const result = db
-      .prepare("DELETE FROM audit_log WHERE created_at < datetime('now', ?)")
-      .run(cutoff);
+      .prepare(`DELETE FROM audit_log WHERE created_at < datetime('now', ?) AND action NOT IN (${placeholders})`)
+      .run(cutoff, ...RETAINED_AUDIT_ACTIONS);
     if (result.changes > 0) {
       console.log('Pruned old audit_log rows', { deleted: result.changes });
     }

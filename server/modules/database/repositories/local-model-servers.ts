@@ -5,11 +5,23 @@ export type LocalModelServer = {
   id: string; ownerId: number; providerId: string; name: string; baseUrl: string;
   runtime: 'ollama' | 'lmstudio' | 'llamacpp' | 'vllm' | 'other';
   models: LocalModel[]; createdAt: string; updatedAt: string;
+  /** ADR-227: the vetted IP literals of the last successful connection test ([] = none). */
+  verifiedAddresses?: string[];
 };
-const columns = 'id, owner_id AS ownerId, provider_id AS providerId, name, base_url AS baseUrl, runtime, models_json AS modelsJson, created_at AS createdAt, updated_at AS updatedAt';
+const columns = 'id, owner_id AS ownerId, provider_id AS providerId, name, base_url AS baseUrl, runtime, models_json AS modelsJson, created_at AS createdAt, updated_at AS updatedAt, verified_address AS verifiedAddress';
+/** verified_address holds a JSON array of IP literals (a bare string from before T-2098 r2). */
+const decodeAddresses = (raw: unknown): string[] => {
+  if (typeof raw !== 'string' || raw === '') return [];
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter((value): value is string => typeof value === 'string') : [];
+  } catch {
+    return [raw];
+  }
+};
 const decode = (row: any): LocalModelServer => {
-  const { modelsJson, ...server } = row;
-  return { ...server, models: JSON.parse(modelsJson) };
+  const { modelsJson, verifiedAddress, ...server } = row;
+  return { ...server, models: JSON.parse(modelsJson), verifiedAddresses: decodeAddresses(verifiedAddress) };
 };
 
 export const localModelServersDb = {
@@ -34,7 +46,9 @@ export const localModelServersDb = {
   /** Persists an owner-scoped create/update; ownership is never reassigned. */
   save(server: Omit<LocalModelServer, 'createdAt' | 'updatedAt'>): void {
     getConnection().prepare(`INSERT INTO local_model_servers (id,owner_id,provider_id,name,base_url,runtime,models_json) VALUES (?,?,?,?,?,?,?)
-      ON CONFLICT(id) DO UPDATE SET name=excluded.name, base_url=excluded.base_url, runtime=excluded.runtime, models_json=excluded.models_json, updated_at=datetime('now') WHERE owner_id=excluded.owner_id`)
+      ON CONFLICT(id) DO UPDATE SET name=excluded.name, base_url=excluded.base_url, runtime=excluded.runtime, models_json=excluded.models_json, updated_at=datetime('now'),
+        verified_address=CASE WHEN local_model_servers.base_url = excluded.base_url THEN local_model_servers.verified_address ELSE NULL END
+      WHERE owner_id=excluded.owner_id`)
       .run(server.id, server.ownerId, server.providerId, server.name, server.baseUrl, server.runtime, JSON.stringify(server.models));
   },
   /** Compare-and-swap catalogue: an in-flight fetch cannot resurrect or overwrite edits. */
@@ -42,6 +56,16 @@ export const localModelServersDb = {
     return getConnection().prepare(`UPDATE local_model_servers SET models_json = ?, updated_at = datetime('now')
       WHERE id = ? AND owner_id = ? AND base_url = ? AND runtime = ? AND models_json = ? AND updated_at = ?`)
       .run(JSON.stringify(models), server.id, server.ownerId, server.baseUrl, server.runtime, JSON.stringify(server.models), server.updatedAt).changes === 1;
+  },
+  /**
+   * ADR-227 / T-2098: records (or clears, with null/[]) the vetted address set a
+   * connection test reached. Bound to the base URL the test used, so a concurrent
+   * edit wins; leaves updated_at alone so the catalogue compare-and-swap holds.
+   */
+  setVerifiedAddresses(server: Pick<LocalModelServer, 'id' | 'ownerId' | 'baseUrl'>, addresses: readonly string[] | null): boolean {
+    const value = addresses && addresses.length > 0 ? JSON.stringify([...new Set(addresses)]) : null;
+    return getConnection().prepare('UPDATE local_model_servers SET verified_address = ? WHERE id = ? AND owner_id = ? AND base_url = ?')
+      .run(value, server.id, server.ownerId, server.baseUrl).changes === 1;
   },
   /** Removes only the caller's row; does not signal any running process. */
   remove(id: string, ownerId: number): void {

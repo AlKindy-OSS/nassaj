@@ -34,6 +34,11 @@ import path from 'node:path';
 
 import { localModelProviderBlocks } from './local-model-config.js';
 import {
+  LOCAL_INSTRUCTION_TIER,
+  OPENCODE_LOCAL_CONFIG_SUBDIR,
+  localTaskPermission,
+} from './opencode-local-tier-material.js';
+import {
   ensurePrivateRealDirectory,
   recoverOpenCodeConfigMigration,
   secureNeutralizeOpenCodeFile,
@@ -140,11 +145,15 @@ export function fingerprintOf(content) {
 /**
  * Builds the canonical opencode.json object with the governed `glm` provider block.
  * The provider id is deliberately `glm` (NOT `anthropic`, which would collide with the
- * built-in provider — OCC-2).
+ * built-in provider — OCC-2). The local tier (ADR-LOCAL-INSTR-TIER-001) adds only the
+ * `permission.task` allow-list; provider and limit material stay identical.
  *
- * @returns {{ provider: { glm: { npm: string, options: { baseURL: string }, models: Record<string, { name: string }> } } }}
+ * @param {unknown} [mcp] the MCP overlay to keep
+ * @param {string|number|null} [callerId] owner of the local provider blocks
+ * @param {string|null} [tier] LOCAL_INSTRUCTION_TIER for the local config dir, else null
+ * @returns {{ provider: Record<string, unknown>, permission?: object, mcp?: object }}
  */
-export function buildOpenCodeConfig(mcp, callerId = null) {
+export function buildOpenCodeConfig(mcp, callerId = null, tier = null) {
   const config = {
     provider: {
       [GLM_CARRIER_PROVIDER_ID]: {
@@ -155,6 +164,9 @@ export function buildOpenCodeConfig(mcp, callerId = null) {
       ...localModelProviderBlocks(callerId),
     },
   };
+  if (tier === LOCAL_INSTRUCTION_TIER) {
+    config.permission = localTaskPermission();
+  }
   const overlay = normalizeOpenCodeMcpOverlay(mcp);
   if (Object.keys(overlay).length > 0) {
     config.mcp = overlay;
@@ -228,7 +240,8 @@ export function openCodeConfigMatches(targetPath, expected = serializeOpenCodeCo
     let effectiveExpected = expected;
     if (arguments.length < 2) {
       const parsed = JSON.parse(current.toString('utf8'));
-      effectiveExpected = serializeOpenCodeConfig(buildOpenCodeConfig(parsed?.mcp, callerIdFromConfigPath(targetPath)));
+      const identity = configIdentityFromPath(targetPath);
+      effectiveExpected = serializeOpenCodeConfig(buildOpenCodeConfig(parsed?.mcp, identity.callerId, identity.tier));
     }
     return fingerprintOf(current) === fingerprintOf(effectiveExpected);
   } catch {
@@ -283,7 +296,7 @@ const parseLegacyJsonc = (content) =>
  * to write (fail-safe), so a pre-GL-5 shared symlink is never written THROUGH.
  *
  * @param {string} configDir the per-user XDG_CONFIG_HOME/opencode dir to populate
- * @param {{ mode?: number, callerId?: string | number | null, mcp?: unknown, onError?: (err: unknown) => void, lockHeld?: boolean }} [options]
+ * @param {{ mode?: number, callerId?: string | number | null, tier?: string | null, mcp?: unknown, onError?: (err: unknown) => void, lockHeld?: boolean }} [options]
  * @returns {boolean} whether the config matches the canonical content after the attempt
  */
 export function materializeOpenCodeConfig(configDir, options = {}) {
@@ -367,7 +380,12 @@ function materializeOpenCodeConfigUnlocked(configDir, options = {}) {
       mcp = undefined;
     }
   }
-  const expected = serializeOpenCodeConfig(buildOpenCodeConfig(mcp, options.callerId ?? callerIdFromConfigPath(targetPath)));
+  const identity = configIdentityFromPath(targetPath);
+  const expected = serializeOpenCodeConfig(buildOpenCodeConfig(
+    mcp,
+    options.callerId ?? identity.callerId,
+    options.tier ?? identity.tier,
+  ));
 
   if (openCodeConfigMatches(targetPath, expected)) {
     return true;
@@ -400,8 +418,39 @@ function materializeOpenCodeConfigUnlocked(configDir, options = {}) {
   return openCodeConfigMatches(targetPath, expected);
 }
 
-/** Existing config writers infer identity only from the canonical per-user layout. */
-function callerIdFromConfigPath(targetPath) {
-  const matched = targetPath.replaceAll('\\', '/').match(/\/([1-9][0-9]*)\/\.config\/opencode\/opencode\.json$/u);
-  return matched ? Number(matched[1]) : null;
+const CONFIG_IDENTITY_PATTERN = new RegExp(
+  `/([1-9][0-9]*)/(\\.config|${OPENCODE_LOCAL_CONFIG_SUBDIR.replace('.', '\\.')})/opencode/opencode\\.json$`,
+  'u',
+);
+
+/**
+ * Writers without an explicit identity infer it only from the canonical per-user
+ * layout: `<id>/.config/opencode` (no tier) or `<id>/.config-local/opencode` (local tier).
+ * @param {string} targetPath
+ * @returns {{ callerId: number|null, tier: string|null }}
+ */
+function configIdentityFromPath(targetPath) {
+  const matched = targetPath.replaceAll('\\', '/').match(CONFIG_IDENTITY_PATTERN);
+  if (!matched) return { callerId: null, tier: null };
+  return {
+    callerId: Number(matched[1]),
+    tier: matched[2] === OPENCODE_LOCAL_CONFIG_SUBDIR ? LOCAL_INSTRUCTION_TIER : null,
+  };
+}
+
+/**
+ * The MCP overlay of the governed opencode.json in `configDir`, read without following
+ * a link. A file with no `mcp`, and any read failure (missing file, unmigrated jsonc,
+ * a link or hard link, bad JSON), yield `{}` — the caller then writes NO overlay, so a
+ * removed server (and its credentials) can never survive in a copy made from it.
+ * @param {string} configDir
+ * @returns {Record<string, unknown>}
+ */
+export function readOpenCodeMcpOverlay(configDir) {
+  try {
+    const mcp = JSON.parse(secureReadOpenCodeText(path.join(configDir, OPENCODE_CONFIG_FILENAME)))?.mcp;
+    return mcp && typeof mcp === 'object' && !Array.isArray(mcp) ? mcp : {};
+  } catch {
+    return {};
+  }
 }

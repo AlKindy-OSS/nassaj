@@ -2,7 +2,6 @@ import { randomBytes } from 'node:crypto';
 import { constants } from 'node:fs';
 import { opendir, open, realpath } from 'node:fs/promises';
 import path from 'node:path';
-import os from 'node:os';
 
 import { participantsDb, sessionsDb } from '@/modules/database/index.js';
 import {
@@ -11,7 +10,6 @@ import {
 } from '@/modules/providers/shared/session-transcript.js';
 import { credentialPrincipalId } from '@/services/isolation/credential-principal.js';
 import { userConfigDir } from '@/services/isolation/provision-user-dirs.js';
-import { isProviderIsolated } from '@/services/provider-sharing.js';
 import { AppError } from '@/shared/utils.js';
 import { parseFrontMatter } from '@/shared/frontmatter.js';
 
@@ -50,8 +48,7 @@ function authorize(sessionId: string, provider: string, principal: number | null
 function readOnlyHome(owner: number, provider: string): string {
   if (provider !== 'claude' && provider !== 'codex') return '';
   // T-1675: a session owner running on a granted credential reads the grantor's tree.
-  return isProviderIsolated(provider) ? userConfigDir(credentialPrincipalId(owner, provider), `.${provider}`)
-    : (provider === 'codex' ? process.env.CODEX_HOME : process.env.CLAUDE_CONFIG_DIR) || path.join(os.homedir(), `.${provider}`);
+  return userConfigDir(credentialPrincipalId(owner, provider), `.${provider}`);
 }
 
 function emptyCoverage(supported: boolean, reason: SkillCoverage['reasons'][number] = 'cold_cache'): SkillCoverage {

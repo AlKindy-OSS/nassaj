@@ -79,6 +79,7 @@ vi.mock('./normalizeProviderModel', () => ({
 
 vi.mock('./claudeModelSlot', () => ({
   claudeSlotCatalogProvider: () => 'claude',
+  sanitizeClaudeSlotModel: (_engine: unknown, raw: string | null) => raw ?? 'claude-opus',
 }));
 
 vi.mock('./engineProviderSession', () => ({

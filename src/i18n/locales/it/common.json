@@ -336,7 +336,7 @@
   "governanceBadge": {
     "ungoverned": "Senza governance",
     "tooltip": {
-      "none": "Questa sessione è in esecuzione al di fuori della governance di Nassaj — controlla le impostazioni del provider"
+      "none": "Questa sessione è in esecuzione al di fuori della governance di Nassaj — controlla le impostazioni dell'agente di programmazione"
     }
   },
   "mermaidZoom": {

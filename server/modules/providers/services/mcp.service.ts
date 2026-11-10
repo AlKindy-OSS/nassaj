@@ -105,10 +105,9 @@ export const providerMcpService = {
 
   /**
    * True when this provider's user/local MCP writer targets the CALLER's own config
-   * home (T-1177). The route pairs this with the sharing policy before letting a
-   * plain member write: the policy says WHERE the spawn reads, this says whether the
-   * writer follows the caller — and only both together mean "the member's own tree".
-   * An unknown provider name is not writable-by-member, fail-closed.
+   * home (T-1177). Spawns are always isolated (ADR-152 A1); this says whether the
+   * WRITER follows the caller, which is what "the member's own tree" means for a
+   * write. An unknown provider name is not writable-by-member, fail-closed.
    */
   providerWritesPerUserMcpConfig(providerName: string): boolean {
     try {

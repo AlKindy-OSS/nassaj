@@ -43,7 +43,6 @@
  */
 
 import { readFile } from 'node:fs/promises';
-import os from 'node:os';
 import path from 'node:path';
 
 import type {
@@ -52,7 +51,9 @@ import type {
 } from '@/modules/execution-permissions/index.js';
 import { resolveModelVendor, harnessVendor, type VendorKey } from '@/modules/providers/services/cost/model-vendor.js';
 import { resolveProviderEnv } from '@/services/isolation/resolve-provider-env.js';
+import { resolvedKnob } from '@/services/isolation/resolved-knob.js';
 import { resolveSlotKey } from '@/services/isolation/provider-slot-key.js';
+import { isMemberActor } from '@/services/isolation/credential-actor.js';
 import { credentialPrincipalId } from '@/services/isolation/credential-principal.js';
 import { userConfigDir } from '@/services/isolation/provision-user-dirs.js';
 import type {
@@ -260,9 +261,8 @@ async function fetchJsonDirect(
 // ---------------------------------------------------------------------------
 
 function codexHome(userId: string | number | null): string {
-  const env = resolveProviderEnv(userId, 'codex') as Record<string, string | undefined>;
-  const home = env.CODEX_HOME;
-  return typeof home === 'string' && home.trim() ? home : path.join(os.homedir(), '.codex');
+  // ADR-152 A1 §3.4: no member ⇒ refused by the resolver, never the operator ~/.codex.
+  return resolvedKnob(resolveProviderEnv(userId, 'codex'), 'CODEX_HOME');
 }
 
 async function readCodexAuth(
@@ -374,17 +374,10 @@ async function readGlmQuota(
   userId: string | number | null,
   deps: ProviderQuotaDeps,
 ): Promise<ProviderQuotaWindows | null> {
-  // T-1260 — `process.env.GLM_API_KEY` OUTRANKS the store and is deliberately
-  // left in place. It is a real bypass (an operator-set env var answers for every
-  // member and is invisible to the store, the audit log, and any future sharing
-  // declaration), but removing it here would change which credential this call
-  // spends — a behavioural change wave A is not allowed to make. It is unset in
-  // `.env` today (checked), and closing it is tracked with the declaration work.
-  const key =
-    deps.credential
-    ?? process.env.GLM_API_KEY
-    ?? resolveSlotKey(credentialPrincipalId(userId, 'glm'), 'glm', { sharedFallback: false })?.key
-    ?? null;
+  // B-1744 (ADR-152 A1): the requesting member's own key or a grantor's, never
+  // GLM_API_KEY from the server environment. No key ⇒ "not linked", no call.
+  const key = deps.credential
+    ?? (isMemberActor(userId) ? resolveSlotKey(credentialPrincipalId(userId, 'glm'), 'glm')?.key ?? null : null);
   if (!key) return null;
 
   const body = asRecord(
@@ -451,18 +444,17 @@ async function readGlmQuota(
 // ---------------------------------------------------------------------------
 
 /**
- * ‏`~/.kimi-code/credentials/kimi-code.json` للمشغّل، أو
- * ‏`~/.nassaj-users/<userId>/.kimi/credentials/kimi-code.json` للمستخدم المعزول.
+ * ‏`~/.nassaj-users/<principal>/.kimi/credentials/kimi-code.json` للعضو (أو لمانح
+ * منحته)؛ لا ملفّ المشغّل أبداً (B-1744).
  * نفس قاعدة أدوات الطرف الثالث (‏quota-axi): التوكن صالح فقط إن بقي فيه أكثر
  * من 60 ثانية.
  */
 async function readKimiSubscriptionAuth(
   userId: string | number | null,
 ): Promise<string | null> {
-  const credPath =
-    userId === null || userId === undefined
-      ? path.join(os.homedir(), '.kimi-code', 'credentials', 'kimi-code.json')
-      : path.join(userConfigDir(credentialPrincipalId(userId, 'kimi'), '.kimi'), 'credentials', 'kimi-code.json');
+  // B-1744: a caller with no member reads nobody's login — never the operator's ~/.kimi-code.
+  if (userId === null || !isMemberActor(userId)) return null;
+  const credPath = path.join(userConfigDir(credentialPrincipalId(userId, 'kimi'), '.kimi'), 'credentials', 'kimi-code.json');
   try {
     const raw = await readFile(credPath, 'utf8');
     const data = asRecord(JSON.parse(raw));

@@ -38,15 +38,11 @@ assert.equal(os.homedir(), sandboxHome);
 
 const { initializeDatabase, closeConnection, userDb, credentialGrantsDb } =
   await import('@/modules/database/index.js');
-const { setProviderSharingConfig, _resetProviderSharingCache } =
-  await import('@/services/provider-sharing.js');
 const { resolveProviderEnv } = await import('@/services/isolation/resolve-provider-env.js');
 const { userConfigDir } = await import('@/services/isolation/provision-user-dirs.js');
 const { ClaudeCredentialsWriter } = await import('./claude-credentials.writer.js');
 
 await initializeDatabase();
-_resetProviderSharingCache();
-setProviderSharingConfig({ claude: 'isolated' });
 
 const grantor = userDb.createUser('grantor-a', 'hash', 'user');
 const grantee = userDb.createUser('grantee-b', 'hash', 'user');

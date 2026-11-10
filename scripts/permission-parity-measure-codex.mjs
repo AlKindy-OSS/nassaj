@@ -211,7 +211,7 @@ export const measureCodexCandidate = async ({
 };
 
 const EXPECTED_BODIES = Object.freeze(['claude', 'codex', 'cursor', 'antigravity',
-  'opencode', 'kimi', 'deepseek', 'glm', 'hermes', 'qwen', 'sakana']);
+  'opencode', 'kimi', 'deepseek', 'glm', 'hermes', 'qwen', 'sakana', 'dsh']);
 
 const artifactPayload = ({ schemaVersion, reference, candidates, unavailableBodies }) =>
   ({ schemaVersion, reference, candidates, unavailableBodies });

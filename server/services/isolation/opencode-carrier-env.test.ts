@@ -47,8 +47,8 @@ process.env.NASSAJ_PROVIDER_SECRETS_KEY = crypto.randomBytes(32).toString('base6
 assert.equal(os.homedir(), sandboxHome, 'os.homedir() must honor the sandboxed $HOME');
 
 const { initializeDatabase, closeConnection } = await import('@/modules/database/index.js');
-const { setProviderSharingConfig, _resetProviderSharingCache } = await import('../provider-sharing.js');
-const { resolveProviderEnv } = await import('./resolve-provider-env.js');
+const { resolveProviderEnv, INHERITED_CREDENTIAL_ENV } = await import('./resolve-provider-env.js');
+const { SYSTEM_ACTOR } = await import('./credential-actor.js');
 
 await initializeDatabase();
 
@@ -89,11 +89,6 @@ function assertNoAnthropicNamespace(env: NodeJS.ProcessEnv): void {
   }
 }
 
-function isolateOpencode(): void {
-  _resetProviderSharingCache();
-  setProviderSharingConfig({ opencode: 'isolated' });
-}
-
 /**
  * A deliberately "dirty" operator env: it carries every sensitive namespace a
  * leaked parent process could pass down. carrier mode must scrub it; chat mode
@@ -116,7 +111,6 @@ function dirtyEnv(): NodeJS.ProcessEnv {
 
 describe('GL-4 — opencode carrier (agent) mode sanitizes the child env', () => {
   it('strips inherited ANTHROPIC_*/CLAUDE_*/OAuth/*_BASE_URL from the carrier child', () => {
-    isolateOpencode();
     const uid = 800;
     const env = resolveProviderEnv(uid, 'opencode', dirtyEnv(), 'agent');
 
@@ -132,7 +126,6 @@ describe('GL-4 — opencode carrier (agent) mode sanitizes the child env', () =>
   });
 
   it('keeps XDG isolation and the GLM_ key namespace intact in carrier mode', () => {
-    isolateOpencode();
     const uid = 801;
     const env = resolveProviderEnv(uid, 'opencode', dirtyEnv(), 'agent');
 
@@ -140,16 +133,15 @@ describe('GL-4 — opencode carrier (agent) mode sanitizes the child env', () =>
     for (const [k, v] of Object.entries(xdgOverrides(uid))) {
       assert.equal(env[k], v, `${k} must survive sanitize`);
     }
-    // Benign + the carrier's own key namespace survive (GLM key comes from
-    // auth.json, but if present in env it must NOT be stripped — sanitize keeps
-    // KIMI_/DEEPSEEK_/GLM_/ZAI_ deliberately).
+    // Benign vars survive. The GLM key comes from the member's auth.json; an
+    // INHERITED GLM_API_KEY is stripped like every inherited credential
+    // (ADR-152 A1 §3.5), so it reaches no child.
     assert.equal(env.PATH, '/usr/bin');
     assert.equal(env.LANG, 'en_US.UTF-8');
-    assert.equal(env.GLM_API_KEY, 'sk-glm-should-survive');
+    assert.equal(env.GLM_API_KEY, undefined);
   });
 
   it('carrier mode produces a STRICTLY different env than chat mode (GL-4 is active)', () => {
-    isolateOpencode();
     const uid = 802;
     const agent = resolveProviderEnv(uid, 'opencode', dirtyEnv(), 'agent');
     const chat = resolveProviderEnv(uid, 'opencode', dirtyEnv(), 'chat');
@@ -159,7 +151,6 @@ describe('GL-4 — opencode carrier (agent) mode sanitizes the child env', () =>
 
 describe('GL-4 — opencode chat/legacy is byte-for-byte pre-GL-4 (anthropic target intact)', () => {
   it("legacy 3-arg === mode 'chat' and equals the exact pre-GL-4 result", () => {
-    isolateOpencode();
     const uid = 810;
 
     const legacy = resolveProviderEnv(uid, 'opencode', dirtyEnv());
@@ -185,13 +176,14 @@ describe('GL-4 — opencode chat/legacy is byte-for-byte pre-GL-4 (anthropic tar
     };
     delete expected.ANTHROPIC_API_KEY;
     delete expected.ANTHROPIC_AUTH_TOKEN;
+    // ADR-152 A1 §3.5: every inherited credential is pre-stripped by the resolver.
+    for (const name of INHERITED_CREDENTIAL_ENV) delete expected[name];
 
     assert.deepEqual(chat, legacy, 'mode "chat" must equal the legacy 3-arg call');
     assert.deepEqual(chat, expected, 'chat mode must be pre-GL-4 apart from the B-378 strip');
   });
 
   it('the built-in anthropic DEFAULT_TARGET path is NOT broken (chat is not sanitized)', () => {
-    isolateOpencode();
     const uid = 811;
     const chat = resolveProviderEnv(uid, 'opencode', dirtyEnv(), 'chat');
 
@@ -200,7 +192,8 @@ describe('GL-4 — opencode chat/legacy is byte-for-byte pre-GL-4 (anthropic tar
     // does NOT (it must keep reaching the iron-rule guard, which rejects a
     // competitor host loudly instead of falling back in silence).
     assert.equal(chat.ANTHROPIC_BASE_URL, 'https://api.anthropic.com');
-    assert.equal(chat.CLAUDE_CODE_OAUTH_TOKEN, 'oauth-owner-subscription');
+    // ADR-152 A1 §3.5: an inherited Claude OAuth token reaches no child at all.
+    assert.equal(chat.CLAUDE_CODE_OAUTH_TOKEN, undefined);
     assert.equal(chat.GITHUB_TOKEN, 'ghp_operator');
     assert.equal(chat.SOME_VENDOR_BASE_URL, 'https://intruder.example');
 
@@ -227,16 +220,15 @@ describe('GL-4 — seam contracts unchanged for anonymous / shared opencode', ()
     return base;
   };
 
-  it('anonymous (null userId) carrier spawn is not sanitized by the GL-4 seam', () => {
-    isolateOpencode();
-    const env = resolveProviderEnv(null, 'opencode', dirtyEnv(), 'agent');
-    assert.deepEqual(env, baselineAfterHostStrip());
+  it('a null carrier actor is refused (ADR-152 A1 §3.4); the system actor is sanitized too', () => {
+    assert.throws(() => resolveProviderEnv(null, 'opencode', dirtyEnv(), 'agent'), { code: 'CREDENTIAL_ACTOR_REQUIRED' });
+    const env = resolveProviderEnv(SYSTEM_ACTOR as never, 'opencode', dirtyEnv(), 'agent');
+    assertNoAnthropicNamespace(env);
   });
 
-  it('shared-by-policy opencode carrier spawn is not sanitized by the GL-4 seam', () => {
-    _resetProviderSharingCache();
-    setProviderSharingConfig({ opencode: 'shared' });
+  it('ADR-152 A1: a member carrier spawn is always isolated AND sanitized (no shared mode)', () => {
     const env = resolveProviderEnv(812, 'opencode', dirtyEnv(), 'agent');
-    assert.deepEqual(env, baselineAfterHostStrip());
+    assertNoAnthropicNamespace(env);
+    assert.ok(String(env.XDG_DATA_HOME).includes(`${path.sep}.nassaj-users${path.sep}812`));
   });
 });

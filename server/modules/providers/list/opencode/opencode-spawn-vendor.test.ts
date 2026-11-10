@@ -191,7 +191,7 @@ test('model ids mirror the measured vendor fallback catalogs; catalogue env name
     assert.deepEqual(cell?.delivery, { kind: 'spawn', env: row.keyEnv }, row.id);
     assert.equal(catalogueRow?.secretId, row.slot, row.id);
     assert.equal(cell?.keyOwner, 'sender');
-    assert.equal(cell?.sharedFallback, false);
+    assert.equal(Object.hasOwn(cell ?? {}, 'sharedFallback'), false, 'the install-wide fallback field is retired');
   }
 });
 

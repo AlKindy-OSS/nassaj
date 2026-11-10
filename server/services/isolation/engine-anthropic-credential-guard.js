@@ -23,7 +23,7 @@ import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { isAnthropicHostAllowed } from './anthropic-base-url-guard.js';
+import { isAnthropicHostAllowed, normalizeAuthorizedOrigin } from './anthropic-base-url-guard.js';
 
 export const ENGINE_ANTHROPIC_CREDENTIAL_CODE = 'ENGINE_ANTHROPIC_CREDENTIAL_EXPOSED';
 
@@ -42,6 +42,18 @@ const SPAWN_ENV_FORBIDDEN = Object.freeze([
 /** In a settings `env` block ANTHROPIC_AUTH_TOKEN would override the engine key
  * we set, so a settings file may not carry it either. */
 export const SETTINGS_ENV_FORBIDDEN = Object.freeze([...SPAWN_ENV_FORBIDDEN, 'ANTHROPIC_AUTH_TOKEN']);
+
+/**
+ * ADR-227 / T-2098 (qa item 5): env names that re-route or re-trust a local-engine
+ * run without touching ANTHROPIC_BASE_URL — a proxy (both spellings; NO_PROXY
+ * decides which hosts bypass it), a Node loader, or disabled TLS checks. The
+ * local-engine env strips them; a settings `env` block may not set them either.
+ */
+export const LOCAL_ENGINE_ROUTE_OVERRIDE_KEYS = Object.freeze([
+  'HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'NO_PROXY',
+  'http_proxy', 'https_proxy', 'all_proxy', 'no_proxy',
+  'NODE_OPTIONS', 'NODE_TLS_REJECT_UNAUTHORIZED',
+]);
 
 /** Top-level settings keys that make the CLI produce a credential. */
 export const SETTINGS_TOP_LEVEL_FORBIDDEN = Object.freeze(['apiKeyHelper']);
@@ -135,9 +147,10 @@ export function readJsonObject(file, label, opts = {}) {
  * @param {Record<string, unknown>} settings
  * @param {string} label
  * @param {string} file
+ * @param {boolean} [localEngine] also refuse the local-engine route overrides
  * @returns {Array<{source:string, file:string, key:string}>}
  */
-function settingsFindings(settings, label, file) {
+function settingsFindings(settings, label, file, localEngine = false) {
   const findings = [];
   for (const key of SETTINGS_TOP_LEVEL_FORBIDDEN) {
     if (isPresent(settings[key])) findings.push({ source: label, file, key });
@@ -147,7 +160,8 @@ function settingsFindings(settings, label, file) {
   if (typeof env !== 'object' || Array.isArray(env)) {
     return [...findings, { source: label, file, key: '<malformed-env>' }];
   }
-  for (const key of SETTINGS_ENV_FORBIDDEN) {
+  const forbidden = localEngine ? [...SETTINGS_ENV_FORBIDDEN, ...LOCAL_ENGINE_ROUTE_OVERRIDE_KEYS] : SETTINGS_ENV_FORBIDDEN;
+  for (const key of forbidden) {
     if (isPresent(env[key])) findings.push({ source: label, file, key: `env.${key}` });
   }
   return findings;
@@ -249,12 +263,17 @@ function globalConfigFiles(env, configDir, home) {
  * flag-enabled Bedrock/Vertex and operator-allowlisted proxies
  * (NASSAJ_ALLOWED_ANTHROPIC_HOSTS in the same env) are not engine routing, the
  * same rule the server-side guard applies. An unparseable URL counts as routed.
+ * ADR-227: a base URL whose normalized origin is one of `engineOrigins` (a
+ * caller-owned local model server) is routed by definition; loopback/private
+ * hosts can no longer be admitted through NASSAJ_ALLOWED_ANTHROPIC_HOSTS either.
  * @param {NodeJS.ProcessEnv} env
+ * @param {Set<string>|null} [engineOrigins] origins the local-engine verdict authorized
  * @returns {boolean}
  */
-export function isEngineRoutedEnv(env) {
+export function isEngineRoutedEnv(env, engineOrigins = null) {
   const raw = env.ANTHROPIC_BASE_URL;
   if (typeof raw !== 'string' || raw.trim() === '') return false;
+  if (engineOrigins instanceof Set && engineOrigins.has(normalizeAuthorizedOrigin(raw) ?? '')) return true;
   let host;
   try {
     host = new URL(raw.trim()).hostname.toLowerCase().replace(/\.$/, '');
@@ -312,9 +331,10 @@ export function credentialRefusal(findings) {
  * legitimately carry ANTHROPIC_API_KEY.
  *
  * @param {NodeJS.ProcessEnv} env the exact env the child will receive
- * @param {{cwd?: string|null, managedSettingsDir?: string}} [ctx] the child's
+ * @param {{cwd?: string|null, managedSettingsDir?: string, localEngine?: boolean}} [ctx] the child's
  *   working directory (defaults to this process's cwd, which is what the CLI
- *   inherits when the spawn sets none); managedSettingsDir is a test seam
+ *   inherits when the spawn sets none); localEngine (ADR-227) also refuses
+ *   LOCAL_ENGINE_ROUTE_OVERRIDE_KEYS in settings env; managedSettingsDir is a test seam
  * @returns {void}
  * @throws {Error} code ENGINE_ANTHROPIC_CREDENTIAL_EXPOSED
  */
@@ -331,7 +351,7 @@ export function assertNoAnthropicCredentialForEngine(env, ctx = {}) {
 
   for (const { file, label } of settingsFiles(configDir, cwd, managedDir)) {
     const settings = readJsonObject(file, label);
-    if (settings) findings.push(...settingsFindings(settings, label, file));
+    if (settings) findings.push(...settingsFindings(settings, label, file, ctx.localEngine === true));
   }
   for (const file of globalConfigFiles(env, configDir, home)) {
     const config = readJsonObject(file, 'global config', { retryOnce: true });

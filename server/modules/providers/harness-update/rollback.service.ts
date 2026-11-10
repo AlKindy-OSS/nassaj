@@ -35,6 +35,7 @@ import { getHarnessDescriptor, parseVersionOutput, type HarnessDescriptor } from
 import { releaseHarnessFileLock } from './harness-lock.js';
 import { activeHarnessJobId, releaseHarnessLease } from './lease.js';
 import { completeRestore } from './restore-engine.js';
+import { listNpmLockRollbackOffers, startNpmLockRollback } from './npm-lock/npm-lock-jobs.js';
 import { assertNoOriginConflict, verifyBinarySnapshot } from './snapshot/binary-snapshot.js';
 import { snapshotError } from './snapshot/errors.js';
 import {
@@ -135,6 +136,12 @@ export interface ManualRollbackRequest {
  * HARNESS_UPDATE_IN_PROGRESS | HARNESS_RECOVERY_FAILED, 423 store in use.
  */
 export async function startManualRollback(req: ManualRollbackRequest, perCall: Partial<SnapshotRuntime> = {}): Promise<HarnessUpdateJob> {
+  const lockDescriptor = getHarnessDescriptor(req.harness);
+  if (lockDescriptor?.installMethod === 'npm-lock') {
+    // T-2086 S4: the kept previous version is the rollback target (no snapshot).
+    parseScope(req.scope);
+    return startNpmLockRollback(lockDescriptor, resolveSnapshotRuntime(perCall), { userId: req.userId, offerId: req.jobId });
+  }
   const d = snapshotDescriptor(req.harness);
   const scope = parseScope(req.scope);
   const rt = resolveSnapshotRuntime(perCall);
@@ -405,6 +412,7 @@ function summaryOf(rt: SnapshotRuntime, d: HarnessDescriptor, m: HarnessSnapshot
 export function listHarnessSnapshots(harness: string, perCall: Partial<SnapshotRuntime> = {}): HarnessSnapshotSummary[] {
   const d = getHarnessDescriptor(harness);
   if (!d) throw snapshotError('SNAPSHOT_NOT_FOUND');
+  if (d.installMethod === 'npm-lock') return listNpmLockRollbackOffers(resolveSnapshotRuntime(perCall).home);
   if (!d.snapshot) return [];
   const rt = resolveSnapshotRuntime(perCall);
   return listHarnessManifests(rt.snapshotRoot, d.id)

@@ -54,7 +54,7 @@ const enoent = (): SyncResult => ({
 
 test('getStatus reports installed=false when the machine release is absent', async () => {
   nextSyncResult = enoent();
-  const status = await new CodexProviderAuth(() => false).getStatus();
+  const status = await new CodexProviderAuth(() => false).getStatus(7);
   assert.equal(status.provider, 'codex');
   assert.equal(status.installed, false);
 });
@@ -62,7 +62,7 @@ test('getStatus reports installed=false when the machine release is absent', asy
 test('T-1872: a PATH codex never counts as installed without the machine release', async () => {
   nextSyncResult = { status: 0 };
   delete process.env.CODEX_PATH;
-  const status = await new CodexProviderAuth().getStatus();
+  const status = await new CodexProviderAuth().getStatus(7);
   assert.equal(status.installed, false);
 });
 
@@ -71,21 +71,21 @@ test('T-1872: the machine release counts as installed even when PATH has no code
   const machine = createCodexMachineFixture(path.join(HOME_DIR, 'machine'));
   process.env.CODEX_PATH = machine.launcher;
   try {
-    const status = await new CodexProviderAuth().getStatus();
+    const status = await new CodexProviderAuth().getStatus(7);
     assert.equal(status.installed, true);
     assert.equal(status.authenticated, false);
   } finally { delete process.env.CODEX_PATH; }
 });
 
 test('getStatus reports installed=true + authenticated=true when an API key is configured', async () => {
-  const codexDir = path.join(HOME_DIR, '.codex');
+  const codexDir = path.join(HOME_DIR, '.nassaj-users', '7', '.codex');
   await mkdir(codexDir, { recursive: true });
   await writeFile(
     path.join(codexDir, 'auth.json'),
     JSON.stringify({ OPENAI_API_KEY: 'sk-test-xxx' }),
     'utf8',
   );
-  const status = await new CodexProviderAuth(() => true).getStatus();
+  const status = await new CodexProviderAuth(() => true).getStatus(7);
   assert.equal(status.installed, true);
   assert.equal(status.authenticated, true);
   assert.equal(status.method, 'api_key');
@@ -117,23 +117,23 @@ test('S3: resolveCodexEffectiveAuth encodes the measured Codex precedence', asyn
 });
 
 test('S3: getStatus reports the credential that runs, not just the first one found', async () => {
-  const codexDir = path.join(HOME_DIR, '.codex');
+  const codexDir = path.join(HOME_DIR, '.nassaj-users', '7', '.codex');
   await mkdir(codexDir, { recursive: true });
   const tokens = { id_token: 'h.p.s', access_token: 'DUMMY' };
   const write = (auth: object) => writeFile(path.join(codexDir, 'auth.json'), JSON.stringify(auth), 'utf8');
 
   await write({ auth_mode: 'apikey', OPENAI_API_KEY: 'sk-d', tokens });
-  let status = await new CodexProviderAuth(() => true).getStatus();
+  let status = await new CodexProviderAuth(() => true).getStatus(7);
   assert.equal(status.method, 'api_key');
   assert.equal(status.authMode, 'both');
 
   await write({ auth_mode: 'chatgpt', OPENAI_API_KEY: 'sk-d', tokens });
-  status = await new CodexProviderAuth(() => true).getStatus();
+  status = await new CodexProviderAuth(() => true).getStatus(7);
   assert.equal(status.method, 'credentials_file');
   assert.equal(status.authMode, 'both');
 
   await write({ auth_mode: 'apikey', OPENAI_API_KEY: null, tokens });
-  status = await new CodexProviderAuth(() => true).getStatus();
+  status = await new CodexProviderAuth(() => true).getStatus(7);
   assert.equal(status.authenticated, false);
   assert.equal(status.authMode, 'subscription_oauth');
 });

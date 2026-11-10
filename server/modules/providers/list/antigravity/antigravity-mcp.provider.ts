@@ -1,9 +1,9 @@
-import os from 'node:os';
 import path from 'node:path';
 import type { Stats } from 'node:fs';
 
 import { McpProvider } from '@/modules/providers/shared/mcp/mcp.provider.js';
 import { resolveProviderEnv } from '@/services/isolation/resolve-provider-env.js';
+import { resolvedKnob } from '@/services/isolation/resolved-knob.js';
 import type { McpScope, ProviderMcpServer, UpsertProviderMcpServerInput } from '@/shared/types.js';
 import {
   AppError,
@@ -14,6 +14,8 @@ import {
   readStringRecord,
   writeJsonConfigAtomic,
 } from '@/shared/utils.js';
+import os from 'node:os';
+import { isMemberActor } from '@/services/isolation/credential-actor.js';
 
 const jsonTransactionConfig = (snapshot: string | null): Record<string, unknown> => {
   if (snapshot === null) return {};
@@ -46,8 +48,11 @@ export class AntigravityMcpProvider extends McpProvider {
         statusCode: 400,
       });
     }
-    const env = resolveProviderEnv(userId ?? null, 'agy', process.env);
-    return path.join(env.HOME || os.homedir(), '.gemini', 'config', 'mcp_config.json');
+    // ADR-152 A1: an MCP config file is not a credential. A member always resolves to
+    // their own tree; a caller with NO member (an operator-scoped placement) names the
+    // operator's config file explicitly, never through the credential resolver.
+    const home = isMemberActor(userId) ? resolvedKnob(resolveProviderEnv(userId, 'agy', process.env), 'HOME') : os.homedir();
+    return path.join(home, '.gemini', 'config', 'mcp_config.json');
   }
 
   protected async readScopedServers(

@@ -258,13 +258,13 @@ async function withEnv(
   }
 }
 
-/** Drives queryCodex once (anonymous) and returns the captured threadOptions. */
+/** Drives queryCodex once (as the test member) and returns the captured threadOptions. */
 async function spawnAndCapture(options: Record<string, unknown>): Promise<ThreadOptions | undefined> {
   const before = threadStarts.length;
   await queryCodex(
     'ping',
     { cwd: sandboxCwd, model: 'gpt-5-codex', ...options },
-    makeWs(options.sessionId ? permissionTestUser.id : null),
+    makeWs(permissionTestUser.id),
   );
   assert.equal(
     threadStarts.length,
@@ -510,7 +510,7 @@ describe('queryCodex live spawn — sandbox ceiling regression (T-884)', () => {
     const bwrap = path.join(codexMachine.release, 'codex-resources', 'bwrap');
     const original = fs.readFileSync(bwrap);
     fs.appendFileSync(bwrap, 'tampered');
-    const ws = makeWs(null);
+    const ws = makeWs(permissionTestUser.id);
     try {
       await queryCodex('ping', { cwd: sandboxCwd, model: 'gpt-5-codex', permissionExecution: {
         launchIdentity: identity,
@@ -530,7 +530,7 @@ describe('queryCodex live spawn — sandbox ceiling regression (T-884)', () => {
     process.env.CODEX_PATH = path.join(sandbox, 'absent', 'codex');
     const before = codexStarts.length;
     const trace: string[] = [];
-    const ws = makeWs(null);
+    const ws = makeWs(permissionTestUser.id);
     try {
       await queryCodex('ping', { cwd: sandboxCwd, model: 'gpt-5-codex', permissionExecution: {
         launchIdentity: null,
@@ -551,7 +551,7 @@ describe('queryCodex live spawn — sandbox ceiling regression (T-884)', () => {
   it('T-1872 M1: an admission without an identity never re-acquires one, even when it would resolve', async () => {
     const before = codexStarts.length;
     const trace: string[] = [];
-    const ws = makeWs(null);
+    const ws = makeWs(permissionTestUser.id);
     // CODEX_PATH points at a valid fixture release: a re-acquisition here would succeed.
     await queryCodex('ping', { cwd: sandboxCwd, model: 'gpt-5-codex', permissionExecution: {
       launchIdentity: null,
@@ -898,7 +898,7 @@ describe('queryCodex new-chat session bind (T-1910 S2)', () => {
 
   it('a refused bind stops the turn in-process like any other mid-turn failure', async () => {
     const trace: string[] = [];
-    const ws = makeWs(null);
+    const ws = makeWs(permissionTestUser.id);
     runStreamedEvents = async function* started() {
       yield { type: 'thread.started', thread_id: THREAD };
       yield { type: 'item.completed', item: { type: 'agent_message', id: 'item_1', text: 'never seen' } };
@@ -941,7 +941,7 @@ describe('queryCodex turn processes (ADR-206 S3/S4)', () => {
 
   const runTurn = async (events: () => AsyncGenerator<unknown, void, unknown>) => {
     const trace: string[] = [];
-    const ws = makeWs(null);
+    const ws = makeWs(permissionTestUser.id);
     const before = { ...processCalls, cleanup: processCalls.cleanup.length, registered: processCalls.registered.length };
     runStreamedEvents = events;
     try {
@@ -1085,8 +1085,8 @@ describe('queryCodex turn processes (ADR-206 S3/S4)', () => {
     });
     const tagged = () => codexStarts.filter(start => start.env?.CCUI_PROCESS_TAG === TAG).length;
     const before = tagged();
-    await queryCodex('ping', { cwd: sandboxCwd, model: 'gpt-5-codex', permissionExecution: once }, makeWs(null));
-    await queryCodex('ping', { cwd: sandboxCwd, model: 'gpt-5-codex', permissionExecution: once }, makeWs(null));
+    await queryCodex('ping', { cwd: sandboxCwd, model: 'gpt-5-codex', permissionExecution: once }, makeWs(permissionTestUser.id));
+    await queryCodex('ping', { cwd: sandboxCwd, model: 'gpt-5-codex', permissionExecution: once }, makeWs(permissionTestUser.id));
     assert.equal(tagged() - before, 1);
     assert.deepEqual(trace.filter(entry => entry === 'consume'), ['consume']);
   });
@@ -1136,7 +1136,7 @@ describe('queryCodex helpers lease (ADR-206 S2)', () => {
     runStreamedEvents = events;
     try {
       await queryCodex('ping', { cwd: sandboxCwd, model: 'gpt-5-codex', permissionExecution: await handle(trace, overrides) },
-        makeWs(null));
+        makeWs(permissionTestUser.id));
     } finally { runStreamedEvents = null; }
     return {
       trace,
@@ -1153,7 +1153,7 @@ describe('queryCodex helpers lease (ADR-206 S2)', () => {
       yield reply;
       yield { type: 'turn.completed', usage: null };
     });
-    assert.deepEqual(reserve, [{ tag: TAG, userId: null }]);
+    assert.deepEqual(reserve, [{ tag: TAG, userId: permissionTestUser.id }]);
     assert.equal(first.length, 1);
     assert.equal(first[0].tag, TAG);
     assert.equal(finish.length, 1);

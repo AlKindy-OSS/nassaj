@@ -55,7 +55,7 @@ export const ENGINE_API_TIMEOUT_MS = '3000000';
  * and applies it to `env` when it can be honoured.
  *
  * @param {NodeJS.ProcessEnv} env spawn env to mutate IN PLACE (already cloned by the caller)
- * @param {string|number|null} userId authenticated user id (null = shared single-user store)
+ * @param {string|number|null} userId the caller (no member ⇒ no key ⇒ `missing_key`)
  * @param {string|null|undefined} provider engine provider id (kimi/glm)
  * @returns {EngineEnvVerdict} `none` when no engine was asked for, `applied` with
  *   the authorized hostname set, or `unavailable` with the reason. Nothing is
@@ -78,31 +78,10 @@ export function applyClaudeEngineProviderEnv(env, userId, provider) {
     return { status: 'unavailable', provider: requested, reason: 'not_eligible' };
   }
 
-  // (c) Resolve the key: the member's own first, the ORG key second.
-  //
-  // T-1208 — WHY AN ORG FALLBACK IS CORRECT HERE, AND WHY IT IS NOT KEY SHARING.
-  // nassaj is the vendor's customer: one account, one bill, one API key metered
-  // by consumption. Its members are users INSIDE this app, not seats at the
-  // vendor — which is the ordinary shape of every server that calls a paid API
-  // on its users' behalf. This is categorically unlike routing a personal
-  // SUBSCRIPTION (a per-human seat) through a harness, which stays forbidden and
-  // is enforced elsewhere; conflating the two is what made an earlier guard
-  // block the team over a rule that never applied to them.
-  //
-  // Order is load-bearing, not cosmetic:
-  //   • the member's own key WINS whenever one exists, so a user who brings
-  //     their own credential is never silently billed to the org — and the
-  //     cross-user isolation this seam was built for (B-222) is untouched;
-  //   • the operator-wide slot is consulted only when that member has none,
-  //     which is the normal case here: members are non-technical and are not
-  //     asked to obtain vendor keys.
-  //
-  // `userId ?? SYSTEM_SCOPE` did NOT already do this: every spawn passes a real
-  // userId, so the org store was unreachable in practice and a member with no
-  // personal key was refused with `missing_key` while an org key sat unused.
-  // T-1260 moved that precedence into resolveSlotKey unchanged — this site is
-  // where `sharedFallback: true` originally came from (T-1208).
-  const resolved = resolveSlotKey(userId, requested, { sharedFallback: true });
+  // (c) Resolve the key: the caller's OWN key only (ADR-152 A1 §3.8, D1). The
+  // install-wide slot that T-1208 fell back to is inert; a member with no key
+  // of their own is refused with `missing_key`, never billed to someone else.
+  const resolved = resolveSlotKey(userId, requested);
   const token = resolved?.key ?? null;
 
   // No key anywhere: inject nothing and refuse. Returning early here is what

@@ -53,25 +53,22 @@
  *              IRON RULE above is preserved. deepseek/glm have no native CLI and
  *              ignore mode entirely.
  *
- * Whether a given provider is isolated at all is now an admin-configurable
- * policy (see services/provider-sharing.js). resolveProviderEnv consults
- * isProviderIsolated(provider) on every call: when a provider is marked
- * 'shared' the base (operator) environment is returned unchanged even for
- * claude/codex; when marked 'isolated' the per-user override is applied.
- * The default policy is now 'isolated' for every provider that HAS an isolation
- * case (ADR-105, superseding the ADR-016 default): nassaj is open source, so a
- * fresh install belongs to somebody else's team, and defaulting to shared there
- * spends one person's credentials on another's work.
+ * Every known provider is ALWAYS isolated per user (ADR-152 amendment 1): the
+ * install-wide sharing policy is retired, no role or stored value can return
+ * the operator environment to a member, and another member's credential is
+ * reachable only through a grant its owner made (credential-principal.js).
  *
  * Conversations/instructions stay SHARED: provisionUserDirs symlinks each
  * per-user config dir's `projects/` and CLAUDE.md/NASSAJ.md back to the shared
  * root, so isolating credentials never forks the chat history or instructions.
  *
- * When userId is null/undefined (system/anonymous/platform-mode), no isolation
- * is applied and the base environment is returned unchanged — preserving the
- * single-user behavior the app had before multi-user.
+ * Every call names its ACTOR (credential-actor.js, ADR-152 A1 §3.4): a member
+ * id, or SYSTEM_ACTOR for non-inference work, which gets a credential-less tree
+ * under ~/.nassaj-users/.system/. A missing actor (null, undefined, '', 0, …)
+ * throws CREDENTIAL_ACTOR_REQUIRED and builds no environment — there is no
+ * "anonymous means operator" path any more.
  *
- * @typedef {'claude'|'codex'|'agy'|'cursor'|'opencode'|'kimi'|'deepseek'|'glm'|'qwen'} ProviderName
+ * @typedef {'claude'|'codex'|'agy'|'cursor'|'opencode'|'kimi'|'deepseek'|'glm'|'qwen'|'dsh'} ProviderName
  *
  * Spawn mode for a provider (SL-5/ADR-062). 'chat' is the historical toolless
  * HTTP path (the default — identical to the pre-SL-5 behavior for EVERY
@@ -83,9 +80,11 @@
 import path from 'path';
 
 import { AppError } from '../../shared/utils.js';
-import { isProviderIsolated, KNOWN_PROVIDERS } from '../provider-sharing.js';
 
 import { applyOperatorPolicy } from './claude-managed-settings.js';
+import { SYSTEM_ACTOR, normalizeCredentialActor, systemActorHome } from './credential-actor.js';
+import { KNOWN_PROVIDERS } from './known-providers.js';
+import { INHERITED_CREDENTIAL_ENV } from './provider-credential-env.js';
 import { listDelegatedOwners, listDelegatedProvidersFromOwner, resolveCredentialPrincipal } from './credential-principal.js';
 import { materializeGrantHome, sweepGrantHomes } from './grant-home.js';
 import { resolveSlotKey } from './provider-slot-key.js';
@@ -104,6 +103,18 @@ const VENDOR_KEY_ENV = Object.freeze({
   glm: 'GLM_API_KEY',
 });
 
+// The list lives in a dependency-free module so test tooling imports the same names (B-1771).
+export { INHERITED_CREDENTIAL_ENV };
+
+/**
+ * B-1745: providers steered by HOME alone. The resolver sets no XDG_* for them,
+ * so an inherited XDG base dir would point their config/data/state/cache at the
+ * OPERATOR's tree. They are removed for every actor.
+ * @type {ReadonlySet<string>}
+ */
+const HOME_STEERED_PROVIDERS = new Set(['agy', 'cursor', 'qwen', 'dsh']);
+const XDG_BASE_DIRS = Object.freeze(['XDG_CONFIG_HOME', 'XDG_DATA_HOME', 'XDG_STATE_HOME', 'XDG_CACHE_HOME']);
+
 /**
  * INTERNAL. The historical resolver body: applies the per-user isolation knob
  * for `provider`. NOT exported — every caller goes through `resolveProviderEnv`
@@ -111,26 +122,25 @@ const VENDOR_KEY_ENV = Object.freeze({
  * means the strip cannot be bypassed by any of the eight `return` paths here,
  * nor by a provider case added later.
  *
- * @param {string|number|null} userId
+ * @param {unknown} actor member id or SYSTEM_ACTOR (credential-actor.js)
  * @param {ProviderName} provider
  * @param {NodeJS.ProcessEnv} baseEnv
  * @param {ProviderMode} mode
  * @returns {NodeJS.ProcessEnv}
  */
-function resolveIsolatedProviderEnv(userId, provider, baseEnv, mode, honorGrants) {
+function resolveIsolatedProviderEnv(actor, provider, baseEnv, mode, honorGrants) {
+  // ADR-152 A1 §3.4: the actor check comes first; a missing actor throws before
+  // any environment exists.
+  const normalized = normalizeCredentialActor(actor);
   const env = { ...baseEnv };
-
-  // No authenticated user: return the base (shared) environment unchanged.
-  if (userId === null || userId === undefined || userId === '') {
-    return env;
+  // ADR-152 A1 §3.5: no inherited credential survives into any child.
+  for (const name of INHERITED_CREDENTIAL_ENV) delete env[name];
+  if (HOME_STEERED_PROVIDERS.has(provider)) {
+    for (const name of XDG_BASE_DIRS) delete env[name];
   }
 
-  // ADR-105 — a provider the policy has never heard of is REFUSED, not silently
-  // treated as shared. This gate used to answer `policy[provider] === 'isolated'`,
-  // which is false for an unknown key, so a provider missing from KNOWN_PROVIDERS
-  // took the operator's environment through the early return below and never
-  // reached the switch at all — it ran every member's turn on the operator's
-  // login, invisible to the admin panel and to the `default:` branch alike.
+  // ADR-105 — a provider outside KNOWN_PROVIDERS is REFUSED, never handed the
+  // operator's environment.
   if (!KNOWN_PROVIDERS.includes(provider)) {
     throw new AppError(
       `Provider "${provider}" is not covered by the credential-isolation policy, so it cannot run `
@@ -139,11 +149,10 @@ function resolveIsolatedProviderEnv(userId, provider, baseEnv, mode, honorGrants
     );
   }
 
-  // Admin policy gate: a provider marked 'shared' uses the operator's
-  // credentials regardless of its case below — return base env unchanged.
-  if (!isProviderIsolated(provider)) {
-    return env;
+  if (normalized === SYSTEM_ACTOR) {
+    return systemActorEnv(provider, env, mode);
   }
+  const userId = normalized;
 
   // T-1675 / ADR-152 — WHOSE credential this spawn runs on. Isolation is the
   // base, so this is the caller's own id unless another member delegated their
@@ -276,6 +285,19 @@ function resolveIsolatedProviderEnv(userId, provider, baseEnv, mode, honorGrants
       env.HOME = homeRoot();
       return env;
     }
+    case 'dsh': {
+      // T-2086/ADR-224: the DeepSeek Harness keys every path off HOME (its
+      // DSH_HOME / DSH_AGENTS_HOME / TMPDIR are derived from it by the dsh
+      // launcher, which rebuilds the child env from an allow-list). dsh is an
+      // OWN-credential body: HOME is always the member's own tree (never a grant
+      // home) and the key is the member's own deepseek slot, whatever grants
+      // exist. No XDG_* (HOME_STEERED_PROVIDERS) and no *_BASE_URL is ever set.
+      provisionUserDirs(userId);
+      env.HOME = userConfigDir(userId, '');
+      const resolved = resolveSlotKey(userId, 'deepseek');
+      if (resolved) env.DEEPSEEK_API_KEY = resolved.key;
+      return env;
+    }
     case 'kimi':
     case 'deepseek':
     case 'glm': {
@@ -283,12 +305,9 @@ function resolveIsolatedProviderEnv(userId, provider, baseEnv, mode, honorGrants
       // env var. No CONFIG_DIR/HOME override — these APIs read no nassaj tree.
       // IRON RULE: only the provider-specific KEY var is ever set here; nothing
       // under the ANTHROPIC_*/CLAUDE_* namespace and no *_BASE_URL is touched.
-      // T-1260: `sharedFallback: false` is this site's behaviour PRESERVED, not
-      // chosen — a member with no key of their own gets no key here today, and
-      // the run then fails with `missing_key`. Whether that should match the
-      // engine path (which does fall back, T-1208) is a wave-B decision; making
-      // it here would be a silent spending change under a refactor.
-      const resolved = resolveSlotKey(credentialUserId, provider, { sharedFallback: false });
+      // The principal's own key only (ADR-152 A1 §3.8): the install-wide slot is
+      // inert, so a member with no key and no grant gets no key here.
+      const resolved = resolveSlotKey(credentialUserId, provider);
       if (resolved) {
         env[VENDOR_KEY_ENV[provider]] = resolved.key;
       }
@@ -330,6 +349,47 @@ function resolveIsolatedProviderEnv(userId, provider, baseEnv, mode, honorGrants
 }
 
 /**
+ * The SYSTEM_ACTOR environment (ADR-152 A1 §3.4, D2): every provider knob points
+ * into the credential-less ~/.nassaj-users/.system/ tree, never the OS user's
+ * own credential tree, and no vendor key is injected. For non-inference work
+ * only (version, install, update, empty-catalog probes).
+ *
+ * @param {ProviderName} provider
+ * @param {NodeJS.ProcessEnv} env copy of the base env (mutated)
+ * @param {ProviderMode} mode
+ * @returns {NodeJS.ProcessEnv}
+ */
+function systemActorEnv(provider, env, mode) {
+  const root = systemActorHome();
+  switch (provider) {
+    case 'claude':
+      env.CLAUDE_CONFIG_DIR = path.join(root, '.claude');
+      return env;
+    case 'codex':
+      env.CODEX_HOME = path.join(root, '.codex');
+      return env;
+    case 'agy':
+    case 'cursor':
+    case 'qwen':
+    case 'dsh':
+      env.HOME = root;
+      return env;
+    case 'opencode':
+      env.XDG_DATA_HOME = path.join(root, '.local', 'share');
+      env.XDG_CONFIG_HOME = path.join(root, '.config');
+      env.XDG_CACHE_HOME = path.join(root, '.cache');
+      env.XDG_STATE_HOME = path.join(root, '.local', 'state');
+      return mode === 'agent' ? sanitizeVendorAgentEnv(env) : env;
+    case 'kimi':
+      env.KIMI_CODE_HOME = path.join(root, KIMI_HOME_SUBDIR);
+      return env;
+    default:
+      // deepseek/glm: hosted APIs with no tree; the system actor has no key.
+      return env;
+  }
+}
+
+/**
  * Applies the built-in updater kill switches to every credential mode. These
  * flags govern the binary itself, so shared/system launches need them just as
  * much as isolated member launches do.
@@ -349,7 +409,34 @@ function applyHarnessUpdaterPolicy(provider, env) {
 }
 
 /**
+ * Shell bookkeeping variables that describe the SERVER's own working directory.
+ * `PWD` is the pm2 launch root (the live server root); a child spawned with a
+ * different `cwd` inherits it unchanged because only a shell rewrites it.
+ */
+const INHERITED_WORKING_DIR_ENV = ['PWD', 'OLDPWD'];
+
+/**
+ * B-1715: removes the server's inherited `PWD`/`OLDPWD` from a child env.
+ *
+ * Some harnesses trust `$PWD` over getcwd(): opencode 1.19 resolves its project
+ * directory as `resolve(process.env.PWD ?? process.cwd())`, so every opencode
+ * session was recorded under the live server root instead of the chat's cwd.
+ * Without the variable each child derives its directory from the real `cwd` its
+ * spawn site already sets, and a shell recomputes `PWD` itself. Dropping it here,
+ * at the env choke point, fixes every provider instead of one spawn site.
+ * @param {NodeJS.ProcessEnv} env a fresh env object owned by the caller
+ * @returns {NodeJS.ProcessEnv} the same object without the working-dir vars
+ */
+function dropInheritedWorkingDirEnv(env) {
+  for (const name of INHERITED_WORKING_DIR_ENV) delete env[name];
+  return env;
+}
+
+/**
  * Resolves the environment for spawning a provider CLI on behalf of a user.
+ *
+ * B-1715: the server's `PWD`/`OLDPWD` never reach the child (see
+ * dropInheritedWorkingDirEnv); the child's directory is its spawn `cwd`.
  *
  * SEC-ENV-1 — HOST-SECRET STRIP (unconditional, every provider, every mode):
  * the resolver starts from `{ ...baseEnv }` (process.env by default), so before
@@ -372,7 +459,8 @@ function applyHarnessUpdaterPolicy(provider, env) {
  *
  * Signature and every documented behavior are unchanged.
  *
- * @param {string|number|null} userId authenticated user id (null = system/anon)
+ * @param {unknown} userId the actor: a member id, or SYSTEM_ACTOR (credential-actor.js).
+ *   Anything else throws CREDENTIAL_ACTOR_REQUIRED and builds nothing.
  * @param {ProviderName} provider provider identifier
  * @param {NodeJS.ProcessEnv} [baseEnv] base environment to extend (defaults to process.env)
  * @param {{ honorGrants?: boolean }} [options] `honorGrants: false` ignores
@@ -388,7 +476,7 @@ function applyHarnessUpdaterPolicy(provider, env) {
 export function resolveProviderEnv(userId, provider, baseEnv = process.env, mode = 'chat', options = {}) {
   const honorGrants = options.honorGrants !== false;
   const resolved = resolveIsolatedProviderEnv(userId, provider, baseEnv, mode, honorGrants);
-  return sanitizeHostSecretEnv(applyHarnessUpdaterPolicy(provider, resolved));
+  return dropInheritedWorkingDirEnv(sanitizeHostSecretEnv(applyHarnessUpdaterPolicy(provider, resolved)));
 }
 
 /**
@@ -405,8 +493,6 @@ export function resolveProviderEnv(userId, provider, baseEnv = process.env, mode
  * `AppError` — provider outside the policy, or with no isolation case) the
  * answer is `null`, NOT the operator's environment. The caller treats `null` as
  * "no catalog for you": it serves its degraded fallback and spawns nothing.
- * A deliberately SHARED provider (admin policy) still returns the operator env:
- * that is the spawn's own answer for the same caller, so catalog and turn agree.
  *
  * Any other error (EACCES while provisioning the member tree, …) propagates —
  * the readers already turn a throw into a degraded catalog, never a spawn.
@@ -415,7 +501,7 @@ export function resolveProviderEnv(userId, provider, baseEnv = process.env, mode
  * isolated member provisions their tree (idempotent) and may refresh a grant
  * home; without it the CLI finds no tree and the catalog is a false empty.
  *
- * @param {string|number|null} userId caller (null = operator, stated explicitly)
+ * @param {unknown} userId the actor (a missing actor answers null: no catalog)
  * @param {ProviderName} provider isolation key ('agy' for antigravity)
  * @param {NodeJS.ProcessEnv} [baseEnv] base environment (defaults to process.env)
  * @returns {NodeJS.ProcessEnv|null} sanitized env, or null when isolation is unavailable

@@ -1,6 +1,5 @@
 import { useCallback, useState } from 'react';
 
-import { useAuth } from '../../../../../../auth';
 import { useClaudeConnection } from '../../../../../hooks/useClaudeConnection';
 import type { AuthStatus } from '../../../../../types/types';
 import ProviderLoginModal from '../../../../../../provider-auth/view/ProviderLoginModal';
@@ -43,9 +42,6 @@ export default function ClaudeConnectionSection({
   onLogin,
   onRefreshAuthStatus,
 }: ClaudeConnectionSectionProps) {
-  const { user } = useAuth();
-  const isOwner = user?.role === 'owner';
-
   const { connected, incompleteLink, loading, error, refresh } = useClaudeConnection(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
 
@@ -64,7 +60,6 @@ export default function ClaudeConnectionSection({
     incompleteLink,
     loading,
     error,
-    isOwner,
     i18nPrefix: 'claudeConnection',
     /**
      * **الأمر المعروض هو الأمر المُشغَّل.** B-1260: صار `claude auth login`

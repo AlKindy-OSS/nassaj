@@ -429,7 +429,8 @@ describe('ADR-200 unified key catalogue (S1)', () => {
       .map(({ row }) => row.secretId);
     expect(new Set(pinned)).toEqual(new Set(ELIGIBLE_ENGINE_PROVIDERS));
     for (const { consumer } of consumers.filter(({ consumer: c }) => c.how === 'engine_pin')) {
-      expect(consumer).toMatchObject({ keyOwner: 'caller', sharedFallback: true });
+      expect(consumer).toMatchObject({ keyOwner: 'caller' });
+      expect(consumer).not.toHaveProperty('sharedFallback');
     }
   });
 
@@ -460,7 +461,8 @@ describe('ADR-200 unified key catalogue (S1)', () => {
 
   it('spawn-time OpenCode keys are the sender\'s own and never fall back', () => {
     for (const { consumer } of consumers.filter(({ consumer: c }) => c.how === 'spawn_provider')) {
-      expect(consumer).toMatchObject({ harness: 'opencode', keyOwner: 'sender', sharedFallback: false });
+      expect(consumer).toMatchObject({ harness: 'opencode', keyOwner: 'sender' });
+      expect(consumer).not.toHaveProperty('sharedFallback');
     }
   });
 });

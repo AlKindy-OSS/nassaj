@@ -26,11 +26,11 @@
  * WHICH SLOTS — `vendorIds` (T-1201). The surface is now one field plus a
  * checkbox per slot, so the call names the slots it ticked. That list can only
  * NARROW the company's own catalog set (see `selectVendors`), and it is applied
- * BEFORE nothing else: the role gate and the subscription skip still run per
- * surviving slot, so a client that ticks a shared slot it may not write still
- * gets `forbidden`, and one that ticks a subscribed slot without asking for the
- * override still gets `skipped_subscription`. The checkbox chooses among the
- * writes the caller was already allowed; it never authorizes one.
+ * BEFORE nothing else: the subscription skip still runs per surviving slot, so
+ * one that ticks a subscribed slot without asking for the override still gets
+ * `skipped_subscription`. Every slot is the caller's own tree (ADR-152 A1). The
+ * checkbox chooses among the writes the caller was already allowed; it never
+ * authorizes one.
  *
  * The per-slot outcome is REPORTED rather than collapsed into a boolean: a
  * fan-out that half-succeeds and says "saved" is the failure mode this file
@@ -80,8 +80,6 @@ export type CompanySlotOutcome =
   | 'written'
   /** Skipped: the harness is signed in by subscription and would be downgraded. */
   | 'skipped_subscription'
-  /** Skipped: writing this slot touches the operator's shared credentials. */
-  | 'forbidden'
   /**
    * ADR-200 S4 (in-flag): the link-mode choke point refused the key because the
    * harness is in subscription mode (or no mode is chosen yet). Nothing written.
@@ -96,8 +94,6 @@ export type CompanySlotOutcome =
   | 'linked'
   /** OpenCode: the target holds a login, which nassaj never overwrites. */
   | 'login_present'
-  /** The harness uses a shared tree; a member's key is never written there (D6). */
-  | 'shared_scope_refused'
   /** A value nassaj does not own sits there; untouched without explicit confirm. */
   | 'foreign_credential'
   // ADR-200 S6 (in-flag) Delete outcomes:
@@ -261,14 +257,12 @@ async function fanoutSave(
   key: string,
   vendors: Vendor[],
   options: {
-    isElevated: boolean;
     replaceForeignKey?: boolean;
     authenticatedPrincipal?: unknown;
     auditContext?: QwenCredentialAuditContext;
   },
 ): Promise<CompanyKeyResult> {
   const results = await (await loadFanout()).save(userId, companyId, key, {
-    isElevated: options.isElevated,
     replaceForeignKey: options.replaceForeignKey === true,
     authenticatedPrincipal: options.authenticatedPrincipal,
     auditContext: options.auditContext,
@@ -385,21 +379,12 @@ export const companyCredentialsService = {
     return seen;
   },
 
-  /**
-   * Writes one key into every slot of `companyId`.
-   *
-   * `isElevated` is the caller's owner/admin standing, resolved by the route
-   * from the token. It is passed in rather than read here because the role rule
-   * (`requiresElevatedRole`) belongs to the route layer that already owns the
-   * 403 contract — this service must not become a second place that decides
-   * authorization.
-   */
+  /** Writes one key into every slot of `companyId`, all in the caller's own tree. */
   async setKey(
     userId: string | number | null | undefined,
     companyId: string,
     apiKey: unknown,
     options: {
-      isElevated: boolean;
       includeSubscription?: boolean;
       /** ADR-200 S4 / G1 M-5: explicit confirmation to replace a key nassaj did not write. */
       replaceForeignKey?: boolean;
@@ -407,7 +392,7 @@ export const companyCredentialsService = {
       /** Slots the caller ticked. Absent = every slot (pre-checkbox clients). */
       vendorIds?: readonly string[];
       auditContext?: QwenCredentialAuditContext;
-    } = { isElevated: false },
+    } = {},
   ): Promise<CompanyKeyResult> {
     const vendors = selectVendors(companyVendors(companyId), options.vendorIds);
     if (typeof apiKey !== 'string' || apiKey.trim() === '') {
@@ -423,14 +408,6 @@ export const companyCredentialsService = {
     for (const vendor of vendors) {
       const slot = vendor.slot!;
       const base = { vendorId: vendor.id, provider: slot.provider, target: slot.target };
-
-      if (
-        providerCredentialsService.requiresElevatedRole(slot.provider)
-        && !options.isElevated
-      ) {
-        slots.push({ ...base, outcome: 'forbidden' });
-        continue;
-      }
 
       if (
         !options.includeSubscription
@@ -474,12 +451,11 @@ export const companyCredentialsService = {
     userId: string | number | null | undefined,
     companyId: string,
     options: {
-      isElevated: boolean;
       vendorIds?: readonly string[];
       /** ADR-200 S6: explicit confirm to also remove adopted and foreign projections. */
       removeForeignKey?: boolean;
       auditContext?: QwenCredentialAuditContext;
-    } = { isElevated: false },
+    } = {},
   ): Promise<CompanyKeyResult> {
     const vendors = selectVendors(companyVendors(companyId), options.vendorIds);
     if (usesUnifiedFanout(userId)) {
@@ -494,11 +470,6 @@ export const companyCredentialsService = {
     for (const vendor of vendors) {
       const slot = vendor.slot!;
       const base = { vendorId: vendor.id, provider: slot.provider, target: slot.target };
-
-      if (providerCredentialsService.requiresElevatedRole(slot.provider) && !options.isElevated) {
-        slots.push({ ...base, outcome: 'forbidden' });
-        continue;
-      }
 
       try {
         await providerCredentialsService.deleteKey(userId, slot.provider, slot.target, options.auditContext);

@@ -1,5 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
+import {
+  readCredentialNotLinked,
+  type CredentialNotLinkedInfo,
+} from '../../credential-link/credentialNotLinked';
+
 /**
  * T-849 (+ الجزء العميلي من T-881) — القناة الجانبية «/btw».
  *
@@ -67,6 +72,8 @@ export interface BtwState {
   errorCode?: string;
   /** رسالة الخطأ الخام من الخادم (تُعرض حين لا مفتاح i18n مطابق للكود). */
   errorMessage?: string;
+  /** T-2083: the refusal's fields when `errorCode` is CREDENTIAL_NOT_LINKED. */
+  errorCredential?: CredentialNotLinkedInfo;
 }
 
 /** نافذة السماح قبل إعلان «يتطلّب تحديث الخادم» (لا ردّ btw-* إطلاقاً). */
@@ -392,9 +399,10 @@ export function useBtwSideChannel({
         typeof latestMessage.code === 'string' && latestMessage.code ? latestMessage.code : 'sdk_error';
       const errorMessage =
         typeof latestMessage.message === 'string' ? latestMessage.message : undefined;
+      const errorCredential = readCredentialNotLinked(latestMessage) ?? undefined;
       setActiveBtw((prev) =>
         prev && prev.btwId === btwId
-          ? { ...prev, status: 'error', errorCode, errorMessage }
+          ? { ...prev, status: 'error', errorCode, errorMessage, errorCredential }
           : prev,
       );
     }

@@ -33,6 +33,7 @@ import fs from 'fs';
 import path from 'path';
 
 import { userConfigDir } from './provision-user-dirs.js';
+import { SYSTEM_ACTOR_DIRNAME } from './credential-actor.js';
 
 const DIR_MODE = 0o700;
 
@@ -169,6 +170,10 @@ function syncLevel(compositeDir, granteeDir, ownerDir, ownerLinks, skip) {
  * @returns {string} absolute path to use as HOME (or XDG root) for the spawn
  */
 export function materializeGrantHome(granteeId, ownerId, providers) {
+  // ADR-152 A1 §3.4: the system tree is never a grant home end (never linkable).
+  if (String(granteeId) === SYSTEM_ACTOR_DIRNAME || String(ownerId) === SYSTEM_ACTOR_DIRNAME) {
+    throw new Error('grant-home: the system actor tree is never linked');
+  }
   const granteeRoot = userConfigDir(granteeId, '');
   const ownerRoot = userConfigDir(ownerId, '');
   const compositeRoot = userConfigDir(granteeId, path.join(GRANTS_SUBDIR, String(ownerId)));
@@ -192,6 +197,7 @@ export function materializeGrantHome(granteeId, ownerId, providers) {
  * @param {string[]} keepOwnerIds
  */
 export function sweepGrantHomes(granteeId, keepOwnerIds) {
+  if (String(granteeId) === SYSTEM_ACTOR_DIRNAME) return;
   const grantsDir = userConfigDir(granteeId, GRANTS_SUBDIR);
   for (const name of listEntries(grantsDir)) {
     if (keepOwnerIds.includes(name)) continue;

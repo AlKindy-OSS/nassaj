@@ -15,6 +15,10 @@
  * (register this live test process = alive; forget = dead).
  */
 
+// B-1771: FIRST import. Run ad hoc with the operator HOME, this test wrote into
+// the real home (member tree or provider state); the sandbox moves HOME first.
+import '@/shared/__tests__/sandbox-home.js';
+
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { mkdtemp, mkdir, rm, utimes, writeFile } from 'node:fs/promises';

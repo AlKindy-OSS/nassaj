@@ -15,8 +15,17 @@ import { relayModeNow, type RelayMode } from './peer-spawn-policy.js';
 
 export { computeRelayMode, relaySdkSettings, type RelayMode } from './peer-spawn-policy.js';
 
-/** CLI versions re-run against ADR-219 tests 1–6. */
-export const VERIFIED_RELAY_CLI_VERSIONS: ReadonlySet<string> = new Set(['2.1.306']);
+/**
+ * CLI versions whose S1 P0 facts were measured (ADR-219 tests 1–6; B-1728 re-run on
+ * 2.1.312, 2026-10-29). An explicit set, never a range: a new CLI is added only after
+ * the harness (`peer-relay-p2.live.mjs --only cli-p0`) passes on it.
+ */
+export const VERIFIED_RELAY_CLI_VERSIONS: ReadonlySet<string> = new Set(['2.1.306', '2.1.312']);
+
+/** True only for an exact member of the verified set; anything else fails closed. */
+export function isVerifiedRelayCliVersion(version: unknown): boolean {
+  return typeof version === 'string' && VERIFIED_RELAY_CLI_VERSIONS.has(version);
+}
 
 export type PeerRunState = {
   readonly relayMode: RelayMode;
@@ -69,7 +78,7 @@ export function settlePeerRunMode(run: PeerRunState, finalMode: string | null | 
 
 /** True when this run's CLI is known and outside the verified set. */
 export function isUnverifiedCli(run: PeerRunState): boolean {
-  return run.cliVersion !== null && !VERIFIED_RELAY_CLI_VERSIONS.has(run.cliVersion);
+  return run.cliVersion !== null && !isVerifiedRelayCliVersion(run.cliVersion);
 }
 
 /** Server-only key of the delivery descriptor on dispatch options (never JSON-reachable). */

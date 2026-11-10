@@ -156,6 +156,8 @@ pinHostQuiet();
 globalThis.setInterval = realSetInterval;
 
 await initializeDatabase();
+// ADR-152 A1 §3.4: a Codex run needs a signed-in member.
+const RUN_MEMBER = (await import('@/modules/database/index.js')).userDb.createUser('codex-run-member', 'hash', 'user').id;
 
 after(() => {
   Object.assign(codexHelpersRuntime, realHelpersRuntime);
@@ -180,15 +182,15 @@ function makeWs(userId: number | null): { userId: number | null; send: (m: unkno
 async function spawn(
   options: Record<string, unknown>,
 ): Promise<{ ws: ReturnType<typeof makeWs>; threadsStarted: number }> {
-  const ws = makeWs(null);
+  const ws = makeWs(RUN_MEMBER);
   const before = threadStarts.length;
   await queryCodex('ping', { cwd: sandboxCwd, model: 'gpt-5-codex', ...options }, ws);
   return { ws, threadsStarted: threadStarts.length - before };
 }
 
-// The operator (anonymous) CODEX_HOME under the sandboxed HOME — where a spawn
-// materializes its delegates.
-const CODEX_AGENTS = path.join(sandboxHome, '.codex', 'agents');
+// The run member's own CODEX_HOME under the sandboxed HOME — where a spawn
+// materializes its delegates (ADR-152 A1: every run is a member's).
+const CODEX_AGENTS = path.join(sandboxHome, '.nassaj-users', String(RUN_MEMBER), '.codex', 'agents');
 
 // ===========================================================================
 // Part 1 — parser: coordination is NOT a sandbox mode; the three real modes map
@@ -374,7 +376,7 @@ describe('queryCodex — fail-open when delegates cannot be materialized (T-886 
     try {
       const before = threadStarts.length;
       const beforeInputs = runInputs.length;
-      const ws = makeWs(null);
+      const ws = makeWs(RUN_MEMBER);
       await queryCodex(
         'ping',
         { cwd: sandboxCwd, model: 'gpt-5-codex', permissionMode: 'default' },
@@ -425,7 +427,7 @@ describe('queryCodex — ADR-206 S1 helpers switch per turn', () => {
     typeof m === 'string' ? JSON.parse(m) as SentMsg : m));
 
   async function launch(cwd: string, options: Record<string, unknown> = {}) {
-    const ws = makeWs(null);
+    const ws = makeWs(RUN_MEMBER);
     const before = threadStarts.length;
     await queryCodex('ping', { cwd, model: 'gpt-5-codex', ...options }, ws);
     const config = codexConstructions.at(-1)?.config ?? {};

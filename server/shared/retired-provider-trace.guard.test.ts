@@ -41,8 +41,11 @@ const ALLOWLIST: Readonly<Record<string, string>> = Object.freeze({
   'scripts/repair-agy-orphan-workspaces.mjs': AGY_HOME,
   'scripts/repair-agy-orphan-workspaces.test.mjs': AGY_HOME,
   'server/agy-cli.handover.test.ts': AGY_HOME,
+  'server/services/isolation/provider-sharing-retired.test.ts': `${AGY_HOME}: the operator agy tree a member must never reach`,
   'server/modules/providers/harness-update/descriptors.ts': AGY_HOME,
   // ADR-215 install cleanup and installer env: protections, not leftovers.
+  'server/services/isolation/credential-gate.js': `${AGY_HOME}; ${CREDENTIAL_UNIT}`,
+  'server/services/isolation/credential-gate.test.ts': `${AGY_HOME}; ${CREDENTIAL_UNIT}`,
   'server/modules/providers/harness-update/install-cleanup.ts': `cleanup deny-list protects ~/.gemini and the ~/.local/bin/gemini link; ${CREDENTIAL_UNIT}`,
   'server/modules/providers/harness-update/install-cleanup.test.ts': 'asserts the cleanup deny-list refuses ~/.gemini and ~/.local/bin/gemini',
   'server/modules/providers/harness-update/install.agy.test.ts': 'asserts agy install never touches ~/.gemini and never passes GEMINI_API_KEY',
@@ -51,6 +54,7 @@ const ALLOWLIST: Readonly<Record<string, string>> = Object.freeze({
   'server/modules/providers/list/antigravity/agy-brain-dir.js': AGY_HOME,
   'server/modules/providers/list/antigravity/agy-brain-layout.ts': AGY_HOME,
   'server/modules/websocket/services/session-handover.test.ts': AGY_HOME,
+  'server/modules/websocket/services/chat-websocket.context-guard.test.ts': `${AGY_MODELS}: an agy session pinned to a gemini model`,
   'server/agy-cli.lifecycle.test.ts': AGY_HOME,
   'server/agy-cli.model.test.ts': AGY_MODELS,
   'server/agy-cli.registry-integration.test.ts': AGY_HOME,
@@ -76,7 +80,6 @@ const ALLOWLIST: Readonly<Record<string, string>> = Object.freeze({
   'server/modules/providers/list/catalog-isolation.test.ts': 'fake agy CLI catalog prints a Google gemini-* model id',
   'server/modules/providers/list/cursor/cursor-models.provider.ts': 'Cursor offers Google gemini-* models',
   'server/modules/providers/list/opencode/glm-carrier.integration.test.ts': 'asserts GEMINI_API_KEY is stripped',
-  'server/modules/providers/list/opencode/opencode-auth.provider.ts': 'OpenCode accepts a GEMINI_API_KEY for Google models',
   'server/modules/providers/list/opencode/opencode-models.provider.ts': 'OpenCode offers google/gemini-* models',
   'server/modules/providers/provider.routes.governance-link.test.ts': AGY_GOVERNANCE,
   'server/modules/providers/provider.routes.mcp-member-scope.test.ts': 'asserts nothing writes the legacy ~/.gemini/settings.json',
@@ -126,6 +129,7 @@ const ALLOWLIST: Readonly<Record<string, string>> = Object.freeze({
   'server/services/isolation/resolve-provider-env.js': AGY_HOME,
   'server/services/isolation/sanitize-vendor-agent-env.js': 'strips GEMINI_* secrets from vendor agents',
   'server/services/isolation/sanitize-vendor-agent-env.test.js': 'asserts GEMINI_* handling',
+  'server/services/isolation/inherited-credential-strip.test.ts': 'asserts an inherited GEMINI_API_KEY reaches no child (ADR-152 A1)',
   'server/services/isolation/vendor-single-launcher.guard.test.ts': 'asserts GEMINI_API_KEY is stripped',
   'server/services/transcript-parser.js': AGY_MODELS,
   'server/sessionManager.js': 'shared agy/kimi session store keeps the ~/.gemini/sessions path',
@@ -166,6 +170,15 @@ const ALLOWLIST: Readonly<Record<string, string>> = Object.freeze({
   'src/lib/themeRingContrast.test.ts': THEME,
   'src/lib/themeStatusContrast.test.ts': THEME,
   'src/types/app.ts': 'excludes gemini among retired bodies from the ActiveBodyProvider type',
+  // B-1771 test isolation and B-1760 credential strip: protections, not leftovers.
+  'scripts/fixtures/provider-leak-parent-env.mjs': `${AGY_HOME}; a parent GEMINI_API_KEY the isolated runner must drop`,
+  'scripts/lib/isolated-test-env.mjs': `${AGY_HOME}: the isolated test HOME re-roots it`,
+  'scripts/run-isolated-node-tests.provider-leak.test.mjs': `${AGY_HOME}: asserts it resolves into the case home`,
+  'server/modules/providers/services/provider-credential-files.ts': `${AGY_HOME} (~/.gemini/antigravity-cli)`,
+  'server/modules/providers/services/provider-credential-files.test.ts': `${AGY_HOME} (~/.gemini/antigravity-cli)`,
+  'server/services/isolation/provider-credential-env.js': 'GEMINI_API_KEY in the inherited credential env every spawn strips',
+  'server/shared/__tests__/real-credential-guard.ts': `${AGY_HOME}: a real credential dotfile tests must never touch`,
+  'server/shared/__tests__/real-credential-guard.test.ts': `${AGY_HOME}: asserts ~/.gemini credentials stay untouched`,
 });
 
 function collectMatchingFiles(): string[] {

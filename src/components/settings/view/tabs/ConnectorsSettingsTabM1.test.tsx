@@ -793,9 +793,9 @@ describe('portable connectors M1 surface', () => {
       availabilityState: 'needs_reconciliation', pendingBodies: ['codex'],
     })];
     render(<ConnectorsSettingsTabM1 />);
-    expect(await screen.findByText('Verified · preparing model bodies')).toBeTruthy();
+    expect(await screen.findByText('Verified · preparing coding agents')).toBeTruthy();
     expect(screen.queryByRole('heading', { name: 'Linked accounts' })).toBeNull();
-    expect(screen.getByText(/Pending models:/).textContent).toContain('codex');
+    expect(screen.getByText(/Coding agents being prepared:/).textContent).toContain('codex');
   });
 
   it('renders every final availability state without promoting it to connected', async () => {
@@ -840,7 +840,7 @@ describe('portable connectors M1 surface', () => {
     const google = screen.getByRole('heading', { name: 'Google Workspace' }).closest('article')!;
     expect(within(google).getAllByText('Workspace')).toHaveLength(1);
     expect(within(google).getByText('Google Calendar · Google Drive')).toBeTruthy();
-    expect(within(google).getAllByText(/Available models:/)).toHaveLength(1);
+    expect(within(google).getAllByText(/Available coding agents:/)).toHaveLength(1);
     expect(within(google).getAllByText(/claude, codex/)).toHaveLength(1);
     expect(within(google).queryByRole('button', { name: 'Sign in' })).toBeNull();
     expect(within(google).getAllByRole('button', { name: 'Add account' })).toHaveLength(1);

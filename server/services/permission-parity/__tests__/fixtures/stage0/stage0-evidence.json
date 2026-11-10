@@ -1,0 +1,4285 @@
+{
+ "provenance": {
+  "task": "T-2089 S0 (ADR-225)",
+  "package": "@deepseek-ai/dsh@0.2.2-rc.1",
+  "node": "v24.18.1",
+  "recordedAt": "2026-11-07",
+  "launch": "node <dsh>/lib/bin.js nassaj-acp --from-default-profile acp --patch <RUN>/layers/probe-layer.yml",
+  "layer": "server/governance/dsh-nassaj-layer.yml with llm-deepseek baseURL -> 127.0.0.1 fake LLM (probe only) + insert {id: nassaj-parity-probe, name: <rel|abs|file-url>}",
+  "stdio": "recorder spawns dsh with ['pipe','pipe','pipe','pipe'(fd3),'ignore','ignore','ignore','pipe'(fd7)]",
+  "host": {
+   "kernel.yama.ptrace_scope": "0",
+   "bwrap": "absent"
+  }
+ },
+ "runs": {
+  "main_scope": {
+   "acp": [
+    {
+     "jsonrpc": "2.0",
+     "method": "session/update",
+     "params": {
+      "sessionId": "<UUID>",
+      "update": {
+       "sessionUpdate": "tool_call",
+       "toolCallId": "toolu_probe_1",
+       "title": "bash",
+       "kind": "other",
+       "status": "in_progress",
+       "rawInput": {
+        "command": "echo SHELL_FDS; ls -l /proc/$$/fd; echo PPID=$PPID; cat /proc/self/cgroup; env | sort",
+        "description": "fd probe"
+       }
+      }
+     }
+    },
+    {
+     "jsonrpc": "2.0",
+     "method": "session/update",
+     "params": {
+      "sessionId": "<UUID>",
+      "update": {
+       "sessionUpdate": "tool_call_update",
+       "toolCallId": "toolu_probe_1",
+       "status": "completed",
+       "content": [
+        {
+         "type": "content",
+         "content": {
+          "type": "text",
+          "text": "SHELL_FDS\ntotal 0\nlr-x------ 1 nassaj nassaj 64 <DATE> 0 -> /dev/null\nlrwx------ 1 nassaj nassaj 64 <DATE> 1 -> socket:[N]\nlrwx------ 1 nassaj nassaj 64 <DATE> 2 -> socket:[N]\nPPID=<DSH_PID>\n0::/user.slice/user-1000.slice/user@1000.service/app.slice/dsh-subprocess-<PID>-<HEX>.scope\nDBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus\nDSH_HOME=<RUN>/home/.dsh\nDSH_PROFILE=nassaj-acp\nDSH_PROFILE_DIR=<RUN>/home/.dsh/profiles/nassaj-acp\nDSH_SESSION_ID=<UUID>\nDSH_SHELL=1\nGIT_PAGER=cat\nHOME=<RUN>/home\nLANG=C.UTF-8\nNO_COLOR=1\nPAGER=cat\nPATH=/usr/local/bin:/usr/bin:/bin\nPWD=<RUN>/ws\nREC_CWD=<RUN>/ws\nSHLVL=1\nTERM=dumb\nTMPDIR=<RUN>/home/.tmp\nXDG_RUNTIME_DIR=/run/user/1000\n_=/usr/bin/env\n"
+         }
+        }
+       ]
+      }
+     }
+    },
+    {
+     "jsonrpc": "2.0",
+     "method": "session/update",
+     "params": {
+      "sessionId": "<UUID>",
+      "update": {
+       "sessionUpdate": "tool_call",
+       "toolCallId": "toolu_probe_2",
+       "title": "no_such_tool",
+       "kind": "other",
+       "status": "in_progress",
+       "rawInput": {
+        "x": 1
+       }
+      }
+     }
+    },
+    {
+     "jsonrpc": "2.0",
+     "method": "session/update",
+     "params": {
+      "sessionId": "<UUID>",
+      "update": {
+       "sessionUpdate": "tool_call_update",
+       "toolCallId": "toolu_probe_2",
+       "status": "failed",
+       "content": [
+        {
+         "type": "content",
+         "content": {
+          "type": "text",
+          "text": "Error: unknown tool \"no_such_tool\""
+         }
+        }
+       ]
+      }
+     }
+    },
+    {
+     "jsonrpc": "2.0",
+     "method": "session/update",
+     "params": {
+      "sessionId": "<UUID>",
+      "update": {
+       "sessionUpdate": "tool_call",
+       "toolCallId": "toolu_probe_3",
+       "title": "subagent",
+       "kind": "other",
+       "status": "in_progress",
+       "rawInput": {
+        "description": "probe sub",
+        "prompt": "SUB_STEPS [{\"name\":\"bash\",\"raw\":\"{\\\"command\\\":\\\"echo from-subagent; ls -l /proc/self/fd\\\",\\\"description\\\":\\\"sub probe\\\"}\"},{\"text\":\"sub done\"}] END_SUB"
+       }
+      }
+     }
+    },
+    {
+     "jsonrpc": "2.0",
+     "method": "session/update",
+     "params": {
+      "sessionId": "<UUID>",
+      "update": {
+       "sessionUpdate": "tool_call_update",
+       "toolCallId": "toolu_probe_3",
+       "status": "completed",
+       "content": [
+        {
+         "type": "content",
+         "content": {
+          "type": "text",
+          "text": "started subagent <UUID>"
+         }
+        }
+       ]
+      }
+     }
+    },
+    {
+     "jsonrpc": "2.0",
+     "id": 3,
+     "error": {
+      "code": -32603,
+      "message": "Internal error: turn failed: DeepSeek Messages expected a JSON object"
+     }
+    }
+   ],
+   "plugin": [
+    {
+     "t": 0,
+     "kind": "apply",
+     "pid": "<PID>",
+     "ppid": "<PID>",
+     "config": {
+      "marker": "probe"
+     },
+     "url": "file://<RUN>/layers/plugin/nassaj-probe-plugin.mjs"
+    },
+    {
+     "t": 0,
+     "kind": "inventory",
+     "when": "apply",
+     "readable": true,
+     "out": {
+      "tools/pre-execute": [],
+      "tools/execute": [
+       {
+        "entryId": "timeout-policy",
+        "entryName": "@deepseek-ai/dsh-tool-call-timeout-policy",
+        "runtimeName": "timeout-policy",
+        "scope": [],
+        "prepend": false,
+        "global": false
+       }
+      ],
+      "tools/post-execute": [
+       {
+        "entryId": "repeat-tool-reminder",
+        "entryName": "@deepseek-ai/dsh-repeat-tool-reminder",
+        "runtimeName": "repeat-tool-reminder",
+        "scope": [],
+        "prepend": false,
+        "global": false
+       }
+      ],
+      "tools/result": []
+     }
+    },
+    {
+     "t": 0,
+     "kind": "pre-execute",
+     "callId": "toolu_probe_1",
+     "rootCallId": "toolu_probe_1",
+     "name": "bash",
+     "arguments": {
+      "command": "echo SHELL_FDS; ls -l /proc/$$/fd; echo PPID=$PPID; cat /proc/self/cgroup; env | sort",
+      "description": "fd probe"
+     },
+     "argType": "object",
+     "hasParent": false,
+     "agent": {
+      "id": "<UUID>"
+     }
+    },
+    {
+     "t": 0,
+     "kind": "inventory",
+     "when": "first-pre-execute",
+     "readable": true,
+     "out": {
+      "tools/pre-execute": [
+       {
+        "entryId": "tool-jobs",
+        "entryName": "@deepseek-ai/dsh-tool-jobs",
+        "runtimeName": "tool-jobs",
+        "scope": [],
+        "prepend": true,
+        "global": false
+       },
+       {
+        "entryId": "nassaj-parity-probe",
+        "entryName": "file://<RUN>/layers/plugin/nassaj-probe-plugin.mjs",
+        "runtimeName": "nassaj-parity-probe",
+        "scope": [],
+        "prepend": true,
+        "global": true
+       }
+      ],
+      "tools/execute": [
+       {
+        "entryId": "nassaj-parity-probe",
+        "entryName": "file://<RUN>/layers/plugin/nassaj-probe-plugin.mjs",
+        "runtimeName": "nassaj-parity-probe",
+        "scope": [],
+        "prepend": true,
+        "global": true
+       },
+       {
+        "entryId": "timeout-policy",
+        "entryName": "@deepseek-ai/dsh-tool-call-timeout-policy",
+        "runtimeName": "timeout-policy",
+        "scope": [],
+        "prepend": false,
+        "global": false
+       },
+       {
+        "entryId": "session-checkpoint-policy",
+        "entryName": "@deepseek-ai/dsh-session-checkpoint-policy",
+        "runtimeName": "session-checkpoint-policy",
+        "scope": [],
+        "prepend": false,
+        "global": false
+       }
+      ],
+      "tools/post-execute": [
+       {
+        "entryId": "spill-policy",
+        "entryName": "@deepseek-ai/dsh-spill-policy",
+        "runtimeName": "spill-policy",
+        "scope": [],
+        "prepend": true,
+        "global": false
+       },
+       {
+        "entryId": "nassaj-parity-probe",
+        "entryName": "file://<RUN>/layers/plugin/nassaj-probe-plugin.mjs",
+        "runtimeName": "nassaj-parity-probe",
+        "scope": [],
+        "prepend": true,
+        "global": true
+       },
+       {
+        "entryId": "repeat-tool-reminder",
+        "entryName": "@deepseek-ai/dsh-repeat-tool-reminder",
+        "runtimeName": "repeat-tool-reminder",
+        "scope": [],
+        "prepend": false,
+        "global": false
+       },
+       {
+        "entryId": "tool-fs-search",
+        "entryName": "@deepseek-ai/dsh-tool-fs-search",
+        "runtimeName": "tool-fs-search",
+        "scope": [],
+        "prepend": false,
+        "global": false
+       },
+       {
+        "entryId": "tool-fs-search",
+        "entryName": "@deepseek-ai/dsh-tool-fs-search",
+        "runtimeName": "tool-fs-search",
+        "scope": [],
+        "prepend": false,
+        "global": false
+       }
+      ],
+      "tools/result": [
+       {
+        "entryId": "nassaj-parity-probe",
+        "entryName": "file://<RUN>/layers/plugin/nassaj-probe-plugin.mjs",
+        "runtimeName": "nassaj-parity-probe",
+        "scope": [],
+        "prepend": false,
+        "global": true
+       },
+       {
+        "entryId": "agent-instructions",
+        "entryName": "@deepseek-ai/dsh-agent-instructions",
+        "runtimeName": "agent-instructions",
+        "scope": [],
+        "prepend": false,
+        "global": false
+       }
+      ]
+     }
+    },
+    {
+     "t": 0,
+     "kind": "execute",
+     "callId": "toolu_probe_1",
+     "rootCallId": "toolu_probe_1",
+     "name": "bash",
+     "arguments": {
+      "command": "echo SHELL_FDS; ls -l /proc/$$/fd; echo PPID=$PPID; cat /proc/self/cgroup; env | sort",
+      "description": "fd probe"
+     },
+     "argType": "object",
+     "hasParent": false,
+     "agent": {
+      "id": "<UUID>"
+     }
+    },
+    {
+     "t": 0,
+     "kind": "execute-done",
+     "callId": "toolu_probe_1",
+     "isError": false
+    },
+    {
+     "t": 0,
+     "kind": "post-execute",
+     "callId": "toolu_probe_1",
+     "rootCallId": "toolu_probe_1",
+     "name": "bash",
+     "arguments": {
+      "command": "echo SHELL_FDS; ls -l /proc/$$/fd; echo PPID=$PPID; cat /proc/self/cgroup; env | sort",
+      "description": "fd probe"
+     },
+     "argType": "object",
+     "hasParent": false,
+     "agent": {
+      "id": "<UUID>"
+     },
+     "isError": false,
+     "error": null
+    },
+    {
+     "t": 0,
+     "kind": "result",
+     "callId": "toolu_probe_1",
+     "name": "bash",
+     "isError": false,
+     "error": null
+    },
+    {
+     "t": 0,
+     "kind": "pre-execute",
+     "callId": "toolu_probe_2",
+     "rootCallId": "toolu_probe_2",
+     "name": "no_such_tool",
+     "arguments": {
+      "x": 1
+     },
+     "argType": "object",
+     "hasParent": false,
+     "agent": {
+      "id": "<UUID>"
+     }
+    },
+    {
+     "t": 0,
+     "kind": "inventory",
+     "when": "first-pre-execute",
+     "readable": true,
+     "out": {
+      "tools/pre-execute": [
+       {
+        "entryId": "tool-jobs",
+        "entryName": "@deepseek-ai/dsh-tool-jobs",
+        "runtimeName": "tool-jobs",
+        "scope": [],
+        "prepend": true,
+        "global": false
+       },
+       {
+        "entryId": "nassaj-parity-probe",
+        "entryName": "file://<RUN>/layers/plugin/nassaj-probe-plugin.mjs",
+        "runtimeName": "nassaj-parity-probe",
+        "scope": [],
+        "prepend": true,
+        "global": true
+       }
+      ],
+      "tools/execute": [
+       {
+        "entryId": "nassaj-parity-probe",
+        "entryName": "file://<RUN>/layers/plugin/nassaj-probe-plugin.mjs",
+        "runtimeName": "nassaj-parity-probe",
+        "scope": [],
+        "prepend": true,
+        "global": true
+       },
+       {
+        "entryId": "timeout-policy",
+        "entryName": "@deepseek-ai/dsh-tool-call-timeout-policy",
+        "runtimeName": "timeout-policy",
+        "scope": [],
+        "prepend": false,
+        "global": false
+       },
+       {
+        "entryId": "session-checkpoint-policy",
+        "entryName": "@deepseek-ai/dsh-session-checkpoint-policy",
+        "runtimeName": "session-checkpoint-policy",
+        "scope": [],
+        "prepend": false,
+        "global": false
+       }
+      ],
+      "tools/post-execute": [
+       {
+        "entryId": "spill-policy",
+        "entryName": "@deepseek-ai/dsh-spill-policy",
+        "runtimeName": "spill-policy",
+        "scope": [],
+        "prepend": true,
+        "global": false
+       },
+       {
+        "entryId": "nassaj-parity-probe",
+        "entryName": "file://<RUN>/layers/plugin/nassaj-probe-plugin.mjs",
+        "runtimeName": "nassaj-parity-probe",
+        "scope": [],
+        "prepend": true,
+        "global": true
+       },
+       {
+        "entryId": "repeat-tool-reminder",
+        "entryName": "@deepseek-ai/dsh-repeat-tool-reminder",
+        "runtimeName": "repeat-tool-reminder",
+        "scope": [],
+        "prepend": false,
+        "global": false
+       },
+       {
+        "entryId": "tool-fs-search",
+        "entryName": "@deepseek-ai/dsh-tool-fs-search",
+        "runtimeName": "tool-fs-search",
+        "scope": [],
+        "prepend": false,
+        "global": false
+       },
+       {
+        "entryId": "tool-fs-search",
+        "entryName": "@deepseek-ai/dsh-tool-fs-search",
+        "runtimeName": "tool-fs-search",
+        "scope": [],
+        "prepend": false,
+        "global": false
+       }
+      ],
+      "tools/result": [
+       {
+        "entryId": "nassaj-parity-probe",
+        "entryName": "file://<RUN>/layers/plugin/nassaj-probe-plugin.mjs",
+        "runtimeName": "nassaj-parity-probe",
+        "scope": [],
+        "prepend": false,
+        "global": true
+       },
+       {
+        "entryId": "agent-instructions",
+        "entryName": "@deepseek-ai/dsh-agent-instructions",
+        "runtimeName": "agent-instructions",
+        "scope": [],
+        "prepend": false,
+        "global": false
+       }
+      ]
+     }
+    },
+    {
+     "t": 0,
+     "kind": "execute",
+     "callId": "toolu_probe_2",
+     "rootCallId": "toolu_probe_2",
+     "name": "no_such_tool",
+     "arguments": {
+      "x": 1
+     },
+     "argType": "object",
+     "hasParent": false,
+     "agent": {
+      "id": "<UUID>"
+     }
+    },
+    {
+     "t": 0,
+     "kind": "execute-done",
+     "callId": "toolu_probe_2",
+     "isError": true
+    },
+    {
+     "t": 0,
+     "kind": "post-execute",
+     "callId": "toolu_probe_2",
+     "rootCallId": "toolu_probe_2",
+     "name": "no_such_tool",
+     "arguments": {
+      "x": 1
+     },
+     "argType": "object",
+     "hasParent": false,
+     "agent": {
+      "id": "<UUID>"
+     },
+     "isError": true,
+     "error": "unknown tool \"no_such_tool\""
+    },
+    {
+     "t": 0,
+     "kind": "result",
+     "callId": "toolu_probe_2",
+     "name": "no_such_tool",
+     "isError": true,
+     "error": "unknown tool \"no_such_tool\""
+    },
+    {
+     "t": 0,
+     "kind": "pre-execute",
+     "callId": "toolu_probe_3",
+     "rootCallId": "toolu_probe_3",
+     "name": "subagent",
+     "arguments": {
+      "description": "probe sub",
+      "prompt": "SUB_STEPS [{\"name\":\"bash\",\"raw\":\"{\\\"command\\\":\\\"echo from-subagent; ls -l /proc/self/fd\\\",\\\"description\\\":\\\"sub probe\\\"}\"},{\"text\":\"sub done\"}] END_SUB"
+     },
+     "argType": "object",
+     "hasParent": false,
+     "agent": {
+      "id": "<UUID>"
+     }
+    },
+    {
+     "t": 0,
+     "kind": "inventory",
+     "when": "first-pre-execute",
+     "readable": true,
+     "out": {
+      "tools/pre-execute": [
+       {
+        "entryId": "tool-jobs",
+        "entryName": "@deepseek-ai/dsh-tool-jobs",
+        "runtimeName": "tool-jobs",
+        "scope": [],
+        "prepend": true,
+        "global": false
+       },
+       {
+        "entryId": "nassaj-parity-probe",
+        "entryName": "file://<RUN>/layers/plugin/nassaj-probe-plugin.mjs",
+        "runtimeName": "nassaj-parity-probe",
+        "scope": [],
+        "prepend": true,
+        "global": true
+       }
+      ],
+      "tools/execute": [
+       {
+        "entryId": "nassaj-parity-probe",
+        "entryName": "file://<RUN>/layers/plugin/nassaj-probe-plugin.mjs",
+        "runtimeName": "nassaj-parity-probe",
+        "scope": [],
+        "prepend": true,
+        "global": true
+       },
+       {
+        "entryId": "timeout-policy",
+        "entryName": "@deepseek-ai/dsh-tool-call-timeout-policy",
+        "runtimeName": "timeout-policy",
+        "scope": [],
+        "prepend": false,
+        "global": false
+       },
+       {
+        "entryId": "session-checkpoint-policy",
+        "entryName": "@deepseek-ai/dsh-session-checkpoint-policy",
+        "runtimeName": "session-checkpoint-policy",
+        "scope": [],
+        "prepend": false,
+        "global": false
+       }
+      ],
+      "tools/post-execute": [
+       {
+        "entryId": "spill-policy",
+        "entryName": "@deepseek-ai/dsh-spill-policy",
+        "runtimeName": "spill-policy",
+        "scope": [],
+        "prepend": true,
+        "global": false
+       },
+       {
+        "entryId": "nassaj-parity-probe",
+        "entryName": "file://<RUN>/layers/plugin/nassaj-probe-plugin.mjs",
+        "runtimeName": "nassaj-parity-probe",
+        "scope": [],
+        "prepend": true,
+        "global": true
+       },
+       {
+        "entryId": "repeat-tool-reminder",
+        "entryName": "@deepseek-ai/dsh-repeat-tool-reminder",
+        "runtimeName": "repeat-tool-reminder",
+        "scope": [],
+        "prepend": false,
+        "global": false
+       },
+       {
+        "entryId": "tool-fs-search",
+        "entryName": "@deepseek-ai/dsh-tool-fs-search",
+        "runtimeName": "tool-fs-search",
+        "scope": [],
+        "prepend": false,
+        "global": false
+       },
+       {
+        "entryId": "tool-fs-search",
+        "entryName": "@deepseek-ai/dsh-tool-fs-search",
+        "runtimeName": "tool-fs-search",
+        "scope": [],
+        "prepend": false,
+        "global": false
+       }
+      ],
+      "tools/result": [
+       {
+        "entryId": "nassaj-parity-probe",
+        "entryName": "file://<RUN>/layers/plugin/nassaj-probe-plugin.mjs",
+        "runtimeName": "nassaj-parity-probe",
+        "scope": [],
+        "prepend": false,
+        "global": true
+       },
+       {
+        "entryId": "agent-instructions",
+        "entryName": "@deepseek-ai/dsh-agent-instructions",
+        "runtimeName": "agent-instructions",
+        "scope": [],
+        "prepend": false,
+        "global": false
+       }
+      ]
+     }
+    },
+    {
+     "t": 0,
+     "kind": "execute",
+     "callId": "toolu_probe_3",
+     "rootCallId": "toolu_probe_3",
+     "name": "subagent",
+     "arguments": {
+      "description": "probe sub",
+      "prompt": "SUB_STEPS [{\"name\":\"bash\",\"raw\":\"{\\\"command\\\":\\\"echo from-subagent; ls -l /proc/self/fd\\\",\\\"description\\\":\\\"sub probe\\\"}\"},{\"text\":\"sub done\"}] END_SUB"
+     },
+     "argType": "object",
+     "hasParent": false,
+     "agent": {
+      "id": "<UUID>"
+     }
+    },
+    {
+     "t": 0,
+     "kind": "execute-done",
+     "callId": "toolu_probe_3",
+     "isError": false
+    },
+    {
+     "t": 0,
+     "kind": "post-execute",
+     "callId": "toolu_probe_3",
+     "rootCallId": "toolu_probe_3",
+     "name": "subagent",
+     "arguments": {
+      "description": "probe sub",
+      "prompt": "SUB_STEPS [{\"name\":\"bash\",\"raw\":\"{\\\"command\\\":\\\"echo from-subagent; ls -l /proc/self/fd\\\",\\\"description\\\":\\\"sub probe\\\"}\"},{\"text\":\"sub done\"}] END_SUB"
+     },
+     "argType": "object",
+     "hasParent": false,
+     "agent": {
+      "id": "<UUID>"
+     },
+     "isError": false,
+     "error": null
+    },
+    {
+     "t": 0,
+     "kind": "result",
+     "callId": "toolu_probe_3",
+     "name": "subagent",
+     "isError": false,
+     "error": null
+    },
+    {
+     "t": 0,
+     "kind": "pre-execute",
+     "callId": "toolu_probe_5",
+     "rootCallId": "toolu_probe_5",
+     "name": "bash",
+     "arguments": {
+      "command": "echo from-subagent; ls -l /proc/self/fd",
+      "description": "sub probe"
+     },
+     "argType": "object",
+     "hasParent": false,
+     "agent": {
+      "id": "<UUID>"
+     }
+    },
+    {
+     "t": 0,
+     "kind": "inventory",
+     "when": "first-pre-execute",
+     "readable": true,
+     "out": {
+      "tools/pre-execute": [
+       {
+        "entryId": "tool-jobs",
+        "entryName": "@deepseek-ai/dsh-tool-jobs",
+        "runtimeName": "tool-jobs",
+        "scope": [],
+        "prepend": true,
+        "global": false
+       },
+       {
+        "entryId": "nassaj-parity-probe",
+        "entryName": "file://<RUN>/layers/plugin/nassaj-probe-plugin.mjs",
+        "runtimeName": "nassaj-parity-probe",
+        "scope": [],
+        "prepend": true,
+        "global": true
+       }
+      ],
+      "tools/execute": [
+       {
+        "entryId": "nassaj-parity-probe",
+        "entryName": "file://<RUN>/layers/plugin/nassaj-probe-plugin.mjs",
+        "runtimeName": "nassaj-parity-probe",
+        "scope": [],
+        "prepend": true,
+        "global": true
+       },
+       {
+        "entryId": "timeout-policy",
+        "entryName": "@deepseek-ai/dsh-tool-call-timeout-policy",
+        "runtimeName": "timeout-policy",
+        "scope": [],
+        "prepend": false,
+        "global": false
+       },
+       {
+        "entryId": "session-checkpoint-policy",
+        "entryName": "@deepseek-ai/dsh-session-checkpoint-policy",
+        "runtimeName": "session-checkpoint-policy",
+        "scope": [],
+        "prepend": false,
+        "global": false
+       }
+      ],
+      "tools/post-execute": [
+       {
+        "entryId": "spill-policy",
+        "entryName": "@deepseek-ai/dsh-spill-policy",
+        "runtimeName": "spill-policy",
+        "scope": [],
+        "prepend": true,
+        "global": false
+       },
+       {
+        "entryId": "nassaj-parity-probe",
+        "entryName": "file://<RUN>/layers/plugin/nassaj-probe-plugin.mjs",
+        "runtimeName": "nassaj-parity-probe",
+        "scope": [],
+        "prepend": true,
+        "global": true
+       },
+       {
+        "entryId": "repeat-tool-reminder",
+        "entryName": "@deepseek-ai/dsh-repeat-tool-reminder",
+        "runtimeName": "repeat-tool-reminder",
+        "scope": [],
+        "prepend": false,
+        "global": false
+       },
+       {
+        "entryId": "tool-fs-search",
+        "entryName": "@deepseek-ai/dsh-tool-fs-search",
+        "runtimeName": "tool-fs-search",
+        "scope": [],
+        "prepend": false,
+        "global": false
+       },
+       {
+        "entryId": "tool-fs-search",
+        "entryName": "@deepseek-ai/dsh-tool-fs-search",
+        "runtimeName": "tool-fs-search",
+        "scope": [],
+        "prepend": false,
+        "global": false
+       }
+      ],
+      "tools/result": [
+       {
+        "entryId": "nassaj-parity-probe",
+        "entryName": "file://<RUN>/layers/plugin/nassaj-probe-plugin.mjs",
+        "runtimeName": "nassaj-parity-probe",
+        "scope": [],
+        "prepend": false,
+        "global": true
+       },
+       {
+        "entryId": "agent-instructions",
+        "entryName": "@deepseek-ai/dsh-agent-instructions",
+        "runtimeName": "agent-instructions",
+        "scope": [],
+        "prepend": false,
+        "global": false
+       }
+      ]
+     }
+    },
+    {
+     "t": 0,
+     "kind": "execute",
+     "callId": "toolu_probe_5",
+     "rootCallId": "toolu_probe_5",
+     "name": "bash",
+     "arguments": {
+      "command": "echo from-subagent; ls -l /proc/self/fd",
+      "description": "sub probe"
+     },
+     "argType": "object",
+     "hasParent": false,
+     "agent": {
+      "id": "<UUID>"
+     }
+    },
+    {
+     "t": 0,
+     "kind": "execute-done",
+     "callId": "toolu_probe_5",
+     "isError": false
+    },
+    {
+     "t": 0,
+     "kind": "post-execute",
+     "callId": "toolu_probe_5",
+     "rootCallId": "toolu_probe_5",
+     "name": "bash",
+     "arguments": {
+      "command": "echo from-subagent; ls -l /proc/self/fd",
+      "description": "sub probe"
+     },
+     "argType": "object",
+     "hasParent": false,
+     "agent": {
+      "id": "<UUID>"
+     },
+     "isError": false,
+     "error": null
+    },
+    {
+     "t": 0,
+     "kind": "result",
+     "callId": "toolu_probe_5",
+     "name": "bash",
+     "isError": false,
+     "error": null
+    }
+   ],
+   "proc": [
+    {
+     "label": "after-session-new",
+     "listening": [],
+     "lsofInet": "",
+     "fd3": "3->socket:[N]",
+     "fd7": "7->socket:[N]"
+    },
+    {
+     "label": "after-prompt",
+     "listening": [],
+     "lsofInet": "COMMAND       PID   USER FD   TYPE    DEVICE SIZE/OFF NODE NAME\nMainThrea <PID> nassaj 25u  IPv4 454163646      0t0  TCP localhost:37166->localhost:47811 (ESTABLISHED)\n",
+     "fd3": "3->socket:[N]",
+     "fd7": "7->socket:[N]"
+    }
+   ],
+   "llmRequests": 7
+  },
+  "main_direct_noXdg": {
+   "acp": [
+    {
+     "jsonrpc": "2.0",
+     "method": "session/update",
+     "params": {
+      "sessionId": "<UUID>",
+      "update": {
+       "sessionUpdate": "tool_call",
+       "toolCallId": "toolu_probe_1",
+       "title": "bash",
+       "kind": "other",
+       "status": "in_progress",
+       "rawInput": {
+        "command": "echo SHELL_FDS; ls -l /proc/$$/fd; echo PPID=$PPID; cat /proc/self/cgroup; env | sort",
+        "description": "fd probe"
+       }
+      }
+     }
+    },
+    {
+     "jsonrpc": "2.0",
+     "method": "session/update",
+     "params": {
+      "sessionId": "<UUID>",
+      "update": {
+       "sessionUpdate": "tool_call_update",
+       "toolCallId": "toolu_probe_1",
+       "status": "completed",
+       "content": [
+        {
+         "type": "content",
+         "content": {
+          "type": "text",
+          "text": "SHELL_FDS\ntotal 0\nlr-x------ 1 nassaj nassaj 64 <DATE> 0 -> /dev/null\nlrwx------ 1 nassaj nassaj 64 <DATE> 1 -> socket:[N]\nlrwx------ 1 nassaj nassaj 64 <DATE> 2 -> socket:[N]\nPPID=<DSH_PID>\n0::/system.slice/pm2-nassaj.service\nDSH_HOME=<RUN>/home/.dsh\nDSH_PROFILE=nassaj-acp\nDSH_PROFILE_DIR=<RUN>/home/.dsh/profiles/nassaj-acp\nDSH_SESSION_ID=<UUID>\nDSH_SHELL=1\nGIT_PAGER=cat\nHOME=<RUN>/home\nLANG=C.UTF-8\nNO_COLOR=1\nPAGER=cat\nPATH=/usr/local/bin:/usr/bin:/bin\nPWD=<RUN>/ws\nREC_CWD=<RUN>/ws\nSHLVL=1\nTERM=dumb\nTMPDIR=<RUN>/home/.tmp\n_=/usr/bin/env\n"
+         }
+        }
+       ]
+      }
+     }
+    },
+    {
+     "jsonrpc": "2.0",
+     "method": "session/update",
+     "params": {
+      "sessionId": "<UUID>",
+      "update": {
+       "sessionUpdate": "tool_call",
+       "toolCallId": "toolu_probe_2",
+       "title": "no_such_tool",
+       "kind": "other",
+       "status": "in_progress",
+       "rawInput": {
+        "x": 1
+       }
+      }
+     }
+    },
+    {
+     "jsonrpc": "2.0",
+     "method": "session/update",
+     "params": {
+      "sessionId": "<UUID>",
+      "update": {
+       "sessionUpdate": "tool_call_update",
+       "toolCallId": "toolu_probe_2",
+       "status": "failed",
+       "content": [
+        {
+         "type": "content",
+         "content": {
+          "type": "text",
+          "text": "Error: unknown tool \"no_such_tool\""
+         }
+        }
+       ]
+      }
+     }
+    },
+    {
+     "jsonrpc": "2.0",
+     "method": "session/update",
+     "params": {
+      "sessionId": "<UUID>",
+      "update": {
+       "sessionUpdate": "tool_call",
+       "toolCallId": "toolu_probe_3",
+       "title": "subagent",
+       "kind": "other",
+       "status": "in_progress",
+       "rawInput": {
+        "description": "probe sub",
+        "prompt": "SUB_STEPS [{\"name\":\"bash\",\"raw\":\"{\\\"command\\\":\\\"echo from-subagent; ls -l /proc/self/fd\\\",\\\"description\\\":\\\"sub probe\\\"}\"},{\"text\":\"sub done\"}] END_SUB"
+       }
+      }
+     }
+    },
+    {
+     "jsonrpc": "2.0",
+     "method": "session/update",
+     "params": {
+      "sessionId": "<UUID>",
+      "update": {
+       "sessionUpdate": "tool_call_update",
+       "toolCallId": "toolu_probe_3",
+       "status": "completed",
+       "content": [
+        {
+         "type": "content",
+         "content": {
+          "type": "text",
+          "text": "started subagent <UUID>"
+         }
+        }
+       ]
+      }
+     }
+    },
+    {
+     "jsonrpc": "2.0",
+     "id": 3,
+     "error": {
+      "code": -32603,
+      "message": "Internal error: turn failed: DeepSeek Messages expected a JSON object"
+     }
+    }
+   ],
+   "plugin": [
+    {
+     "t": 0,
+     "kind": "apply",
+     "pid": "<PID>",
+     "ppid": "<PID>",
+     "config": {
+      "marker": "probe"
+     },
+     "url": "file://<RUN>/layers/plugin/nassaj-probe-plugin.mjs"
+    },
+    {
+     "t": 0,
+     "kind": "inventory",
+     "when": "apply",
+     "readable": true,
+     "out": {
+      "tools/pre-execute": [],
+      "tools/execute": [
+       {
+        "entryId": "timeout-policy",
+        "entryName": "@deepseek-ai/dsh-tool-call-timeout-policy",
+        "runtimeName": "timeout-policy",
+        "scope": [],
+        "prepend": false,
+        "global": false
+       }
+      ],
+      "tools/post-execute": [
+       {
+        "entryId": "repeat-tool-reminder",
+        "entryName": "@deepseek-ai/dsh-repeat-tool-reminder",
+        "runtimeName": "repeat-tool-reminder",
+        "scope": [],
+        "prepend": false,
+        "global": false
+       }
+      ],
+      "tools/result": []
+     }
+    },
+    {
+     "t": 0,
+     "kind": "pre-execute",
+     "callId": "toolu_probe_1",
+     "rootCallId": "toolu_probe_1",
+     "name": "bash",
+     "arguments": {
+      "command": "echo SHELL_FDS; ls -l /proc/$$/fd; echo PPID=$PPID; cat /proc/self/cgroup; env | sort",
+      "description": "fd probe"
+     },
+     "argType": "object",
+     "hasParent": false,
+     "agent": {
+      "id": "<UUID>"
+     }
+    },
+    {
+     "t": 0,
+     "kind": "inventory",
+     "when": "first-pre-execute",
+     "readable": true,
+     "out": {
+      "tools/pre-execute": [
+       {
+        "entryId": "tool-jobs",
+        "entryName": "@deepseek-ai/dsh-tool-jobs",
+        "runtimeName": "tool-jobs",
+        "scope": [],
+        "prepend": true,
+        "global": false
+       },
+       {
+        "entryId": "nassaj-parity-probe",
+        "entryName": "file://<RUN>/layers/plugin/nassaj-probe-plugin.mjs",
+        "runtimeName": "nassaj-parity-probe",
+        "scope": [],
+        "prepend": true,
+        "global": true
+       }
+      ],
+      "tools/execute": [
+       {
+        "entryId": "nassaj-parity-probe",
+        "entryName": "file://<RUN>/layers/plugin/nassaj-probe-plugin.mjs",
+        "runtimeName": "nassaj-parity-probe",
+        "scope": [],
+        "prepend": true,
+        "global": true
+       },
+       {
+        "entryId": "timeout-policy",
+        "entryName": "@deepseek-ai/dsh-tool-call-timeout-policy",
+        "runtimeName": "timeout-policy",
+        "scope": [],
+        "prepend": false,
+        "global": false
+       },
+       {
+        "entryId": "session-checkpoint-policy",
+        "entryName": "@deepseek-ai/dsh-session-checkpoint-policy",
+        "runtimeName": "session-checkpoint-policy",
+        "scope": [],
+        "prepend": false,
+        "global": false
+       }
+      ],
+      "tools/post-execute": [
+       {
+        "entryId": "spill-policy",
+        "entryName": "@deepseek-ai/dsh-spill-policy",
+        "runtimeName": "spill-policy",
+        "scope": [],
+        "prepend": true,
+        "global": false
+       },
+       {
+        "entryId": "nassaj-parity-probe",
+        "entryName": "file://<RUN>/layers/plugin/nassaj-probe-plugin.mjs",
+        "runtimeName": "nassaj-parity-probe",
+        "scope": [],
+        "prepend": true,
+        "global": true
+       },
+       {
+        "entryId": "repeat-tool-reminder",
+        "entryName": "@deepseek-ai/dsh-repeat-tool-reminder",
+        "runtimeName": "repeat-tool-reminder",
+        "scope": [],
+        "prepend": false,
+        "global": false
+       },
+       {
+        "entryId": "tool-fs-search",
+        "entryName": "@deepseek-ai/dsh-tool-fs-search",
+        "runtimeName": "tool-fs-search",
+        "scope": [],
+        "prepend": false,
+        "global": false
+       },
+       {
+        "entryId": "tool-fs-search",
+        "entryName": "@deepseek-ai/dsh-tool-fs-search",
+        "runtimeName": "tool-fs-search",
+        "scope": [],
+        "prepend": false,
+        "global": false
+       }
+      ],
+      "tools/result": [
+       {
+        "entryId": "nassaj-parity-probe",
+        "entryName": "file://<RUN>/layers/plugin/nassaj-probe-plugin.mjs",
+        "runtimeName": "nassaj-parity-probe",
+        "scope": [],
+        "prepend": false,
+        "global": true
+       },
+       {
+        "entryId": "agent-instructions",
+        "entryName": "@deepseek-ai/dsh-agent-instructions",
+        "runtimeName": "agent-instructions",
+        "scope": [],
+        "prepend": false,
+        "global": false
+       }
+      ]
+     }
+    },
+    {
+     "t": 0,
+     "kind": "execute",
+     "callId": "toolu_probe_1",
+     "rootCallId": "toolu_probe_1",
+     "name": "bash",
+     "arguments": {
+      "command": "echo SHELL_FDS; ls -l /proc/$$/fd; echo PPID=$PPID; cat /proc/self/cgroup; env | sort",
+      "description": "fd probe"
+     },
+     "argType": "object",
+     "hasParent": false,
+     "agent": {
+      "id": "<UUID>"
+     }
+    },
+    {
+     "t": 0,
+     "kind": "execute-done",
+     "callId": "toolu_probe_1",
+     "isError": false
+    },
+    {
+     "t": 0,
+     "kind": "post-execute",
+     "callId": "toolu_probe_1",
+     "rootCallId": "toolu_probe_1",
+     "name": "bash",
+     "arguments": {
+      "command": "echo SHELL_FDS; ls -l /proc/$$/fd; echo PPID=$PPID; cat /proc/self/cgroup; env | sort",
+      "description": "fd probe"
+     },
+     "argType": "object",
+     "hasParent": false,
+     "agent": {
+      "id": "<UUID>"
+     },
+     "isError": false,
+     "error": null
+    },
+    {
+     "t": 0,
+     "kind": "result",
+     "callId": "toolu_probe_1",
+     "name": "bash",
+     "isError": false,
+     "error": null
+    },
+    {
+     "t": 0,
+     "kind": "pre-execute",
+     "callId": "toolu_probe_2",
+     "rootCallId": "toolu_probe_2",
+     "name": "no_such_tool",
+     "arguments": {
+      "x": 1
+     },
+     "argType": "object",
+     "hasParent": false,
+     "agent": {
+      "id": "<UUID>"
+     }
+    },
+    {
+     "t": 0,
+     "kind": "inventory",
+     "when": "first-pre-execute",
+     "readable": true,
+     "out": {
+      "tools/pre-execute": [
+       {
+        "entryId": "tool-jobs",
+        "entryName": "@deepseek-ai/dsh-tool-jobs",
+        "runtimeName": "tool-jobs",
+        "scope": [],
+        "prepend": true,
+        "global": false
+       },
+       {
+        "entryId": "nassaj-parity-probe",
+        "entryName": "file://<RUN>/layers/plugin/nassaj-probe-plugin.mjs",
+        "runtimeName": "nassaj-parity-probe",
+        "scope": [],
+        "prepend": true,
+        "global": true
+       }
+      ],
+      "tools/execute": [
+       {
+        "entryId": "nassaj-parity-probe",
+        "entryName": "file://<RUN>/layers/plugin/nassaj-probe-plugin.mjs",
+        "runtimeName": "nassaj-parity-probe",
+        "scope": [],
+        "prepend": true,
+        "global": true
+       },
+       {
+        "entryId": "timeout-policy",
+        "entryName": "@deepseek-ai/dsh-tool-call-timeout-policy",
+        "runtimeName": "timeout-policy",
+        "scope": [],
+        "prepend": false,
+        "global": false
+       },
+       {
+        "entryId": "session-checkpoint-policy",
+        "entryName": "@deepseek-ai/dsh-session-checkpoint-policy",
+        "runtimeName": "session-checkpoint-policy",
+        "scope": [],
+        "prepend": false,
+        "global": false
+       }
+      ],
+      "tools/post-execute": [
+       {
+        "entryId": "spill-policy",
+        "entryName": "@deepseek-ai/dsh-spill-policy",
+        "runtimeName": "spill-policy",
+        "scope": [],
+        "prepend": true,
+        "global": false
+       },
+       {
+        "entryId": "nassaj-parity-probe",
+        "entryName": "file://<RUN>/layers/plugin/nassaj-probe-plugin.mjs",
+        "runtimeName": "nassaj-parity-probe",
+        "scope": [],
+        "prepend": true,
+        "global": true
+       },
+       {
+        "entryId": "repeat-tool-reminder",
+        "entryName": "@deepseek-ai/dsh-repeat-tool-reminder",
+        "runtimeName": "repeat-tool-reminder",
+        "scope": [],
+        "prepend": false,
+        "global": false
+       },
+       {
+        "entryId": "tool-fs-search",
+        "entryName": "@deepseek-ai/dsh-tool-fs-search",
+        "runtimeName": "tool-fs-search",
+        "scope": [],
+        "prepend": false,
+        "global": false
+       },
+       {
+        "entryId": "tool-fs-search",
+        "entryName": "@deepseek-ai/dsh-tool-fs-search",
+        "runtimeName": "tool-fs-search",
+        "scope": [],
+        "prepend": false,
+        "global": false
+       }
+      ],
+      "tools/result": [
+       {
+        "entryId": "nassaj-parity-probe",
+        "entryName": "file://<RUN>/layers/plugin/nassaj-probe-plugin.mjs",
+        "runtimeName": "nassaj-parity-probe",
+        "scope": [],
+        "prepend": false,
+        "global": true
+       },
+       {
+        "entryId": "agent-instructions",
+        "entryName": "@deepseek-ai/dsh-agent-instructions",
+        "runtimeName": "agent-instructions",
+        "scope": [],
+        "prepend": false,
+        "global": false
+       }
+      ]
+     }
+    },
+    {
+     "t": 0,
+     "kind": "execute",
+     "callId": "toolu_probe_2",
+     "rootCallId": "toolu_probe_2",
+     "name": "no_such_tool",
+     "arguments": {
+      "x": 1
+     },
+     "argType": "object",
+     "hasParent": false,
+     "agent": {
+      "id": "<UUID>"
+     }
+    },
+    {
+     "t": 0,
+     "kind": "execute-done",
+     "callId": "toolu_probe_2",
+     "isError": true
+    },
+    {
+     "t": 0,
+     "kind": "post-execute",
+     "callId": "toolu_probe_2",
+     "rootCallId": "toolu_probe_2",
+     "name": "no_such_tool",
+     "arguments": {
+      "x": 1
+     },
+     "argType": "object",
+     "hasParent": false,
+     "agent": {
+      "id": "<UUID>"
+     },
+     "isError": true,
+     "error": "unknown tool \"no_such_tool\""
+    },
+    {
+     "t": 0,
+     "kind": "result",
+     "callId": "toolu_probe_2",
+     "name": "no_such_tool",
+     "isError": true,
+     "error": "unknown tool \"no_such_tool\""
+    },
+    {
+     "t": 0,
+     "kind": "pre-execute",
+     "callId": "toolu_probe_3",
+     "rootCallId": "toolu_probe_3",
+     "name": "subagent",
+     "arguments": {
+      "description": "probe sub",
+      "prompt": "SUB_STEPS [{\"name\":\"bash\",\"raw\":\"{\\\"command\\\":\\\"echo from-subagent; ls -l /proc/self/fd\\\",\\\"description\\\":\\\"sub probe\\\"}\"},{\"text\":\"sub done\"}] END_SUB"
+     },
+     "argType": "object",
+     "hasParent": false,
+     "agent": {
+      "id": "<UUID>"
+     }
+    },
+    {
+     "t": 0,
+     "kind": "inventory",
+     "when": "first-pre-execute",
+     "readable": true,
+     "out": {
+      "tools/pre-execute": [
+       {
+        "entryId": "tool-jobs",
+        "entryName": "@deepseek-ai/dsh-tool-jobs",
+        "runtimeName": "tool-jobs",
+        "scope": [],
+        "prepend": true,
+        "global": false
+       },
+       {
+        "entryId": "nassaj-parity-probe",
+        "entryName": "file://<RUN>/layers/plugin/nassaj-probe-plugin.mjs",
+        "runtimeName": "nassaj-parity-probe",
+        "scope": [],
+        "prepend": true,
+        "global": true
+       }
+      ],
+      "tools/execute": [
+       {
+        "entryId": "nassaj-parity-probe",
+        "entryName": "file://<RUN>/layers/plugin/nassaj-probe-plugin.mjs",
+        "runtimeName": "nassaj-parity-probe",
+        "scope": [],
+        "prepend": true,
+        "global": true
+       },
+       {
+        "entryId": "timeout-policy",
+        "entryName": "@deepseek-ai/dsh-tool-call-timeout-policy",
+        "runtimeName": "timeout-policy",
+        "scope": [],
+        "prepend": false,
+        "global": false
+       },
+       {
+        "entryId": "session-checkpoint-policy",
+        "entryName": "@deepseek-ai/dsh-session-checkpoint-policy",
+        "runtimeName": "session-checkpoint-policy",
+        "scope": [],
+        "prepend": false,
+        "global": false
+       }
+      ],
+      "tools/post-execute": [
+       {
+        "entryId": "spill-policy",
+        "entryName": "@deepseek-ai/dsh-spill-policy",
+        "runtimeName": "spill-policy",
+        "scope": [],
+        "prepend": true,
+        "global": false
+       },
+       {
+        "entryId": "nassaj-parity-probe",
+        "entryName": "file://<RUN>/layers/plugin/nassaj-probe-plugin.mjs",
+        "runtimeName": "nassaj-parity-probe",
+        "scope": [],
+        "prepend": true,
+        "global": true
+       },
+       {
+        "entryId": "repeat-tool-reminder",
+        "entryName": "@deepseek-ai/dsh-repeat-tool-reminder",
+        "runtimeName": "repeat-tool-reminder",
+        "scope": [],
+        "prepend": false,
+        "global": false
+       },
+       {
+        "entryId": "tool-fs-search",
+        "entryName": "@deepseek-ai/dsh-tool-fs-search",
+        "runtimeName": "tool-fs-search",
+        "scope": [],
+        "prepend": false,
+        "global": false
+       },
+       {
+        "entryId": "tool-fs-search",
+        "entryName": "@deepseek-ai/dsh-tool-fs-search",
+        "runtimeName": "tool-fs-search",
+        "scope": [],
+        "prepend": false,
+        "global": false
+       }
+      ],
+      "tools/result": [
+       {
+        "entryId": "nassaj-parity-probe",
+        "entryName": "file://<RUN>/layers/plugin/nassaj-probe-plugin.mjs",
+        "runtimeName": "nassaj-parity-probe",
+        "scope": [],
+        "prepend": false,
+        "global": true
+       },
+       {
+        "entryId": "agent-instructions",
+        "entryName": "@deepseek-ai/dsh-agent-instructions",
+        "runtimeName": "agent-instructions",
+        "scope": [],
+        "prepend": false,
+        "global": false
+       }
+      ]
+     }
+    },
+    {
+     "t": 0,
+     "kind": "execute",
+     "callId": "toolu_probe_3",
+     "rootCallId": "toolu_probe_3",
+     "name": "subagent",
+     "arguments": {
+      "description": "probe sub",
+      "prompt": "SUB_STEPS [{\"name\":\"bash\",\"raw\":\"{\\\"command\\\":\\\"echo from-subagent; ls -l /proc/self/fd\\\",\\\"description\\\":\\\"sub probe\\\"}\"},{\"text\":\"sub done\"}] END_SUB"
+     },
+     "argType": "object",
+     "hasParent": false,
+     "agent": {
+      "id": "<UUID>"
+     }
+    },
+    {
+     "t": 0,
+     "kind": "execute-done",
+     "callId": "toolu_probe_3",
+     "isError": false
+    },
+    {
+     "t": 0,
+     "kind": "post-execute",
+     "callId": "toolu_probe_3",
+     "rootCallId": "toolu_probe_3",
+     "name": "subagent",
+     "arguments": {
+      "description": "probe sub",
+      "prompt": "SUB_STEPS [{\"name\":\"bash\",\"raw\":\"{\\\"command\\\":\\\"echo from-subagent; ls -l /proc/self/fd\\\",\\\"description\\\":\\\"sub probe\\\"}\"},{\"text\":\"sub done\"}] END_SUB"
+     },
+     "argType": "object",
+     "hasParent": false,
+     "agent": {
+      "id": "<UUID>"
+     },
+     "isError": false,
+     "error": null
+    },
+    {
+     "t": 0,
+     "kind": "result",
+     "callId": "toolu_probe_3",
+     "name": "subagent",
+     "isError": false,
+     "error": null
+    },
+    {
+     "t": 0,
+     "kind": "pre-execute",
+     "callId": "toolu_probe_5",
+     "rootCallId": "toolu_probe_5",
+     "name": "bash",
+     "arguments": {
+      "command": "echo from-subagent; ls -l /proc/self/fd",
+      "description": "sub probe"
+     },
+     "argType": "object",
+     "hasParent": false,
+     "agent": {
+      "id": "<UUID>"
+     }
+    },
+    {
+     "t": 0,
+     "kind": "inventory",
+     "when": "first-pre-execute",
+     "readable": true,
+     "out": {
+      "tools/pre-execute": [
+       {
+        "entryId": "tool-jobs",
+        "entryName": "@deepseek-ai/dsh-tool-jobs",
+        "runtimeName": "tool-jobs",
+        "scope": [],
+        "prepend": true,
+        "global": false
+       },
+       {
+        "entryId": "nassaj-parity-probe",
+        "entryName": "file://<RUN>/layers/plugin/nassaj-probe-plugin.mjs",
+        "runtimeName": "nassaj-parity-probe",
+        "scope": [],
+        "prepend": true,
+        "global": true
+       }
+      ],
+      "tools/execute": [
+       {
+        "entryId": "nassaj-parity-probe",
+        "entryName": "file://<RUN>/layers/plugin/nassaj-probe-plugin.mjs",
+        "runtimeName": "nassaj-parity-probe",
+        "scope": [],
+        "prepend": true,
+        "global": true
+       },
+       {
+        "entryId": "timeout-policy",
+        "entryName": "@deepseek-ai/dsh-tool-call-timeout-policy",
+        "runtimeName": "timeout-policy",
+        "scope": [],
+        "prepend": false,
+        "global": false
+       },
+       {
+        "entryId": "session-checkpoint-policy",
+        "entryName": "@deepseek-ai/dsh-session-checkpoint-policy",
+        "runtimeName": "session-checkpoint-policy",
+        "scope": [],
+        "prepend": false,
+        "global": false
+       }
+      ],
+      "tools/post-execute": [
+       {
+        "entryId": "spill-policy",
+        "entryName": "@deepseek-ai/dsh-spill-policy",
+        "runtimeName": "spill-policy",
+        "scope": [],
+        "prepend": true,
+        "global": false
+       },
+       {
+        "entryId": "nassaj-parity-probe",
+        "entryName": "file://<RUN>/layers/plugin/nassaj-probe-plugin.mjs",
+        "runtimeName": "nassaj-parity-probe",
+        "scope": [],
+        "prepend": true,
+        "global": true
+       },
+       {
+        "entryId": "repeat-tool-reminder",
+        "entryName": "@deepseek-ai/dsh-repeat-tool-reminder",
+        "runtimeName": "repeat-tool-reminder",
+        "scope": [],
+        "prepend": false,
+        "global": false
+       },
+       {
+        "entryId": "tool-fs-search",
+        "entryName": "@deepseek-ai/dsh-tool-fs-search",
+        "runtimeName": "tool-fs-search",
+        "scope": [],
+        "prepend": false,
+        "global": false
+       },
+       {
+        "entryId": "tool-fs-search",
+        "entryName": "@deepseek-ai/dsh-tool-fs-search",
+        "runtimeName": "tool-fs-search",
+        "scope": [],
+        "prepend": false,
+        "global": false
+       }
+      ],
+      "tools/result": [
+       {
+        "entryId": "nassaj-parity-probe",
+        "entryName": "file://<RUN>/layers/plugin/nassaj-probe-plugin.mjs",
+        "runtimeName": "nassaj-parity-probe",
+        "scope": [],
+        "prepend": false,
+        "global": true
+       },
+       {
+        "entryId": "agent-instructions",
+        "entryName": "@deepseek-ai/dsh-agent-instructions",
+        "runtimeName": "agent-instructions",
+        "scope": [],
+        "prepend": false,
+        "global": false
+       }
+      ]
+     }
+    },
+    {
+     "t": 0,
+     "kind": "execute",
+     "callId": "toolu_probe_5",
+     "rootCallId": "toolu_probe_5",
+     "name": "bash",
+     "arguments": {
+      "command": "echo from-subagent; ls -l /proc/self/fd",
+      "description": "sub probe"
+     },
+     "argType": "object",
+     "hasParent": false,
+     "agent": {
+      "id": "<UUID>"
+     }
+    },
+    {
+     "t": 0,
+     "kind": "execute-done",
+     "callId": "toolu_probe_5",
+     "isError": false
+    },
+    {
+     "t": 0,
+     "kind": "post-execute",
+     "callId": "toolu_probe_5",
+     "rootCallId": "toolu_probe_5",
+     "name": "bash",
+     "arguments": {
+      "command": "echo from-subagent; ls -l /proc/self/fd",
+      "description": "sub probe"
+     },
+     "argType": "object",
+     "hasParent": false,
+     "agent": {
+      "id": "<UUID>"
+     },
+     "isError": false,
+     "error": null
+    },
+    {
+     "t": 0,
+     "kind": "result",
+     "callId": "toolu_probe_5",
+     "name": "bash",
+     "isError": false,
+     "error": null
+    }
+   ],
+   "proc": [
+    {
+     "label": "after-session-new",
+     "listening": [],
+     "lsofInet": "",
+     "fd3": "3->socket:[N]",
+     "fd7": "7->socket:[N]"
+    },
+    {
+     "label": "after-prompt",
+     "listening": [],
+     "lsofInet": "COMMAND       PID   USER FD   TYPE    DEVICE SIZE/OFF NODE NAME\nMainThrea <PID> nassaj 25u  IPv4 454223664      0t0  TCP localhost:60534->localhost:47812 (ESTABLISHED)\n",
+     "fd3": "3->socket:[N]",
+     "fd7": "7->socket:[N]"
+    }
+   ],
+   "llmRequests": 7
+  },
+  "malformed_json": {
+   "acp": [
+    {
+     "jsonrpc": "2.0",
+     "id": 3,
+     "error": {
+      "code": -32603,
+      "message": "Internal error: turn failed: DeepSeek Messages stream: tool input is invalid JSON"
+     }
+    }
+   ],
+   "plugin": [
+    {
+     "t": 0,
+     "kind": "apply",
+     "pid": "<PID>",
+     "ppid": "<PID>",
+     "config": {
+      "marker": "probe"
+     },
+     "url": "file://<RUN>/layers/plugin/nassaj-probe-plugin.mjs"
+    },
+    {
+     "t": 0,
+     "kind": "inventory",
+     "when": "apply",
+     "readable": true,
+     "out": {
+      "tools/pre-execute": [],
+      "tools/execute": [
+       {
+        "entryId": "timeout-policy",
+        "entryName": "@deepseek-ai/dsh-tool-call-timeout-policy",
+        "runtimeName": "timeout-policy",
+        "scope": [],
+        "prepend": false,
+        "global": false
+       }
+      ],
+      "tools/post-execute": [
+       {
+        "entryId": "repeat-tool-reminder",
+        "entryName": "@deepseek-ai/dsh-repeat-tool-reminder",
+        "runtimeName": "repeat-tool-reminder",
+        "scope": [],
+        "prepend": false,
+        "global": false
+       }
+      ],
+      "tools/result": []
+     }
+    }
+   ],
+   "proc": [
+    {
+     "label": "after-session-new",
+     "listening": [],
+     "lsofInet": "",
+     "fd3": "3->socket:[N]",
+     "fd7": "7->socket:[N]"
+    },
+    {
+     "label": "after-prompt",
+     "listening": [],
+     "lsofInet": "COMMAND       PID   USER FD   TYPE    DEVICE SIZE/OFF NODE NAME\nMainThrea <PID> nassaj 25u  IPv4 454230900      0t0  TCP localhost:34942->localhost:47813 (ESTABLISHED)\n",
+     "fd3": "3->socket:[N]",
+     "fd7": "7->socket:[N]"
+    }
+   ],
+   "llmRequests": 1
+  },
+  "string_args": {
+   "acp": [
+    {
+     "jsonrpc": "2.0",
+     "id": 3,
+     "error": {
+      "code": -32603,
+      "message": "Internal error: turn failed: DeepSeek Messages expected a JSON object"
+     }
+    }
+   ],
+   "plugin": [
+    {
+     "t": 0,
+     "kind": "apply",
+     "pid": "<PID>",
+     "ppid": "<PID>",
+     "config": {
+      "marker": "probe"
+     },
+     "url": "file://<RUN>/layers/plugin/nassaj-probe-plugin.mjs"
+    },
+    {
+     "t": 0,
+     "kind": "inventory",
+     "when": "apply",
+     "readable": true,
+     "out": {
+      "tools/pre-execute": [],
+      "tools/execute": [
+       {
+        "entryId": "timeout-policy",
+        "entryName": "@deepseek-ai/dsh-tool-call-timeout-policy",
+        "runtimeName": "timeout-policy",
+        "scope": [],
+        "prepend": false,
+        "global": false
+       }
+      ],
+      "tools/post-execute": [
+       {
+        "entryId": "repeat-tool-reminder",
+        "entryName": "@deepseek-ai/dsh-repeat-tool-reminder",
+        "runtimeName": "repeat-tool-reminder",
+        "scope": [],
+        "prepend": false,
+        "global": false
+       }
+      ],
+      "tools/result": []
+     }
+    }
+   ],
+   "proc": [
+    {
+     "label": "after-session-new",
+     "listening": [],
+     "lsofInet": "",
+     "fd3": "3->socket:[N]",
+     "fd7": "7->socket:[N]"
+    },
+    {
+     "label": "after-prompt",
+     "listening": [],
+     "lsofInet": "COMMAND       PID   USER FD   TYPE    DEVICE SIZE/OFF NODE NAME\nMainThrea <PID> nassaj 25u  IPv4 454234977      0t0  TCP localhost:44742->localhost:47814 (ESTABLISHED)\n",
+     "fd3": "3->socket:[N]",
+     "fd7": "7->socket:[N]"
+    }
+   ],
+   "llmRequests": 1
+  },
+  "cancel": {
+   "acp": [
+    {
+     "jsonrpc": "2.0",
+     "method": "session/update",
+     "params": {
+      "sessionId": "<UUID>",
+      "update": {
+       "sessionUpdate": "tool_call",
+       "toolCallId": "toolu_probe_1",
+       "title": "bash",
+       "kind": "other",
+       "status": "in_progress",
+       "rawInput": {
+        "command": "sleep 20; echo late > cancel-witness",
+        "description": "slow"
+       }
+      }
+     }
+    },
+    {
+     "jsonrpc": "2.0",
+     "method": "session/update",
+     "params": {
+      "sessionId": "<UUID>",
+      "update": {
+       "sessionUpdate": "tool_call_update",
+       "toolCallId": "toolu_probe_1",
+       "status": "failed",
+       "content": [
+        {
+         "type": "content",
+         "content": {
+          "type": "text",
+          "text": "Error: tool call aborted"
+         }
+        }
+       ]
+      }
+     }
+    },
+    {
+     "jsonrpc": "2.0",
+     "id": 3,
+     "result": {
+      "stopReason": "cancelled"
+     }
+    }
+   ],
+   "plugin": [
+    {
+     "t": 0,
+     "kind": "apply",
+     "pid": "<PID>",
+     "ppid": "<PID>",
+     "config": {
+      "marker": "probe"
+     },
+     "url": "file://<RUN>/layers/plugin/nassaj-probe-plugin.mjs"
+    },
+    {
+     "t": 0,
+     "kind": "inventory",
+     "when": "apply",
+     "readable": true,
+     "out": {
+      "tools/pre-execute": [],
+      "tools/execute": [
+       {
+        "entryId": "timeout-policy",
+        "entryName": "@deepseek-ai/dsh-tool-call-timeout-policy",
+        "runtimeName": "timeout-policy",
+        "scope": [],
+        "prepend": false,
+        "global": false
+       }
+      ],
+      "tools/post-execute": [
+       {
+        "entryId": "repeat-tool-reminder",
+        "entryName": "@deepseek-ai/dsh-repeat-tool-reminder",
+        "runtimeName": "repeat-tool-reminder",
+        "scope": [],
+        "prepend": false,
+        "global": false
+       }
+      ],
+      "tools/result": []
+     }
+    },
+    {
+     "t": 0,
+     "kind": "pre-execute",
+     "callId": "toolu_probe_1",
+     "rootCallId": "toolu_probe_1",
+     "name": "bash",
+     "arguments": {
+      "command": "sleep 20; echo late > cancel-witness",
+      "description": "slow"
+     },
+     "argType": "object",
+     "hasParent": false,
+     "agent": {
+      "id": "<UUID>"
+     }
+    },
+    {
+     "t": 0,
+     "kind": "inventory",
+     "when": "first-pre-execute",
+     "readable": true,
+     "out": {
+      "tools/pre-execute": [
+       {
+        "entryId": "tool-jobs",
+        "entryName": "@deepseek-ai/dsh-tool-jobs",
+        "runtimeName": "tool-jobs",
+        "scope": [],
+        "prepend": true,
+        "global": false
+       },
+       {
+        "entryId": "nassaj-parity-probe",
+        "entryName": "file://<RUN>/layers/plugin/nassaj-probe-plugin.mjs",
+        "runtimeName": "nassaj-parity-probe",
+        "scope": [],
+        "prepend": true,
+        "global": true
+       }
+      ],
+      "tools/execute": [
+       {
+        "entryId": "nassaj-parity-probe",
+        "entryName": "file://<RUN>/layers/plugin/nassaj-probe-plugin.mjs",
+        "runtimeName": "nassaj-parity-probe",
+        "scope": [],
+        "prepend": true,
+        "global": true
+       },
+       {
+        "entryId": "timeout-policy",
+        "entryName": "@deepseek-ai/dsh-tool-call-timeout-policy",
+        "runtimeName": "timeout-policy",
+        "scope": [],
+        "prepend": false,
+        "global": false
+       },
+       {
+        "entryId": "session-checkpoint-policy",
+        "entryName": "@deepseek-ai/dsh-session-checkpoint-policy",
+        "runtimeName": "session-checkpoint-policy",
+        "scope": [],
+        "prepend": false,
+        "global": false
+       }
+      ],
+      "tools/post-execute": [
+       {
+        "entryId": "spill-policy",
+        "entryName": "@deepseek-ai/dsh-spill-policy",
+        "runtimeName": "spill-policy",
+        "scope": [],
+        "prepend": true,
+        "global": false
+       },
+       {
+        "entryId": "nassaj-parity-probe",
+        "entryName": "file://<RUN>/layers/plugin/nassaj-probe-plugin.mjs",
+        "runtimeName": "nassaj-parity-probe",
+        "scope": [],
+        "prepend": true,
+        "global": true
+       },
+       {
+        "entryId": "repeat-tool-reminder",
+        "entryName": "@deepseek-ai/dsh-repeat-tool-reminder",
+        "runtimeName": "repeat-tool-reminder",
+        "scope": [],
+        "prepend": false,
+        "global": false
+       },
+       {
+        "entryId": "tool-fs-search",
+        "entryName": "@deepseek-ai/dsh-tool-fs-search",
+        "runtimeName": "tool-fs-search",
+        "scope": [],
+        "prepend": false,
+        "global": false
+       },
+       {
+        "entryId": "tool-fs-search",
+        "entryName": "@deepseek-ai/dsh-tool-fs-search",
+        "runtimeName": "tool-fs-search",
+        "scope": [],
+        "prepend": false,
+        "global": false
+       }
+      ],
+      "tools/result": [
+       {
+        "entryId": "nassaj-parity-probe",
+        "entryName": "file://<RUN>/layers/plugin/nassaj-probe-plugin.mjs",
+        "runtimeName": "nassaj-parity-probe",
+        "scope": [],
+        "prepend": false,
+        "global": true
+       },
+       {
+        "entryId": "agent-instructions",
+        "entryName": "@deepseek-ai/dsh-agent-instructions",
+        "runtimeName": "agent-instructions",
+        "scope": [],
+        "prepend": false,
+        "global": false
+       }
+      ]
+     }
+    },
+    {
+     "t": 0,
+     "kind": "execute",
+     "callId": "toolu_probe_1",
+     "rootCallId": "toolu_probe_1",
+     "name": "bash",
+     "arguments": {
+      "command": "sleep 20; echo late > cancel-witness",
+      "description": "slow"
+     },
+     "argType": "object",
+     "hasParent": false,
+     "agent": {
+      "id": "<UUID>"
+     }
+    },
+    {
+     "t": 0,
+     "kind": "inventory",
+     "when": "apply+2s",
+     "readable": true,
+     "out": {
+      "tools/pre-execute": [
+       {
+        "entryId": "tool-jobs",
+        "entryName": "@deepseek-ai/dsh-tool-jobs",
+        "runtimeName": "tool-jobs",
+        "scope": [],
+        "prepend": true,
+        "global": false
+       },
+       {
+        "entryId": "nassaj-parity-probe",
+        "entryName": "file://<RUN>/layers/plugin/nassaj-probe-plugin.mjs",
+        "runtimeName": "nassaj-parity-probe",
+        "scope": [],
+        "prepend": true,
+        "global": true
+       }
+      ],
+      "tools/execute": [
+       {
+        "entryId": "nassaj-parity-probe",
+        "entryName": "file://<RUN>/layers/plugin/nassaj-probe-plugin.mjs",
+        "runtimeName": "nassaj-parity-probe",
+        "scope": [],
+        "prepend": true,
+        "global": true
+       },
+       {
+        "entryId": "timeout-policy",
+        "entryName": "@deepseek-ai/dsh-tool-call-timeout-policy",
+        "runtimeName": "timeout-policy",
+        "scope": [],
+        "prepend": false,
+        "global": false
+       },
+       {
+        "entryId": "session-checkpoint-policy",
+        "entryName": "@deepseek-ai/dsh-session-checkpoint-policy",
+        "runtimeName": "session-checkpoint-policy",
+        "scope": [],
+        "prepend": false,
+        "global": false
+       }
+      ],
+      "tools/post-execute": [
+       {
+        "entryId": "spill-policy",
+        "entryName": "@deepseek-ai/dsh-spill-policy",
+        "runtimeName": "spill-policy",
+        "scope": [],
+        "prepend": true,
+        "global": false
+       },
+       {
+        "entryId": "nassaj-parity-probe",
+        "entryName": "file://<RUN>/layers/plugin/nassaj-probe-plugin.mjs",
+        "runtimeName": "nassaj-parity-probe",
+        "scope": [],
+        "prepend": true,
+        "global": true
+       },
+       {
+        "entryId": "repeat-tool-reminder",
+        "entryName": "@deepseek-ai/dsh-repeat-tool-reminder",
+        "runtimeName": "repeat-tool-reminder",
+        "scope": [],
+        "prepend": false,
+        "global": false
+       },
+       {
+        "entryId": "tool-fs-search",
+        "entryName": "@deepseek-ai/dsh-tool-fs-search",
+        "runtimeName": "tool-fs-search",
+        "scope": [],
+        "prepend": false,
+        "global": false
+       },
+       {
+        "entryId": "tool-fs-search",
+        "entryName": "@deepseek-ai/dsh-tool-fs-search",
+        "runtimeName": "tool-fs-search",
+        "scope": [],
+        "prepend": false,
+        "global": false
+       }
+      ],
+      "tools/result": [
+       {
+        "entryId": "nassaj-parity-probe",
+        "entryName": "file://<RUN>/layers/plugin/nassaj-probe-plugin.mjs",
+        "runtimeName": "nassaj-parity-probe",
+        "scope": [],
+        "prepend": false,
+        "global": true
+       },
+       {
+        "entryId": "agent-instructions",
+        "entryName": "@deepseek-ai/dsh-agent-instructions",
+        "runtimeName": "agent-instructions",
+        "scope": [],
+        "prepend": false,
+        "global": false
+       }
+      ]
+     }
+    },
+    {
+     "t": 0,
+     "kind": "execute-done",
+     "callId": "toolu_probe_1",
+     "isError": true
+    },
+    {
+     "t": 0,
+     "kind": "post-execute",
+     "callId": "toolu_probe_1",
+     "rootCallId": "toolu_probe_1",
+     "name": "bash",
+     "arguments": {
+      "command": "sleep 20; echo late > cancel-witness",
+      "description": "slow"
+     },
+     "argType": "object",
+     "hasParent": false,
+     "agent": {
+      "id": "<UUID>"
+     },
+     "isError": true,
+     "error": "tool call aborted"
+    },
+    {
+     "t": 0,
+     "kind": "result",
+     "callId": "toolu_probe_1",
+     "name": "bash",
+     "isError": true,
+     "error": "tool call aborted"
+    }
+   ],
+   "proc": [
+    {
+     "label": "after-session-new",
+     "listening": [],
+     "lsofInet": "",
+     "fd3": "3->socket:[N]",
+     "fd7": "7->socket:[N]"
+    },
+    {
+     "label": "prompt-settled",
+     "listening": [],
+     "lsofInet": "COMMAND       PID   USER FD   TYPE    DEVICE SIZE/OFF NODE NAME\nMainThrea <PID> nassaj 25u  IPv4 454256124      0t0  TCP localhost:36670->localhost:47815 (ESTABLISHED)\n",
+     "fd3": "3->socket:[N]",
+     "fd7": "7->socket:[N]"
+    }
+   ],
+   "llmRequests": 1
+  },
+  "ptrace_sandboxed_scope": {
+   "acp": [
+    {
+     "jsonrpc": "2.0",
+     "method": "session/update",
+     "params": {
+      "sessionId": "<UUID>",
+      "update": {
+       "sessionUpdate": "tool_call",
+       "toolCallId": "toolu_probe_1",
+       "title": "bash",
+       "kind": "other",
+       "status": "in_progress",
+       "rawInput": {
+        "command": "python3 -I <PROBE>/grab.py $PPID; ps -o pid,ppid,comm -p $PPID",
+        "description": "ptrace probe"
+       }
+      }
+     }
+    },
+    {
+     "jsonrpc": "2.0",
+     "method": "session/update",
+     "params": {
+      "sessionId": "<UUID>",
+      "update": {
+       "sessionUpdate": "tool_call_update",
+       "toolCallId": "toolu_probe_1",
+       "status": "completed",
+       "content": [
+        {
+         "type": "content",
+         "content": {
+          "type": "text",
+          "text": "pidfd_open 3 ok\ngetfd 3: FAIL Operation not permitted\ngetfd 7: FAIL Operation not permitted\nmem read FAIL [Errno 13] Permission denied: '/proc/<PID>/mem'\n    PID    PPID COMMAND\n2764250 <PID> MainThread\n"
+         }
+        }
+       ]
+      }
+     }
+    },
+    {
+     "jsonrpc": "2.0",
+     "id": 3,
+     "result": {
+      "stopReason": "end_turn"
+     }
+    }
+   ],
+   "plugin": [
+    {
+     "t": 0,
+     "kind": "apply",
+     "pid": "<PID>",
+     "ppid": "<PID>",
+     "config": {
+      "marker": "probe"
+     },
+     "url": "file://<RUN>/layers/plugin/nassaj-probe-plugin.mjs"
+    },
+    {
+     "t": 0,
+     "kind": "inventory",
+     "when": "apply",
+     "readable": true,
+     "out": {
+      "tools/pre-execute": [],
+      "tools/execute": [
+       {
+        "entryId": "timeout-policy",
+        "entryName": "@deepseek-ai/dsh-tool-call-timeout-policy",
+        "runtimeName": "timeout-policy",
+        "scope": [],
+        "prepend": false,
+        "global": false
+       }
+      ],
+      "tools/post-execute": [
+       {
+        "entryId": "repeat-tool-reminder",
+        "entryName": "@deepseek-ai/dsh-repeat-tool-reminder",
+        "runtimeName": "repeat-tool-reminder",
+        "scope": [],
+        "prepend": false,
+        "global": false
+       }
+      ],
+      "tools/result": []
+     }
+    },
+    {
+     "t": 0,
+     "kind": "pre-execute",
+     "callId": "toolu_probe_1",
+     "rootCallId": "toolu_probe_1",
+     "name": "bash",
+     "arguments": {
+      "command": "python3 -I <PROBE>/grab.py $PPID; ps -o pid,ppid,comm -p $PPID",
+      "description": "ptrace probe"
+     },
+     "argType": "object",
+     "hasParent": false,
+     "agent": {
+      "id": "<UUID>"
+     }
+    },
+    {
+     "t": 0,
+     "kind": "inventory",
+     "when": "first-pre-execute",
+     "readable": true,
+     "out": {
+      "tools/pre-execute": [
+       {
+        "entryId": "tool-jobs",
+        "entryName": "@deepseek-ai/dsh-tool-jobs",
+        "runtimeName": "tool-jobs",
+        "scope": [],
+        "prepend": true,
+        "global": false
+       },
+       {
+        "entryId": "nassaj-parity-probe",
+        "entryName": "file://<RUN>/layers/plugin/nassaj-probe-plugin.mjs",
+        "runtimeName": "nassaj-parity-probe",
+        "scope": [],
+        "prepend": true,
+        "global": true
+       }
+      ],
+      "tools/execute": [
+       {
+        "entryId": "nassaj-parity-probe",
+        "entryName": "file://<RUN>/layers/plugin/nassaj-probe-plugin.mjs",
+        "runtimeName": "nassaj-parity-probe",
+        "scope": [],
+        "prepend": true,
+        "global": true
+       },
+       {
+        "entryId": "timeout-policy",
+        "entryName": "@deepseek-ai/dsh-tool-call-timeout-policy",
+        "runtimeName": "timeout-policy",
+        "scope": [],
+        "prepend": false,
+        "global": false
+       },
+       {
+        "entryId": "session-checkpoint-policy",
+        "entryName": "@deepseek-ai/dsh-session-checkpoint-policy",
+        "runtimeName": "session-checkpoint-policy",
+        "scope": [],
+        "prepend": false,
+        "global": false
+       }
+      ],
+      "tools/post-execute": [
+       {
+        "entryId": "spill-policy",
+        "entryName": "@deepseek-ai/dsh-spill-policy",
+        "runtimeName": "spill-policy",
+        "scope": [],
+        "prepend": true,
+        "global": false
+       },
+       {
+        "entryId": "nassaj-parity-probe",
+        "entryName": "file://<RUN>/layers/plugin/nassaj-probe-plugin.mjs",
+        "runtimeName": "nassaj-parity-probe",
+        "scope": [],
+        "prepend": true,
+        "global": true
+       },
+       {
+        "entryId": "repeat-tool-reminder",
+        "entryName": "@deepseek-ai/dsh-repeat-tool-reminder",
+        "runtimeName": "repeat-tool-reminder",
+        "scope": [],
+        "prepend": false,
+        "global": false
+       },
+       {
+        "entryId": "tool-fs-search",
+        "entryName": "@deepseek-ai/dsh-tool-fs-search",
+        "runtimeName": "tool-fs-search",
+        "scope": [],
+        "prepend": false,
+        "global": false
+       },
+       {
+        "entryId": "tool-fs-search",
+        "entryName": "@deepseek-ai/dsh-tool-fs-search",
+        "runtimeName": "tool-fs-search",
+        "scope": [],
+        "prepend": false,
+        "global": false
+       }
+      ],
+      "tools/result": [
+       {
+        "entryId": "nassaj-parity-probe",
+        "entryName": "file://<RUN>/layers/plugin/nassaj-probe-plugin.mjs",
+        "runtimeName": "nassaj-parity-probe",
+        "scope": [],
+        "prepend": false,
+        "global": true
+       },
+       {
+        "entryId": "agent-instructions",
+        "entryName": "@deepseek-ai/dsh-agent-instructions",
+        "runtimeName": "agent-instructions",
+        "scope": [],
+        "prepend": false,
+        "global": false
+       }
+      ]
+     }
+    },
+    {
+     "t": 0,
+     "kind": "execute",
+     "callId": "toolu_probe_1",
+     "rootCallId": "toolu_probe_1",
+     "name": "bash",
+     "arguments": {
+      "command": "python3 -I <PROBE>/grab.py $PPID; ps -o pid,ppid,comm -p $PPID",
+      "description": "ptrace probe"
+     },
+     "argType": "object",
+     "hasParent": false,
+     "agent": {
+      "id": "<UUID>"
+     }
+    },
+    {
+     "t": 0,
+     "kind": "execute-done",
+     "callId": "toolu_probe_1",
+     "isError": false
+    },
+    {
+     "t": 0,
+     "kind": "post-execute",
+     "callId": "toolu_probe_1",
+     "rootCallId": "toolu_probe_1",
+     "name": "bash",
+     "arguments": {
+      "command": "python3 -I <PROBE>/grab.py $PPID; ps -o pid,ppid,comm -p $PPID",
+      "description": "ptrace probe"
+     },
+     "argType": "object",
+     "hasParent": false,
+     "agent": {
+      "id": "<UUID>"
+     },
+     "isError": false,
+     "error": null
+    },
+    {
+     "t": 0,
+     "kind": "result",
+     "callId": "toolu_probe_1",
+     "name": "bash",
+     "isError": false,
+     "error": null
+    }
+   ],
+   "proc": [
+    {
+     "label": "after-session-new",
+     "listening": [],
+     "lsofInet": "",
+     "fd3": "3->socket:[N]",
+     "fd7": "7->socket:[N]"
+    },
+    {
+     "label": "after-prompt",
+     "listening": [],
+     "lsofInet": "COMMAND       PID   USER FD   TYPE    DEVICE SIZE/OFF NODE NAME\nMainThrea <PID> nassaj 25u  IPv4 454274431      0t0  TCP localhost:38948->localhost:47816 (ESTABLISHED)\n",
+     "fd3": "3->socket:[N]",
+     "fd7": "7->socket:[N]"
+    }
+   ],
+   "llmRequests": 2
+  },
+  "ptrace_sandboxed_direct": {
+   "acp": [
+    {
+     "jsonrpc": "2.0",
+     "method": "session/update",
+     "params": {
+      "sessionId": "<UUID>",
+      "update": {
+       "sessionUpdate": "tool_call",
+       "toolCallId": "toolu_probe_1",
+       "title": "bash",
+       "kind": "other",
+       "status": "in_progress",
+       "rawInput": {
+        "command": "python3 -I <PROBE>/grab.py $PPID; ps -o pid,ppid,comm -p $PPID",
+        "description": "ptrace probe"
+       }
+      }
+     }
+    },
+    {
+     "jsonrpc": "2.0",
+     "method": "session/update",
+     "params": {
+      "sessionId": "<UUID>",
+      "update": {
+       "sessionUpdate": "tool_call_update",
+       "toolCallId": "toolu_probe_1",
+       "status": "completed",
+       "content": [
+        {
+         "type": "content",
+         "content": {
+          "type": "text",
+          "text": "pidfd_open 3 ok\ngetfd 3: FAIL Operation not permitted\ngetfd 7: FAIL Operation not permitted\nmem read FAIL [Errno 13] Permission denied: '/proc/<PID>/mem'\n    PID    PPID COMMAND\n2768300 <PID> MainThread\n"
+         }
+        }
+       ]
+      }
+     }
+    },
+    {
+     "jsonrpc": "2.0",
+     "id": 3,
+     "result": {
+      "stopReason": "end_turn"
+     }
+    }
+   ],
+   "plugin": [
+    {
+     "t": 0,
+     "kind": "apply",
+     "pid": "<PID>",
+     "ppid": "<PID>",
+     "config": {
+      "marker": "probe"
+     },
+     "url": "file://<RUN>/layers/plugin/nassaj-probe-plugin.mjs"
+    },
+    {
+     "t": 0,
+     "kind": "inventory",
+     "when": "apply",
+     "readable": true,
+     "out": {
+      "tools/pre-execute": [],
+      "tools/execute": [
+       {
+        "entryId": "timeout-policy",
+        "entryName": "@deepseek-ai/dsh-tool-call-timeout-policy",
+        "runtimeName": "timeout-policy",
+        "scope": [],
+        "prepend": false,
+        "global": false
+       }
+      ],
+      "tools/post-execute": [
+       {
+        "entryId": "repeat-tool-reminder",
+        "entryName": "@deepseek-ai/dsh-repeat-tool-reminder",
+        "runtimeName": "repeat-tool-reminder",
+        "scope": [],
+        "prepend": false,
+        "global": false
+       }
+      ],
+      "tools/result": []
+     }
+    },
+    {
+     "t": 0,
+     "kind": "pre-execute",
+     "callId": "toolu_probe_1",
+     "rootCallId": "toolu_probe_1",
+     "name": "bash",
+     "arguments": {
+      "command": "python3 -I <PROBE>/grab.py $PPID; ps -o pid,ppid,comm -p $PPID",
+      "description": "ptrace probe"
+     },
+     "argType": "object",
+     "hasParent": false,
+     "agent": {
+      "id": "<UUID>"
+     }
+    },
+    {
+     "t": 0,
+     "kind": "inventory",
+     "when": "first-pre-execute",
+     "readable": true,
+     "out": {
+      "tools/pre-execute": [
+       {
+        "entryId": "tool-jobs",
+        "entryName": "@deepseek-ai/dsh-tool-jobs",
+        "runtimeName": "tool-jobs",
+        "scope": [],
+        "prepend": true,
+        "global": false
+       },
+       {
+        "entryId": "nassaj-parity-probe",
+        "entryName": "file://<RUN>/layers/plugin/nassaj-probe-plugin.mjs",
+        "runtimeName": "nassaj-parity-probe",
+        "scope": [],
+        "prepend": true,
+        "global": true
+       }
+      ],
+      "tools/execute": [
+       {
+        "entryId": "nassaj-parity-probe",
+        "entryName": "file://<RUN>/layers/plugin/nassaj-probe-plugin.mjs",
+        "runtimeName": "nassaj-parity-probe",
+        "scope": [],
+        "prepend": true,
+        "global": true
+       },
+       {
+        "entryId": "timeout-policy",
+        "entryName": "@deepseek-ai/dsh-tool-call-timeout-policy",
+        "runtimeName": "timeout-policy",
+        "scope": [],
+        "prepend": false,
+        "global": false
+       },
+       {
+        "entryId": "session-checkpoint-policy",
+        "entryName": "@deepseek-ai/dsh-session-checkpoint-policy",
+        "runtimeName": "session-checkpoint-policy",
+        "scope": [],
+        "prepend": false,
+        "global": false
+       }
+      ],
+      "tools/post-execute": [
+       {
+        "entryId": "spill-policy",
+        "entryName": "@deepseek-ai/dsh-spill-policy",
+        "runtimeName": "spill-policy",
+        "scope": [],
+        "prepend": true,
+        "global": false
+       },
+       {
+        "entryId": "nassaj-parity-probe",
+        "entryName": "file://<RUN>/layers/plugin/nassaj-probe-plugin.mjs",
+        "runtimeName": "nassaj-parity-probe",
+        "scope": [],
+        "prepend": true,
+        "global": true
+       },
+       {
+        "entryId": "repeat-tool-reminder",
+        "entryName": "@deepseek-ai/dsh-repeat-tool-reminder",
+        "runtimeName": "repeat-tool-reminder",
+        "scope": [],
+        "prepend": false,
+        "global": false
+       },
+       {
+        "entryId": "tool-fs-search",
+        "entryName": "@deepseek-ai/dsh-tool-fs-search",
+        "runtimeName": "tool-fs-search",
+        "scope": [],
+        "prepend": false,
+        "global": false
+       },
+       {
+        "entryId": "tool-fs-search",
+        "entryName": "@deepseek-ai/dsh-tool-fs-search",
+        "runtimeName": "tool-fs-search",
+        "scope": [],
+        "prepend": false,
+        "global": false
+       }
+      ],
+      "tools/result": [
+       {
+        "entryId": "nassaj-parity-probe",
+        "entryName": "file://<RUN>/layers/plugin/nassaj-probe-plugin.mjs",
+        "runtimeName": "nassaj-parity-probe",
+        "scope": [],
+        "prepend": false,
+        "global": true
+       },
+       {
+        "entryId": "agent-instructions",
+        "entryName": "@deepseek-ai/dsh-agent-instructions",
+        "runtimeName": "agent-instructions",
+        "scope": [],
+        "prepend": false,
+        "global": false
+       }
+      ]
+     }
+    },
+    {
+     "t": 0,
+     "kind": "execute",
+     "callId": "toolu_probe_1",
+     "rootCallId": "toolu_probe_1",
+     "name": "bash",
+     "arguments": {
+      "command": "python3 -I <PROBE>/grab.py $PPID; ps -o pid,ppid,comm -p $PPID",
+      "description": "ptrace probe"
+     },
+     "argType": "object",
+     "hasParent": false,
+     "agent": {
+      "id": "<UUID>"
+     }
+    },
+    {
+     "t": 0,
+     "kind": "execute-done",
+     "callId": "toolu_probe_1",
+     "isError": false
+    },
+    {
+     "t": 0,
+     "kind": "post-execute",
+     "callId": "toolu_probe_1",
+     "rootCallId": "toolu_probe_1",
+     "name": "bash",
+     "arguments": {
+      "command": "python3 -I <PROBE>/grab.py $PPID; ps -o pid,ppid,comm -p $PPID",
+      "description": "ptrace probe"
+     },
+     "argType": "object",
+     "hasParent": false,
+     "agent": {
+      "id": "<UUID>"
+     },
+     "isError": false,
+     "error": null
+    },
+    {
+     "t": 0,
+     "kind": "result",
+     "callId": "toolu_probe_1",
+     "name": "bash",
+     "isError": false,
+     "error": null
+    }
+   ],
+   "proc": [
+    {
+     "label": "after-session-new",
+     "listening": [],
+     "lsofInet": "",
+     "fd3": "3->socket:[N]",
+     "fd7": "7->socket:[N]"
+    },
+    {
+     "label": "after-prompt",
+     "listening": [],
+     "lsofInet": "COMMAND       PID   USER FD   TYPE    DEVICE SIZE/OFF NODE NAME\nMainThrea <PID> nassaj 25u  IPv4 454280175      0t0  TCP localhost:43104->localhost:47817 (ESTABLISHED)\n",
+     "fd3": "3->socket:[N]",
+     "fd7": "7->socket:[N]"
+    }
+   ],
+   "llmRequests": 2
+  },
+  "ptrace_escalated_scope": {
+   "acp": [
+    {
+     "jsonrpc": "2.0",
+     "method": "session/update",
+     "params": {
+      "sessionId": "<UUID>",
+      "update": {
+       "sessionUpdate": "tool_call",
+       "toolCallId": "toolu_probe_1",
+       "title": "bash",
+       "kind": "other",
+       "status": "in_progress",
+       "rawInput": {
+        "command": "grep -E \"NoNewPrivs|Seccomp:\" /proc/self/status; python3 -I <PROBE>/grab.py $PPID; ls -l /proc/$$/fd",
+        "description": "ptrace probe esc",
+        "sandbox_permissions": "danger-full-access",
+        "justification": "probe"
+       }
+      }
+     }
+    },
+    {
+     "jsonrpc": "2.0",
+     "id": 0,
+     "method": "session/request_permission",
+     "params": {
+      "sessionId": "<UUID>",
+      "toolCall": {
+       "toolCallId": "toolu_probe_1"
+      },
+      "options": [
+       {
+        "optionId": "allow-once",
+        "name": "Allow once",
+        "kind": "allow_once"
+       },
+       {
+        "optionId": "reject-once",
+        "name": "Reject",
+        "kind": "reject_once"
+       }
+      ]
+     }
+    },
+    {
+     "jsonrpc": "2.0",
+     "method": "session/update",
+     "params": {
+      "sessionId": "<UUID>",
+      "update": {
+       "sessionUpdate": "tool_call_update",
+       "toolCallId": "toolu_probe_1",
+       "status": "completed",
+       "content": [
+        {
+         "type": "content",
+         "content": {
+          "type": "text",
+          "text": "NoNewPrivs:\t0\nSeccomp:\t0\npidfd_open 3 ok\ngetfd 3: OK socket=True -> socket:[N]\ngetfd 7: OK socket=True -> socket:[N]\nmem read bytes: 16\ntotal 0\nlr-x------ 1 nassaj nassaj 64 <DATE> 0 -> /dev/null\nlrwx------ 1 nassaj nassaj 64 <DATE> 1 -> socket:[N]\nlrwx------ 1 nassaj nassaj 64 <DATE> 2 -> socket:[N]\nlr-x------ 1 nassaj nassaj 64 <DATE> 3 -> /proc/<PID>/fd\n"
+         }
+        }
+       ]
+      }
+     }
+    },
+    {
+     "jsonrpc": "2.0",
+     "method": "session/update",
+     "params": {
+      "sessionId": "<UUID>",
+      "update": {
+       "sessionUpdate": "tool_call",
+       "toolCallId": "toolu_probe_2",
+       "title": "bash",
+       "kind": "other",
+       "status": "in_progress",
+       "rawInput": {
+        "command": "grep -E \"NoNewPrivs|Seccomp:\" /proc/self/status",
+        "description": "status"
+       }
+      }
+     }
+    },
+    {
+     "jsonrpc": "2.0",
+     "method": "session/update",
+     "params": {
+      "sessionId": "<UUID>",
+      "update": {
+       "sessionUpdate": "tool_call_update",
+       "toolCallId": "toolu_probe_2",
+       "status": "completed",
+       "content": [
+        {
+         "type": "content",
+         "content": {
+          "type": "text",
+          "text": "NoNewPrivs:\t1\nSeccomp:\t0\n"
+         }
+        }
+       ]
+      }
+     }
+    },
+    {
+     "jsonrpc": "2.0",
+     "id": 3,
+     "result": {
+      "stopReason": "end_turn"
+     }
+    }
+   ],
+   "plugin": [
+    {
+     "t": 0,
+     "kind": "apply",
+     "pid": "<PID>",
+     "ppid": "<PID>",
+     "config": {
+      "marker": "probe"
+     },
+     "url": "file://<RUN>/layers/plugin/nassaj-probe-plugin.mjs"
+    },
+    {
+     "t": 0,
+     "kind": "inventory",
+     "when": "apply",
+     "readable": true,
+     "out": {
+      "tools/pre-execute": [],
+      "tools/execute": [
+       {
+        "entryId": "timeout-policy",
+        "entryName": "@deepseek-ai/dsh-tool-call-timeout-policy",
+        "runtimeName": "timeout-policy",
+        "scope": [],
+        "prepend": false,
+        "global": false
+       }
+      ],
+      "tools/post-execute": [
+       {
+        "entryId": "repeat-tool-reminder",
+        "entryName": "@deepseek-ai/dsh-repeat-tool-reminder",
+        "runtimeName": "repeat-tool-reminder",
+        "scope": [],
+        "prepend": false,
+        "global": false
+       }
+      ],
+      "tools/result": []
+     }
+    },
+    {
+     "t": 0,
+     "kind": "pre-execute",
+     "callId": "toolu_probe_1",
+     "rootCallId": "toolu_probe_1",
+     "name": "bash",
+     "arguments": {
+      "command": "grep -E \"NoNewPrivs|Seccomp:\" /proc/self/status; python3 -I <PROBE>/grab.py $PPID; ls -l /proc/$$/fd",
+      "description": "ptrace probe esc",
+      "sandbox_permissions": "danger-full-access",
+      "justification": "probe"
+     },
+     "argType": "object",
+     "hasParent": false,
+     "agent": {
+      "id": "<UUID>"
+     }
+    },
+    {
+     "t": 0,
+     "kind": "inventory",
+     "when": "first-pre-execute",
+     "readable": true,
+     "out": {
+      "tools/pre-execute": [
+       {
+        "entryId": "tool-jobs",
+        "entryName": "@deepseek-ai/dsh-tool-jobs",
+        "runtimeName": "tool-jobs",
+        "scope": [],
+        "prepend": true,
+        "global": false
+       },
+       {
+        "entryId": "nassaj-parity-probe",
+        "entryName": "file://<RUN>/layers/plugin/nassaj-probe-plugin.mjs",
+        "runtimeName": "nassaj-parity-probe",
+        "scope": [],
+        "prepend": true,
+        "global": true
+       }
+      ],
+      "tools/execute": [
+       {
+        "entryId": "nassaj-parity-probe",
+        "entryName": "file://<RUN>/layers/plugin/nassaj-probe-plugin.mjs",
+        "runtimeName": "nassaj-parity-probe",
+        "scope": [],
+        "prepend": true,
+        "global": true
+       },
+       {
+        "entryId": "timeout-policy",
+        "entryName": "@deepseek-ai/dsh-tool-call-timeout-policy",
+        "runtimeName": "timeout-policy",
+        "scope": [],
+        "prepend": false,
+        "global": false
+       },
+       {
+        "entryId": "session-checkpoint-policy",
+        "entryName": "@deepseek-ai/dsh-session-checkpoint-policy",
+        "runtimeName": "session-checkpoint-policy",
+        "scope": [],
+        "prepend": false,
+        "global": false
+       }
+      ],
+      "tools/post-execute": [
+       {
+        "entryId": "spill-policy",
+        "entryName": "@deepseek-ai/dsh-spill-policy",
+        "runtimeName": "spill-policy",
+        "scope": [],
+        "prepend": true,
+        "global": false
+       },
+       {
+        "entryId": "nassaj-parity-probe",
+        "entryName": "file://<RUN>/layers/plugin/nassaj-probe-plugin.mjs",
+        "runtimeName": "nassaj-parity-probe",
+        "scope": [],
+        "prepend": true,
+        "global": true
+       },
+       {
+        "entryId": "repeat-tool-reminder",
+        "entryName": "@deepseek-ai/dsh-repeat-tool-reminder",
+        "runtimeName": "repeat-tool-reminder",
+        "scope": [],
+        "prepend": false,
+        "global": false
+       },
+       {
+        "entryId": "tool-fs-search",
+        "entryName": "@deepseek-ai/dsh-tool-fs-search",
+        "runtimeName": "tool-fs-search",
+        "scope": [],
+        "prepend": false,
+        "global": false
+       },
+       {
+        "entryId": "tool-fs-search",
+        "entryName": "@deepseek-ai/dsh-tool-fs-search",
+        "runtimeName": "tool-fs-search",
+        "scope": [],
+        "prepend": false,
+        "global": false
+       }
+      ],
+      "tools/result": [
+       {
+        "entryId": "nassaj-parity-probe",
+        "entryName": "file://<RUN>/layers/plugin/nassaj-probe-plugin.mjs",
+        "runtimeName": "nassaj-parity-probe",
+        "scope": [],
+        "prepend": false,
+        "global": true
+       },
+       {
+        "entryId": "agent-instructions",
+        "entryName": "@deepseek-ai/dsh-agent-instructions",
+        "runtimeName": "agent-instructions",
+        "scope": [],
+        "prepend": false,
+        "global": false
+       }
+      ]
+     }
+    },
+    {
+     "t": 0,
+     "kind": "execute",
+     "callId": "toolu_probe_1",
+     "rootCallId": "toolu_probe_1",
+     "name": "bash",
+     "arguments": {
+      "command": "grep -E \"NoNewPrivs|Seccomp:\" /proc/self/status; python3 -I <PROBE>/grab.py $PPID; ls -l /proc/$$/fd",
+      "description": "ptrace probe esc",
+      "sandbox_permissions": "danger-full-access",
+      "justification": "probe"
+     },
+     "argType": "object",
+     "hasParent": false,
+     "agent": {
+      "id": "<UUID>"
+     }
+    },
+    {
+     "t": 0,
+     "kind": "execute-done",
+     "callId": "toolu_probe_1",
+     "isError": false
+    },
+    {
+     "t": 0,
+     "kind": "post-execute",
+     "callId": "toolu_probe_1",
+     "rootCallId": "toolu_probe_1",
+     "name": "bash",
+     "arguments": {
+      "command": "grep -E \"NoNewPrivs|Seccomp:\" /proc/self/status; python3 -I <PROBE>/grab.py $PPID; ls -l /proc/$$/fd",
+      "description": "ptrace probe esc",
+      "sandbox_permissions": "danger-full-access",
+      "justification": "probe"
+     },
+     "argType": "object",
+     "hasParent": false,
+     "agent": {
+      "id": "<UUID>"
+     },
+     "isError": false,
+     "error": null
+    },
+    {
+     "t": 0,
+     "kind": "result",
+     "callId": "toolu_probe_1",
+     "name": "bash",
+     "isError": false,
+     "error": null
+    },
+    {
+     "t": 0,
+     "kind": "pre-execute",
+     "callId": "toolu_probe_2",
+     "rootCallId": "toolu_probe_2",
+     "name": "bash",
+     "arguments": {
+      "command": "grep -E \"NoNewPrivs|Seccomp:\" /proc/self/status",
+      "description": "status"
+     },
+     "argType": "object",
+     "hasParent": false,
+     "agent": {
+      "id": "<UUID>"
+     }
+    },
+    {
+     "t": 0,
+     "kind": "inventory",
+     "when": "first-pre-execute",
+     "readable": true,
+     "out": {
+      "tools/pre-execute": [
+       {
+        "entryId": "tool-jobs",
+        "entryName": "@deepseek-ai/dsh-tool-jobs",
+        "runtimeName": "tool-jobs",
+        "scope": [],
+        "prepend": true,
+        "global": false
+       },
+       {
+        "entryId": "nassaj-parity-probe",
+        "entryName": "file://<RUN>/layers/plugin/nassaj-probe-plugin.mjs",
+        "runtimeName": "nassaj-parity-probe",
+        "scope": [],
+        "prepend": true,
+        "global": true
+       }
+      ],
+      "tools/execute": [
+       {
+        "entryId": "nassaj-parity-probe",
+        "entryName": "file://<RUN>/layers/plugin/nassaj-probe-plugin.mjs",
+        "runtimeName": "nassaj-parity-probe",
+        "scope": [],
+        "prepend": true,
+        "global": true
+       },
+       {
+        "entryId": "timeout-policy",
+        "entryName": "@deepseek-ai/dsh-tool-call-timeout-policy",
+        "runtimeName": "timeout-policy",
+        "scope": [],
+        "prepend": false,
+        "global": false
+       },
+       {
+        "entryId": "session-checkpoint-policy",
+        "entryName": "@deepseek-ai/dsh-session-checkpoint-policy",
+        "runtimeName": "session-checkpoint-policy",
+        "scope": [],
+        "prepend": false,
+        "global": false
+       }
+      ],
+      "tools/post-execute": [
+       {
+        "entryId": "spill-policy",
+        "entryName": "@deepseek-ai/dsh-spill-policy",
+        "runtimeName": "spill-policy",
+        "scope": [],
+        "prepend": true,
+        "global": false
+       },
+       {
+        "entryId": "nassaj-parity-probe",
+        "entryName": "file://<RUN>/layers/plugin/nassaj-probe-plugin.mjs",
+        "runtimeName": "nassaj-parity-probe",
+        "scope": [],
+        "prepend": true,
+        "global": true
+       },
+       {
+        "entryId": "repeat-tool-reminder",
+        "entryName": "@deepseek-ai/dsh-repeat-tool-reminder",
+        "runtimeName": "repeat-tool-reminder",
+        "scope": [],
+        "prepend": false,
+        "global": false
+       },
+       {
+        "entryId": "tool-fs-search",
+        "entryName": "@deepseek-ai/dsh-tool-fs-search",
+        "runtimeName": "tool-fs-search",
+        "scope": [],
+        "prepend": false,
+        "global": false
+       },
+       {
+        "entryId": "tool-fs-search",
+        "entryName": "@deepseek-ai/dsh-tool-fs-search",
+        "runtimeName": "tool-fs-search",
+        "scope": [],
+        "prepend": false,
+        "global": false
+       }
+      ],
+      "tools/result": [
+       {
+        "entryId": "nassaj-parity-probe",
+        "entryName": "file://<RUN>/layers/plugin/nassaj-probe-plugin.mjs",
+        "runtimeName": "nassaj-parity-probe",
+        "scope": [],
+        "prepend": false,
+        "global": true
+       },
+       {
+        "entryId": "agent-instructions",
+        "entryName": "@deepseek-ai/dsh-agent-instructions",
+        "runtimeName": "agent-instructions",
+        "scope": [],
+        "prepend": false,
+        "global": false
+       }
+      ]
+     }
+    },
+    {
+     "t": 0,
+     "kind": "execute",
+     "callId": "toolu_probe_2",
+     "rootCallId": "toolu_probe_2",
+     "name": "bash",
+     "arguments": {
+      "command": "grep -E \"NoNewPrivs|Seccomp:\" /proc/self/status",
+      "description": "status"
+     },
+     "argType": "object",
+     "hasParent": false,
+     "agent": {
+      "id": "<UUID>"
+     }
+    },
+    {
+     "t": 0,
+     "kind": "execute-done",
+     "callId": "toolu_probe_2",
+     "isError": false
+    },
+    {
+     "t": 0,
+     "kind": "post-execute",
+     "callId": "toolu_probe_2",
+     "rootCallId": "toolu_probe_2",
+     "name": "bash",
+     "arguments": {
+      "command": "grep -E \"NoNewPrivs|Seccomp:\" /proc/self/status",
+      "description": "status"
+     },
+     "argType": "object",
+     "hasParent": false,
+     "agent": {
+      "id": "<UUID>"
+     },
+     "isError": false,
+     "error": null
+    },
+    {
+     "t": 0,
+     "kind": "result",
+     "callId": "toolu_probe_2",
+     "name": "bash",
+     "isError": false,
+     "error": null
+    }
+   ],
+   "proc": [
+    {
+     "label": "after-session-new",
+     "listening": [],
+     "lsofInet": "",
+     "fd3": "3->socket:[N]",
+     "fd7": "7->socket:[N]"
+    },
+    {
+     "label": "after-prompt",
+     "listening": [],
+     "lsofInet": "COMMAND       PID   USER FD   TYPE    DEVICE SIZE/OFF NODE NAME\nMainThrea <PID> nassaj 25u  IPv4 454297450      0t0  TCP localhost:45164->localhost:47818 (ESTABLISHED)\n",
+     "fd3": "3->socket:[N]",
+     "fd7": "7->socket:[N]"
+    }
+   ],
+   "llmRequests": 3
+  },
+  "ptrace_escalated_direct": {
+   "acp": [
+    {
+     "jsonrpc": "2.0",
+     "method": "session/update",
+     "params": {
+      "sessionId": "<UUID>",
+      "update": {
+       "sessionUpdate": "tool_call",
+       "toolCallId": "toolu_probe_1",
+       "title": "bash",
+       "kind": "other",
+       "status": "in_progress",
+       "rawInput": {
+        "command": "grep -E \"NoNewPrivs|Seccomp:\" /proc/self/status; python3 -I <PROBE>/grab.py $PPID; ls -l /proc/$$/fd",
+        "description": "ptrace probe esc",
+        "sandbox_permissions": "danger-full-access",
+        "justification": "probe"
+       }
+      }
+     }
+    },
+    {
+     "jsonrpc": "2.0",
+     "id": 0,
+     "method": "session/request_permission",
+     "params": {
+      "sessionId": "<UUID>",
+      "toolCall": {
+       "toolCallId": "toolu_probe_1"
+      },
+      "options": [
+       {
+        "optionId": "allow-once",
+        "name": "Allow once",
+        "kind": "allow_once"
+       },
+       {
+        "optionId": "reject-once",
+        "name": "Reject",
+        "kind": "reject_once"
+       }
+      ]
+     }
+    },
+    {
+     "jsonrpc": "2.0",
+     "method": "session/update",
+     "params": {
+      "sessionId": "<UUID>",
+      "update": {
+       "sessionUpdate": "tool_call_update",
+       "toolCallId": "toolu_probe_1",
+       "status": "completed",
+       "content": [
+        {
+         "type": "content",
+         "content": {
+          "type": "text",
+          "text": "NoNewPrivs:\t0\nSeccomp:\t0\npidfd_open 3 ok\ngetfd 3: OK socket=True -> socket:[N]\ngetfd 7: OK socket=True -> socket:[N]\nmem read bytes: 16\ntotal 0\nlr-x------ 1 nassaj nassaj 64 <DATE> 0 -> /dev/null\nlrwx------ 1 nassaj nassaj 64 <DATE> 1 -> socket:[N]\nlrwx------ 1 nassaj nassaj 64 <DATE> 2 -> socket:[N]\nlr-x------ 1 nassaj nassaj 64 <DATE> 3 -> /proc/<PID>/fd\n"
+         }
+        }
+       ]
+      }
+     }
+    },
+    {
+     "jsonrpc": "2.0",
+     "method": "session/update",
+     "params": {
+      "sessionId": "<UUID>",
+      "update": {
+       "sessionUpdate": "tool_call",
+       "toolCallId": "toolu_probe_2",
+       "title": "bash",
+       "kind": "other",
+       "status": "in_progress",
+       "rawInput": {
+        "command": "grep -E \"NoNewPrivs|Seccomp:\" /proc/self/status",
+        "description": "status"
+       }
+      }
+     }
+    },
+    {
+     "jsonrpc": "2.0",
+     "method": "session/update",
+     "params": {
+      "sessionId": "<UUID>",
+      "update": {
+       "sessionUpdate": "tool_call_update",
+       "toolCallId": "toolu_probe_2",
+       "status": "completed",
+       "content": [
+        {
+         "type": "content",
+         "content": {
+          "type": "text",
+          "text": "NoNewPrivs:\t1\nSeccomp:\t0\n"
+         }
+        }
+       ]
+      }
+     }
+    },
+    {
+     "jsonrpc": "2.0",
+     "id": 3,
+     "result": {
+      "stopReason": "end_turn"
+     }
+    }
+   ],
+   "plugin": [
+    {
+     "t": 0,
+     "kind": "apply",
+     "pid": "<PID>",
+     "ppid": "<PID>",
+     "config": {
+      "marker": "probe"
+     },
+     "url": "file://<RUN>/layers/plugin/nassaj-probe-plugin.mjs"
+    },
+    {
+     "t": 0,
+     "kind": "inventory",
+     "when": "apply",
+     "readable": true,
+     "out": {
+      "tools/pre-execute": [],
+      "tools/execute": [
+       {
+        "entryId": "timeout-policy",
+        "entryName": "@deepseek-ai/dsh-tool-call-timeout-policy",
+        "runtimeName": "timeout-policy",
+        "scope": [],
+        "prepend": false,
+        "global": false
+       }
+      ],
+      "tools/post-execute": [
+       {
+        "entryId": "repeat-tool-reminder",
+        "entryName": "@deepseek-ai/dsh-repeat-tool-reminder",
+        "runtimeName": "repeat-tool-reminder",
+        "scope": [],
+        "prepend": false,
+        "global": false
+       }
+      ],
+      "tools/result": []
+     }
+    },
+    {
+     "t": 0,
+     "kind": "pre-execute",
+     "callId": "toolu_probe_1",
+     "rootCallId": "toolu_probe_1",
+     "name": "bash",
+     "arguments": {
+      "command": "grep -E \"NoNewPrivs|Seccomp:\" /proc/self/status; python3 -I <PROBE>/grab.py $PPID; ls -l /proc/$$/fd",
+      "description": "ptrace probe esc",
+      "sandbox_permissions": "danger-full-access",
+      "justification": "probe"
+     },
+     "argType": "object",
+     "hasParent": false,
+     "agent": {
+      "id": "<UUID>"
+     }
+    },
+    {
+     "t": 0,
+     "kind": "inventory",
+     "when": "first-pre-execute",
+     "readable": true,
+     "out": {
+      "tools/pre-execute": [
+       {
+        "entryId": "tool-jobs",
+        "entryName": "@deepseek-ai/dsh-tool-jobs",
+        "runtimeName": "tool-jobs",
+        "scope": [],
+        "prepend": true,
+        "global": false
+       },
+       {
+        "entryId": "nassaj-parity-probe",
+        "entryName": "file://<RUN>/layers/plugin/nassaj-probe-plugin.mjs",
+        "runtimeName": "nassaj-parity-probe",
+        "scope": [],
+        "prepend": true,
+        "global": true
+       }
+      ],
+      "tools/execute": [
+       {
+        "entryId": "nassaj-parity-probe",
+        "entryName": "file://<RUN>/layers/plugin/nassaj-probe-plugin.mjs",
+        "runtimeName": "nassaj-parity-probe",
+        "scope": [],
+        "prepend": true,
+        "global": true
+       },
+       {
+        "entryId": "timeout-policy",
+        "entryName": "@deepseek-ai/dsh-tool-call-timeout-policy",
+        "runtimeName": "timeout-policy",
+        "scope": [],
+        "prepend": false,
+        "global": false
+       },
+       {
+        "entryId": "session-checkpoint-policy",
+        "entryName": "@deepseek-ai/dsh-session-checkpoint-policy",
+        "runtimeName": "session-checkpoint-policy",
+        "scope": [],
+        "prepend": false,
+        "global": false
+       }
+      ],
+      "tools/post-execute": [
+       {
+        "entryId": "spill-policy",
+        "entryName": "@deepseek-ai/dsh-spill-policy",
+        "runtimeName": "spill-policy",
+        "scope": [],
+        "prepend": true,
+        "global": false
+       },
+       {
+        "entryId": "nassaj-parity-probe",
+        "entryName": "file://<RUN>/layers/plugin/nassaj-probe-plugin.mjs",
+        "runtimeName": "nassaj-parity-probe",
+        "scope": [],
+        "prepend": true,
+        "global": true
+       },
+       {
+        "entryId": "repeat-tool-reminder",
+        "entryName": "@deepseek-ai/dsh-repeat-tool-reminder",
+        "runtimeName": "repeat-tool-reminder",
+        "scope": [],
+        "prepend": false,
+        "global": false
+       },
+       {
+        "entryId": "tool-fs-search",
+        "entryName": "@deepseek-ai/dsh-tool-fs-search",
+        "runtimeName": "tool-fs-search",
+        "scope": [],
+        "prepend": false,
+        "global": false
+       },
+       {
+        "entryId": "tool-fs-search",
+        "entryName": "@deepseek-ai/dsh-tool-fs-search",
+        "runtimeName": "tool-fs-search",
+        "scope": [],
+        "prepend": false,
+        "global": false
+       }
+      ],
+      "tools/result": [
+       {
+        "entryId": "nassaj-parity-probe",
+        "entryName": "file://<RUN>/layers/plugin/nassaj-probe-plugin.mjs",
+        "runtimeName": "nassaj-parity-probe",
+        "scope": [],
+        "prepend": false,
+        "global": true
+       },
+       {
+        "entryId": "agent-instructions",
+        "entryName": "@deepseek-ai/dsh-agent-instructions",
+        "runtimeName": "agent-instructions",
+        "scope": [],
+        "prepend": false,
+        "global": false
+       }
+      ]
+     }
+    },
+    {
+     "t": 0,
+     "kind": "execute",
+     "callId": "toolu_probe_1",
+     "rootCallId": "toolu_probe_1",
+     "name": "bash",
+     "arguments": {
+      "command": "grep -E \"NoNewPrivs|Seccomp:\" /proc/self/status; python3 -I <PROBE>/grab.py $PPID; ls -l /proc/$$/fd",
+      "description": "ptrace probe esc",
+      "sandbox_permissions": "danger-full-access",
+      "justification": "probe"
+     },
+     "argType": "object",
+     "hasParent": false,
+     "agent": {
+      "id": "<UUID>"
+     }
+    },
+    {
+     "t": 0,
+     "kind": "execute-done",
+     "callId": "toolu_probe_1",
+     "isError": false
+    },
+    {
+     "t": 0,
+     "kind": "post-execute",
+     "callId": "toolu_probe_1",
+     "rootCallId": "toolu_probe_1",
+     "name": "bash",
+     "arguments": {
+      "command": "grep -E \"NoNewPrivs|Seccomp:\" /proc/self/status; python3 -I <PROBE>/grab.py $PPID; ls -l /proc/$$/fd",
+      "description": "ptrace probe esc",
+      "sandbox_permissions": "danger-full-access",
+      "justification": "probe"
+     },
+     "argType": "object",
+     "hasParent": false,
+     "agent": {
+      "id": "<UUID>"
+     },
+     "isError": false,
+     "error": null
+    },
+    {
+     "t": 0,
+     "kind": "result",
+     "callId": "toolu_probe_1",
+     "name": "bash",
+     "isError": false,
+     "error": null
+    },
+    {
+     "t": 0,
+     "kind": "pre-execute",
+     "callId": "toolu_probe_2",
+     "rootCallId": "toolu_probe_2",
+     "name": "bash",
+     "arguments": {
+      "command": "grep -E \"NoNewPrivs|Seccomp:\" /proc/self/status",
+      "description": "status"
+     },
+     "argType": "object",
+     "hasParent": false,
+     "agent": {
+      "id": "<UUID>"
+     }
+    },
+    {
+     "t": 0,
+     "kind": "inventory",
+     "when": "first-pre-execute",
+     "readable": true,
+     "out": {
+      "tools/pre-execute": [
+       {
+        "entryId": "tool-jobs",
+        "entryName": "@deepseek-ai/dsh-tool-jobs",
+        "runtimeName": "tool-jobs",
+        "scope": [],
+        "prepend": true,
+        "global": false
+       },
+       {
+        "entryId": "nassaj-parity-probe",
+        "entryName": "file://<RUN>/layers/plugin/nassaj-probe-plugin.mjs",
+        "runtimeName": "nassaj-parity-probe",
+        "scope": [],
+        "prepend": true,
+        "global": true
+       }
+      ],
+      "tools/execute": [
+       {
+        "entryId": "nassaj-parity-probe",
+        "entryName": "file://<RUN>/layers/plugin/nassaj-probe-plugin.mjs",
+        "runtimeName": "nassaj-parity-probe",
+        "scope": [],
+        "prepend": true,
+        "global": true
+       },
+       {
+        "entryId": "timeout-policy",
+        "entryName": "@deepseek-ai/dsh-tool-call-timeout-policy",
+        "runtimeName": "timeout-policy",
+        "scope": [],
+        "prepend": false,
+        "global": false
+       },
+       {
+        "entryId": "session-checkpoint-policy",
+        "entryName": "@deepseek-ai/dsh-session-checkpoint-policy",
+        "runtimeName": "session-checkpoint-policy",
+        "scope": [],
+        "prepend": false,
+        "global": false
+       }
+      ],
+      "tools/post-execute": [
+       {
+        "entryId": "spill-policy",
+        "entryName": "@deepseek-ai/dsh-spill-policy",
+        "runtimeName": "spill-policy",
+        "scope": [],
+        "prepend": true,
+        "global": false
+       },
+       {
+        "entryId": "nassaj-parity-probe",
+        "entryName": "file://<RUN>/layers/plugin/nassaj-probe-plugin.mjs",
+        "runtimeName": "nassaj-parity-probe",
+        "scope": [],
+        "prepend": true,
+        "global": true
+       },
+       {
+        "entryId": "repeat-tool-reminder",
+        "entryName": "@deepseek-ai/dsh-repeat-tool-reminder",
+        "runtimeName": "repeat-tool-reminder",
+        "scope": [],
+        "prepend": false,
+        "global": false
+       },
+       {
+        "entryId": "tool-fs-search",
+        "entryName": "@deepseek-ai/dsh-tool-fs-search",
+        "runtimeName": "tool-fs-search",
+        "scope": [],
+        "prepend": false,
+        "global": false
+       },
+       {
+        "entryId": "tool-fs-search",
+        "entryName": "@deepseek-ai/dsh-tool-fs-search",
+        "runtimeName": "tool-fs-search",
+        "scope": [],
+        "prepend": false,
+        "global": false
+       }
+      ],
+      "tools/result": [
+       {
+        "entryId": "nassaj-parity-probe",
+        "entryName": "file://<RUN>/layers/plugin/nassaj-probe-plugin.mjs",
+        "runtimeName": "nassaj-parity-probe",
+        "scope": [],
+        "prepend": false,
+        "global": true
+       },
+       {
+        "entryId": "agent-instructions",
+        "entryName": "@deepseek-ai/dsh-agent-instructions",
+        "runtimeName": "agent-instructions",
+        "scope": [],
+        "prepend": false,
+        "global": false
+       }
+      ]
+     }
+    },
+    {
+     "t": 0,
+     "kind": "execute",
+     "callId": "toolu_probe_2",
+     "rootCallId": "toolu_probe_2",
+     "name": "bash",
+     "arguments": {
+      "command": "grep -E \"NoNewPrivs|Seccomp:\" /proc/self/status",
+      "description": "status"
+     },
+     "argType": "object",
+     "hasParent": false,
+     "agent": {
+      "id": "<UUID>"
+     }
+    },
+    {
+     "t": 0,
+     "kind": "execute-done",
+     "callId": "toolu_probe_2",
+     "isError": false
+    },
+    {
+     "t": 0,
+     "kind": "post-execute",
+     "callId": "toolu_probe_2",
+     "rootCallId": "toolu_probe_2",
+     "name": "bash",
+     "arguments": {
+      "command": "grep -E \"NoNewPrivs|Seccomp:\" /proc/self/status",
+      "description": "status"
+     },
+     "argType": "object",
+     "hasParent": false,
+     "agent": {
+      "id": "<UUID>"
+     },
+     "isError": false,
+     "error": null
+    },
+    {
+     "t": 0,
+     "kind": "result",
+     "callId": "toolu_probe_2",
+     "name": "bash",
+     "isError": false,
+     "error": null
+    }
+   ],
+   "proc": [
+    {
+     "label": "after-session-new",
+     "listening": [],
+     "lsofInet": "",
+     "fd3": "3->socket:[N]",
+     "fd7": "7->socket:[N]"
+    },
+    {
+     "label": "after-prompt",
+     "listening": [],
+     "lsofInet": "COMMAND       PID   USER FD   TYPE    DEVICE SIZE/OFF NODE NAME\nMainThrea <PID> nassaj 25u  IPv4 454471941      0t0  TCP localhost:49518->localhost:47819 (ESTABLISHED)\n",
+     "fd3": "3->socket:[N]",
+     "fd7": "7->socket:[N]"
+    }
+   ],
+   "llmRequests": 3
+  },
+  "first_rel": {
+   "acp": [
+    {
+     "jsonrpc": "2.0",
+     "method": "session/update",
+     "params": {
+      "sessionId": "<UUID>",
+      "update": {
+       "sessionUpdate": "tool_call",
+       "toolCallId": "toolu_probe_1",
+       "title": "bash",
+       "kind": "other",
+       "status": "in_progress",
+       "rawInput": {
+        "command": "ls -l /proc/self/fd; echo PPID=$PPID; cat /proc/self/cgroup"
+       }
+      }
+     }
+    },
+    {
+     "jsonrpc": "2.0",
+     "method": "session/update",
+     "params": {
+      "sessionId": "<UUID>",
+      "update": {
+       "sessionUpdate": "tool_call_update",
+       "toolCallId": "toolu_probe_1",
+       "status": "failed",
+       "content": [
+        {
+         "type": "content",
+         "content": {
+          "type": "text",
+          "text": "Error: invalid arguments: missing required property \"description\""
+         }
+        }
+       ]
+      }
+     }
+    },
+    {
+     "jsonrpc": "2.0",
+     "id": 3,
+     "error": {
+      "code": -32603,
+      "message": "Internal error: turn failed: DeepSeek Messages stream: tool input is invalid JSON"
+     }
+    }
+   ],
+   "plugin": [
+    {
+     "t": 0,
+     "kind": "apply",
+     "pid": "<PID>",
+     "ppid": "<PID>",
+     "config": {
+      "marker": "probe"
+     },
+     "url": "file://<RUN>/layers/plugin/nassaj-probe-plugin.mjs"
+    },
+    {
+     "t": 0,
+     "kind": "inventory",
+     "when": "apply",
+     "readable": true,
+     "out": {
+      "tools/pre-execute": [],
+      "tools/execute": [
+       {
+        "entryId": "timeout-policy",
+        "entryName": "@deepseek-ai/dsh-tool-call-timeout-policy",
+        "runtimeName": "timeout-policy",
+        "scope": [],
+        "prepend": false,
+        "global": false
+       }
+      ],
+      "tools/post-execute": [
+       {
+        "entryId": "repeat-tool-reminder",
+        "entryName": "@deepseek-ai/dsh-repeat-tool-reminder",
+        "runtimeName": "repeat-tool-reminder",
+        "scope": [],
+        "prepend": false,
+        "global": false
+       }
+      ],
+      "tools/result": []
+     }
+    },
+    {
+     "t": 0,
+     "kind": "pre-execute",
+     "callId": "toolu_probe_1",
+     "rootCallId": "toolu_probe_1",
+     "name": "bash",
+     "arguments": {
+      "command": "ls -l /proc/self/fd; echo PPID=$PPID; cat /proc/self/cgroup"
+     },
+     "argType": "object",
+     "hasParent": false,
+     "agent": {
+      "id": "<UUID>"
+     }
+    },
+    {
+     "t": 0,
+     "kind": "inventory",
+     "when": "first-pre-execute",
+     "readable": true,
+     "out": {
+      "tools/pre-execute": [
+       {
+        "entryId": "tool-jobs",
+        "entryName": "@deepseek-ai/dsh-tool-jobs",
+        "runtimeName": "tool-jobs",
+        "scope": [],
+        "prepend": true,
+        "global": false
+       },
+       {
+        "entryId": "nassaj-parity-probe",
+        "entryName": "file://<RUN>/layers/plugin/nassaj-probe-plugin.mjs",
+        "runtimeName": "nassaj-parity-probe",
+        "scope": [],
+        "prepend": true,
+        "global": true
+       }
+      ],
+      "tools/execute": [
+       {
+        "entryId": "nassaj-parity-probe",
+        "entryName": "file://<RUN>/layers/plugin/nassaj-probe-plugin.mjs",
+        "runtimeName": "nassaj-parity-probe",
+        "scope": [],
+        "prepend": true,
+        "global": true
+       },
+       {
+        "entryId": "timeout-policy",
+        "entryName": "@deepseek-ai/dsh-tool-call-timeout-policy",
+        "runtimeName": "timeout-policy",
+        "scope": [],
+        "prepend": false,
+        "global": false
+       },
+       {
+        "entryId": "session-checkpoint-policy",
+        "entryName": "@deepseek-ai/dsh-session-checkpoint-policy",
+        "runtimeName": "session-checkpoint-policy",
+        "scope": [],
+        "prepend": false,
+        "global": false
+       }
+      ],
+      "tools/post-execute": [
+       {
+        "entryId": "spill-policy",
+        "entryName": "@deepseek-ai/dsh-spill-policy",
+        "runtimeName": "spill-policy",
+        "scope": [],
+        "prepend": true,
+        "global": false
+       },
+       {
+        "entryId": "nassaj-parity-probe",
+        "entryName": "file://<RUN>/layers/plugin/nassaj-probe-plugin.mjs",
+        "runtimeName": "nassaj-parity-probe",
+        "scope": [],
+        "prepend": true,
+        "global": true
+       },
+       {
+        "entryId": "repeat-tool-reminder",
+        "entryName": "@deepseek-ai/dsh-repeat-tool-reminder",
+        "runtimeName": "repeat-tool-reminder",
+        "scope": [],
+        "prepend": false,
+        "global": false
+       },
+       {
+        "entryId": "tool-fs-search",
+        "entryName": "@deepseek-ai/dsh-tool-fs-search",
+        "runtimeName": "tool-fs-search",
+        "scope": [],
+        "prepend": false,
+        "global": false
+       },
+       {
+        "entryId": "tool-fs-search",
+        "entryName": "@deepseek-ai/dsh-tool-fs-search",
+        "runtimeName": "tool-fs-search",
+        "scope": [],
+        "prepend": false,
+        "global": false
+       }
+      ],
+      "tools/result": [
+       {
+        "entryId": "nassaj-parity-probe",
+        "entryName": "file://<RUN>/layers/plugin/nassaj-probe-plugin.mjs",
+        "runtimeName": "nassaj-parity-probe",
+        "scope": [],
+        "prepend": false,
+        "global": true
+       },
+       {
+        "entryId": "agent-instructions",
+        "entryName": "@deepseek-ai/dsh-agent-instructions",
+        "runtimeName": "agent-instructions",
+        "scope": [],
+        "prepend": false,
+        "global": false
+       }
+      ]
+     }
+    },
+    {
+     "t": 0,
+     "kind": "execute",
+     "callId": "toolu_probe_1",
+     "rootCallId": "toolu_probe_1",
+     "name": "bash",
+     "arguments": {
+      "command": "ls -l /proc/self/fd; echo PPID=$PPID; cat /proc/self/cgroup"
+     },
+     "argType": "object",
+     "hasParent": false,
+     "agent": {
+      "id": "<UUID>"
+     }
+    },
+    {
+     "t": 0,
+     "kind": "execute-done",
+     "callId": "toolu_probe_1",
+     "isError": true
+    },
+    {
+     "t": 0,
+     "kind": "post-execute",
+     "callId": "toolu_probe_1",
+     "rootCallId": "toolu_probe_1",
+     "name": "bash",
+     "arguments": {
+      "command": "ls -l /proc/self/fd; echo PPID=$PPID; cat /proc/self/cgroup"
+     },
+     "argType": "object",
+     "hasParent": false,
+     "agent": {
+      "id": "<UUID>"
+     },
+     "isError": true,
+     "error": "invalid arguments: missing required property \"description\""
+    },
+    {
+     "t": 0,
+     "kind": "result",
+     "callId": "toolu_probe_1",
+     "name": "bash",
+     "isError": true,
+     "error": "invalid arguments: missing required property \"description\""
+    }
+   ],
+   "proc": [
+    {
+     "label": "after-session-new",
+     "listening": [],
+     "lsofInet": "",
+     "fd3": "3->socket:[N]",
+     "fd7": "7->socket:[N]"
+    },
+    {
+     "label": "after-prompt",
+     "listening": [],
+     "lsofInet": "COMMAND       PID   USER FD   TYPE    DEVICE SIZE/OFF NODE NAME\nMainThrea <PID> nassaj 25u  IPv4 454072569      0t0  TCP localhost:41406->localhost:47811 (ESTABLISHED)\n",
+     "fd3": "3->socket:[N]",
+     "fd7": "7->socket:[N]"
+    }
+   ],
+   "llmRequests": 2
+  }
+ },
+ "liveTools": [
+  "bash",
+  "create_goal",
+  "edit",
+  "get_goal",
+  "glob",
+  "grep",
+  "interrupt_agent",
+  "job_kill",
+  "job_list",
+  "job_output",
+  "list_agents",
+  "read",
+  "read_image",
+  "send_message",
+  "skill",
+  "subagent",
+  "subagent_fork",
+  "todo_write",
+  "update_goal",
+  "web_fetch",
+  "web_search",
+  "workflow",
+  "working_directory",
+  "write"
+ ],
+ "findings": {
+  "a_plugin_from_layer": "loads; a ./relative name resolves against the --patch layer file location; absolute path and file:// URL also load",
+  "b_single_file_plugin": "node: imports + ctx only (inject ['tools']) registers pre-execute/execute/post-execute prepend+global and tools/result global; sees subagent calls (exec.agent.id = subagent id, rootCallId = its own callId, no parent token)",
+  "b_subagent_calls_not_on_acp": "subagent tool calls reach the plugin but emit NO ACP tool_call/tool_call_update; the subagent tool returns immediately (started subagent <id>)",
+  "b_prepend_not_outermost": "tool-jobs registers a prepend pre-execute listener AFTER the plugin and runs before it; spill-policy likewise on post-execute",
+  "c_inventory": "ctx.events._hooks[event] (private) lists {ctx, callback, prepend, global}; owner = hook.ctx.fiber.entry.options.id/name",
+  "d_no_listener": "ss -ltunp shows no listening socket for the dsh pid at session/new and after prompt; lsof -i only an outbound connection to the LLM origin",
+  "e_fd_inheritance": "bash children hold only fds 0,1,2 on BOTH paths (systemd-run --user --scope when XDG_RUNTIME_DIR is set; direct spawn under the Nassaj exact env, cgroup = pm2 service); sandboxed children get EPERM on pidfd_getfd and /proc/<dsh>/mem; an APPROVED escalation (sandbox_permissions danger-full-access) child takes fd 3 and fd 7 via pidfd_getfd and reads /proc/<dsh>/mem (host ptrace_scope=0)",
+  "f_non_ready": "malformed JSON args and non-object args (array, string) fail the WHOLE turn in the DeepSeek Messages decoder (JSON-RPC -32603) before any tool_call or pipeline event; unknown tool DOES reach pre-execute and execute and fails in the body; cancel during the body: pre-execute and execute ran, post-execute isError \"tool call aborted\", the command did not finish",
+  "f_raw_arguments": "no raw argument text on either side: the plugin sees deep-frozen parsed exec.arguments, ACP sees parsed rawInput; JSON.stringify of both is identical for every root call in the recording",
+  "tool_args_validated_in_body": "schema validation (e.g. bash missing description) runs inside the body after pre-execute and execute listeners",
+  "tool_env": "bash tool env has no DEEPSEEK_API_KEY (dsh strips it)"
+ }
+}

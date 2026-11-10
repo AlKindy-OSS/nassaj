@@ -72,6 +72,9 @@ export function readSettingsDestination(search = window.location.search): Settin
   if (destination.tab === 'agents' && params.get('settingsLocalModels') === 'true') {
     destination.localModels = true;
   }
+  if (destination.tab === 'agents' && params.get('settingsSection') === 'credential-grants') {
+    destination.section = 'credential-grants';
+  }
   if (destination.tab === 'system') {
     const fenceFilter = sanitizeFenceFilter(params.get('settingsFenceFilter'));
     if (fenceFilter) destination.fenceFilter = fenceFilter;
@@ -87,12 +90,14 @@ export function writeSettingsDestination(destination: SettingsDeepLink, options:
   url.searchParams.delete('settingsCategory');
   url.searchParams.delete('settingsLocalModels');
   url.searchParams.delete('settingsFenceFilter');
+  url.searchParams.delete('settingsSection');
   if (destination.tab === 'agents') {
     if (destination.localModels) {
       url.searchParams.set('settingsLocalModels', 'true');
     } else {
       if (destination.agent) url.searchParams.set('settingsAgent', destination.agent);
       if (destination.category) url.searchParams.set('settingsCategory', destination.category);
+      if (destination.section === 'credential-grants') url.searchParams.set('settingsSection', destination.section);
     }
   }
   if (destination.tab === 'system') {
@@ -110,6 +115,7 @@ export function clearSettingsDestination(): void {
   url.searchParams.delete('settingsCategory');
   url.searchParams.delete('settingsLocalModels');
   url.searchParams.delete('settingsFenceFilter');
+  url.searchParams.delete('settingsSection');
   writeSearch(url, false);
 }
 

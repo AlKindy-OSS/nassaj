@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 
 import { resolveTextDirection } from '../../utils/textDirection';
 
-import { peerDisplayState, type PeerDisplayState } from './peerDisplay';
+import { peerDisplayState, timeOf, type PeerDisplayState } from './peerDisplay';
 import type { PeerMessageView } from './peerMessageStore';
 
 /** Causes on a delivered row that do not change its meaning (a repair confirmed delivery). */
@@ -19,11 +19,6 @@ const STATE_ICON: Record<PeerDisplayState, LucideIcon> = {
 };
 
 const PROBLEM_STATES = new Set<PeerDisplayState>(['refused', 'failed']);
-
-const timeOf = (ms: number, locale: string): string | null => {
-  const date = new Date(ms);
-  return Number.isNaN(date.getTime()) ? null : date.toLocaleTimeString(locale, { hour: 'numeric', minute: '2-digit' });
-};
 
 export interface PeerMessageCardProps {
   message: PeerMessageView;
@@ -45,19 +40,27 @@ function useStateLabel(message: PeerMessageView) {
   return { state, label, cause: state === 'queued' ? null : cause };
 }
 
-function StatusChip({ state, label }: { state: PeerDisplayState; label: string }) {
-  const Icon = STATE_ICON[state];
-  const tone = PROBLEM_STATES.has(state) ? 'text-[color:var(--session-peer-problem)]' : 'text-[color:var(--session-peer-accent)]';
+/** One state chip on the fixed --session-peer-* tokens; shared by message and hold cards. */
+export function PeerChip({ icon: Icon, label, state, problem, spin }: {
+  icon: LucideIcon; label: string; state: string; problem: boolean; spin: boolean;
+}) {
+  const tone = problem ? 'text-[color:var(--session-peer-problem)]' : 'text-[color:var(--session-peer-accent)]';
   return (
     <span className={`ms-auto inline-flex flex-shrink-0 items-center gap-1 ${tone}`} data-peer-state={state}>
-      <Icon className={`h-3 w-3 ${state === 'delivering' ? 'animate-spin motion-reduce:animate-none' : ''}`} aria-hidden="true" />
+      <Icon className={`h-3 w-3 ${spin ? 'animate-spin motion-reduce:animate-none' : ''}`} aria-hidden="true" />
       {label}
     </span>
   );
 }
 
+function StatusChip({ state, label }: { state: PeerDisplayState; label: string }) {
+  return (
+    <PeerChip icon={STATE_ICON[state]} label={label} state={state} problem={PROBLEM_STATES.has(state)} spin={state === 'delivering'} />
+  );
+}
+
 /** Session name as a link when the viewer can open it, plain text otherwise. */
-function SessionName({ name, sessionId, onOpenSession, linkLabel }: {
+export function SessionName({ name, sessionId, onOpenSession, linkLabel }: {
   name: string; sessionId: string; onOpenSession?: (sessionId: string) => void; linkLabel: string;
 }) {
   if (!onOpenSession) return <bdi className="font-semibold">{name}</bdi>;
@@ -100,7 +103,7 @@ export default function PeerMessageCard({ message, currentSessionId, targetName,
           data-peer-message="inbound"
           aria-label={t('peerRelay.inbound.ariaLabel', { name })}
         >
-          <header className="mb-1 flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
+          <header className="mb-1 flex flex-wrap items-center gap-1.5 text-[11px] text-[color:var(--session-peer-muted)]">
             <MessagesSquare className="h-3.5 w-3.5 flex-shrink-0 text-[color:var(--session-peer-accent)]" aria-hidden="true" />
             <span className="inline-flex min-w-0 items-center gap-1 text-[color:var(--session-peer-accent)]">
               <span className="font-semibold">{t('peerRelay.inbound.heading')}</span>
@@ -119,7 +122,7 @@ export default function PeerMessageCard({ message, currentSessionId, targetName,
           <div className="whitespace-pre-wrap break-words text-sm text-foreground" dir={dir} data-peer-body>
             {message.body}
           </div>
-          {cause && <p className="mt-1 text-xs text-muted-foreground">{cause}</p>}
+          {cause && <p className="mt-1 text-xs text-[color:var(--session-peer-muted)]">{cause}</p>}
         </article>
       </div>
     );
@@ -135,7 +138,7 @@ export default function PeerMessageCard({ message, currentSessionId, targetName,
         data-peer-message="outbound"
         aria-label={t('peerRelay.outbound.ariaLabel', { name: target, state: label })}
       >
-        <header className="flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
+        <header className="flex flex-wrap items-center gap-1.5 text-[11px] text-[color:var(--session-peer-muted)]">
           <Send className="h-3.5 w-3.5 flex-shrink-0 text-[color:var(--session-peer-accent)] rtl:-scale-x-100" aria-hidden="true" />
           <span className="inline-flex min-w-0 items-center gap-1 text-[color:var(--session-peer-accent)]">
             <span className="font-semibold">{t('peerRelay.outbound.heading')}</span>
@@ -149,6 +152,7 @@ export default function PeerMessageCard({ message, currentSessionId, targetName,
           {time && <span aria-hidden="true">·</span>}
           {time && <time dateTime={new Date(message.createdAt).toISOString()}>{time}</time>}
           <span role="status" aria-live="polite" className="ms-auto inline-flex">
+            <span className="sr-only">{target}: </span>
             <StatusChip state={state} label={label} />
           </span>
         </header>
@@ -156,7 +160,7 @@ export default function PeerMessageCard({ message, currentSessionId, targetName,
           {preview}
         </p>
         {cause && (
-          <p className={`mt-1 text-xs ${PROBLEM_STATES.has(state) ? 'text-[color:var(--session-peer-problem)]' : 'text-muted-foreground'}`} data-peer-cause>
+          <p className={`mt-1 text-xs ${PROBLEM_STATES.has(state) ? 'text-[color:var(--session-peer-problem)]' : 'text-[color:var(--session-peer-muted)]'}`} data-peer-cause>
             {cause}
           </p>
         )}

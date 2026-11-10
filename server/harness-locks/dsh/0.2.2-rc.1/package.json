@@ -1,0 +1,8 @@
+{
+  "name": "nassaj-dsh-pin",
+  "private": true,
+  "version": "0.0.0",
+  "dependencies": {
+    "@deepseek-ai/dsh": "0.2.2-rc.1"
+  }
+}

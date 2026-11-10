@@ -8,6 +8,8 @@
 import { sessionsDb, type PeerMessageRow } from '@/modules/database/index.js';
 // eslint-disable-next-line boundaries/dependencies -- ADR-219: the relay's own tables as a leaf (see peer-relay.service.ts).
 import { peerMessagesDb } from '@/modules/database/repositories/peer-messages.db.js';
+// eslint-disable-next-line boundaries/dependencies -- ADR-219 P2: the relay's own hold table as a leaf.
+import { peerHoldsDb } from '@/modules/database/repositories/peer-holds.db.js';
 import {
   ledgerHasDelivery, readLedger, scanJsonlForProofFrom, transcriptByteSize, writeDeliveryLedgerEntries,
 } from '@/modules/workflow-supervisor/index.js';
@@ -18,6 +20,7 @@ import {
 } from './peer-dispatcher.js';
 import { quotaPercent } from './peer-policy.js';
 import { configurePeerRelay, publishPeerMessage, readSessionMode, senderName } from './peer-relay.service.js';
+import { checkHoldAtGate, releaseHoldForEndedRow, sweepPeerHolds } from './peer-holds.service.js';
 import { createPeerTurnRunner, type PeerTurnRunnerDependencies } from './peer-turn-runner.js';
 
 type UsageWindow = { utilization: number } | null | undefined;
@@ -87,6 +90,10 @@ export function buildPeerDispatcherDependencies(seams: PeerDispatcherSeams): Pee
     runTurn: seams.runTurn,
     publish: publishPeerMessage,
     log,
+    holdGate: checkHoldAtGate,
+    memberName: (userId) => peerHoldsDb.memberName(userId) ?? 'member',
+    sweep: () => { sweepPeerHolds(); },
+    onHoldRowEnded: releaseHoldForEndedRow,
   };
 }
 

@@ -1,0 +1,5 @@
+#!/bin/sh
+# ADR-226 §6.0 witness-only shim for `ssh`: never runs the real ssh. It appends one line naming
+# the call to $PARITY_SHIM_WITNESS (a /var/tmp scratch file) and exits 97.
+if [ -n "$PARITY_SHIM_WITNESS" ]; then printf '%s %s\n' 'ssh' "$*" >> "$PARITY_SHIM_WITNESS"; fi
+exit 97

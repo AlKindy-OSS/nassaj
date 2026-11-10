@@ -23,7 +23,6 @@ const cageDeps = (spawnImpl: typeof spawn) => ({
   homedir: () => '/home/op',
   existsSync: () => true,
   lstatSync: (() => { throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' }); }) as never,
-  isProviderIsolated: () => true,
 });
 
 const processGroupOf = (pid: number): number => {

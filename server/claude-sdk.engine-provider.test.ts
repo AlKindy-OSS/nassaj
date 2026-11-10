@@ -139,6 +139,12 @@ beforeEach(() => {
   (os as unknown as { homedir: () => string }).homedir = () => sandboxHome;
   // T-1873: the SDK executable is the registry claude under the operator home.
   installFakeHarnessBinary(sandboxHome, 'claude');
+  // ADR-152 A1 §3.5: the member has a Claude link of their own, so the official
+  // path is admitted by the credential gate; engine runs still need the engine key.
+  const memberClaude = path.join(sandboxHome, '.nassaj-users', USER_ID, '.claude');
+  fs.mkdirSync(memberClaude, { recursive: true });
+  fs.writeFileSync(path.join(memberClaude, '.credentials.json'),
+    JSON.stringify({ claudeAiOauth: { accessToken: 'sk-ant-oat01-test' } }));
   process.env.NASSAJ_PROVIDER_SECRETS_KEY = crypto.randomBytes(32).toString('base64');
   secrets._resetProviderSecretsServerKeyCache();
 });

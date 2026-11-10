@@ -1,0 +1,1039 @@
+{
+ "_source": "Real rows (read-only copy, 2026-11-09) from a per-user opencode.db, fetchHistory join order. B-1750/B-1756/B-1757. The compaction session repeats one 4-message cycle ~20 times; only the first 13 messages and the last 3 are kept. Nothing else altered.",
+ "promptPrefix": {
+  "session": {
+   "id": "ses_fixture0002",
+   "title": "New session - 2026-11-09T00:55:59.967Z",
+   "directory": "/home/user/nassaj-online",
+   "time_created": 1794185759967,
+   "time_updated": 1794185791240
+  },
+  "rows": [
+   {
+    "message_id": "msg_fixture0001",
+    "message_time_created": 1794185760003,
+    "message_data": {
+     "role": "user",
+     "time": {
+      "created": 1794185760003
+     },
+     "agent": "build",
+     "model": {
+      "providerID": "nassaj_local_dfba04b011a04cf6bddf5835bc6d89bd",
+      "modelID": "qwen3.6-35b"
+     },
+     "summary": {
+      "diffs": []
+     }
+    },
+    "part_id": "prt_1bdce0d07001xJnVtraFJwMQk2",
+    "part_time_created": 1794185760010,
+    "part_data": {
+     "type": "text",
+     "text": "\"<nassaj_document_sharing>\nNassaj document sharing:\nKeep files inside the current project. Supported share roots are doc/ and docs/.\nSupported formats: pdf, docx, xlsx, txt, md, csv, html, htm, xhtml.\nWhen the user requests a share link for a file you actually created, include a relative Markdown file reference, e.g. [Share this page](docs/page.html).\nThe chat renders a Share action for that reference; the user confirms audience and expiry, and the server creates the URL in the dialog.\nDo not invent a public URL, claim a share already exists, call authenticated APIs using user credentials, or request/copy a client share token into the conversation.\nExplain that the Share action creates and copies the link. There is no model-side share-creation tool.\nHTML previews are static: scripts, forms, navigation, SVG and external resources are disabled.\nPlace local CSS, raster images and fonts under the adjacent <basename>.assets/ folder; link them relatively, e.g. page.assets/style.css.\nSharing a page includes only that resource folder, never the whole project. Files remain in place; later saves appear on reload.\nFor the complete contract read docs/document-sharing.md in Nassaj, when available.\n</nassaj_document_sharing>\n\n<nassaj_public_pages>\nNassaj public page publishing:\nThis is a public website or landing page for everyone — not the members/client document Share action described above.\nTo publish one, write the page files in your own project directory (never under --root) and run: node /home/user/nassaj-online/scripts/public-page-publish.mjs publish --site <id> --dir <path> --root /home/user/.local/share/nassaj-dev/public-content — it is served at https://nassaj.example.com/<id>/.\nNever write page, site or user content inside the Nassaj installation tree (dist/, dist-server/): it breaks node updates (client_asset_manifest_changed) and the next generation swap erases it.\n</nassaj_public_pages>\n\n<nassaj_quick_replies>\nNassaj quick replies: only in a reply to the user awaiting one pick among 2-5 discrete options, end it with one ```choices fence, one option per line in the user's language (max 60 chars, none starting with / or equal to \\\"help\\\"), one question per fence. If you have a tool to ask the user a question, use it instead; never both. Never in subagent reports, files or commits. Wrap any example of this fence in 4 backticks.\n</nassaj_quick_replies>\n\n<coordination>\nCoordination level for this turn: delegated. The coordinator delegates implementation work to the appropriate specialized agents, coordinates their results, and does not silently replace requested delegation with self-execution.\n</coordination>\n\nهل تمتلك الان ادوات اوبن كود ؟\""
+    }
+   },
+   {
+    "message_id": "msg_fixture0002",
+    "message_time_created": 1794185760250,
+    "message_data": {
+     "parentID": "msg_fixture0001",
+     "role": "assistant",
+     "mode": "build",
+     "agent": "build",
+     "path": {
+      "cwd": "/home/user/nassaj-online",
+      "root": "/home/user/nassaj-online"
+     },
+     "cost": 0,
+     "tokens": {
+      "total": 23039,
+      "input": 22965,
+      "output": 74,
+      "reasoning": 0,
+      "cache": {
+       "write": 0,
+       "read": 0
+      }
+     },
+     "modelID": "qwen3.6-35b",
+     "providerID": "nassaj_local_dfba04b011a04cf6bddf5835bc6d89bd",
+     "time": {
+      "created": 1794185760250,
+      "completed": 1794185791237
+     },
+     "finish": "stop"
+    },
+    "part_id": "prt_1bdce7f1d001RJXFIbZCU2rKtl",
+    "part_time_created": 1794185789213,
+    "part_data": {
+     "snapshot": "667176baa2215c8921398f0075b1870fdd805a88",
+     "type": "step-start"
+    }
+   },
+   {
+    "message_id": "msg_fixture0002",
+    "message_time_created": 1794185760250,
+    "message_data": {
+     "parentID": "msg_fixture0001",
+     "role": "assistant",
+     "mode": "build",
+     "agent": "build",
+     "path": {
+      "cwd": "/home/user/nassaj-online",
+      "root": "/home/user/nassaj-online"
+     },
+     "cost": 0,
+     "tokens": {
+      "total": 23039,
+      "input": 22965,
+      "output": 74,
+      "reasoning": 0,
+      "cache": {
+       "write": 0,
+       "read": 0
+      }
+     },
+     "modelID": "qwen3.6-35b",
+     "providerID": "nassaj_local_dfba04b011a04cf6bddf5835bc6d89bd",
+     "time": {
+      "created": 1794185760250,
+      "completed": 1794185791237
+     },
+     "finish": "stop"
+    },
+    "part_id": "prt_1bdce7f1f0016nUWO7aWeVcuA7",
+    "part_time_created": 1794185789216,
+    "part_data": {
+     "type": "reasoning",
+     "text": "The user is asking if I have OpenCode tools. Let me answer directly.\n",
+     "time": {
+      "start": 1794185789215,
+      "end": 1794185789748
+     }
+    }
+   },
+   {
+    "message_id": "msg_fixture0002",
+    "message_time_created": 1794185760250,
+    "message_data": {
+     "parentID": "msg_fixture0001",
+     "role": "assistant",
+     "mode": "build",
+     "agent": "build",
+     "path": {
+      "cwd": "/home/user/nassaj-online",
+      "root": "/home/user/nassaj-online"
+     },
+     "cost": 0,
+     "tokens": {
+      "total": 23039,
+      "input": 22965,
+      "output": 74,
+      "reasoning": 0,
+      "cache": {
+       "write": 0,
+       "read": 0
+      }
+     },
+     "modelID": "qwen3.6-35b",
+     "providerID": "nassaj_local_dfba04b011a04cf6bddf5835bc6d89bd",
+     "time": {
+      "created": 1794185760250,
+      "completed": 1794185791237
+     },
+     "finish": "stop"
+    },
+    "part_id": "prt_1bdce8135001dIlwR0w12nZCrc",
+    "part_time_created": 1794185789749,
+    "part_data": {
+     "type": "text",
+     "text": "نعم، أنا أعمل داخل بيئة OpenCode وأمتلك أدواتها المتاحة: قراءة وكتابة الملفات، البحث في الكود، تنفيذ الأوامر عبر الطرفية، وجلب المحتوى من الويب، بالإضافة إلى الوكلاء المتخصصين المفوّضين عند الحاجة.",
+     "time": {
+      "start": 1794185789749,
+      "end": 1794185791206
+     }
+    }
+   },
+   {
+    "message_id": "msg_fixture0002",
+    "message_time_created": 1794185760250,
+    "message_data": {
+     "parentID": "msg_fixture0001",
+     "role": "assistant",
+     "mode": "build",
+     "agent": "build",
+     "path": {
+      "cwd": "/home/user/nassaj-online",
+      "root": "/home/user/nassaj-online"
+     },
+     "cost": 0,
+     "tokens": {
+      "total": 23039,
+      "input": 22965,
+      "output": 74,
+      "reasoning": 0,
+      "cache": {
+       "write": 0,
+       "read": 0
+      }
+     },
+     "modelID": "qwen3.6-35b",
+     "providerID": "nassaj_local_dfba04b011a04cf6bddf5835bc6d89bd",
+     "time": {
+      "created": 1794185760250,
+      "completed": 1794185791237
+     },
+     "finish": "stop"
+    },
+    "part_id": "prt_1bdce86f5001fo7qIupvxaova2",
+    "part_time_created": 1794185791221,
+    "part_data": {
+     "reason": "stop",
+     "snapshot": "667176baa2215c8921398f0075b1870fdd805a88",
+     "type": "step-finish",
+     "tokens": {
+      "total": 23039,
+      "input": 22965,
+      "output": 74,
+      "reasoning": 0,
+      "cache": {
+       "write": 0,
+       "read": 0
+      }
+     },
+     "cost": 0
+    }
+   }
+  ],
+  "canonicalUserText": "هل تمتلك الان ادوات اوبن كود ؟",
+  "coordinationLevel": "delegated"
+ },
+ "compaction": {
+  "session": {
+   "id": "ses_fixture0001",
+   "title": "Nassaj document sharing and public page publishing",
+   "directory": "/home/user/nassaj-online",
+   "time_created": 1794186477832,
+   "time_updated": 1794186851504
+  },
+  "rows": [
+   {
+    "message_id": "msg_fixture0003",
+    "message_time_created": 1794186477853,
+    "message_data": {
+     "role": "user",
+     "time": {
+      "created": 1794186477853
+     },
+     "agent": "build",
+     "model": {
+      "providerID": "nassaj_local_dfba04b011a04cf6bddf5835bc6d89bd",
+      "modelID": "qwen3-next-80b"
+     },
+     "summary": {
+      "diffs": []
+     }
+    },
+    "part_id": "prt_1bdd90121001UAYQLpVNc1OSk3",
+    "part_time_created": 1794186477859,
+    "part_data": {
+     "type": "text",
+     "text": "\"<nassaj_document_sharing>\nNassaj document sharing:\nKeep files inside the current project. Supported share roots are doc/ and docs/.\nSupported formats: pdf, docx, xlsx, txt, md, csv, html, htm, xhtml.\nWhen the user requests a share link for a file you actually created, include a relative Markdown file reference, e.g. [Share this page](docs/page.html).\nThe chat renders a Share action for that reference; the user confirms audience and expiry, and the server creates the URL in the dialog.\nDo not invent a public URL, claim a share already exists, call authenticated APIs using user credentials, or request/copy a client share token into the conversation.\nExplain that the Share action creates and copies the link. There is no model-side share-creation tool.\nHTML previews are static: scripts, forms, navigation, SVG and external resources are disabled.\nPlace local CSS, raster images and fonts under the adjacent <basename>.assets/ folder; link them relatively, e.g. page.assets/style.css.\nSharing a page includes only that resource folder, never the whole project. Files remain in place; later saves appear on reload.\nFor the complete contract read docs/document-sharing.md in Nassaj, when available.\n</nassaj_document_sharing>\n\n<nassaj_public_pages>\nNassaj public page publishing:\nThis is a public website or landing page for everyone — not the members/client document Share action described above.\nTo publish one, write the page files in your own project directory (never under --root) and run: node /home/user/nassaj-online/scripts/public-page-publish.mjs publish --site <id> --dir <path> --root /home/user/.local/share/nassaj-dev/public-content — it is served at https://nassaj.example.com/<id>/.\nNever write page, site or user content inside the Nassaj installation tree (dist/, dist-server/): it breaks node updates (client_asset_manifest_changed) and the next generation swap erases it.\n</nassaj_public_pages>\n\n<nassaj_quick_replies>\nNassaj quick replies: only in a reply to the user awaiting one pick among 2-5 discrete options, end it with one ```choices fence, one option per line in the user's language (max 60 chars, none starting with / or equal to \\\"help\\\"), one question per fence. If you have a tool to ask the user a question, use it instead; never both. Never in subagent reports, files or commits. Wrap any example of this fence in 4 backticks.\n</nassaj_quick_replies>\n\n<coordination>\nCoordination level for this turn: delegated. The coordinator delegates implementation work to the appropriate specialized agents, coordinates their results, and does not silently replace requested delegation with self-execution.\n</coordination>\n\nايش اسمك ؟\""
+    }
+   },
+   {
+    "message_id": "msg_fixture0004",
+    "message_time_created": 1794186478090,
+    "message_data": {
+     "parentID": "msg_fixture0003",
+     "role": "assistant",
+     "mode": "build",
+     "agent": "build",
+     "path": {
+      "cwd": "/home/user/nassaj-online",
+      "root": "/home/user/nassaj-online"
+     },
+     "cost": 0,
+     "tokens": {
+      "input": 0,
+      "output": 0,
+      "reasoning": 0,
+      "cache": {
+       "read": 0,
+       "write": 0
+      }
+     },
+     "modelID": "qwen3-next-80b",
+     "providerID": "nassaj_local_dfba04b011a04cf6bddf5835bc6d89bd",
+     "time": {
+      "created": 1794186478090,
+      "completed": 1794186492643
+     }
+    },
+    "part_id": null,
+    "part_time_created": null,
+    "part_data": null
+   },
+   {
+    "message_id": "msg_fixture0005",
+    "message_time_created": 1794186492645,
+    "message_data": {
+     "role": "user",
+     "model": {
+      "providerID": "nassaj_local_dfba04b011a04cf6bddf5835bc6d89bd",
+      "modelID": "qwen3-next-80b"
+     },
+     "agent": "build",
+     "time": {
+      "created": 1794186492645
+     },
+     "summary": {
+      "diffs": []
+     }
+    },
+    "part_id": "prt_1bdd93ae60011kXA3RZVKszmqx",
+    "part_time_created": 1794186492646,
+    "part_data": {
+     "type": "compaction",
+     "auto": true,
+     "overflow": true
+    }
+   },
+   {
+    "message_id": "msg_fixture0006",
+    "message_time_created": 1794186492650,
+    "message_data": {
+     "role": "assistant",
+     "parentID": "msg_fixture0005",
+     "mode": "compaction",
+     "agent": "compaction",
+     "summary": true,
+     "path": {
+      "cwd": "/home/user/nassaj-online",
+      "root": "/home/user/nassaj-online"
+     },
+     "cost": 0,
+     "tokens": {
+      "total": 1114,
+      "input": 1021,
+      "output": 93,
+      "reasoning": 0,
+      "cache": {
+       "write": 0,
+       "read": 0
+      }
+     },
+     "modelID": "qwen3-next-80b",
+     "providerID": "nassaj_local_dfba04b011a04cf6bddf5835bc6d89bd",
+     "time": {
+      "created": 1794186492650,
+      "completed": 1794186552231
+     },
+     "finish": "stop"
+    },
+    "part_id": "prt_1bdda09f4001JU7h2Op4d9YEIC",
+    "part_time_created": 1794186545652,
+    "part_data": {
+     "snapshot": "667176baa2215c8921398f0075b1870fdd805a88",
+     "type": "step-start"
+    }
+   },
+   {
+    "message_id": "msg_fixture0006",
+    "message_time_created": 1794186492650,
+    "message_data": {
+     "role": "assistant",
+     "parentID": "msg_fixture0005",
+     "mode": "compaction",
+     "agent": "compaction",
+     "summary": true,
+     "path": {
+      "cwd": "/home/user/nassaj-online",
+      "root": "/home/user/nassaj-online"
+     },
+     "cost": 0,
+     "tokens": {
+      "total": 1114,
+      "input": 1021,
+      "output": 93,
+      "reasoning": 0,
+      "cache": {
+       "write": 0,
+       "read": 0
+      }
+     },
+     "modelID": "qwen3-next-80b",
+     "providerID": "nassaj_local_dfba04b011a04cf6bddf5835bc6d89bd",
+     "time": {
+      "created": 1794186492650,
+      "completed": 1794186552231
+     },
+     "finish": "stop"
+    },
+    "part_id": "prt_1bdda09f5001jtED88ZIk6ftAo",
+    "part_time_created": 1794186545653,
+    "part_data": {
+     "type": "text",
+     "text": "## Objective\n- The user is asking for the agent's name, likely to establish context or identity in the conversation.\n\n## Important Details\n- (none)\n\n## Work State\n### Completed\n- (none)\n\n### Active\n- (none)\n\n### Blocked\n- (none)\n\n## Next Move\n1. Respond with the agent's identity in Arabic, as the query is in Arabic.\n2. (none)\n\n## Relevant Files\n- (none)",
+     "time": {
+      "start": 1794186545653,
+      "end": 1794186552208
+     }
+    }
+   },
+   {
+    "message_id": "msg_fixture0006",
+    "message_time_created": 1794186492650,
+    "message_data": {
+     "role": "assistant",
+     "parentID": "msg_fixture0005",
+     "mode": "compaction",
+     "agent": "compaction",
+     "summary": true,
+     "path": {
+      "cwd": "/home/user/nassaj-online",
+      "root": "/home/user/nassaj-online"
+     },
+     "cost": 0,
+     "tokens": {
+      "total": 1114,
+      "input": 1021,
+      "output": 93,
+      "reasoning": 0,
+      "cache": {
+       "write": 0,
+       "read": 0
+      }
+     },
+     "modelID": "qwen3-next-80b",
+     "providerID": "nassaj_local_dfba04b011a04cf6bddf5835bc6d89bd",
+     "time": {
+      "created": 1794186492650,
+      "completed": 1794186552231
+     },
+     "finish": "stop"
+    },
+    "part_id": "prt_1bdda239c001MaeJONeShIdU6j",
+    "part_time_created": 1794186552220,
+    "part_data": {
+     "reason": "stop",
+     "snapshot": "667176baa2215c8921398f0075b1870fdd805a88",
+     "type": "step-finish",
+     "tokens": {
+      "total": 1114,
+      "input": 1021,
+      "output": 93,
+      "reasoning": 0,
+      "cache": {
+       "write": 0,
+       "read": 0
+      }
+     },
+     "cost": 0
+    }
+   },
+   {
+    "message_id": "msg_fixture0007",
+    "message_time_created": 1794186552232,
+    "message_data": {
+     "role": "user",
+     "time": {
+      "created": 1794186552232
+     },
+     "agent": "build",
+     "model": {
+      "providerID": "nassaj_local_dfba04b011a04cf6bddf5835bc6d89bd",
+      "modelID": "qwen3-next-80b"
+     }
+    },
+    "part_id": "prt_1bdda23a9001l32IaNCKTCiAYN",
+    "part_time_created": 1794186552233,
+    "part_data": {
+     "type": "text",
+     "metadata": {
+      "compaction_continue": true
+     },
+     "synthetic": true,
+     "text": "The previous request exceeded the provider's size limit due to large media attachments. The conversation was compacted and media files were removed from context. If the user was asking about attached images or files, explain that the attachments were too large to process and suggest they try again with smaller or fewer files.\n\nContinue if you have next steps, or stop and ask for clarification if you are unsure how to proceed.",
+     "time": {
+      "start": 1794186552233,
+      "end": 1794186552233
+     }
+    }
+   },
+   {
+    "message_id": "msg_fixture0008",
+    "message_time_created": 1794186552234,
+    "message_data": {
+     "parentID": "msg_fixture0007",
+     "role": "assistant",
+     "mode": "build",
+     "agent": "build",
+     "path": {
+      "cwd": "/home/user/nassaj-online",
+      "root": "/home/user/nassaj-online"
+     },
+     "cost": 0,
+     "tokens": {
+      "input": 0,
+      "output": 0,
+      "reasoning": 0,
+      "cache": {
+       "read": 0,
+       "write": 0
+      }
+     },
+     "modelID": "qwen3-next-80b",
+     "providerID": "nassaj_local_dfba04b011a04cf6bddf5835bc6d89bd",
+     "time": {
+      "created": 1794186552234,
+      "completed": 1794186621595
+     }
+    },
+    "part_id": null,
+    "part_time_created": null,
+    "part_data": null
+   },
+   {
+    "message_id": "msg_fixture0009",
+    "message_time_created": 1794186621597,
+    "message_data": {
+     "role": "user",
+     "model": {
+      "providerID": "nassaj_local_dfba04b011a04cf6bddf5835bc6d89bd",
+      "modelID": "qwen3-next-80b"
+     },
+     "agent": "build",
+     "time": {
+      "created": 1794186621597
+     },
+     "summary": {
+      "diffs": []
+     }
+    },
+    "part_id": "prt_1bddb329e0019zmhjxfgnM7iJV",
+    "part_time_created": 1794186621598,
+    "part_data": {
+     "type": "compaction",
+     "auto": true,
+     "overflow": true
+    }
+   },
+   {
+    "message_id": "msg_fixture0010",
+    "message_time_created": 1794186621601,
+    "message_data": {
+     "role": "assistant",
+     "parentID": "msg_fixture0009",
+     "mode": "compaction",
+     "agent": "compaction",
+     "summary": true,
+     "path": {
+      "cwd": "/home/user/nassaj-online",
+      "root": "/home/user/nassaj-online"
+     },
+     "cost": 0,
+     "tokens": {
+      "total": 972,
+      "input": 780,
+      "output": 192,
+      "reasoning": 0,
+      "cache": {
+       "write": 0,
+       "read": 0
+      }
+     },
+     "modelID": "qwen3-next-80b",
+     "providerID": "nassaj_local_dfba04b011a04cf6bddf5835bc6d89bd",
+     "time": {
+      "created": 1794186621601,
+      "completed": 1794186705869
+     },
+     "finish": "stop"
+    },
+    "part_id": "prt_1bddc5a7e001nUEGyyhVZHTNGa",
+    "part_time_created": 1794186697342,
+    "part_data": {
+     "snapshot": "667176baa2215c8921398f0075b1870fdd805a88",
+     "type": "step-start"
+    }
+   },
+   {
+    "message_id": "msg_fixture0010",
+    "message_time_created": 1794186621601,
+    "message_data": {
+     "role": "assistant",
+     "parentID": "msg_fixture0009",
+     "mode": "compaction",
+     "agent": "compaction",
+     "summary": true,
+     "path": {
+      "cwd": "/home/user/nassaj-online",
+      "root": "/home/user/nassaj-online"
+     },
+     "cost": 0,
+     "tokens": {
+      "total": 972,
+      "input": 780,
+      "output": 192,
+      "reasoning": 0,
+      "cache": {
+       "write": 0,
+       "read": 0
+      }
+     },
+     "modelID": "qwen3-next-80b",
+     "providerID": "nassaj_local_dfba04b011a04cf6bddf5835bc6d89bd",
+     "time": {
+      "created": 1794186621601,
+      "completed": 1794186705869
+     },
+     "finish": "stop"
+    },
+    "part_id": "prt_1bddc5a80001zIvI9CKuC88mON",
+    "part_time_created": 1794186697344,
+    "part_data": {
+     "type": "text",
+     "text": "## Objective\n- The user is asking for the agent's name to establish context, but the conversation was interrupted due to media attachments exceeding size limits.\n\n## Important Details\n- Media attachments were too large to process and were removed from context.\n- User may be attempting to reference attached images or files; they must retry with smaller or fewer files.\n- Query is in Arabic; response must be in Arabic.\n\n## Work State\n### Completed\n- Identified user intent to learn the agent's identity.\n- Detected that prior message was truncated due to media size limits.\n\n### Active\n- Preparing Arabic response confirming agent identity and advising on file size constraints.\n\n### Blocked\n- Cannot process or reference attached media files due to size limits.\n\n## Next Move\n1. Respond in Arabic: confirm agent identity and instruct user to retry with smaller files.\n2. Await user’s next input with reduced file size or clarified request.\n\n## Relevant Files\n- (none)",
+     "time": {
+      "start": 1794186697344,
+      "end": 1794186705844
+     }
+    }
+   },
+   {
+    "message_id": "msg_fixture0010",
+    "message_time_created": 1794186621601,
+    "message_data": {
+     "role": "assistant",
+     "parentID": "msg_fixture0009",
+     "mode": "compaction",
+     "agent": "compaction",
+     "summary": true,
+     "path": {
+      "cwd": "/home/user/nassaj-online",
+      "root": "/home/user/nassaj-online"
+     },
+     "cost": 0,
+     "tokens": {
+      "total": 972,
+      "input": 780,
+      "output": 192,
+      "reasoning": 0,
+      "cache": {
+       "write": 0,
+       "read": 0
+      }
+     },
+     "modelID": "qwen3-next-80b",
+     "providerID": "nassaj_local_dfba04b011a04cf6bddf5835bc6d89bd",
+     "time": {
+      "created": 1794186621601,
+      "completed": 1794186705869
+     },
+     "finish": "stop"
+    },
+    "part_id": "prt_1bddc7bc2001W2bOhS9IMoNURx",
+    "part_time_created": 1794186705858,
+    "part_data": {
+     "reason": "stop",
+     "snapshot": "667176baa2215c8921398f0075b1870fdd805a88",
+     "type": "step-finish",
+     "tokens": {
+      "total": 972,
+      "input": 780,
+      "output": 192,
+      "reasoning": 0,
+      "cache": {
+       "write": 0,
+       "read": 0
+      }
+     },
+     "cost": 0
+    }
+   },
+   {
+    "message_id": "msg_fixture0011",
+    "message_time_created": 1794186705870,
+    "message_data": {
+     "role": "user",
+     "time": {
+      "created": 1794186705870
+     },
+     "agent": "build",
+     "model": {
+      "providerID": "nassaj_local_dfba04b011a04cf6bddf5835bc6d89bd",
+      "modelID": "qwen3-next-80b"
+     }
+    },
+    "part_id": "prt_1bddc7bcf0017bew3HFQjYIOY5",
+    "part_time_created": 1794186705871,
+    "part_data": {
+     "type": "text",
+     "metadata": {
+      "compaction_continue": true
+     },
+     "synthetic": true,
+     "text": "The previous request exceeded the provider's size limit due to large media attachments. The conversation was compacted and media files were removed from context. If the user was asking about attached images or files, explain that the attachments were too large to process and suggest they try again with smaller or fewer files.\n\nContinue if you have next steps, or stop and ask for clarification if you are unsure how to proceed.",
+     "time": {
+      "start": 1794186705871,
+      "end": 1794186705871
+     }
+    }
+   },
+   {
+    "message_id": "msg_fixture0012",
+    "message_time_created": 1794186705872,
+    "message_data": {
+     "parentID": "msg_fixture0011",
+     "role": "assistant",
+     "mode": "build",
+     "agent": "build",
+     "path": {
+      "cwd": "/home/user/nassaj-online",
+      "root": "/home/user/nassaj-online"
+     },
+     "cost": 0,
+     "tokens": {
+      "input": 0,
+      "output": 0,
+      "reasoning": 0,
+      "cache": {
+       "read": 0,
+       "write": 0
+      }
+     },
+     "modelID": "qwen3-next-80b",
+     "providerID": "nassaj_local_dfba04b011a04cf6bddf5835bc6d89bd",
+     "time": {
+      "created": 1794186705872,
+      "completed": 1794186706139
+     }
+    },
+    "part_id": null,
+    "part_time_created": null,
+    "part_data": null
+   },
+   {
+    "message_id": "msg_fixture0013",
+    "message_time_created": 1794186706139,
+    "message_data": {
+     "role": "user",
+     "model": {
+      "providerID": "nassaj_local_dfba04b011a04cf6bddf5835bc6d89bd",
+      "modelID": "qwen3-next-80b"
+     },
+     "agent": "build",
+     "time": {
+      "created": 1794186706139
+     },
+     "summary": {
+      "diffs": []
+     }
+    },
+    "part_id": "prt_1bddc7cdc001U0Xo1HB4xoYK84",
+    "part_time_created": 1794186706140,
+    "part_data": {
+     "type": "compaction",
+     "auto": true,
+     "overflow": true
+    }
+   },
+   {
+    "message_id": "msg_fixture0014",
+    "message_time_created": 1794186706143,
+    "message_data": {
+     "role": "assistant",
+     "parentID": "msg_fixture0013",
+     "mode": "compaction",
+     "agent": "compaction",
+     "summary": true,
+     "path": {
+      "cwd": "/home/user/nassaj-online",
+      "root": "/home/user/nassaj-online"
+     },
+     "cost": 0,
+     "tokens": {
+      "total": 1103,
+      "input": 761,
+      "output": 224,
+      "reasoning": 0,
+      "cache": {
+       "write": 0,
+       "read": 118
+      }
+     },
+     "modelID": "qwen3-next-80b",
+     "providerID": "nassaj_local_dfba04b011a04cf6bddf5835bc6d89bd",
+     "time": {
+      "created": 1794186706143,
+      "completed": 1794186723747
+     },
+     "finish": "stop"
+    },
+    "part_id": "prt_1bddc9a95001zQ4H26bbzoayaX",
+    "part_time_created": 1794186713749,
+    "part_data": {
+     "snapshot": "667176baa2215c8921398f0075b1870fdd805a88",
+     "type": "step-start"
+    }
+   },
+   {
+    "message_id": "msg_fixture0014",
+    "message_time_created": 1794186706143,
+    "message_data": {
+     "role": "assistant",
+     "parentID": "msg_fixture0013",
+     "mode": "compaction",
+     "agent": "compaction",
+     "summary": true,
+     "path": {
+      "cwd": "/home/user/nassaj-online",
+      "root": "/home/user/nassaj-online"
+     },
+     "cost": 0,
+     "tokens": {
+      "total": 1103,
+      "input": 761,
+      "output": 224,
+      "reasoning": 0,
+      "cache": {
+       "write": 0,
+       "read": 118
+      }
+     },
+     "modelID": "qwen3-next-80b",
+     "providerID": "nassaj_local_dfba04b011a04cf6bddf5835bc6d89bd",
+     "time": {
+      "created": 1794186706143,
+      "completed": 1794186723747
+     },
+     "finish": "stop"
+    },
+    "part_id": "prt_1bddc9a96001zQihKKgfrZlsSc",
+    "part_time_created": 1794186713751,
+    "part_data": {
+     "type": "text",
+     "text": "## Objective\n- The user is seeking confirmation of the agent’s identity and needs guidance to resubmit a request with smaller media files due to prior size limit violations.\n\n## Important Details\n- Media attachments were too large and were removed from context; user must retry with smaller or fewer files.\n- Query is in Arabic; response must be in Arabic.\n- User may be attempting to reference attached images or files but cannot do so until file size constraints are met.\n\n## Work State\n### Completed\n- Identified user intent to learn the agent's identity.\n- Confirmed media attachments exceeded size limits and were removed from context.\n- Determined that response must be in Arabic.\n\n### Active\n- Preparing Arabic response to confirm agent identity and instruct user to resubmit with reduced file size.\n\n### Blocked\n- Cannot process or reference any attached media files due to size limits.\n\n## Next Move\n1. Respond in Arabic: confirm agent identity and instruct user to retry with smaller or fewer files.\n2. Await user’s next input with reduced file size or clarified request.\n\n## Relevant Files\n- (none)",
+     "time": {
+      "start": 1794186713750,
+      "end": 1794186723697
+     }
+    }
+   },
+   {
+    "message_id": "msg_fixture0014",
+    "message_time_created": 1794186706143,
+    "message_data": {
+     "role": "assistant",
+     "parentID": "msg_fixture0013",
+     "mode": "compaction",
+     "agent": "compaction",
+     "summary": true,
+     "path": {
+      "cwd": "/home/user/nassaj-online",
+      "root": "/home/user/nassaj-online"
+     },
+     "cost": 0,
+     "tokens": {
+      "total": 1103,
+      "input": 761,
+      "output": 224,
+      "reasoning": 0,
+      "cache": {
+       "write": 0,
+       "read": 118
+      }
+     },
+     "modelID": "qwen3-next-80b",
+     "providerID": "nassaj_local_dfba04b011a04cf6bddf5835bc6d89bd",
+     "time": {
+      "created": 1794186706143,
+      "completed": 1794186723747
+     },
+     "finish": "stop"
+    },
+    "part_id": "prt_1bddcc188001PZrmc5v3WcsCPE",
+    "part_time_created": 1794186723720,
+    "part_data": {
+     "reason": "stop",
+     "snapshot": "667176baa2215c8921398f0075b1870fdd805a88",
+     "type": "step-finish",
+     "tokens": {
+      "total": 1103,
+      "input": 761,
+      "output": 224,
+      "reasoning": 0,
+      "cache": {
+       "write": 0,
+       "read": 118
+      }
+     },
+     "cost": 0
+    }
+   },
+   {
+    "message_id": "msg_fixture0015",
+    "message_time_created": 1794186723749,
+    "message_data": {
+     "role": "user",
+     "time": {
+      "created": 1794186723749
+     },
+     "agent": "build",
+     "model": {
+      "providerID": "nassaj_local_dfba04b011a04cf6bddf5835bc6d89bd",
+      "modelID": "qwen3-next-80b"
+     }
+    },
+    "part_id": "prt_1bddcc1a6001aAh9Reghwq2bhr",
+    "part_time_created": 1794186723750,
+    "part_data": {
+     "type": "text",
+     "metadata": {
+      "compaction_continue": true
+     },
+     "synthetic": true,
+     "text": "The previous request exceeded the provider's size limit due to large media attachments. The conversation was compacted and media files were removed from context. If the user was asking about attached images or files, explain that the attachments were too large to process and suggest they try again with smaller or fewer files.\n\nContinue if you have next steps, or stop and ask for clarification if you are unsure how to proceed.",
+     "time": {
+      "start": 1794186723750,
+      "end": 1794186723750
+     }
+    }
+   },
+   {
+    "message_id": "msg_fixture0017",
+    "message_time_created": 1794186851504,
+    "message_data": {
+     "parentID": "msg_fixture0016",
+     "role": "assistant",
+     "mode": "build",
+     "agent": "build",
+     "path": {
+      "cwd": "/home/user/nassaj-online",
+      "root": "/home/user/nassaj-online"
+     },
+     "cost": 0,
+     "tokens": {
+      "input": 0,
+      "output": 0,
+      "reasoning": 0,
+      "cache": {
+       "read": 0,
+       "write": 0
+      }
+     },
+     "modelID": "qwen3-next-80b",
+     "providerID": "nassaj_local_dfba04b011a04cf6bddf5835bc6d89bd",
+     "time": {
+      "created": 1794186851504,
+      "completed": 1794186851725
+     }
+    },
+    "part_id": null,
+    "part_time_created": null,
+    "part_data": null
+   },
+   {
+    "message_id": "msg_fixture0018",
+    "message_time_created": 1794186851726,
+    "message_data": {
+     "role": "user",
+     "model": {
+      "providerID": "nassaj_local_dfba04b011a04cf6bddf5835bc6d89bd",
+      "modelID": "qwen3-next-80b"
+     },
+     "agent": "build",
+     "time": {
+      "created": 1794186851726
+     }
+    },
+    "part_id": "prt_1bddeb58e002ZLzvf19d4z7TOp",
+    "part_time_created": 1794186851726,
+    "part_data": {
+     "type": "compaction",
+     "auto": true,
+     "overflow": true
+    }
+   },
+   {
+    "message_id": "msg_fixture0019",
+    "message_time_created": 1794186851729,
+    "message_data": {
+     "role": "assistant",
+     "parentID": "msg_fixture0018",
+     "mode": "compaction",
+     "agent": "compaction",
+     "summary": true,
+     "path": {
+      "cwd": "/home/user/nassaj-online",
+      "root": "/home/user/nassaj-online"
+     },
+     "cost": 0,
+     "tokens": {
+      "output": 0,
+      "input": 0,
+      "reasoning": 0,
+      "cache": {
+       "read": 0,
+       "write": 0
+      }
+     },
+     "modelID": "qwen3-next-80b",
+     "providerID": "nassaj_local_dfba04b011a04cf6bddf5835bc6d89bd",
+     "time": {
+      "created": 1794186851729
+     }
+    },
+    "part_id": "prt_1bddeb603001qXRGgoD8el2U1O",
+    "part_time_created": 1794186851843,
+    "part_data": {
+     "snapshot": "667176baa2215c8921398f0075b1870fdd805a88",
+     "type": "step-start"
+    }
+   },
+   {
+    "message_id": "msg_fixture0019",
+    "message_time_created": 1794186851729,
+    "message_data": {
+     "role": "assistant",
+     "parentID": "msg_fixture0018",
+     "mode": "compaction",
+     "agent": "compaction",
+     "summary": true,
+     "path": {
+      "cwd": "/home/user/nassaj-online",
+      "root": "/home/user/nassaj-online"
+     },
+     "cost": 0,
+     "tokens": {
+      "output": 0,
+      "input": 0,
+      "reasoning": 0,
+      "cache": {
+       "read": 0,
+       "write": 0
+      }
+     },
+     "modelID": "qwen3-next-80b",
+     "providerID": "nassaj_local_dfba04b011a04cf6bddf5835bc6d89bd",
+     "time": {
+      "created": 1794186851729
+     }
+    },
+    "part_id": "prt_1bddeb603002uB4Ue4bW9k9vAD",
+    "part_time_created": 1794186851843,
+    "part_data": {
+     "type": "text",
+     "text": "",
+     "time": {
+      "start": 1794186851843
+     }
+    }
+   }
+  ],
+  "canonicalUserText": "ايش اسمك ؟",
+  "coordinationLevel": "delegated"
+ }
+}

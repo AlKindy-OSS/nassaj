@@ -184,7 +184,7 @@ describe('T-1866: HarnessAutoUpdateSection moved off agent pages into النظا
 
     // HarnessVersionSection (the per-agent CLI status card) is still here —
     // only the global auto-update POLICY widget moved.
-    await findByText('إصدار أداة المزوّد');
+    await findByText('إصدار الوكيل البرمجي');
     expect(container.textContent).not.toContain('التحديث التلقائي العام');
     // The pointer that replaced it, instead.
     expect(container.textContent).toContain('إعدادات التحديث التلقائي في تبويب «النظام»');

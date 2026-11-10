@@ -8,8 +8,9 @@
  * inside every other member's session. B-384 moved the writer onto the per-user
  * file the spawn actually reads, so on an ISOLATED provider a member's definition
  * now reaches only their own sessions — where they can already run commands via
- * their own agent turns. The gate therefore follows the live sharing policy
- * instead of the role alone.
+ * their own agent turns. The gate therefore follows the WRITER (does it write
+ * the caller's own tree?) instead of the role alone; every spawn is isolated
+ * (ADR-152 A1), and a writer not declared per-user keeps the admin bar.
  *
  * WHAT THESE TESTS PIN. Not the 403 code — the FILESYSTEM. The payload is the
  * same plausible attack the containment suite uses (`bash -c 'curl … | sh'`), and
@@ -32,7 +33,6 @@ import type { Server } from 'node:http';
 import express from 'express';
 
 import { closeConnection, initializeDatabase, projectsDb, userDb } from '@/modules/database/index.js';
-import { setProviderSharingConfig } from '@/services/provider-sharing.js';
 import { AppError } from '@/shared/utils.js';
 
 import providerRouter from './provider.routes.js';
@@ -89,10 +89,6 @@ before(async () => {
 
   memberUser = userDb.createUser('mcp_member', 'hash', 'user') as TestUser;
   adminUser = { ...(userDb.createUser('mcp_admin', 'hash', 'user') as TestUser), role: 'admin' };
-
-  // Pin the policy this test reasons about instead of inheriting an install's:
-  // claude isolated (per-user file), opencode shared (operator file).
-  setProviderSharingConfig({ claude: 'isolated', opencode: 'shared' });
 
   const app = express();
   app.use(express.json());
@@ -155,18 +151,18 @@ test('one member cannot see or reach another member\'s user-scoped servers', asy
   assert.equal(fs.existsSync(memberClaudeConfig(other.id)), false, 'a mere read must not create a tree');
 });
 
-test('a member is still refused on a SHARED provider — that file is the operator\'s', async () => {
+test('a member is still refused where the writer is not declared per-user (opencode)', async () => {
   const response = await call('POST', '/api/providers/opencode/mcp/servers', memberUser, {
     ...HOSTILE,
     scope: 'user',
   });
-  assert.equal(response.status, 403, 'shared providers keep the admin bar');
+  assert.equal(response.status, 403, 'a non-per-user writer keeps the admin bar');
   assert.equal((response.json.error as { code?: string })?.code, 'MCP_WRITE_FORBIDDEN');
 });
 
 test('OpenCode stays dormant for admins too while its rollout flag is off', async () => {
   const response = await call('POST', '/api/providers/opencode/mcp/servers', adminUser, {
-    name: 'admin-shared',
+    name: 'admin-opencode',
     transport: 'stdio',
     command: 'example-mcp',
     scope: 'user',
@@ -198,30 +194,6 @@ test('a member may remove their own server, and the removal stays in their tree'
   };
   assert.equal(config.mcpServers?.['to-remove'], undefined);
   assert.ok(config.mcpServers?.['sibling'], 'removing one server must not drop the others');
-});
-
-test('flipping the policy back to shared re-arms the admin bar on the next request', async () => {
-  // Flip THROUGH the service, the way the admin route does: the policy is cached
-  // in-process for the spawn hot path and refreshed synchronously on write. Poking
-  // app_config directly would leave the cache stale — which is precisely what this
-  // test caught on its first run, and why the gate's guarantee is "no cached
-  // DECISION of its own", not "no cache anywhere".
-  setProviderSharingConfig({ claude: 'shared', opencode: 'shared' });
-  try {
-    const response = await call('POST', '/api/providers/claude/mcp/servers', memberUser, {
-      ...HOSTILE,
-      name: 'after-flip',
-      scope: 'user',
-    });
-    assert.equal(response.status, 403, 'the gate reads the live policy, never a cached decision');
-    assert.equal(
-      fs.existsSync(operatorClaudeConfig()),
-      false,
-      'and no write reached the operator file on the way to the refusal',
-    );
-  } finally {
-    setProviderSharingConfig({ claude: 'isolated', opencode: 'shared' });
-  }
 });
 
 test('a member may write scope=local — into projects[ws] of their OWN file (B-345 regression)', async () => {
@@ -277,7 +249,6 @@ test('a member write never reaches ANOTHER member\'s file on disk', async () => 
 });
 
 test('the deleted Gemini provider is refused (400) and never writes ~/.gemini/settings.json', async () => {
-  setProviderSharingConfig({ claude: 'isolated', opencode: 'shared' });
   const response = await call('POST', '/api/providers/gemini/mcp/servers', memberUser, {
     name: 'gem-own',
     transport: 'stdio',
@@ -315,29 +286,24 @@ test('the deleted Gemini provider is refused (400) and never writes ~/.gemini/se
   );
 });
 
-test('CRUX: opencode marked isolated does NOT bypass its dormant rollout gate', async () => {
-  // Isolation policy and rollout are separate decisions. Flipping sharing to
-  // isolated must not expose a contract whose feature flag is still off.
-  setProviderSharingConfig({ claude: 'isolated', opencode: 'isolated' });
-  try {
-    const response = await call('POST', '/api/providers/opencode/mcp/servers', memberUser, {
-      ...HOSTILE,
-      name: 'opencode-escalation',
-      scope: 'user',
-    });
-    assert.equal(response.status, 403, 'writesPerUserConfig=false keeps the admin bar regardless of policy');
-    const operatorOpenCode = path.join(sandboxHome, '.config', 'opencode', 'opencode.json');
-    const contents = fs.existsSync(operatorOpenCode)
-      ? (JSON.parse(fs.readFileSync(operatorOpenCode, 'utf8')) as { mcp?: Record<string, unknown> })
-      : { mcp: {} };
-    assert.equal(
-      contents.mcp?.['opencode-escalation'],
-      undefined,
-      'the member definition must not reach the operator opencode config',
-    );
-  } finally {
-    setProviderSharingConfig({ claude: 'isolated', opencode: 'shared' });
-  }
+test('CRUX: opencode isolation does NOT bypass its dormant rollout gate', async () => {
+  // Isolation and rollout are separate decisions: an isolated spawn must not
+  // expose a contract whose feature flag is still off.
+  const response = await call('POST', '/api/providers/opencode/mcp/servers', memberUser, {
+    ...HOSTILE,
+    name: 'opencode-escalation',
+    scope: 'user',
+  });
+  assert.equal(response.status, 403, 'writesPerUserConfig=false keeps the admin bar regardless of policy');
+  const operatorOpenCode = path.join(sandboxHome, '.config', 'opencode', 'opencode.json');
+  const contents = fs.existsSync(operatorOpenCode)
+    ? (JSON.parse(fs.readFileSync(operatorOpenCode, 'utf8')) as { mcp?: Record<string, unknown> })
+    : { mcp: {} };
+  assert.equal(
+    contents.mcp?.['opencode-escalation'],
+    undefined,
+    'the member definition must not reach the operator opencode config',
+  );
 });
 
 test('vendor providers with no MCP store refuse before any path is computed', async () => {

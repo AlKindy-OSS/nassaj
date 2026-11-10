@@ -29,9 +29,6 @@ delete process.env.CLAUDE_CONFIG_DIR;
 const { closeConnection, getConnection, initializeDatabase, scanStateDb, sessionsDb } = await import(
   '@/modules/database/index.js'
 );
-const { setProviderSharingConfig, _resetProviderSharingCache } = await import(
-  '@/services/provider-sharing.js'
-);
 const { userConfigDir } = await import('@/services/isolation/provision-user-dirs.js');
 const { operatorClaudeHome, resolveClaudeHomeForUser, resolveClaudeHomes } = await import(
   '@/modules/providers/list/claude/claude-home.js'
@@ -48,11 +45,6 @@ await initializeDatabase();
 const USER_ID = 8738;
 getConnection().prepare("INSERT OR IGNORE INTO users (id, username, password_hash) VALUES (?, ?, 'x')")
   .run(USER_ID, 'claude-isolation-user');
-
-_resetProviderSharingCache();
-setProviderSharingConfig({
-  claude: 'isolated', codex: 'shared', agy: 'shared', cursor: 'shared', opencode: 'shared',
-});
 
 after(async () => {
   await closeSessionsWatcher();
@@ -79,10 +71,10 @@ function writeTranscript(home: string, sessionId: string, display?: string): str
 }
 
 describe('Claude session paths honor CLAUDE_CONFIG_DIR (B-738)', () => {
-  it('resolves isolated homes while anonymous/shared fallback remains the operator home', () => {
+  it('resolves isolated homes; an anonymous id is refused, the operator home stays a transcript root', () => {
     const isolatedHome = userConfigDir(USER_ID, '.claude');
     assert.equal(resolveClaudeHomeForUser(USER_ID), isolatedHome);
-    assert.equal(resolveClaudeHomeForUser(null), operatorClaudeHome());
+    assert.throws(() => resolveClaudeHomeForUser(null), { code: 'CREDENTIAL_ACTOR_REQUIRED' });
     assert.deepEqual(new Set(resolveClaudeHomes()), new Set([operatorClaudeHome(), isolatedHome]));
   });
 

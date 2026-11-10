@@ -1,13 +1,14 @@
 /**
- * opencode-governance (GL-5, ADR-062) — the fail-closed governance gate for the GLM
- * OpenCode carrier, the carrier-path sibling of Codex's ensureCodexGovernance.
+ * opencode-governance (GL-5, ADR-062) — the fail-closed governance gate for EVERY OpenCode
+ * spawn (B-1761, ADR-226: carrier, local and legacy alike), the sibling of Codex's
+ * ensureCodexGovernance.
  *
  * PRINCIPLE (inherited from the 2026-07-12 Codex remediation, ADR-057 §5):
  * a governed vendor CLI must NEVER run outside nassaj governance. opencode ingests its
  * global rules from `$XDG_CONFIG_HOME/opencode/AGENTS.md` and — unlike kimi's "reference
  * not privileged" posture — obeys it at the codex level (the enforced tier). So
- * before a carrier turn is spawned, the launcher (server/opencode-cli.js, carrier mode
- * only) calls this gate to verify the user's effective opencode `AGENTS.md` is AUTHENTIC
+ * before any turn is spawned, the launcher (server/opencode-cli.js) calls this gate, with
+ * the config home of the env the child actually runs with, to verify the user's effective opencode `AGENTS.md` is AUTHENTIC
  * neutral governance — a real, non-empty file (never a symlink) whose sha256 EQUALS the
  * neutral source's. If it is missing, empty, a symlink, or drifted/subverted, the gate
  * self-heals ONCE (a direct re-materialization of the read-only 0444 COPY) and re-checks.
@@ -34,11 +35,23 @@
  * shape and governance filename.
  */
 
+import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
 import { isGovernanceExempt } from '@/services/isolation/governance-exemption.js';
+import {
+  LOCAL_INSTRUCTIONS_FILENAME,
+  LOCAL_INSTRUCTION_TIER,
+  LocalInstructionsUnavailableError,
+  OPENCODE_LOCAL_CONFIG_SUBDIR,
+  carriesCompactTierMarks,
+  instructionRevLine,
+  verifyInstructionRev,
+} from '@/services/isolation/opencode-local-tier-material.js';
+import { userConfigDir } from '@/services/isolation/provision-user-dirs.js';
 import { resolveProviderEnv } from '@/services/isolation/resolve-provider-env.js';
+import { resolvedKnob } from '@/services/isolation/resolved-knob.js';
 import {
   ensureVendorCliGovernance,
   GOVERNANCE_MISSING_CODE,
@@ -60,8 +73,8 @@ export const OPENCODE_AGENTS_FILENAME = 'AGENTS.md';
 /** The `opencode` subdir under XDG_CONFIG_HOME opencode reads config + AGENTS.md from. */
 const OPENCODE_CONFIG_SUBDIR = 'opencode';
 
-/** User-facing (Arabic) message for a governance-blocked carrier launch. */
-export const OPENCODE_GOVERNANCE_MISSING_MESSAGE = 'جلسة OpenCode (حامل GLM) محجوبة: حوكمة نسّاج غير مُهيّأة.';
+/** User-facing (Arabic) message for a governance-blocked launch (any model, B-1761: neutral). */
+export const OPENCODE_GOVERNANCE_MISSING_MESSAGE = 'جلسة OpenCode محجوبة: حوكمة نسّاج غير مُهيّأة.';
 
 const operatorHome = (): string => readOptionalString(process.env.HOME) ?? os.homedir();
 
@@ -73,6 +86,33 @@ const operatorHome = (): string => readOptionalString(process.env.HOME) ?? os.ho
  */
 export function neutralOpenCodeGovernanceSource(): string {
   return path.join(operatorHome(), '.claude', OPENCODE_AGENTS_FILENAME);
+}
+
+/**
+ * The slim source of local-model turns: ~/.claude/AGENTS.local.md (nassaj-core
+ * build-agents, tier local32). There is no fallback to the full file.
+ */
+export function localOpenCodeGovernanceSource(): string {
+  return path.join(operatorHome(), '.claude', LOCAL_INSTRUCTIONS_FILENAME);
+}
+
+/**
+ * The shared agent cards the local dir's generated copies are made from:
+ * ~/.claude/opencode/agent (nassaj-core/opencode/agent, present on every node).
+ */
+export function localAgentCardSourceDir(): string {
+  return path.join(operatorHome(), '.claude', 'opencode', 'agent');
+}
+
+/** The opencode dir of a member's local-model turns, ~/.nassaj-users/<id>/.config-local/opencode. */
+export function localConfigHomeForMember(userId: string | number): string {
+  return path.join(userConfigDir(userId, OPENCODE_LOCAL_CONFIG_SUBDIR), OPENCODE_CONFIG_SUBDIR);
+}
+
+/** As localConfigHomeForMember; null without a member (who has no local turns). */
+export function resolveOpenCodeLocalConfigHomeForUser(userId: string | number | null): string | null {
+  if (userId === null || userId === undefined || userId === '') return null;
+  return localConfigHomeForMember(userId);
 }
 
 /**
@@ -88,13 +128,11 @@ export function neutralOpenCodeGovernanceSource(): string {
  */
 export function resolveOpenCodeConfigHomeForUser(userId: string | number | null): string {
   const env = resolveProviderEnv(userId, 'opencode', process.env);
-  const xdgConfigHome = readOptionalString(env.XDG_CONFIG_HOME)
-    ?? path.join(operatorHome(), '.config');
-  return path.join(xdgConfigHome, OPENCODE_CONFIG_SUBDIR);
+  return path.join(resolvedKnob(env, 'XDG_CONFIG_HOME'), OPENCODE_CONFIG_SUBDIR);
 }
 
 /**
- * Fail-closed governance gate for an opencode carrier spawn (GL-5). Verifies (and
+ * Fail-closed governance gate for an opencode spawn (GL-5, every spawn since B-1761). Verifies (and
  * self-heals once) that `<opencode-config-home>/AGENTS.md` is an authentic
  * neutral-governance COPY whose fingerprint matches the neutral source. Delegates the
  * fingerprint + single self-heal + fail-closed throw to the shared SL-2 gate.
@@ -105,7 +143,11 @@ export function resolveOpenCodeConfigHomeForUser(userId: string | number | null)
  *   after a single self-heal (missing neutral source or a write failure). The launcher
  *   must let this propagate — catching it to spawn anyway defeats the gate.
  */
-export function ensureOpenCodeGovernance(userId: string | number | null, configHome?: string): OpenCodeGovernanceResult {
+export function ensureOpenCodeGovernance(
+  userId: string | number | null,
+  configHome?: string,
+  options: { tier?: typeof LOCAL_INSTRUCTION_TIER } = {},
+): OpenCodeGovernanceResult {
   const uid = userId === undefined || userId === '' ? null : userId;
   const home = configHome ?? resolveOpenCodeConfigHomeForUser(uid);
 
@@ -131,7 +173,65 @@ export function ensureOpenCodeGovernance(userId: string | number | null, configH
     };
   }
 
-  return ensureVendorCliGovernance(OPENCODE_VENDOR_ID, home, neutralOpenCodeGovernanceSource(), {
+  if (options.tier === LOCAL_INSTRUCTION_TIER) return ensureLocalTierGovernance(home);
+
+  const result = ensureVendorCliGovernance(OPENCODE_VENDOR_ID, home, neutralOpenCodeGovernanceSource(), {
     filename: OPENCODE_AGENTS_FILENAME,
   });
+  assertFullSlotNotCompact(result);
+  return result;
+}
+
+/**
+ * I6 for the full slot. Refuses ONLY a compact file in it (a `tier=` tag or the local32
+ * header). A missing REV is accepted and a REV that no longer matches the body only
+ * warns: refusing that would be a new restriction on non-local turns.
+ */
+function assertFullSlotNotCompact(result: OpenCodeGovernanceResult): void {
+  const copy = fs.readFileSync(result.governancePath, 'utf8');
+  if (carriesCompactTierMarks(copy)) {
+    console.error('[opencode] compact instructions in the full governance slot — launch BLOCKED', {
+      governancePath: result.governancePath, reason: 'tier_mismatch',
+    });
+    throw new VendorGovernanceMissingError({
+      vendorId: OPENCODE_VENDOR_ID, home: result.home, governancePath: result.governancePath, reason: 'tier_mismatch',
+    });
+  }
+  const fault = instructionRevLine(copy) ? verifyInstructionRev(copy, null) : null;
+  if (fault) {
+    console.warn('[opencode] full governance REV does not match its body (launch continues)', {
+      governancePath: result.governancePath, reason: 'rev_mismatch', fault,
+    });
+  }
+}
+
+/**
+ * The local tier gate: the slim source must exist and pass the REV/tier/header check,
+ * the sha256 gate copies it as AGENTS.md (repairing a tampered copy), and the copy is
+ * re-checked so a source swapped mid-way still refuses. Every failure is the local
+ * refusal — never the full file.
+ */
+function ensureLocalTierGovernance(home: string): OpenCodeGovernanceResult {
+  const source = localOpenCodeGovernanceSource();
+  const refuse = (reason: string): never => {
+    console.error('[opencode] local instruction tier unavailable — launch BLOCKED', { home, reason });
+    throw new LocalInstructionsUnavailableError(reason);
+  };
+  let text: string;
+  try {
+    text = fs.readFileSync(source, 'utf8');
+  } catch {
+    return refuse('slim source absent');
+  }
+  const sourceFault = verifyInstructionRev(text, LOCAL_INSTRUCTION_TIER);
+  if (sourceFault) refuse(`slim source invalid: ${sourceFault}`);
+  let result: OpenCodeGovernanceResult;
+  try {
+    result = ensureVendorCliGovernance(OPENCODE_VENDOR_ID, home, source, { filename: OPENCODE_AGENTS_FILENAME });
+  } catch (error) {
+    return refuse(`copy not attested: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  const copyFault = verifyInstructionRev(fs.readFileSync(result.governancePath, 'utf8'), LOCAL_INSTRUCTION_TIER);
+  if (copyFault) refuse(`copy invalid: ${copyFault}`);
+  return result;
 }

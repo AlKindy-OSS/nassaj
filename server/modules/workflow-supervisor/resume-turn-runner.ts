@@ -66,6 +66,7 @@ export async function defaultRunResumeTurn(params: ResumeTurnParams): Promise<Re
   try {
     await assertClaudeSpawnEnvAllowed(params.env, {
       engineHosts: params.engineHosts ?? null,
+      engineOrigins: params.engineOrigins ?? null,
       cwd: params.projectPath,
     });
   } catch (error) {

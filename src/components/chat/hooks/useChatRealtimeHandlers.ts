@@ -14,6 +14,7 @@ import {
 } from '../../../contexts/WebSocketContext';
 import {
   pruneProcessedStreamSeqs,
+  streamFinalId,
   type StreamFrameMap,
 } from '../../../contexts/streamFrameLog';
 import { playChatCompletionSound, playChatErrorSound } from '../../../utils/notificationSound';
@@ -1249,10 +1250,14 @@ export function useChatRealtimeHandlers({
       // ADR-041: this path is authoritative for stream frames, so it must move
       // the reconnect replay floor before `latestMessage` skips the same frame.
       sessionStore.recordSeq(sessionId, entry.frame?.sequence, responseRunId(entry.frame));
-      const finalId = entry.frame?.kind === 'text' ? entry.frame.id : `stream_${sessionId}_${entry.seq}`;
+      const finalId = streamFinalId(sessionId, entry);
       const slot = sessionStore.getSessionSlot?.(sessionId);
-      if (entry.ended && finalId && slot
-        && [...slot.serverMessages, ...slot.realtimeMessages].some(message => message.id === finalId)) continue;
+      // A streamed reply's durable id may already be in history (B-1751); only a
+      // finalized live copy means this end was applied, so history alone must
+      // not leave the streaming row unfinalized.
+      const applied = slot && (entry.frame?.kind === 'text'
+        ? [...slot.serverMessages, ...slot.realtimeMessages] : slot.realtimeMessages);
+      if (entry.ended && finalId && applied?.some(message => message.id === finalId)) continue;
       if (entry.frame?.kind === 'text' && entry.frame?.role === 'assistant') {
         const responseToMessageId = responseRunId(entry.frame);
         sessionStore.appendRealtime(sessionId, responseToMessageId

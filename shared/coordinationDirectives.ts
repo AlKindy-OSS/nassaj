@@ -122,4 +122,7 @@ export const COORDINATION_ENFORCEMENT: Readonly<Record<string, CoordinationEnfor
     deepseek: 'textual',
     glm: 'textual',
     sakana: 'none',
+    // T-2086/ADR-224: dsh's only input is the ACP prompt; the directive rides as
+    // a second text block (dsh-acp-runtime.js promptBlocks), no depth switch.
+    dsh: 'textual',
   });

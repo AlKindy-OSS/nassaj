@@ -4,8 +4,9 @@ import { query, type Options, type SDKMessage, type SDKResultMessage } from '@an
 import { isSpawnBlockedForRunProvider } from '../../providers/harness-update/spawn-admission.js';
 // eslint-disable-next-line boundaries/dependencies -- ADR-219 ح-1: the relay spawn policy leaf (member count only), applied at every Claude spawn.
 import { relaySdkSpawnOptions } from '../../peer-relay/peer-spawn-policy.js';
-import { assertAnthropicBaseUrlAllowed, assertSettingsEnvAllowed } from '../../../services/isolation/anthropic-base-url-guard.js';
+import { assertClaudeSpawnEnvAllowed } from '../../../services/isolation/claude-spawn-env-guard.js';
 import { assertLinkModeRunAllowed } from '../../../services/isolation/link-mode-run-gate.js';
+import { localEngineSpawnRefusal } from '../../../services/isolation/local-engine-pin.js';
 import { resolveHarnessBinary } from '../../../shared/harness-binaries.js';
 
 import { admitLinkModeRun, type LinkModeRunGate } from './link-mode-admission.js';
@@ -72,9 +73,10 @@ export function createClaudeSdkTurnAdapter(
     ?? ((userId: string | number) => assertLinkModeRunAllowed(userId, 'claude'));
   const resolveEnvironment = options.resolveEnvironment
     ?? (async (userId, baseEnv) => {
-      const { resolveProviderEnv } = await import('../../../services/isolation/resolve-provider-env.js');
+      const { resolveModelRunEnv } = await import('../../../services/isolation/credential-gate.js');
       const { reconcileClaudeSkillsForEnv } = await import('../../../services/isolation/claude-skills-link.js');
-      const env = resolveProviderEnv(userId, 'claude', baseEnv);
+      // ADR-152 A1 §3.5: the credential gate admits the turn before the env exists.
+      const env = resolveModelRunEnv(userId, 'claude', baseEnv, 'agent');
       reconcileClaudeSkillsForEnv(env); // ADR-203: shared/private skills link
       return env;
     });
@@ -103,6 +105,10 @@ export function createClaudeSdkTurnAdapter(
         throw new TurnAdapterError('effects_unsupported', 'Claude supervisor roles cannot execute effects');
       }
       if (request.signal?.aborted) throw aborted(request.signal.reason);
+      // ADR-227: this role runs on official Anthropic with no engine verdict; a
+      // local model id is refused, never sent to Anthropic.
+      const localRefusal = localEngineSpawnRefusal({ model: request.model, site: 'supervisor role' });
+      if (localRefusal) throw new TurnAdapterError('provider_unavailable', localRefusal.message);
       if (isSpawnBlockedForRunProvider('claude')) {
         throw new TurnAdapterError('provider_unavailable', 'The claude runtime is being updated right now');
       }
@@ -114,8 +120,9 @@ export function createClaudeSdkTurnAdapter(
 
       try {
         const env = await resolveEnvironment(request.userId, { ...process.env });
-        assertAnthropicBaseUrlAllowed(env);
-        assertSettingsEnvAllowed(env.CLAUDE_CONFIG_DIR ?? '', env);
+        // B-1764: the spawn env and every settings file the CLI may load. The
+        // query sets no cwd, so the child inherits this process's.
+        await assertClaudeSpawnEnvAllowed(env, { cwd: process.cwd() });
         const sdkOptions: Options = {
           abortController,
           env,

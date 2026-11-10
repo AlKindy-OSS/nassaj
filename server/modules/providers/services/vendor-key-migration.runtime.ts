@@ -13,7 +13,6 @@ import {
   isUnifiedVendorKeysEnabled,
   projectionFingerprint,
 } from '@/services/isolation/provider-secrets-store.js';
-import { isProviderIsolated } from '@/services/provider-sharing.js';
 
 import type { HarnessFileLocation, ProjectionHarness } from './vendor-key-migration.inventory.js';
 import { createVendorKeyMigrationService } from './vendor-key-migration.service.js';
@@ -23,14 +22,11 @@ const HARNESSES: readonly ProjectionHarness[] = ['claude', 'codex', 'opencode'];
 
 /**
  * The member's OWN credential file per harness, at the path the writers use
- * (`honorGrants: false`, B-1251), computed without provisioning (B-1575). A
- * shared harness is `shared` and never inventoried: its files are the
- * operator's, not this member's.
+ * (`honorGrants: false`, B-1251), computed without provisioning (B-1575).
+ * Every harness is isolated (ADR-152 A1), so every file is the member's own.
  */
 function locateHarnessFiles(userId: string | number): HarnessFileLocation[] {
-  return HARNESSES.map((harness) => (isProviderIsolated(harness)
-    ? { harness, scope: 'own', path: ownHarnessFilePath(userId, harness) }
-    : { harness, scope: 'shared' }));
+  return HARNESSES.map((harness) => ({ harness, scope: 'own', path: ownHarnessFilePath(userId, harness) }));
 }
 
 function toAuditUserId(userId: string | number): number | undefined {

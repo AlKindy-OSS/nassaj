@@ -31,7 +31,6 @@ fs.mkdirSync(path.join(OPERATOR_GEMINI, 'antigravity-cli', 'brain'), { recursive
 fs.writeFileSync(path.join(OPERATOR_GEMINI, 'GEMINI.md'), '# neutral agy governance (test)\n');
 
 const { initializeDatabase, closeConnection, getConnection } = await import('@/modules/database/index.js');
-const { setProviderSharingConfig, _resetProviderSharingCache } = await import('@/services/provider-sharing.js');
 const { credentialUnit, GRANTABLE_UNITS } = await import('@/services/isolation/credential-principal.js');
 const { GRANT_HOME_PROVIDERS, materializeGrantHome } = await import('@/services/isolation/grant-home.js');
 const { resolveProviderEnv } = await import('@/services/isolation/resolve-provider-env.js');
@@ -57,8 +56,6 @@ const MEMBER_ID = 8102;
   insert.run(MEMBER_ID, 'agy-unit-member', 'user');
 }
 
-_resetProviderSharingCache();
-setProviderSharingConfig({ agy: 'isolated' });
 
 after(() => {
   closeConnection();

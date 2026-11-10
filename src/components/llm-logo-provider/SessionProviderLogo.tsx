@@ -73,7 +73,8 @@ export default function SessionProviderLogo({
 
   // deepseek has its own mark now (T-1761). Checked before the vendor branch so
   // the initialised VendorLogo badge does not shadow it.
-  if (provider === 'deepseek') {
+  // dsh (T-2086) is DeepSeek's own harness: same mark, its name is in the label.
+  if (provider === 'deepseek' || provider === 'dsh') {
     return <DeepSeekLogo className={className} />;
   }
 

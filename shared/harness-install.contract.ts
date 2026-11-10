@@ -7,7 +7,7 @@
  */
 
 /** Harnesses the server can install for the owner. */
-export type InstallableHarnessId = 'codex' | 'opencode' | 'antigravity' | 'claude';
+export type InstallableHarnessId = 'codex' | 'opencode' | 'antigravity' | 'claude' | 'dsh';
 
 /** Display copy of one installable harness. */
 export interface HarnessInstallInfo {
@@ -48,6 +48,15 @@ export const HARNESS_INSTALL_INFO: Readonly<Record<InstallableHarnessId, Harness
     note: 'Official native installer → ~/.local/bin/claude → ~/.local/share/claude/versions/<v>; '
       + 'Nassaj verifies the vendor-signed manifest first.',
   }),
+  // T-2086 S4 (ADR-224). Nassaj installs the reviewed pin with `npm ci` of a
+  // committed lockfile and checks the full tree against its sha256 manifest.
+  dsh: Object.freeze({
+    label: 'DeepSeek Harness (dsh) is not installed',
+    command: 'npm install -g @deepseek-ai/dsh@0.2.2-rc.1',
+    note: 'Nassaj installs the reviewed 0.2.2-rc.1 lockfile with npm ci → ~/.local/share/dsh/versions/<v>, '
+      + 'linked at ~/.local/bin/dsh, and verifies every file. Needs node >= 24.9 and 3 GB free. '
+      + 'A manual npm -g copy is not accepted for launches.',
+  }),
 });
 
 /** True when `id` is a harness the install endpoint accepts. */
@@ -83,4 +92,10 @@ export type HarnessInstallJobErrorCode =
   /** ADR-215 ش4: free space in HOME is below the descriptor's minimum. */
   | 'insufficient_space'
   /** ADR-215 ش3: gpgv is missing, so the claude manifest cannot be verified. */
-  | 'verifier_unavailable';
+  | 'verifier_unavailable'
+  /** T-2086 S4: the server's node is older than the harness's floor (dsh: 24.9.0). */
+  | 'node_unsupported'
+  /** T-2086 S4: the reviewed pin files are missing, inconsistent or for another platform. */
+  | 'pin_invalid'
+  /** T-2086 S4: the new version failed its check and the previous one could not be proven back. */
+  | 'recovery_failed';

@@ -47,6 +47,11 @@ const providers: Partial<Record<LLMProvider, IProvider>> = {
  */
 const historyOnlySessions: Partial<Record<LLMProvider, IProviderSessions>> = {
   hermes: new VendorSessionsProvider({ provider: 'hermes' }),
+  // dsh (T-2086, ADR-224): a live body whose ONLY history is the nassaj-owned
+  // vendor transcript dsh-acp-runtime writes (dsh has no session/load). Its full
+  // provider facets (models/auth/MCP/skills/synchronizer) are not registered yet,
+  // so it is read here and nowhere else resolves it as a provider.
+  dsh: new VendorSessionsProvider({ provider: 'dsh' }),
 };
 
 /**

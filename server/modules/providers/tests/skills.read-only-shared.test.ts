@@ -34,7 +34,10 @@ const resolveProviderEnvStandIn = (
 ): NodeJS.ProcessEnv => {
   const env = { ...baseEnv, HOME: os.homedir() };
   delete env.CODEX_HOME;
-  if (userId === null || userId === undefined || userId === '') return env;
+  // ADR-152 A1 §3.4: mirrors the real seam — no member, no environment.
+  if (userId === null || userId === undefined || userId === '') {
+    throw Object.assign(new Error('CREDENTIAL_ACTOR_REQUIRED'), { code: 'CREDENTIAL_ACTOR_REQUIRED', statusCode: 500 });
+  }
   const userRoot = path.join(os.homedir(), '.nassaj-users', String(userId));
   if (provider === 'codex') env.CODEX_HOME = path.join(userRoot, '.codex');
   if (provider === 'qwen') env.HOME = userRoot;

@@ -19,7 +19,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, test } from 'node:test';
 
-import { readHarnessCredentialInventory, type LinkHarness } from './harness-credential-inventory.js';
+import { readClaudeInventoryFromEnv, readCodexInventoryFromEnv, type LinkHarness } from './harness-credential-inventory.js';
 import type { LinkModeRecord } from './harness-link-mode.policy.js';
 import {
   createHarnessLinkModeService,
@@ -116,7 +116,11 @@ function build(extra: Partial<LinkModeDeps> = {}): Harness {
   const state = { enabled: true, shared: false, canonical: { claude: KEY, codex: OPENAI } as Record<string, string | null>, grantees: 2, storeCorrupt: false, writeRefused: false };
   const deps: LinkModeDeps = {
     isEnabled: () => state.enabled,
-    readInventory: readHarnessCredentialInventory,
+    // The pure readers over the sandbox trees: the service's owner semantics are
+    // the unit here; resolving a member's tree is pinned in the resolver suites.
+    readInventory: (_owner, h) => (h === 'claude'
+      ? readClaudeInventoryFromEnv({ CLAUDE_CONFIG_DIR: process.env.CLAUDE_CONFIG_DIR })
+      : readCodexInventoryFromEnv({ CODEX_HOME: process.env.CODEX_HOME })),
     readRecordState: (owner, h) => {
       if (state.storeCorrupt) return { state: 'unreadable', store: true };
       if (unreadable.has(recordKey(owner, h))) return { state: 'unreadable' };

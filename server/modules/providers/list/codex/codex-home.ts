@@ -3,7 +3,7 @@ import path from 'node:path';
 
 import { userDb } from '@/modules/database/index.js';
 import { resolveProviderEnv } from '@/services/isolation/resolve-provider-env.js';
-import { readOptionalString } from '@/shared/utils.js';
+import { resolvedKnob } from '@/services/isolation/resolved-knob.js';
 
 /**
  * codex-home — B-152: resolves WHICH Codex home dir(s) hold a user's session
@@ -26,15 +26,13 @@ export function operatorCodexHome(): string {
 }
 
 /**
- * Resolves one user's effective CODEX_HOME through the central B-136 resolver.
- * When codex is isolated this is ~/.nassaj-users/<userId>/.codex; when codex is
- * shared (admin policy) or the id is anonymous/null, resolveProviderEnv returns
- * the base env with no CODEX_HOME and this falls back to the operator ~/.codex —
- * i.e. the exact pre-isolation behavior.
+ * Resolves one user's effective CODEX_HOME through the central B-136 resolver:
+ * ~/.nassaj-users/<userId>/.codex (or a grantor's). A caller with no member is
+ * refused (ADR-152 A1 §3.4), never given the operator ~/.codex.
  */
 export function resolveCodexHomeForUser(userId: string | number | null): string {
   const env = resolveProviderEnv(userId, 'codex', process.env);
-  return readOptionalString(env.CODEX_HOME) ?? operatorCodexHome();
+  return resolvedKnob(env, 'CODEX_HOME');
 }
 
 /**
@@ -54,7 +52,7 @@ export function resolveCodexHomes(): string[] {
     for (const user of userDb.listUsers()) {
       homes.add(resolveCodexHomeForUser(user.id));
       // T-1675: keep the member's OWN tree watched while they run on a grant.
-      homes.add(readOptionalString(resolveProviderEnv(user.id, 'codex', process.env, 'chat', { honorGrants: false }).CODEX_HOME) ?? operatorCodexHome());
+      homes.add(resolvedKnob(resolveProviderEnv(user.id, 'codex', process.env, 'chat', { honorGrants: false }), 'CODEX_HOME'));
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

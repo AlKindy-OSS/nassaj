@@ -10,12 +10,18 @@
  *
  * Runner: node:test with --experimental-test-module-mocks.
  */
+// B-1771: FIRST import — HOME, CLAUDE_CONFIG_DIR and provider credential env move
+// into a sandbox, so an ad-hoc run cannot touch the operator's live logins.
+import './shared/__tests__/sandbox-home.js';
 // T-1873: harness CLIs resolve to sandbox stubs, never the host's installs.
 import './shared/__tests__/stub-harness-binaries.js';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import test, { mock, beforeEach, afterEach, after } from 'node:test';
+
+import { assertOutsideRealCredentials } from './shared/__tests__/real-credential-guard.js';
 
 type SdkMessage = Record<string, unknown>;
 type HookEntry = { matcher?: string; hooks: Array<(input: unknown) => Promise<unknown>> };
@@ -68,6 +74,14 @@ const { createPeerDeliveryTurn } = await import('./modules/peer-relay/peer-run.j
 const database = await import('@/modules/database/index.js');
 await database.initializeDatabase();
 const owner = database.userDb.createUser('peer_owner', 'hash', 'user') as { id: number };
+/** ADR-152 A1 §3.5: a Claude link in the member's own tree admits the turn. */
+function linkClaudeForTest(userId: number): void {
+  const dir = path.join(os.homedir(), '.nassaj-users', String(userId), '.claude');
+  assertOutsideRealCredentials(dir);
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, '.credentials.json'), JSON.stringify({ claudeAiOauth: { accessToken: 'sk-ant-oat01-test' } }));
+}
+linkClaudeForTest(owner.id);
 
 const SID = 'peer-relay-sdk-session-0001';
 const RESULT = { type: 'result', session_id: SID, subtype: 'success', is_error: false, result: 'ok', total_cost_usd: 0.42 };

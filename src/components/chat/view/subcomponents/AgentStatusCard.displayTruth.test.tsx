@@ -709,7 +709,7 @@ describe('نتيجة الوكيل (agent-progress P0)', () => {
     const badges = screen.getAllByTestId('agent-outcome-badge').map((badge) => badge.textContent);
     assert.deepEqual(badges, ['Stopped by owner', 'No end signal', 'Stopped']);
     const titles = screen.getAllByTestId('agent-outcome-badge').map((badge) => badge.getAttribute('title'));
-    assert.equal(titles[1], 'Its process ended without reporting how this agent finished.');
+    assert.equal(titles[1], 'Its process ended without reporting how this subagent finished.');
     const unknownRow = container.querySelector('[data-testid="agent-mark-unknown"]')!.closest('button')!;
     assert.equal(unknownRow.getAttribute('aria-label')?.includes('Its process ended without reporting'), true,
       'the inferred cause reaches keyboard users, not only a hover title');

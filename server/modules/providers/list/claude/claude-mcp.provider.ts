@@ -4,6 +4,7 @@ import type { Stats } from 'node:fs';
 
 import { McpProvider } from '@/modules/providers/shared/mcp/mcp.provider.js';
 import { resolveProviderEnv } from '@/services/isolation/resolve-provider-env.js';
+import { resolvedKnob } from '@/services/isolation/resolved-knob.js';
 import type { McpScope, ProviderMcpServer, UpsertProviderMcpServerInput } from '@/shared/types.js';
 import {
   AppError,
@@ -14,6 +15,7 @@ import {
   readStringRecord,
   writeJsonConfigAtomic,
 } from '@/shared/utils.js';
+import { isMemberActor } from '@/services/isolation/credential-actor.js';
 
 /**
  * Resolves the `.claude.json` that THIS user's claude spawns actually read (B-384).
@@ -26,16 +28,18 @@ import {
  * before the fix: the operator file held `mcpServers:['playwright']` while all six
  * member files held `[]`.
  *
- * The `|| os.homedir()` fallback is load-bearing, not defensive padding: it makes this
- * path FOLLOW the `provider_sharing` policy automatically. When claude is `isolated`
- * resolveProviderEnv sets CLAUDE_CONFIG_DIR and both sides use the member tree; when it
- * is `shared` it sets nothing and both sides fall back to the operator file — so the
- * reader and the writer can never split again on a policy flip. The same expression is
- * what `loadMcpConfig` resolves, which is what the parity test pins.
+ * resolveProviderEnv always sets CLAUDE_CONFIG_DIR for an accepted actor, so the
+ * reader and the writer use the same member tree; a caller with no member is refused
+ * (ADR-152 A1 §3.4) instead of falling back to the operator file. `loadMcpConfig`
+ * resolves the same expression, which is what the parity test pins.
  */
 const claudeConfigFilePath = (userId?: string | number | null): string => {
-  const env = resolveProviderEnv(userId ?? null, 'claude', process.env);
-  return path.join(env.CLAUDE_CONFIG_DIR || os.homedir(), '.claude.json');
+  // ADR-152 A1: an MCP config file is not a credential. A member always resolves to
+  // their own tree; a caller with NO member (an operator-scoped placement) names the
+  // operator's config file explicitly, never through the credential resolver.
+  if (!isMemberActor(userId)) return path.join(process.env.CLAUDE_CONFIG_DIR || os.homedir(), '.claude.json');
+  const env = resolveProviderEnv(userId, 'claude', process.env);
+  return path.join(resolvedKnob(env, 'CLAUDE_CONFIG_DIR'), '.claude.json');
 };
 
 const jsonTransactionConfig = (snapshot: string | null): Record<string, unknown> => {

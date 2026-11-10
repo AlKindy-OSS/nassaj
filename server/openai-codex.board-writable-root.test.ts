@@ -119,6 +119,8 @@ const { queryCodex, resolveCodexDocsWritableRoots } = codexModule as unknown as 
 };
 
 await initializeDatabase();
+// ADR-152 A1 §3.4: a Codex run needs a signed-in member.
+const RUN_MEMBER = (await import('@/modules/database/index.js')).userDb.createUser('codex-run-member', 'hash', 'user').id;
 
 const WRITABLE_ROOTS_KEY = 'sandbox_workspace_write.writable_roots';
 
@@ -129,14 +131,14 @@ function makeWs(userId: number | null): { userId: number | null; send: (m: unkno
 /** Drives queryCodex once (anonymous) and returns the captured constructor config. */
 async function spawnAndCaptureConfig(cwd: string): Promise<CodexConfig> {
   const before = ctorCalls.length;
-  await queryCodex('ping', { cwd, model: 'gpt-5-codex' }, makeWs(null));
+  await queryCodex('ping', { cwd, model: 'gpt-5-codex' }, makeWs(RUN_MEMBER));
   assert.equal(ctorCalls.length, before + 1, 'queryCodex must construct exactly one Codex client');
   return (ctorCalls[ctorCalls.length - 1].config ?? {}) as CodexConfig;
 }
 
 async function spawnCoordinationAndCapture(cwd: string, coordinationLevel: string) {
   const beforeInputs = runInputs.length;
-  await queryCodex('exact raw prompt', { cwd, model: 'gpt-5-codex', coordinationLevel }, makeWs(null));
+  await queryCodex('exact raw prompt', { cwd, model: 'gpt-5-codex', coordinationLevel }, makeWs(RUN_MEMBER));
   assert.equal(runInputs.length, beforeInputs + 1);
   return {
     config: (ctorCalls[ctorCalls.length - 1].config ?? {}) as CodexConfig,

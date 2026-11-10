@@ -13,11 +13,19 @@ import { randomUUID } from 'node:crypto';
 import { auditLogDb, sessionsDb, type AuditAction, type PeerMessageRow } from '@/modules/database/index.js';
 // eslint-disable-next-line boundaries/dependencies -- ADR-219: the relay's own tables, imported as leaves so a test that mocks the database barrel (for claude-sdk.js) does not have to know them.
 import { peerMessagesDb } from '@/modules/database/repositories/peer-messages.db.js';
+// eslint-disable-next-line boundaries/dependencies -- ADR-219 P2: the relay's own hold table, a leaf like peer_messages.
+import { peerHoldsDb, type PeerHoldRow } from '@/modules/database/repositories/peer-holds.db.js';
 
-import { buildPeerMessageFrame, toPeerMessageView, type PeerMessageView } from './peer-events.js';
+// eslint-disable-next-line boundaries/no-unknown -- the single IS_PLATFORM source (server/constants/config.js).
+import { IS_PLATFORM } from '../../constants/config.js';
+
+import {
+  buildPeerHoldFrame, buildPeerMessageFrame, toPeerHoldView, toPeerMessageView, type PeerHoldView, type PeerMessageView,
+} from './peer-events.js';
 import type { PeerHookDependencies } from './peer-hook.js';
 import {
-  decideS1Acl, isThrottled, modeCategory, S1_REFUSAL_TEXT, type AclVerdict, type PeerModeCategory,
+  decideIntake, isThrottled, modeCategory, PEER_HOLD_LIMITS, PEER_HOLD_TTL_MS, S1_REFUSAL_TEXT, type IntakeVerdict,
+  type PeerModeCategory,
 } from './peer-policy.js';
 import type { ListedSession } from './peer-recipient.js';
 import { readActiveMembers } from './peer-spawn-policy.js';
@@ -40,6 +48,8 @@ export type PeerRelayDependencies = {
   sessionPermissionMode: (sessionId: string, ownerUserId: number | null) => string | null;
   /** Why delivery cannot run on this node (kill switch, ignoring dispatch path), or null. */
   deliveryUnavailable: () => string | null;
+  /** IS_PLATFORM (P2 §2): cross-member intake keeps the S1 refusal. */
+  platformMode: () => boolean;
   now: () => number;
 };
 
@@ -75,6 +85,7 @@ const defaults: PeerRelayDependencies = {
   activeMemberCount: () => readActiveMembers(),
   sessionPermissionMode: readSessionMode,
   deliveryUnavailable: () => null,
+  platformMode: () => IS_PLATFORM,
   now: Date.now,
 };
 
@@ -88,6 +99,11 @@ export function configurePeerRelay(overrides: Partial<PeerRelayDependencies>): v
 /** Test seam: back to the fail-closed defaults plus `overrides`. */
 export function resetPeerRelayForTests(overrides: Partial<PeerRelayDependencies> = {}): void {
   deps = { ...defaults, ...overrides };
+}
+
+/** The relay's configured seams (read by the hold service). */
+export function peerRelayDeps(): Readonly<PeerRelayDependencies> {
+  return deps;
 }
 
 /** Active member count for the spawn-time relay mode (never throws; errors → relay). */
@@ -106,7 +122,7 @@ export type PeerSendRequest = {
   notifyWhenIdle: boolean;
 };
 
-export type PeerSendOutcome = { status: 'queued' | 'refused'; id: string | null; text: string };
+export type PeerSendOutcome = { status: 'queued' | 'held' | 'refused'; id: string | null; text: string };
 
 const refusal = (text: string, id: string | null = null): PeerSendOutcome => ({ status: 'refused', id, text });
 
@@ -131,14 +147,23 @@ function readTarget(req: PeerSendRequest): TargetFacts | string {
   };
 }
 
-function refusalText(verdict: Exclude<AclVerdict, { ok: true }>): string {
-  if (verdict.cause === 'unwritable') return 'you cannot write to the target session\'s project';
-  if (verdict.cause === 'mode_unknown') return 'the target session\'s permission mode is not known yet (it has not run in nassaj since this update)';
-  return S1_REFUSAL_TEXT;
+type RefusalCause = Extract<IntakeVerdict, { kind: 'refuse' }>['cause'] | 'overflow';
+
+const REFUSAL_TEXT: Partial<Record<RefusalCause, string>> = {
+  unwritable: 'you cannot write to the target session\'s project',
+  mode_unknown: 'the target session\'s permission mode is not known yet (it has not run in nassaj since this update)',
+  owner_unknown: 'the target session has no single owner nassaj can ask for approval',
+  overflow: 'the recipient\'s inbox is full (too many messages are waiting for their review); try later',
+};
+
+function refusalText(cause: RefusalCause): string {
+  return REFUSAL_TEXT[cause] ?? S1_REFUSAL_TEXT;
 }
 
+type RowVerdict = { state: 'queued' } | { state: 'refused'; cause: RefusalCause };
+
 /** Inserts the row and returns it (refused rows are kept for audit and the UI). */
-function insertRow(req: PeerSendRequest, facts: TargetFacts, verdict: AclVerdict): { row: PeerMessageRow; truncated: boolean } {
+function insertRow(req: PeerSendRequest, facts: TargetFacts, verdict: RowVerdict): { row: PeerMessageRow; truncated: boolean } {
   const { body, bytes, truncated } = preparePeerBody(req.message);
   const id = `pm_${randomUUID()}`;
   peerMessagesDb.insert({
@@ -148,7 +173,7 @@ function insertRow(req: PeerSendRequest, facts: TargetFacts, verdict: AclVerdict
     project_id: null, body, body_sha256: sha256Hex(body), body_bytes: bytes,
     summary: req.summary ? [...req.summary].slice(0, SUMMARY_MAX).join('') : null, hop: req.hop,
     parent_id: req.run.parentId, notify_when_idle: req.notifyWhenIdle ? 1 : 0,
-    state: verdict.ok ? 'queued' : 'refused', cause: verdict.ok ? null : verdict.cause, now: deps.now(),
+    state: verdict.state, cause: verdict.state === 'refused' ? verdict.cause : null, now: deps.now(),
   });
   return { row: peerMessagesDb.get(id) as PeerMessageRow, truncated };
 }
@@ -162,22 +187,81 @@ function preIntakeRefusal(req: PeerSendRequest): string | null {
   const unavailable = deps.deliveryUnavailable();
   if (unavailable) return `relay unavailable: ${unavailable}`;
   const since = deps.now() - HOUR_MS;
-  if (isThrottled({ sessionLastHour: peerMessagesDb.countFromSessionSince(req.senderSessionId, since),
-    userLastHour: peerMessagesDb.countFromUserSince(req.run.userId, since) })) {
+  if (isThrottled({
+    sessionLastHour: peerMessagesDb.countFromSessionSince(req.senderSessionId, since)
+      + peerHoldsDb.countFromSince('from_session_id', req.senderSessionId, since),
+    userLastHour: peerMessagesDb.countFromUserSince(req.run.userId, since)
+      + peerHoldsDb.countFromSince('from_user_id', req.run.userId, since),
+  })) {
     return 'relay rate limit reached (20 per hour per session, 60 per hour per member); try later';
   }
   return null;
 }
 
 /** A refused verdict: a row (for the sender's view) only under the per-session refusal cap. */
-function refuseVerdict(req: PeerSendRequest, facts: TargetFacts, verdict: Exclude<AclVerdict, { ok: true }>): PeerSendOutcome {
-  const text = `refused: ${refusalText(verdict)}`;
+function refuseVerdict(req: PeerSendRequest, facts: TargetFacts, cause: RefusalCause): PeerSendOutcome {
+  const text = `refused: ${refusalText(cause)}`;
   if (peerMessagesDb.countRefusedFromSessionSince(req.senderSessionId, deps.now() - HOUR_MS) >= REFUSED_ROWS_PER_HOUR) {
     return refusal(text);
   }
-  const { row } = insertRow(req, facts, verdict);
+  const { row } = insertRow(req, facts, { state: 'refused', cause });
   publishPeerMessage(row);
   return refusal(text, row.id);
+}
+
+/**
+ * A cross-member send whose modes match (P2a-min): a `held` row for the target
+ * owner, counted and inserted atomically within the overflow caps (م-7); full ⇒
+ * `refused overflow` and the sender is told the inbox is full.
+ */
+function holdIntake(req: PeerSendRequest, facts: TargetFacts): PeerSendOutcome {
+  const { body, bytes, truncated } = preparePeerBody(req.message);
+  const now = deps.now();
+  const id = `ph_${randomUUID()}`;
+  const inserted = peerHoldsDb.insertHeldWithinLimits({
+    id, chain_id: req.run.chainId ?? `pc_${randomUUID()}`, from_user_id: req.run.userId as number,
+    from_session_id: req.senderSessionId, from_agent_id: req.senderAgentId, from_mode: req.run.modeCategory,
+    to_user_id: facts.targetUserId as number, to_session_id: req.targetSessionId, project_id: null, body,
+    body_sha256: sha256Hex(body), body_bytes: bytes, summary: req.summary ? [...req.summary].slice(0, SUMMARY_MAX).join('') : null,
+    hop: req.hop, parent_id: req.run.parentId, hold_causes: 'cross_member', expires_at: now + PEER_HOLD_TTL_MS, now,
+  }, PEER_HOLD_LIMITS);
+  if (!inserted) return refuseVerdict(req, facts, 'overflow');
+  publishPeerHold(peerHoldsDb.get(id) as PeerHoldRow);
+  auditPeer('peer_relay_hold_created', req.run.userId, { holdId: id, toSessionId: req.targetSessionId });
+  return { status: 'held', id, text: heldText(id, req.targetSessionId, truncated) };
+}
+
+/** The hook's text for a held send (it is not delivered until the recipient's owner approves). */
+export function heldText(id: string, targetSessionId: string, truncated = false): string {
+  return `SUCCESS (not an error): nassaj held this message for the owner of session nassaj:${targetSessionId} `
+    + `to review (hold id ${id}). It is delivered only if they approve it, within 72 hours. Do not send it again.`
+    + (truncated ? ' Note: the message was longer than 8 KB and was cut to 8 KB.' : '');
+}
+
+/** The target's last run mode for its current owner (raw CLI mode), or null. */
+export function readTargetRunMode(sessionId: string): { owner: number | null; mode: string | null } {
+  const owner = peerMessagesDb.strictSpawnOwner(sessionId);
+  return { owner, mode: deps.sessionPermissionMode(sessionId, owner) };
+}
+
+/** The card view of a hold (names and mode from server state). */
+export function holdView(row: PeerHoldRow): PeerHoldView {
+  return toPeerHoldView(row, {
+    fromMemberName: peerHoldsDb.memberName(row.from_user_id) ?? 'member', fromName: senderName(row.from_session_id),
+    toName: senderName(row.to_session_id), targetMode: readTargetRunMode(row.to_session_id).mode,
+  });
+}
+
+/** Sends a hold's frame to both sessions' gated mirrors. Never throws. */
+export function publishPeerHold(row: PeerHoldRow | undefined): void {
+  if (!row) return;
+  try {
+    const serialized = JSON.stringify(buildPeerHoldFrame(holdView(row)));
+    deps.notifySession(row.from_session_id, serialized);
+    if (row.to_session_id !== row.from_session_id) deps.notifySession(row.to_session_id, serialized);
+  } catch {
+    /* the UI view must never break the relay */
+  }
 }
 
 /**
@@ -191,11 +275,12 @@ export function enqueuePeerMessage(req: PeerSendRequest): PeerSendOutcome {
     if (early) return refusal(early);
     const facts = readTarget(req);
     if (typeof facts === 'string') return refusal(facts);
-    const verdict = decideS1Acl({ senderUserId: req.run.userId as number, senderMode: req.run.modeCategory,
-      targetUserId: facts.targetUserId, targetMode: facts.targetMode,
+    const verdict = decideIntake({ senderUserId: req.run.userId as number, senderMode: req.run.modeCategory,
+      targetUserId: facts.targetUserId, targetMode: facts.targetMode, platform: deps.platformMode(),
       senderCanWriteTarget: deps.canWriteSession(req.targetSessionId, req.run.userId as number) });
-    if (!verdict.ok) return refuseVerdict(req, facts, verdict);
-    const { row, truncated } = insertRow(req, facts, verdict);
+    if (verdict.kind === 'refuse') return refuseVerdict(req, facts, verdict.cause);
+    if (verdict.kind === 'hold') return holdIntake(req, facts);
+    const { row, truncated } = insertRow(req, facts, { state: 'queued' });
     publishPeerMessage(row);
     deps.kickDispatcher();
     return { status: 'queued', id: row.id, text: queuedText(row, truncated) };
@@ -271,6 +356,25 @@ export function auditPeer(action: AuditAction, userId: number | null, metadata: 
   } catch {
     /* auditing must never break the relay */
   }
+}
+
+export type PeerPromptDecision = {
+  sessionId: string; requestId: string; toolName: string | null; allowed: boolean; allow: boolean;
+  requesterUserId: unknown; requesterAuthKind: string | null; ownerUserId: unknown;
+};
+
+/**
+ * ADR-219 P2 (qa م-4): the record of an answer to a prompt raised by a relay
+ * delivery turn — who answered, with which credential kind, and whether the
+ * ownership check admitted it. No tool input, no message text. Never throws.
+ */
+export function recordPeerPromptDecision(decision: PeerPromptDecision): void {
+  const userId = Number.isSafeInteger(Number(decision.requesterUserId)) ? Number(decision.requesterUserId) : null;
+  auditPeer('peer_relay_prompt_decided', userId, {
+    sessionId: decision.sessionId, requestId: decision.requestId, toolName: decision.toolName, admitted: decision.allowed,
+    allow: decision.allow, requesterAuthKind: decision.requesterAuthKind,
+    requesterIsOwner: userId !== null && userId === Number(decision.ownerUserId),
+  });
 }
 
 /** Records the session's latest reported total (the next peer turn's baseline). Never throws. */

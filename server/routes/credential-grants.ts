@@ -25,6 +25,7 @@ import {
   credentialUnit,
   resolveCredentialPrincipal,
 } from '@/services/isolation/credential-principal.js';
+import { terminateStaleWarmProcesses } from '@/services/isolation/warm-credential-processes.js';
 import { AppError, asyncHandler, createApiSuccessResponse } from '@/shared/utils.js';
 
 const router = express.Router();
@@ -231,6 +232,8 @@ router.put('/:provider/grantees', writeLimiter, asyncHandler(async (req: Request
   })();
   for (const [action, id] of changes) {
     audit(req, action, { provider, granteeUserId: id });
+    // ADR-152 A1 §3.5: a revoked grantee's warm process ends now, not at its next turn.
+    if (action === 'credential_grant_revoked') terminateStaleWarmProcesses({ userId: id });
   }
 
   res.json(createApiSuccessResponse(buildOverview(callerId)));
@@ -242,6 +245,7 @@ router.delete('/:provider/grantees/:userId', writeLimiter, asyncHandler(async (r
   const granteeId = parseUserId(req.params.userId);
   if (credentialGrantsDb.revoke(callerId, granteeId, provider)) {
     audit(req, 'credential_grant_revoked', { provider, granteeUserId: granteeId });
+    terminateStaleWarmProcesses({ userId: granteeId });
   }
   res.json(createApiSuccessResponse(buildOverview(callerId)));
 }));
@@ -281,6 +285,8 @@ router.put('/:provider/use', writeLimiter, asyncHandler(async (req: Request, res
       );
     }
   }
+  // A changed choice moves the caller's principal: end warm processes on the old one.
+  terminateStaleWarmProcesses({ userId: callerId });
 
   res.json(createApiSuccessResponse(buildOverview(callerId)));
 }));

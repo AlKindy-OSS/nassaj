@@ -59,3 +59,28 @@ test('engine-pinned resume turn refuses a key in <projectPath>/.claude/settings.
     fs.rmSync(fx.root, { recursive: true, force: true });
   }
 });
+
+test('ADR-227: a local-engine resume turn is checked on its whole origin and by B-1541', async () => {
+  const fx = fixture();
+  const params = {
+    userId: 7, conversationId: 'sess-local', projectPath: fx.project, prompt: 'p', systemFraming: 's',
+    model: 'gpt-oss-20b', permissionMode: 'default' as const, disallowedTools: [], maxHoldMs: 1_000,
+    engineHosts: new Set<string>(), engineOrigins: new Set(['http://127.0.0.1:18080']),
+  };
+  const env = {
+    PATH: '/usr/bin', HOME: fx.configDir, CLAUDE_CONFIG_DIR: fx.configDir,
+    ANTHROPIC_BASE_URL: 'http://127.0.0.1:18080', ANTHROPIC_AUTH_TOKEN: 'nassaj-local-no-key',
+  };
+  try {
+    const otherPort = await defaultRunResumeTurn({ ...params, env: { ...env, ANTHROPIC_BASE_URL: 'http://127.0.0.1:18081' } });
+    assert.match(otherPort.error ?? '', /ANTHROPIC_BASE_URL_NOT_ALLOWED/);
+    fs.mkdirSync(path.join(fx.project, '.claude'));
+    fs.writeFileSync(path.join(fx.project, '.claude', 'settings.local.json'),
+      JSON.stringify({ env: { ANTHROPIC_API_KEY: 'sk-ant-api03-FIXTURE' } }));
+    const keyed = await defaultRunResumeTurn({ ...params, env });
+    assert.match(keyed.error ?? '', /ENGINE_ANTHROPIC_CREDENTIAL_EXPOSED/);
+    assert.equal(keyed.exitCode, null);
+  } finally {
+    fs.rmSync(fx.root, { recursive: true, force: true });
+  }
+});

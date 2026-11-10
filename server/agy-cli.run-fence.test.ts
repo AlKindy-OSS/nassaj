@@ -78,7 +78,6 @@ named('./services/provider-run-presence.js', { beginProviderRun: () => ({ end() 
 named('./services/notification-orchestrator.js', { notifyRunFailed() {}, notifyRunStopped() {} });
 named('./shared/cwd-check.js', { checkCwdExists: () => io({ ok: true }), buildCwdMissingPayload: () => ({}) });
 named('./services/isolation/provision-user-dirs.js', { userConfigDir: () => root });
-named('./services/provider-sharing.js', { isProviderIsolated: () => false });
 named('./modules/providers/list/antigravity/antigravity-project-registry.js', {
   registerAntigravityProjectPath() {}, clearAntigravityProjectPath() {},
 });

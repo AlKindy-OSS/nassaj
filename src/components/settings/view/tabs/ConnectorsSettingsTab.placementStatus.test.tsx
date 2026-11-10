@@ -113,7 +113,7 @@ describe('connector account and tool-placement truth', () => {
     render(<ConnectorsSettingsTab />);
 
     expect(await screen.findByText('Account linked')).toBeTruthy();
-    expect(screen.getByText('Tools ready on some engines')).toBeTruthy();
+    expect(screen.getByText('Tools ready on some coding agents')).toBeTruthy();
     expect(screen.getByText('Claude')).toBeTruthy();
     expect(screen.getByText('Ready')).toBeTruthy();
     expect(screen.getByText('Codex')).toBeTruthy();

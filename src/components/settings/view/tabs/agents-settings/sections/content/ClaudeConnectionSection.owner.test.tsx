@@ -4,7 +4,8 @@
  * Linking runs `claude auth login` in the in-app terminal modal, where the code
  * is pasted directly and the CLI stores the credential itself (B-1260). The old
  * setup-token paste card (B-1075) is removed; this file guards that it stays
- * gone for an owner, and that the owner still gets no invite banner.
+ * gone for an owner. Since ADR-152 A1 (D2, T-2083) the owner gets the same
+ * link banner as every member: nobody inherits the operator's credential.
  *
  * Sibling `ClaudeConnectionSection.test.tsx` covers a non-owner member; they are
  * two files because `useAuth` is mocked at module level (role fixed per file).
@@ -139,12 +140,12 @@ describe('ClaudeConnectionSection — owner, not connected', () => {
     expect(screen.queryByText(/setup-token/i)).toBeNull();
   });
 
-  it('does NOT render the invite banner for an owner', async () => {
+  it('asks an unlinked owner to link their own account (ADR-152 A1 D2)', async () => {
     mount();
 
     await waitFor(() => expect(mockConnection).toHaveBeenCalled());
     expect(
-      screen.queryByRole('button', { name: lookup('claudeConnection.linkButton') ?? 'Link Claude account' }),
-    ).toBeNull();
+      screen.getByRole('button', { name: lookup('claudeConnection.linkButton') ?? 'Link Claude account' }),
+    ).toBeTruthy();
   });
 });

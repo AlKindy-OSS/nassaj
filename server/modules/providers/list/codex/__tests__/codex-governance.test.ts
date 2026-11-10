@@ -113,9 +113,6 @@ mock.module('@openai/codex-sdk', { namedExports: { Codex: FakeCodex } });
 const { initializeDatabase, closeConnection, getConnection } = await import(
   '@/modules/database/index.js'
 );
-const { setProviderSharingConfig, _resetProviderSharingCache } = await import(
-  '@/services/provider-sharing.js'
-);
 const { userConfigDir } = await import('@/services/isolation/provision-user-dirs.js');
 const { bundledGovernanceSource } = await import(
   '@/services/isolation/codex-governance-material.js'
@@ -170,17 +167,6 @@ function isGovernedCopy(p: string): boolean {
   }
 }
 
-/** Forces the codex sharing policy to isolated so CODEX_HOME is per-user. */
-function setCodexIsolated(): void {
-  _resetProviderSharingCache();
-  setProviderSharingConfig({
-    claude: 'isolated',
-    codex: 'isolated',
-    agy: 'shared',
-    cursor: 'shared',
-  });
-}
-
 /** Minimal ws stub: records sent frames and carries the spawner's userId. */
 function makeWs(userId: number | null): { userId: number | null; sent: unknown[]; send: (m: unknown) => void } {
   const sent: unknown[] = [];
@@ -229,7 +215,6 @@ after(() => {
 
 describe('ensureCodexGovernance — fail-closed gate (ADR-057 §5, copy identity)', () => {
   it('passes for a governed user (copy matches the neutral source), no repair', () => {
-    setCodexIsolated();
     setNeutralSource(true);
     const userId = 9101;
 
@@ -246,7 +231,6 @@ describe('ensureCodexGovernance — fail-closed gate (ADR-057 §5, copy identity
   });
 
   it('GOVERNS from the bundled default when no operator source exists (T-1078)', () => {
-    setCodexIsolated();
     setNeutralSource(false); // a stranger who cloned the repo: no ~/.claude/AGENTS.md
     const userId = 9102;
 
@@ -264,7 +248,6 @@ describe('ensureCodexGovernance — fail-closed gate (ADR-057 §5, copy identity
   });
 
   it('BLOCKS (ok:false) when governance cannot be materialized at all', () => {
-    setCodexIsolated();
     setNeutralSource(true);
     const userId = 9108;
     const restore = breakGovernanceHome(userId);
@@ -281,7 +264,6 @@ describe('ensureCodexGovernance — fail-closed gate (ADR-057 §5, copy identity
   });
 
   it('self-heals (ok:true, repaired) when the copy vanished but the source is present', () => {
-    setCodexIsolated();
     setNeutralSource(true);
     const userId = 9103;
 
@@ -301,7 +283,6 @@ describe('ensureCodexGovernance — fail-closed gate (ADR-057 §5, copy identity
   });
 
   it('rewrites a DRIFTED copy (subverted/stale content) back to the neutral source', () => {
-    setCodexIsolated();
     setNeutralSource(true);
     const userId = 9106;
 
@@ -321,7 +302,6 @@ describe('ensureCodexGovernance — fail-closed gate (ADR-057 §5, copy identity
   });
 
   it('REJECTS a symlink planted in place of the copy and replaces it with a real file', () => {
-    setCodexIsolated();
     setNeutralSource(true);
     const userId = 9107;
 
@@ -348,7 +328,6 @@ describe('ensureCodexGovernance — fail-closed gate (ADR-057 §5, copy identity
 
 describe('queryCodex spawn path — fail-closed governance enforcement', () => {
   it('REFUSES to launch without governance: governance_missing + Arabic message, NO spawn', async () => {
-    setCodexIsolated();
     setNeutralSource(true);
     const userId = 9104;
     const ws = makeWs(userId);
@@ -377,7 +356,6 @@ describe('queryCodex spawn path — fail-closed governance enforcement', () => {
   });
 
   it('LAUNCHES for a stranger with no operator source, governed by the bundled default (T-1078)', async () => {
-    setCodexIsolated();
     setNeutralSource(false); // fresh clone of the public fork: no ~/.claude/AGENTS.md
     const userId = 9109;
     const ws = makeWs(userId);
@@ -405,7 +383,6 @@ describe('queryCodex spawn path — fail-closed governance enforcement', () => {
   });
 
   it('clears the gate WITH governance and leaves project instructions enabled', async () => {
-    setCodexIsolated();
     setNeutralSource(true);
     const userId = 9105;
     const ws = makeWs(userId);

@@ -148,7 +148,7 @@
     "ariaLabel": "自动系统消息"
   },
   "sessionNotResumable": {
-    "message": "此会话无法恢复 — 它在提供商端已不存在。",
+    "message": "此会话无法恢复 — 它在编程智能体中已不存在。",
     "startNew": "开始新会话"
   },
   "tools": {
@@ -415,7 +415,7 @@
   },
   "providerSelection": {
     "title": "选择您的 AI 助手",
-    "description": "选择一个供应商以开始新对话",
+    "description": "选择一个编程智能体以开始新对话",
     "selectModel": "选择模型",
     "providerInfo": {
       "anthropic": "由 Anthropic 提供",
@@ -427,11 +427,11 @@
       "codex": "准备好使用带有 {{model}} 的 Codex。请在下方开始输入您的消息。",
       "antigravity": "已准备好通过 {{model}} 使用 Antigravity（agy）。请在下方输入消息。",
       "opencode": "准备好使用带有 {{model}} 的 OpenCode。请在下方开始输入您的消息。",
-      "default": "请在上方选择一个提供者以开始",
+      "default": "请在上方选择一个编程智能体以开始",
       "kimi": "准备好使用带有 {{model}} 的 Kimi。请在下方开始输入您的消息。",
       "deepseek": "准备好使用带有 {{model}} 的 DeepSeek。请在下方开始输入您的消息。",
       "glm": "准备好使用带有 {{model}} 的 GLM。请在下方开始输入您的消息。",
-      "claudeEngine": "已就绪：Claude 引擎在 {{provider}} 上使用 {{model}} 运行。请在下方开始输入您的消息。"
+      "claudeEngine": "已就绪：Claude 编程智能体在 {{provider}} 上使用 {{model}} 运行。请在下方开始输入您的消息。"
     },
     "antigravity": {
       "activeModel": "当前模型",
@@ -444,10 +444,10 @@
       "button": "刷新模型和认证状态",
       "refreshing": "刷新中…"
     },
-    "providerUnavailable": "提供商不可用",
+    "providerUnavailable": "编程智能体不可用",
     "signIn": "登录",
     "addApiKey": "添加 {{provider}} API 密钥以启用",
-    "engineOnVendor": "Claude 引擎在 {{provider}} 上"
+    "engineOnVendor": "{{provider}} 上的 Claude 智能体"
   },
   "session": {
     "continue": {
@@ -596,7 +596,7 @@
     "modelsSection": "模型",
     "subagentsSection": "子代理",
     "turns_other": "{{count}} 轮",
-    "harnessLine": "运行环境：{{harness}}",
+    "harnessLine": "编程智能体：{{harness}}",
     "olderModels_other": "{{count}} 个此前模型"
   },
   "composer": {

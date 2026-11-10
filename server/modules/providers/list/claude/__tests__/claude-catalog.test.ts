@@ -44,6 +44,24 @@ mock.module('@anthropic-ai/claude-agent-sdk', {
   },
 });
 
+// ADR-152 A1 §3.4: a credential reader/writer needs a member. The resolver is
+// stubbed so member MEMBER maps onto this suite's sandbox tree, and any other
+// actor is refused exactly like the real resolver.
+const MEMBER = 7;
+{
+  const realResolver = await import('../../../../../services/isolation/resolve-provider-env.js');
+  mock.module(new URL('../../../../../services/isolation/resolve-provider-env.js', import.meta.url).href, {
+    namedExports: {
+      ...realResolver,
+      resolveProviderEnv: (actor: unknown, _provider: string, env: NodeJS.ProcessEnv = process.env) => {
+        if (![7, 8, '7', '8'].includes(actor as never)) {
+          throw Object.assign(new Error('CREDENTIAL_ACTOR_REQUIRED'), { code: 'CREDENTIAL_ACTOR_REQUIRED', statusCode: 500 });
+        }
+        return { ...env, ...{ HOME: process.env.HOME, CLAUDE_CONFIG_DIR: process.env.CLAUDE_CONFIG_DIR ?? `${process.env.HOME}/.claude`, CODEX_HOME: process.env.CODEX_HOME ?? `${process.env.HOME}/.codex`, XDG_DATA_HOME: process.env.XDG_DATA_HOME ?? `${process.env.HOME}/.local/share`, XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME ?? `${process.env.HOME}/.config`, KIMI_CODE_HOME: `${process.env.HOME}/.kimi` } };
+      },
+    },
+  });
+}
 const {
   buildClaudeModelsDefinition,
   getClaudeModelCatalog,
@@ -216,7 +234,7 @@ test('getClaudeModelCatalog: returns the live catalog (not degraded) on a succes
   __resetClaudeCatalogCircuit();
   currentProbe = { supportedModels: async () => SAMPLE_LIVE_MODELS };
 
-  const result = await getClaudeModelCatalog();
+  const result = await getClaudeModelCatalog(MEMBER);
   assert.ok(result.OPTIONS.some((o) => o.value === 'claude-opus-4-8'));
   assert.notEqual(result.degraded, true);
 
@@ -231,7 +249,7 @@ test('getClaudeModelCatalog: falls back to the degraded catalog when the probe t
     },
   };
 
-  const result = await getClaudeModelCatalog();
+  const result = await getClaudeModelCatalog(MEMBER);
   assert.deepEqual(result, { ...CLAUDE_FALLBACK_MODELS, degraded: true });
 
   __resetClaudeCatalogCircuit();
@@ -241,7 +259,7 @@ test('getClaudeModelCatalog: falls back when the probe returns an unusable (empt
   __resetClaudeCatalogCircuit();
   currentProbe = { supportedModels: async () => [] };
 
-  const result = await getClaudeModelCatalog();
+  const result = await getClaudeModelCatalog(MEMBER);
   assert.deepEqual(result, { ...CLAUDE_FALLBACK_MODELS, degraded: true });
 
   __resetClaudeCatalogCircuit();
@@ -262,12 +280,12 @@ test('getClaudeModelCatalog: opens the circuit breaker after repeated failures',
   // Threshold is 3 consecutive failures; the 4th call must be short-circuited by
   // the open breaker and must NOT spawn another probe.
   for (let i = 0; i < 3; i += 1) {
-    const result = await getClaudeModelCatalog();
+    const result = await getClaudeModelCatalog(MEMBER);
     assert.deepEqual(result, { ...CLAUDE_FALLBACK_MODELS, degraded: true });
   }
   assert.equal(constructCalls, 3);
 
-  const afterOpen = await getClaudeModelCatalog();
+  const afterOpen = await getClaudeModelCatalog(MEMBER);
   assert.deepEqual(afterOpen, { ...CLAUDE_FALLBACK_MODELS, degraded: true });
   assert.equal(constructCalls, 3, 'breaker open: no further probe was spawned');
 
@@ -294,9 +312,9 @@ test('getClaudeModelCatalog: single-flight — concurrent callers share one prob
   };
 
   // Fire three concurrent calls before the in-flight probe resolves.
-  const p1 = getClaudeModelCatalog();
-  const p2 = getClaudeModelCatalog();
-  const p3 = getClaudeModelCatalog();
+  const p1 = getClaudeModelCatalog(MEMBER);
+  const p2 = getClaudeModelCatalog(MEMBER);
+  const p3 = getClaudeModelCatalog(MEMBER);
 
   probeGate.release();
   const [r1, r2, r3] = await Promise.all([p1, p2, p3]);
@@ -333,7 +351,7 @@ test('getClaudeModelCatalog: REFUSES to spawn the probe when ANTHROPIC_BASE_URL 
   };
 
   try {
-    const result = await getClaudeModelCatalog();
+    const result = await getClaudeModelCatalog(MEMBER);
     // Fail-closed: the disallowed host degrades to the fallback catalog and the
     // subprocess is never spawned — Claude traffic is NEVER routed to a
     // non-Anthropic endpoint.
@@ -367,7 +385,7 @@ test('getClaudeModelCatalog: guard is a no-op when ANTHROPIC_BASE_URL is unset (
   };
 
   try {
-    const result = await getClaudeModelCatalog();
+    const result = await getClaudeModelCatalog(MEMBER);
     // Unset routing var → guard no-op → probe spawns and returns the live catalog.
     assert.equal(constructCalls, 1, 'unset routing var: the probe spawns normally');
     assert.ok(result.OPTIONS.some((o) => o.value === 'claude-opus-4-8'));
@@ -396,7 +414,7 @@ test('getClaudeModelCatalog: guard allows an official Anthropic ANTHROPIC_BASE_U
   };
 
   try {
-    const result = await getClaudeModelCatalog();
+    const result = await getClaudeModelCatalog(MEMBER);
     assert.equal(constructCalls, 1, 'official Anthropic host is allowed: the probe spawns');
     assert.ok(result.OPTIONS.some((o) => o.value === 'claude-opus-4-8'));
     assert.notEqual(result.degraded, true);
@@ -425,7 +443,7 @@ test('getClaudeModelCatalog: an authenticated list (fable already filtered by An
   currentProbe = { supportedModels: async () => SAMPLE_LIVE_MODELS };
 
   try {
-    const result = await getClaudeModelCatalog('user-auth-1');
+    const result = await getClaudeModelCatalog(7);
     assert.equal(
       result.OPTIONS.some((o) => o.value === 'claude-fable-5'),
       false,
@@ -462,13 +480,13 @@ test('getClaudeModelCatalog: the circuit breaker is isolated per user', async ()
   try {
     // Three consecutive failures open user-A's breaker (threshold = 3).
     for (let i = 0; i < 3; i += 1) {
-      const result = await getClaudeModelCatalog('user-A');
+      const result = await getClaudeModelCatalog(7);
       assert.deepEqual(result, { ...CLAUDE_FALLBACK_MODELS, degraded: true });
     }
     assert.equal(failingConstructs, 3);
 
     // A 4th call for user-A is short-circuited by A's now-open breaker (no probe).
-    await getClaudeModelCatalog('user-A');
+    await getClaudeModelCatalog(7);
     assert.equal(failingConstructs, 3, "user-A's breaker is open: no further probe spawned");
 
     // user-B is unaffected: its breaker is closed, so its probe runs and (now
@@ -480,7 +498,7 @@ test('getClaudeModelCatalog: the circuit breaker is isolated per user', async ()
       },
       supportedModels: async () => SAMPLE_LIVE_MODELS,
     };
-    const resultB = await getClaudeModelCatalog('user-B');
+    const resultB = await getClaudeModelCatalog(8);
     assert.equal(userBConstructs, 1, "user-B's breaker is independent: its probe spawns");
     assert.ok(resultB.OPTIONS.some((o) => o.value === 'claude-opus-4-8'));
     assert.notEqual(resultB.degraded, true);
@@ -509,18 +527,18 @@ test('getClaudeModelCatalog: a model recorded broken for a user is excluded from
 
   try {
     // Before any lazy detection, the advertised model is present.
-    const before = await getClaudeModelCatalog('user-lazy-1');
+    const before = await getClaudeModelCatalog(7);
     assert.ok(
       before.OPTIONS.some((o) => o.value === 'claude-fable-5'),
       'model is advertised before it is proven broken',
     );
 
     // Record it broken for THIS user (what the send loop does on model_not_found).
-    const added = await recordBrokenModel('user-lazy-1', 'claude-fable-5');
+    const added = await recordBrokenModel(7, 'claude-fable-5');
     assert.equal(added, true, 'first record returns true');
 
     // The next catalog for the same user excludes it.
-    const after = await getClaudeModelCatalog('user-lazy-1');
+    const after = await getClaudeModelCatalog(7);
     assert.equal(
       after.OPTIONS.some((o) => o.value === 'claude-fable-5'),
       false,
@@ -529,7 +547,7 @@ test('getClaudeModelCatalog: a model recorded broken for a user is excluded from
     assert.ok(after.OPTIONS.some((o) => o.value === 'claude-opus-4-8'));
 
     // A DIFFERENT user, who never hit the failure, still sees the model.
-    const otherUser = await getClaudeModelCatalog('user-lazy-2');
+    const otherUser = await getClaudeModelCatalog(8);
     assert.ok(
       otherUser.OPTIONS.some((o) => o.value === 'claude-fable-5'),
       "another user's catalog is unaffected by the first user's broken model",

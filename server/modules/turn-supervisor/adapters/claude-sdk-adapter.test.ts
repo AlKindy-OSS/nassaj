@@ -50,7 +50,7 @@ test('Claude SDK role is ephemeral, capture-only, toolless and keeps hidden cont
     },
   });
   const registry = new TurnAdapterRegistry([adapter]);
-  const probe = await registry.probe({ provider: 'claude', userId: 'member-7' });
+  const probe = await registry.probe({ provider: 'claude', userId: '7' });
   assert.equal(probe.available, true);
   assert.deepEqual(probe.capabilities, CLAUDE_SDK_CAPABILITIES);
   const writer = createCaptureOnlyWriter();
@@ -138,4 +138,27 @@ test('Claude adapter fail-closes if any tool_use escapes the empty tool set', as
     capability: probe.capability!, model: 'claude-sonnet-4-6', prompt: 'delegate', persist: false,
     writer: createCaptureOnlyWriter(),
   }), (error: unknown) => error instanceof TurnAdapterError && error.code === 'effects_unsupported');
+});
+
+test('ADR-227: a local model id is refused before any env or query, never run on Anthropic', async () => {
+  let queried = false;
+  let envBuilt = false;
+  const adapter = createClaudeSdkTurnAdapter({
+    enabled: () => true,
+    getAuthStatus: async () => ({ installed: true, authenticated: true }),
+    resolveEnvironment: () => { envBuilt = true; return { PATH: process.env.PATH }; },
+    queryFactory: () => { queried = true; return (async function* stream() { yield success(); })(); },
+  });
+  const registry = new TurnAdapterRegistry([adapter]);
+  const probe = await registry.probe({ provider: 'claude', userId: 7 });
+  await assert.rejects(
+    registry.invoke({
+      capability: probe.capability!, model: 'nassaj_local_abc/gpt-oss-20b', prompt: 'p',
+      persist: false, writer: createCaptureOnlyWriter(),
+    }),
+    (error: TurnAdapterError) => error instanceof TurnAdapterError && error.code === 'provider_unavailable'
+      && /local model server/u.test(error.message),
+  );
+  assert.equal(envBuilt, false);
+  assert.equal(queried, false);
 });

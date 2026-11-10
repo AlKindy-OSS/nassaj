@@ -170,6 +170,14 @@ describe('POST /api/git/generate-commit-message', () => {
     assert.equal(response.body.error, 'provider must be "claude"');
     assert.deepEqual(launched, []);
   });
+
+  it('refuses dsh with its classified code and launches nothing (T-2086)', async () => {
+    const response = await generate('dsh');
+    assert.equal(response.status, 400);
+    assert.equal(response.body.code, 'DSH_COMMIT_MESSAGE_UNSUPPORTED');
+    assert.equal(response.body.notStarted, true);
+    assert.deepEqual(launched, []);
+  });
 });
 
 describe('/api/cursor/*', () => {

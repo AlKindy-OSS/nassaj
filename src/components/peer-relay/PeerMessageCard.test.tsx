@@ -98,7 +98,8 @@ describe('PeerMessageCard — outbound (sender session)', () => {
     );
     const card = container.querySelector('[data-peer-message="outbound"]')!;
     expect(card.getAttribute('aria-label')).toBe(`Message sent to Docs session: ${label}`);
-    expect(screen.getByRole('status').textContent).toBe(label);
+    // The live status names its card for screen readers (sr-only prefix).
+    expect(screen.getByRole('status').textContent).toBe(`Docs session: ${label}`);
     const causeNode = container.querySelector('[data-peer-cause]');
     expect(causeNode?.textContent ?? null).toBe(causeText);
   });
@@ -108,7 +109,7 @@ describe('PeerMessageCard — outbound (sender session)', () => {
     render(<PeerMessageCard message={view({ summary: 'ملخص قصير' })} currentSessionId={SENDER} />);
     expect(screen.getByText('جلسة أخرى')).toBeTruthy();
     expect(screen.getByText('ملخص قصير')).toBeTruthy();
-    expect(screen.getByRole('status').textContent).toBe('سُلِّمت');
+    expect(screen.getByRole('status').textContent).toBe('جلسة أخرى: سُلِّمت');
   });
 });
 

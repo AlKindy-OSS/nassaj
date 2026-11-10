@@ -37,17 +37,17 @@ export function outcomeLabel(t: TFunction, outcome: RowOutcome, cause?: Subagent
 
 /** Tooltip explaining a non-success end and, when inferred, its cause; '' otherwise. */
 export function outcomeTooltip(t: TFunction, outcome: RowOutcome, cause?: SubagentInferredCause): string {
-  if (outcome === 'failed') return t('agentActivity.failedTooltip', { defaultValue: 'The agent reported a failure.' });
+  if (outcome === 'failed') return t('agentActivity.failedTooltip', { defaultValue: 'The subagent reported a failure.' });
   if (outcome === 'stopped') {
     return cause === 'owner'
-      ? t('agentActivity.stoppedByOwnerTooltip', { defaultValue: 'The run was stopped while this agent was working.' })
-      : t('agentActivity.stoppedTooltip', { defaultValue: 'The harness reported that the agent stopped before finishing.' });
+      ? t('agentActivity.stoppedByOwnerTooltip', { defaultValue: 'The run was stopped while this subagent was working.' })
+      : t('agentActivity.stoppedTooltip', { defaultValue: 'The coding agent reported that the subagent stopped before finishing.' });
   }
   if (outcome !== 'unknown') return '';
   return cause === 'timeout'
-    ? t('agentActivity.unknownTimeoutTooltip', { defaultValue: 'No signal from this agent for over 6 hours.' })
+    ? t('agentActivity.unknownTimeoutTooltip', { defaultValue: 'No signal from this subagent for over 6 hours.' })
     : t('agentActivity.unknownProcessExitTooltip', {
-      defaultValue: 'Its process ended without reporting how this agent finished.',
+      defaultValue: 'Its process ended without reporting how this subagent finished.',
     });
 }
 

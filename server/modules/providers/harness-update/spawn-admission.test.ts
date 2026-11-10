@@ -87,6 +87,22 @@ test('glm rides the opencode lease; pure-HTTP vendors are never blocked', () => 
   assert.equal(isSpawnBlockedForRunProvider('unknown-runtime'), false);
 });
 
+test('T-2086 S4: an in-progress dsh update refuses dsh launches (both admission seams)', () => {
+  _resetHarnessLeases();
+  _resetHarnessLaunches();
+  assert.equal(RUN_PROVIDER_TO_HARNESS.dsh, 'dsh');
+  acquireHarnessLease('dsh', 'job-dsh');
+  const sent: Array<Record<string, unknown>> = [];
+  assert.equal(refuseSpawnIfHarnessUpdating('dsh', { send: (m: Record<string, unknown>) => sent.push(m) }, { sessionId: 'd1' }), true);
+  assert.equal(sent[0]?.code, 'harness_updating');
+  assert.equal(sent[0]?.retryable, true);
+  assert.throws(() => beginHarnessLaunch('dsh'));
+  releaseHarnessLease('dsh', 'job-dsh');
+  const release = beginHarnessLaunch('dsh');
+  assert.equal(typeof release, 'function');
+  release();
+});
+
 test('RUN_PROVIDER_TO_HARNESS is in parity with the descriptor runProviders', () => {
   // Every mapping points at a real harness id…
   for (const [runId, harnessId] of Object.entries(RUN_PROVIDER_TO_HARNESS)) {

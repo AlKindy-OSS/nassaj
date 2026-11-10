@@ -26,7 +26,6 @@ import { getConnection, initializeDatabase, projectsDb, sessionsDb, userDb } fro
 import { AGY_BRAIN_UNDER_HOME } from '@/modules/providers/list/antigravity/agy-brain-layout.js';
 import { deleteOrArchiveProject } from '@/modules/projects/services/project-delete.service.js';
 import { AppError } from '@/shared/utils.js';
-import { setProviderSharingConfig } from '@/services/provider-sharing.js';
 
 process.env.CLAUDE_CONFIG_DIR = path.join(SANDBOX_HOME, '.claude');
 // T-1880: the pre-separation operator spelling `$CORE_DIR/projects` lives in the sandbox too.
@@ -41,7 +40,6 @@ await initializeDatabase();
 const ownerId = userDb.createUser('delete-owner', 'hash-o', 'user').id;
 // Members up to /10 exist and Claude is isolated, so every member's Claude home is a T-1880 lookup root.
 for (let filler = 2; userDb.createUser(`delete-member-${filler}`, 'hash', 'user').id < 10; filler += 1);
-setProviderSharingConfig({ claude: 'isolated' });
 
 let counter = 0;
 /** A fresh id in the fixture's UUID shape. */

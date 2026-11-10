@@ -30,7 +30,6 @@
  * base-URL override (or any other key) into settings.json through here.
  */
 
-import os from 'node:os';
 import path from 'node:path';
 
 import {
@@ -39,6 +38,7 @@ import {
 } from '@/modules/providers/shared/credentials/atomic-json-file.js';
 import { isClaudeSubscriptionToken } from '@/modules/providers/shared/credentials/subscription-token-guard.js';
 import { resolveProviderEnv } from '@/services/isolation/resolve-provider-env.js';
+import { resolvedKnob } from '@/services/isolation/resolved-knob.js';
 import type {
   IProviderCredentialWriter,
   ProviderCredentialStatus,
@@ -128,12 +128,12 @@ export class ClaudeCredentialsWriter implements IProviderCredentialWriter {
    * reports on the member's own tree (userConfigDir(userId, '.claude')).
    */
   private settingsFilePath(userId: string | number | null | undefined): string {
-    const env = resolveProviderEnv(userId ?? null, 'claude', process.env, 'chat', {
+    const env = resolveProviderEnv(userId, 'claude', process.env, 'chat', {
       honorGrants: false,
     });
-    const configDir = readOptionalString(env.CLAUDE_CONFIG_DIR)
-      ?? path.join(os.homedir(), '.claude');
-    return path.join(configDir, 'settings.json');
+    // qa M4: the resolver always sets CLAUDE_CONFIG_DIR; a missing one is
+    // refused, never replaced by the operator's ~/.claude.
+    return path.join(resolvedKnob(env, 'CLAUDE_CONFIG_DIR'), 'settings.json');
   }
 
   /** Merges a new env record into settings, enforcing the iron-rule tripwire. */

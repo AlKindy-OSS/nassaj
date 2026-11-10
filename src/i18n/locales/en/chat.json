@@ -11,7 +11,7 @@
     "count": "{{value}} observed skills",
     "partial": "Partial observation",
     "complete": "Available sources scanned",
-    "unsupported": "Observation data is not supported by this server or provider",
+    "unsupported": "Observation data is not supported by this server or coding agent",
     "unavailable": "Observation data unavailable",
     "limited": "Reads and invocations are evidence only; they do not prove application or quality. Unobserved execution remains possible.",
     "updated": "Updated: {{value}}",
@@ -103,7 +103,7 @@
       "disconnected": "Can't fork — connection lost.",
       "invalid_request": "This reply is not available for forking.",
       "timeout": "The result was not confirmed; the conversation may already exist. Check your conversations before creating another. We will not resend automatically.",
-      "unsupported_provider": "Continuing from a specific reply is not supported by this harness yet.",
+      "unsupported_provider": "Continuing from a specific reply is not supported by this coding agent yet.",
       "unsupported_cutoff": "This reply does not yet have a verified, saved continuation point.",
       "runtime_not_ready": "The running server version does not support continuing from this reply yet.",
       "outcome_unknown": "The conversation may already exist, but the result was not confirmed. Check your conversations before creating another. We will not resend automatically.",
@@ -138,7 +138,7 @@
       "title": "Cache reuse",
       "ratio": "Reuse: {{percent}}",
       "empty": "No percentage: input is zero",
-      "unknown": "Unavailable — awaiting a coherent harness observation",
+      "unknown": "Unavailable — awaiting a consistent reading from the coding agent",
       "counts": "Cached reads: {{read}} / total input: {{input}} tokens",
       "ownerThreshold": "Owner compaction policy: {{value}} tokens",
       "experimentalThreshold": "Experimental compaction proposal: {{value}} tokens"
@@ -251,7 +251,7 @@
     "ariaLabel": "Automated system message"
   },
   "sessionNotResumable": {
-    "message": "This session could not be resumed — it no longer exists at the provider.",
+    "message": "This session could not be resumed — the coding agent no longer has it.",
     "startNew": "Start a new session"
   },
   "tools": {
@@ -571,7 +571,7 @@
   },
   "providerSelection": {
     "title": "Choose Your AI Assistant",
-    "description": "Select a provider to start a new conversation",
+    "description": "Select a coding agent to start a new conversation",
     "selectModel": "Select Model",
     "providerInfo": {
       "anthropic": "by Anthropic",
@@ -583,12 +583,13 @@
       "codex": "Ready to use Codex with {{model}}. Start typing your message below.",
       "antigravity": "Ready to use Antigravity (agy) with {{model}}. Start typing your message below.",
       "opencode": "Ready to use OpenCode with {{model}}. Start typing your message below.",
-      "default": "Select a provider above to begin",
+      "default": "Select a coding agent above to begin",
       "kimi": "Ready to use Kimi with {{model}}. Start typing your message below.",
       "deepseek": "Ready to use DeepSeek with {{model}}. Start typing your message below.",
       "glm": "Ready to use GLM with {{model}}. Start typing your message below.",
-      "claudeEngine": "Ready: the Claude engine runs on {{provider}} with {{model}}. Start typing your message below.",
-      "sakana": "Ready with Sakana"
+      "claudeEngine": "Ready: the Claude coding agent runs on {{provider}} with {{model}}. Start typing your message below.",
+      "sakana": "Ready with Sakana",
+      "dsh": "Ready to use DeepSeek Harness with {{model}}. Start typing your message below."
     },
     "antigravity": {
       "activeModel": "Active model",
@@ -601,14 +602,14 @@
       "button": "Refresh models and auth status",
       "refreshing": "Refreshing…"
     },
-    "providerUnavailable": "Provider not available",
+    "providerUnavailable": "Coding agent not available",
     "clickToChange": "Click to change model",
     "loadingModels": "Loading models…",
     "noModelsFound": "No models found.",
     "searchModels": "Search models…",
     "signIn": "Sign in",
     "addApiKey": "Add {{provider}} API key to enable",
-    "engineOnVendor": "Claude engine on {{provider}}",
+    "engineOnVendor": "Claude agent on {{provider}}",
     "engineLine": {
       "subscription": "via {{engine}} · your subscription",
       "native": "via {{engine}} · its own engine",
@@ -629,7 +630,11 @@
       "removeAriaLabel": "Remove {{model}} from favourites"
     },
     "modelSelectorTitle": "Model selector",
-    "chooseModel": "Choose a model"
+    "chooseModel": "Choose a model",
+    "dshDisclosure": {
+      "title": "<b>DeepSeek Harness</b> is a developer preview (<b>rc</b>)",
+      "body": "<b>DeepSeek</b>'s <b>SAFETY.md</b> says it has not had a security audit. Your conversation and project content are sent to <b>DeepSeek</b>, and each request carries a fixed anonymous installation identifier. Its tools run on the server under the same system account as the other agents, so it can read files by absolute path."
+    }
   },
   "session": {
     "historyError": {
@@ -796,11 +801,11 @@
     "stopped": "Stopped",
     "stoppedByOwner": "Stopped by owner",
     "unknownOutcome": "No end signal",
-    "failedTooltip": "The agent reported a failure.",
-    "stoppedTooltip": "The harness reported that the agent stopped before finishing.",
-    "stoppedByOwnerTooltip": "The run was stopped while this agent was working.",
-    "unknownProcessExitTooltip": "Its process ended without reporting how this agent finished.",
-    "unknownTimeoutTooltip": "No signal from this agent for over 6 hours.",
+    "failedTooltip": "The subagent reported a failure.",
+    "stoppedTooltip": "The coding agent reported that the subagent stopped before finishing.",
+    "stoppedByOwnerTooltip": "The run was stopped while this subagent was working.",
+    "unknownProcessExitTooltip": "Its process ended without reporting how this subagent finished.",
+    "unknownTimeoutTooltip": "No signal from this subagent for over 6 hours.",
     "backgroundAgents": "Background agents running",
     "backgroundAgentsEnded": "Background agents finished",
     "estimated": "Estimated state",
@@ -853,7 +858,7 @@
     "subagentsSection": "Subagents",
     "turns_one": "{{count}} turn",
     "turns_other": "{{count}} turns",
-    "harnessLine": "Harness: {{harness}}",
+    "harnessLine": "Coding agent: {{harness}}",
     "olderModels_one": "{{count}} earlier model",
     "olderModels_other": "{{count}} earlier models"
   },
@@ -879,8 +884,17 @@
     "session_busy": "Your message was not sent: this conversation has a run in progress. Wait for it to finish or stop it, then send again",
     "attachment_rejected": "Your message was not sent: an attachment is not a file uploaded to this project. Attach the file again from your device, then send",
     "opencode_project_config_refused": "Could not start: this project has an OpenCode config file (opencode.json or a .opencode folder) that sets provider or MCP endpoints, which is not allowed in this mode. Remove its provider and mcp sections or delete the file, then send again",
-    "permission_auto_rejected": "The engine blocked this action automatically: this run cannot ask for permission, so no one was asked and you did not refuse anything",
+    "permission_auto_rejected": "The coding agent blocked this action automatically: this run cannot ask for permission, so no one was asked and you did not refuse anything",
     "opencode_cli_args_rejected": "Nothing ran: the installed OpenCode refused the arguments it was started with. Update OpenCode, then send again",
+    "permission_denied_by_claude_rule": "Blocked: Claude's permission rules forbid this action, and OpenCode follows the same rules",
+    "permission_requires_approval": "Blocked: this action needs your approval under Claude's rules, and OpenCode cannot ask, so it did not run",
+    "permission_rule_unsupported": "Not started: Claude's settings contain a permission rule OpenCode cannot enforce yet (file path, web domain or MCP rule)",
+    "PERMISSION_EFFECTIVE_POLICY_REQUIRED": "Not started: a Claude settings file exists but cannot be read, so its permission rules cannot be applied",
+    "opencode_parity_rules_invalid": "Blocked: the permission rules could not be applied, so every tool was refused",
+    "opencode_parity_unavailable": "Not started: nassaj's OpenCode permission plugin is not intact",
+    "opencode_parity_not_loaded": "Marked failed: OpenCode ran without nassaj's permission plugin",
+    "opencode_parity_selftest_failed": "Not started: the installed OpenCode does not apply nassaj's permission rules",
+    "opencode_parity_selftest_unavailable": "Not started: the OpenCode permission check could not run; it will be retried shortly",
     "authentication_required": "Provider authentication is missing or expired. Check its connection in Settings",
     "model_not_supported": "The selected model is not supported by this provider",
     "codex_cache_incompatible": "The Codex model cache is incompatible with the installed runtime",
@@ -891,7 +905,29 @@
     "provider_context_overflow": "Your message exceeds the model context limit; raise the context size in the server.",
     "local_models_auth_failed": "The local model server key is incorrect. Check the server settings.",
     "codeLabel": "Code",
-    "unknown": "A server error occurred; its cause could not be determined from the available information"
+    "unknown": "A server error occurred; its cause could not be determined from the available information",
+    "dsh_permission_mode_unsupported": "Not started: DeepSeek Harness cannot apply this permission mode together with one of this server's Claude permission settings yet. Try another permission mode, or use Claude for this conversation",
+    "dsh_permission_rule_unsupported": "Not started: one of this server's Claude permission rules is written in a form DeepSeek Harness cannot apply yet. Use Claude for this conversation, or ask the server owner about the rule",
+    "dsh_claude_hooks_unsupported": "Not started: this server has a Claude hook or plugin DeepSeek Harness cannot apply yet (only command hooks are supported, and every plugin must be readable). Use Claude for this conversation",
+    "dsh_coordination_unsupported": "Not started: DeepSeek Harness does not support this coordination level. Choose another level and send again",
+    "dsh_shared_session_unsupported": "Not started: DeepSeek Harness conversations belong to the member who started them; another member cannot continue this one. Start a new conversation",
+    "dsh_session_unknown": "Not started: this DeepSeek Harness conversation can no longer be found. Start a new conversation",
+    "dsh_session_id_invalid": "Not started: this conversation's id is not valid for DeepSeek Harness. Start a new conversation",
+    "dsh_effort_unsupported": "Not started: DeepSeek Harness does not offer this thinking level. Choose standard, low, high or max and send again",
+    "dsh_cwd_missing": "Not started: the project folder could not be found on the server",
+    "dsh_tree_tampered": "Not started: the installed DeepSeek Harness files no longer match the reviewed version, so it will not run. Ask the server owner to reinstall it",
+    "dsh_tree_unverified": "DeepSeek Harness is still starting up. Try again in a few seconds",
+    "dsh_tree_unmanaged": "Not started: DeepSeek Harness on this server was not installed by Nassaj, so it will not run. Ask the server owner to install it from the agents settings",
+    "governance_missing": "Not started: this server's governance files for the agent are missing. Ask the server owner to check the installation",
+    "dsh_claude_sandbox_unsupported": "Not started: Claude's sandbox is on for this server, and DeepSeek Harness cannot match it yet. Use Claude for this conversation",
+    "dsh_policy_violation": "Stopped: a tool ran without Nassaj's approval, so the conversation was stopped. Please report this to the server owner",
+    "dsh_prompt_blocked": "Not sent: a protection on this server blocked this message. Its reason:",
+    "dsh_cap_channel": "Not started: Nassaj's safety layer got no answer from DeepSeek Harness (its version may not be compatible). Try again, or use Claude for this conversation",
+    "dsh_cap_tools_api": "Not started: this DeepSeek Harness version does not offer the tools interface Nassaj checks with. Use Claude for this conversation",
+    "dsh_cap_gate": "Not started: Nassaj could not confirm it decides every tool in this DeepSeek Harness version. Use Claude for this conversation",
+    "dsh_gate_bypassed": "Stopped: a tool reached execution without Nassaj's decision, so DeepSeek Harness was stopped. Please report this to the server owner",
+    "dsh_post_hook_skipped": "Stopped: a tool ran without passing the after-run checks, so DeepSeek Harness was stopped. Please report this to the server owner",
+    "dsh_override_unverified": "Not started: the DeepSeek Harness copy set by hand on this server lacks the required safety settings. Ask the server owner to fix it"
   },
   "outbox": {
     "cardLabel": "Unsent message",
@@ -934,7 +970,7 @@
     "reason": {
       "delivered": "Kept here until it appears in conversation history",
       "effect_scope_fenced_session": "The previous turn in this conversation ended with an unknown outcome (for example, interrupted by a server restart), so it was locked for safety.",
-      "effect_scope_fenced_provider": "New conversations with this provider are also paused for safety after a previous turn was interrupted with an unknown outcome.",
+      "effect_scope_fenced_provider": "New conversations with this coding agent are also paused for safety after a previous turn was interrupted with an unknown outcome.",
       "effect_scope_fenced_unknown": "This conversation was locked for safety after a previous turn was interrupted with an unknown outcome.",
       "generation_blocked": "All launches on this server are paused after a previous turn was interrupted with an unknown outcome. Only the owner can act.",
       "generation_transitioning": "The server is finishing a safety check — try again shortly.",
@@ -957,7 +993,8 @@
       "client_msg_id_already_started": "This turn may already have started — check before trying again",
       "client_msg_id_fingerprint_mismatch": "This message identity belongs to a different payload and cannot be resent automatically",
       "unknown": "Unknown reason"
-    }
+    },
+    "titleStarting": "Starting up"
   },
   "refreshChat": {
     "refreshing": "Refreshing…"
@@ -972,9 +1009,9 @@
     "lockedDuringRun": "Coordination level cannot be changed during an active turn",
     "messageBadge": "Coordination level: {{name}}",
     "enforcement": {
-      "mechanical": "This engine enforces the limit itself, plus the injected directive.",
-      "textual": "Directive only: injected into the prompt, with no limit enforced by the engine.",
-      "none": "No channel: this engine has no runtime on this deployment."
+      "mechanical": "This coding agent enforces the limit itself, plus the injected directive.",
+      "textual": "Directive only: injected into the prompt, with no limit enforced by the coding agent.",
+      "none": "No channel: this coding agent has no runtime on this deployment."
     },
     "ariaLabel": "Coordination level {{level}}: {{name}}",
     "levels": {
@@ -991,7 +1028,7 @@
       "delegate_review": {
         "short": "Delegate + review",
         "full": "Delegated with review",
-        "description": "Requests up to 10 delegation levels where supported, with reviews passed upward; engine limits apply."
+        "description": "Requests up to 10 delegation levels where supported, with reviews passed upward; the coding agent's own limits apply."
       }
     }
   },
@@ -1086,6 +1123,28 @@
   "engineSwitch": {
     "exportWarning": "Switching engines replays this whole conversation ({{turns}} turns) to the new provider, including what the previous engine wrote. Continue?"
   },
+  "contextGuard": {
+    "preflight": {
+      "title": "This conversation is too big for the new model",
+      "tooSmall": "This conversation uses about {{used}} tokens, but {{model}} can only hold {{budget}}. Its next reply would be refused.\nShrink the conversation first by running the command below, or switch anyway.",
+      "unknown": "Couldn't verify whether {{model}} can hold this conversation.",
+      "switchAnyway": "Switch anyway",
+      "cancel": "Keep current model"
+    },
+    "refused": {
+      "title": "Not sent: the conversation is too big for this model",
+      "body": "The conversation uses about <n>{{used}}</n> tokens, and <m>{{model}}</m> can only hold <n>{{budget}}</n>. Switch back to <m>{{previousModel}}</m>, or shrink the conversation, then send again. Your message is kept.",
+      "bodyNoPrevious": "The conversation uses about <n>{{used}}</n> tokens, and <m>{{model}}</m> can only hold <n>{{budget}}</n>. Shrink the conversation or pick a larger model, then send again. Your message is kept.",
+      "bodyNoCompact": "The conversation uses about <n>{{used}}</n> tokens, and <m>{{model}}</m> can only hold <n>{{budget}}</n>. Switch back to <m>{{previousModel}}</m>, then send again. Your message is kept.",
+      "bodyNoPreviousNoCompact": "The conversation uses about <n>{{used}}</n> tokens, and <m>{{model}}</m> can only hold <n>{{budget}}</n>. Pick a larger model, then send again. Your message is kept."
+    },
+    "actions": {
+      "compact": "Shrink the conversation",
+      "compactHint": "Puts /compact in the message box",
+      "switchBack": "Switch back to <m>{{model}}</m>",
+      "dismissNotice": "Dismiss"
+    }
+  },
   "commandResult": {
     "closeAria": "Close command result modal",
     "escHint": "Esc closes the modal.",
@@ -1103,23 +1162,25 @@
     },
     "models": {
       "engineLocked": "This conversation runs on the <strong>{{engine}}</strong> engine, so its replies are generated by that endpoint — not by Anthropic. The list below is {{engine}}’s own catalog, shown for reference; pinning from this panel is disabled because it can only move one axis, and a {{provider}} model id sent to {{engine}} would fail. To change model or engine mid-conversation, use the model switcher in the composer toolbar — it moves both together.",
-      "fallbackCatalog": "Could not load the live model list for {{provider}}. Showing a built-in fallback list; selecting a model still works. Try “Refresh from providers”.",
+      "fallbackCatalog": "Could not load the live model list for {{provider}}. Showing a built-in fallback list; selecting a model still works. Try “Refresh from coding agents”.",
       "countBadge": "{{count}} models",
       "activeModel": "Active model",
       "nextResponse": "Next response: {{model}}",
       "default": "Default",
       "updated": "Updated",
       "catalogRefresh": "Catalog refresh",
-      "allProviders": "All providers",
+      "allProviders": "All coding agents",
       "cacheNote": "Model lists are cached for 3 days. Refresh after CLI, auth, or config changes, or when a new model is missing.",
       "currentSelection": "Current selection",
       "nextResponseSelection": "Next response selection",
       "applying": "Applying…",
       "copyModelId": "Copy model id {{model}}",
-      "noMatch": "No models match that search."
+      "noMatch": "No models match that search.",
+      "refreshAll": "Refresh from coding agents",
+      "refreshingCatalogs": "Refreshing catalogs…"
     },
     "cost": {
-      "provider": "Provider",
+      "provider": "Coding agent",
       "model": "Model",
       "totalTokens": "Total tokens used",
       "inputTokens": "Input tokens",
@@ -1137,7 +1198,7 @@
         "package": "Package",
         "version": "Version",
         "uptime": "Uptime",
-        "provider": "Provider",
+        "provider": "Coding agent",
         "model": "Model",
         "node": "Node.js",
         "platform": "Platform",
@@ -1153,7 +1214,7 @@
       "models": {
         "eyebrow": "Model inventory",
         "title": "Available models",
-        "subtitle": "Browse, search, and copy model IDs for the active provider."
+        "subtitle": "Browse, search, and copy model IDs for the active coding agent."
       },
       "cost": {
         "eyebrow": "Session telemetry",
@@ -1163,7 +1224,7 @@
       "status": {
         "eyebrow": "Runtime health",
         "title": "System status",
-        "subtitle": "Version, provider, runtime, and environment details in one place."
+        "subtitle": "Version, coding agent, runtime, and environment details in one place."
       }
     }
   },
@@ -1311,7 +1372,7 @@
     "errors": {
       "invalid_request": "Couldn't send the steer — invalid request.",
       "not_writable": "You don't have write access to this session.",
-      "steer_unsupported": "This provider doesn't support mid-turn steering.",
+      "steer_unsupported": "This coding agent doesn't support mid-turn steering.",
       "turn_not_active": "The turn ended before your steer arrived.",
       "starter_unknown": "This turn's owner is unknown, so it can't be steered.",
       "plan_mode": "Steering isn't available in plan mode.",
@@ -1459,7 +1520,7 @@
       "oneshot_in_progress": "This run is already in progress.",
       "oneshot_start_failed": "The server could not start the run.",
       "invalid_command": "The command is not valid.",
-      "provider_removed": "This terminal's provider was removed, so the run was stopped.",
+      "provider_removed": "This terminal's coding agent was removed, so the run was stopped.",
       "oneshot_ledger_unavailable": "The run ledger is temporarily unavailable; the command was not executed.",
       "unknown": "The server refused to run the command."
     },
@@ -1532,10 +1593,106 @@
       "budget_stop": "Delivered; the reply stopped at its cost limit.",
       "repaired_requeue": "Requeued after a server restart.",
       "unknown": "Reason code: {{code}}"
+    },
+    "hold": {
+      "heading": "Message from another member",
+      "headingHeld": "Message from another member awaiting your approval",
+      "unknownMember": "another member",
+      "from": "From",
+      "sessionWord": "session",
+      "to": "To session",
+      "modeLabel": "Last run mode",
+      "modeNote": "(this session's last run)",
+      "modeUnknown": "unknown",
+      "timeLeft": "{{hours}} and {{minutes}} left to decide (72-hour window in total).",
+      "timeUp": "The 72-hour window has ended; it expires now.",
+      "bodyNote": "Shown exactly as sent. Hidden characters appear as <token>⟨U+…⟩</token>. Links and formatting are not active.",
+      "deliver": "Deliver",
+      "reject": "Reject",
+      "confirmDeliverPrompt": "Deliver this message now? The session will act on it in the last run mode shown above.",
+      "confirmDeliver": "Confirm delivery",
+      "confirmReject": "Confirm rejection",
+      "reasonLabel": "Reason for the sender (optional, up to 200 characters)",
+      "reasonShown": "Reason:",
+      "cancel": "Cancel",
+      "sending": "Sending…",
+      "readOnly": "Only the owner of the receiving session can deliver or reject this message.",
+      "state": {
+        "held": "Awaiting approval",
+        "approved": "Approved · delivering",
+        "delivered": "Delivered",
+        "failed": "Delivery failed",
+        "rejected": "Rejected",
+        "expired": "Expired",
+        "cancelled": "Cancelled"
+      },
+      "outbound": {
+        "held": "Waiting for approval",
+        "heldNote": "The other member must approve it before it is delivered."
+      },
+      "cause": {
+        "rejected": "The receiving member rejected it.",
+        "expired": "Nobody decided within 72 hours.",
+        "sender_disabled": "The sender's account was disabled.",
+        "target_archived": "The receiving session was archived.",
+        "rehold": "The session's run mode or owner changed after approval, so it needs a new decision.",
+        "approval_expired": "It was approved but not delivered within 72 hours."
+      },
+      "error": {
+        "invalid_request": "The request was not accepted. Reload and try again.",
+        "platform_mode": "This server does not accept decisions in its current mode.",
+        "interactive_credential_required": "Decisions need a signed-in browser session, not an API key.",
+        "not_target_owner": "Only the owner of the receiving session can decide.",
+        "hold_not_found": "This message no longer exists.",
+        "hold_not_held": "This message was already decided. The card shows its current state.",
+        "stale_version": "The message changed since you opened it. Read the card again, then decide.",
+        "text_hash_mismatch": "The message text changed. Read the card again, then decide.",
+        "target_mode_changed": "The session's run mode changed. Check the new mode, then decide.",
+        "owner_changed": "The receiving session changed owner.",
+        "network": "The server could not be reached. Nothing was sent.",
+        "unknown": "The decision was refused (code: {{code}})."
+      },
+      "timeLeftMinutes": "{{minutes}} left to decide (72-hour window in total).",
+      "confirmRejectPrompt": "Reject this message? The sender sees that it was rejected, and the reason if you give one.",
+      "bodyLabel": "Message text",
+      "hiddenChar": "hidden character {{code}}",
+      "modes": {
+        "default": "Asks before each action",
+        "acceptEdits": "Accepts file edits",
+        "plan": "Plans only, no changes",
+        "bypassPermissions": "Skips every permission prompt",
+        "auto": "Decides permissions automatically"
+      }
+    },
+    "inbox": {
+      "button": "Messages awaiting your approval",
+      "buttonAria": "{{label}}: {{count}}",
+      "title": "Messages awaiting your approval",
+      "description": "Messages other members' sessions sent to your sessions. Nothing is delivered until you approve it.",
+      "empty": "No messages are waiting for you.",
+      "emptyAnnounce": "No messages are waiting for your approval."
     }
   },
   "syntheticMessage": {
     "label": "Message from a non-user source",
     "expand": "Show the delivered text"
+  },
+  "localModels": {
+    "blockHeading": "Local models · {{server}}",
+    "engineLine": "On your own server; no Anthropic account is used",
+    "serverName": "Your local server · {{server}}",
+    "deletedServer": "Deleted local server",
+    "engineShort": "Local",
+    "openSettings": "Server settings",
+    "blocked": {
+      "context_unknown": "Set the context window",
+      "context_too_small": "Needs at least 18,096 tokens",
+      "address_untested": "Re-test the connection",
+      "tls_name_requires_relay": "https with a host name is not supported yet; use http or an IP address",
+      "base_url_unsupported": "This server address is not supported; use a private address on your network",
+      "model_id_reserved": "This model id is reserved and cannot run on the Claude coding agent",
+      "new_chat_only": "Start a new chat",
+      "other_server": "Runs on another server; start a new chat"
+    }
   }
 }

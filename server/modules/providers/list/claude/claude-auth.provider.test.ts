@@ -24,7 +24,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { after, test } from 'node:test';
+import { after, test, mock } from 'node:test';
 
 const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-auth-b190-'));
 const sandboxHome = path.join(sandbox, 'home');
@@ -65,6 +65,24 @@ delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
 // Initialize a throwaway DB before importing the provider: its static import
 // chain (resolveProviderEnv -> provider-sharing -> database) must never touch the
 // real app DB.
+// ADR-152 A1 §3.4: a credential reader/writer needs a member. The resolver is
+// stubbed so member MEMBER maps onto this suite's sandbox tree, and any other
+// actor is refused exactly like the real resolver.
+const MEMBER = 7;
+{
+  const realResolver = await import('../../../../services/isolation/resolve-provider-env.js');
+  mock.module(new URL('../../../../services/isolation/resolve-provider-env.js', import.meta.url).href, {
+    namedExports: {
+      ...realResolver,
+      resolveProviderEnv: (actor: unknown, _provider: string, env: NodeJS.ProcessEnv = process.env) => {
+        if (actor !== MEMBER && actor !== String(MEMBER)) {
+          throw Object.assign(new Error('CREDENTIAL_ACTOR_REQUIRED'), { code: 'CREDENTIAL_ACTOR_REQUIRED', statusCode: 500 });
+        }
+        return { ...env, ...{ HOME: process.env.HOME, CLAUDE_CONFIG_DIR: process.env.CLAUDE_CONFIG_DIR ?? `${process.env.HOME}/.claude`, CODEX_HOME: process.env.CODEX_HOME ?? `${process.env.HOME}/.codex`, XDG_DATA_HOME: process.env.XDG_DATA_HOME ?? `${process.env.HOME}/.local/share`, XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME ?? `${process.env.HOME}/.config`, KIMI_CODE_HOME: `${process.env.HOME}/.kimi` } };
+      },
+    },
+  });
+}
 const { initializeDatabase, closeConnection } = await import('@/modules/database/index.js');
 initializeDatabase();
 
@@ -119,7 +137,7 @@ test('isInstalled() is false for a missing CLI and still emits no credential war
 
 test('getStatus() STILL logs the credential diagnostic for an expired token (diagnostic preserved)', async () => {
   process.env.CLAUDE_CLI_PATH = process.execPath;
-  const { result, warns } = await captureWarns(() => auth.getStatus());
+  const { result, warns } = await captureWarns(() => auth.getStatus(MEMBER));
   const status = result as { authenticated: boolean; installed: boolean };
   assert.equal(status.installed, true);
   assert.equal(status.authenticated, false, 'an expired token must report unauthenticated');
@@ -159,7 +177,7 @@ test('B-586: expired ACCESS token with a live refresh token stays connected', as
     refreshToken: 'test-refresh-token-not-real',
     refreshTokenExpiresAt: Date.now() + 13 * DAY,
   });
-  const { result } = await captureWarns(() => auth.getStatus());
+  const { result } = await captureWarns(() => auth.getStatus(MEMBER));
   const status = result as Status;
   assert.equal(status.authenticated, true, 'the CLI renews this silently — it is not expired');
   assert.equal(status.linkExpiry?.daysLeft, 13, 'the date is reported far out too, not only when close');
@@ -173,7 +191,7 @@ test('B-586: inside the 3-day window the link expiry surfaces, rounded up like t
     refreshToken: 'test-refresh-token-not-real',
     refreshTokenExpiresAt: linkExpiresAt,
   });
-  const { result } = await captureWarns(() => auth.getStatus());
+  const { result } = await captureWarns(() => auth.getStatus(MEMBER));
   const status = result as Status;
   assert.equal(status.authenticated, true, 'still usable until the moment it is not');
   assert.equal(status.linkExpiry?.daysLeft, 2, '1.2 days must ceil to 2, matching the CLI banner');
@@ -190,7 +208,7 @@ test('B-586: a past link stamp does NOT disconnect while the access token still 
     refreshToken: 'test-refresh-token-not-real',
     refreshTokenExpiresAt: Date.now() - 60_000,
   });
-  const { result } = await captureWarns(() => auth.getStatus());
+  const { result } = await captureWarns(() => auth.getStatus(MEMBER));
   const status = result as Status;
   assert.equal(status.authenticated, true, 'the access token has hours left: still usable');
   assert.equal(status.linkExpiry?.daysLeft, 0, 'warn at zero rather than break without notice');
@@ -203,7 +221,7 @@ test('B-586: both clocks run out and the credential is finally dead', async () =
     refreshToken: 'test-refresh-token-not-real',
     refreshTokenExpiresAt: Date.now() - 60_000,
   });
-  const { result, warns } = await captureWarns(() => auth.getStatus());
+  const { result, warns } = await captureWarns(() => auth.getStatus(MEMBER));
   assert.equal((result as Status).authenticated, false, 'no path left: /login is required');
   assert.match(warns.find((w) => w.includes(CRED_WARN))!, /link-expired/);
 });
@@ -218,18 +236,18 @@ test('B-586: the date keeps being reported on both sides of the warning window',
   // The server reports the moment; the client turns daysLeft into a tone. A
   // successful re-login must SHOW its new date, not make the line disappear.
   writeCreds({ ...base, refreshTokenExpiresAt: Date.now() + 3 * DAY - 60_000 });
-  const inside = (await captureWarns(() => auth.getStatus())).result as Status;
+  const inside = (await captureWarns(() => auth.getStatus(MEMBER))).result as Status;
   assert.equal(inside.linkExpiry?.daysLeft, 3, 'just inside three days');
 
   writeCreds({ ...base, refreshTokenExpiresAt: Date.now() + 30 * DAY });
-  const fresh = (await captureWarns(() => auth.getStatus())).result as Status;
+  const fresh = (await captureWarns(() => auth.getStatus(MEMBER))).result as Status;
   assert.equal(fresh.linkExpiry?.daysLeft, 30, 'a freshly renewed link reports its full term');
 });
 
 test('B-586: a blank refresh token counts as no refresh token', async () => {
   process.env.CLAUDE_CLI_PATH = process.execPath;
   writeCreds({ expiresAt: Date.now() - 60_000, refreshToken: '   ' });
-  const { result } = await captureWarns(() => auth.getStatus());
+  const { result } = await captureWarns(() => auth.getStatus(MEMBER));
   assert.equal((result as Status).authenticated, false, 'whitespace cannot renew anything');
 });
 
@@ -238,7 +256,7 @@ test('B-586: a zero expiresAt with no refresh token reads as dead, not as "never
   // The old `!expiresAt` guard treated the epoch stamp as "no expiry set" and
   // reported a dead credential as connected. Fail closed instead.
   writeCreds({ expiresAt: 0 });
-  const { result } = await captureWarns(() => auth.getStatus());
+  const { result } = await captureWarns(() => auth.getStatus(MEMBER));
   assert.equal((result as Status).authenticated, false);
 });
 
@@ -251,7 +269,7 @@ test('B-586: a credentials file at odds with itself warns about nothing', async 
     refreshToken: 'test-refresh-token-not-real',
     refreshTokenExpiresAt: Date.now() + DAY,
   });
-  const { result } = await captureWarns(() => auth.getStatus());
+  const { result } = await captureWarns(() => auth.getStatus(MEMBER));
   const status = result as Status;
   assert.equal(status.authenticated, true);
   assert.equal(status.linkExpiry, null, 'contradictory stamps must not produce a countdown');
@@ -260,7 +278,7 @@ test('B-586: a credentials file at odds with itself warns about nothing', async 
 test('B-586: an older credential without refreshTokenExpiresAt is left alone', async () => {
   process.env.CLAUDE_CLI_PATH = process.execPath;
   writeCreds({ expiresAt: Date.now() - 60_000, refreshToken: 'test-refresh-token-not-real' });
-  const { result } = await captureWarns(() => auth.getStatus());
+  const { result } = await captureWarns(() => auth.getStatus(MEMBER));
   const status = result as Status;
   assert.equal(status.authenticated, true, 'absence of the field is not evidence of death');
   assert.equal(status.linkExpiry, null);
@@ -284,7 +302,7 @@ test('B-586: a key-authenticated path never carries a link expiry', async () => 
   const settingsPath = path.join(configDir, 'settings.json');
   for (const key of ['ANTHROPIC_AUTH_TOKEN', 'CLAUDE_CODE_OAUTH_TOKEN']) {
     fs.writeFileSync(settingsPath, JSON.stringify({ env: { [key]: 'test-key-not-real' } }));
-    const { result } = await captureWarns(() => auth.getStatus());
+    const { result } = await captureWarns(() => auth.getStatus(MEMBER));
 
     const status = result as Status & { method: string | null };
     assert.equal(status.authenticated, true, `${key} should authenticate`);
@@ -300,7 +318,7 @@ test('B-586: an out-of-range stamp still names the real reason', async () => {
   // throw inside the try, and the catch relabelled a perfectly readable file as
   // "unreadable" — sending the operator after file permissions instead.
   writeCreds({ expiresAt: -1e308, refreshToken: '' });
-  const { result, warns } = await captureWarns(() => auth.getStatus());
+  const { result, warns } = await captureWarns(() => auth.getStatus(MEMBER));
 
   assert.equal((result as Status).authenticated, false, 'an epoch-negative stamp is expired');
   const line = warns.find((w) => w.includes(CRED_WARN));
@@ -316,9 +334,19 @@ test('B-586: non-numeric stamps read as absent rather than crashing', async () =
     refreshTokenExpiresAt: null,
     refreshToken: 'test-refresh-token-not-real',
   });
-  const { result } = await captureWarns(() => auth.getStatus());
+  const { result } = await captureWarns(() => auth.getStatus(MEMBER));
   const status = result as Status;
 
   assert.equal(status.authenticated, true, 'a junk stamp must not kill a live refresh token');
   assert.equal(status.linkExpiry, null, 'nothing known means nothing shown');
+});
+
+test('ADR-152 A1 §3.9: a status call with no member reads "not linked" and never the operator credential', async () => {
+  process.env.CLAUDE_CLI_PATH = process.execPath;
+  writeCreds({ refreshToken: 'operator-refresh', expiresAt: Date.now() + 3_600_000 });
+  for (const anonymous of [undefined, null]) {
+    const status = (await auth.getStatus(anonymous)) as Status & { error?: string };
+    assert.equal(status.authenticated, false, 'the operator credential is never reported as a member link');
+    assert.equal(status.error, 'Not linked');
+  }
 });

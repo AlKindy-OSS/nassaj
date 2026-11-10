@@ -60,7 +60,7 @@ const artifactPayload = {
 
 const expectedBodies = new Set([
   'claude', 'codex', 'cursor', 'antigravity', 'opencode', 'kimi',
-  'deepseek', 'glm', 'hermes', 'qwen', 'sakana',
+  'deepseek', 'glm', 'hermes', 'qwen', 'sakana', 'dsh',
 ]);
 const classifiedBodies = [
   ...capabilityArtifact.candidates.map(candidate => candidate.body),

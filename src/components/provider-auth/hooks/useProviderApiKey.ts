@@ -21,23 +21,11 @@ import type { LLMProvider } from '../../../types/app';
  * `/auth/status` so the connection badge flips (ADR-030).
  */
 
-/** Why the server would refuse a write from THIS caller. */
-export type CredentialWriteRefusal = 'shared_requires_admin';
-
 type ApiKeyStatusResponse = {
   success?: boolean;
   data?: {
     provider?: string;
     configured?: boolean;
-    /**
-     * B-362 — may THIS user write THIS slot. The capability descriptor cannot
-     * answer this (it is role-free by design), so without it the entry surface
-     * showed a field, a Save button and a "get a key" link to every member for
-     * the four opencode slots that default to `shared`, and only refused with
-     * 403 after they had bought a key and pasted it.
-     */
-    writable?: boolean;
-    reason?: CredentialWriteRefusal;
   };
   error?: string;
   message?: string;
@@ -59,23 +47,6 @@ export function useProviderApiKey(provider: LLMProvider, target?: string) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  /**
-   * `undefined` = not answered yet, or answered by a server that predates
-   * `writable` (B-367). `false` = this user may genuinely not write this slot.
-   *
-   * THE DISTINCTION IS THE WHOLE FIX. Collapsing "no answer" into "denied" made
-   * the client refuse EVERY slot the moment it shipped ahead of the server:
-   * `Boolean(undefined)` is `false`, so a deploy that rebuilt the client and not
-   * the server printed "you do not have permission" on all nine credentials —
-   * for the owner too — and left no way to add a key at all.
-   *
-   * A client that is newer than its server must degrade to the server's OLD
-   * behaviour, which was to allow the write and let the 403 speak. Locking
-   * everyone out is a worse failure than the one the flag prevents, and unlike
-   * it, it hits the operator.
-   */
-  const [writable, setWritable] = useState<boolean | undefined>(undefined);
-  const [writeRefusal, setWriteRefusal] = useState<CredentialWriteRefusal | null>(null);
 
   const endpoint = `/api/providers/${provider}/api-key`;
   const queryString = target ? `?target=${encodeURIComponent(target)}` : '';
@@ -91,10 +62,6 @@ export function useProviderApiKey(provider: LLMProvider, target?: string) {
       }
       const payload = (await response.json()) as ApiKeyStatusResponse;
       setConfigured(Boolean(payload.data?.configured));
-      // Absent stays absent — see the state declaration. Only an explicit
-      // `false` from a server that knows the field is a refusal.
-      setWritable(payload.data?.writable);
-      setWriteRefusal(payload.data?.reason ?? null);
     } catch {
       setError('Network error');
     } finally {
@@ -162,5 +129,5 @@ export function useProviderApiKey(provider: LLMProvider, target?: string) {
     }
   }, [endpoint, queryString]);
 
-  return { configured, loading, saving, error, writable, writeRefusal, refresh, saveKey, deleteKey };
+  return { configured, loading, saving, error, refresh, saveKey, deleteKey };
 }

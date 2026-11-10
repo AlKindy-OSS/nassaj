@@ -17,6 +17,9 @@
  * Runner: node:test + node:assert/strict via tsx.
  */
 
+// B-1771: FIRST import — HOME, CLAUDE_CONFIG_DIR and provider credential env move
+// into a sandbox, so an ad-hoc run cannot touch the operator's live logins.
+import '../../../shared/__tests__/sandbox-home.js';
 // T-1873: harness CLIs resolve to sandbox stubs, never the host's installs.
 import '../../../shared/__tests__/stub-harness-binaries.js';
 import assert from 'node:assert/strict';
@@ -64,18 +67,16 @@ mock.module('node:child_process', {
   defaultExport: { ...realChildProcess.default, spawn: fakeSpawn },
 });
 
-// The policy's KNOWN_PROVIDERS list is made mutable so the negative case can take
-// a provider OUT of the isolation policy — the real path to an AppError refusal.
-const realSharing = await import('@/services/provider-sharing.js');
-const knownProviders = [...realSharing.KNOWN_PROVIDERS];
-mock.module(new URL('../../../services/provider-sharing.js', import.meta.url).href, {
-  namedExports: { ...realSharing, KNOWN_PROVIDERS: knownProviders },
+// KNOWN_PROVIDERS is made mutable so the negative case can take a provider OUT of
+// the isolation seam — the real path to an AppError refusal.
+const realKnown = await import('@/services/isolation/known-providers.js');
+const knownProviders = [...realKnown.KNOWN_PROVIDERS];
+mock.module(new URL('../../../services/isolation/known-providers.js', import.meta.url).href, {
+  namedExports: { KNOWN_PROVIDERS: knownProviders },
 });
 
 const { initializeDatabase, closeConnection } = await import('@/modules/database/index.js');
 initializeDatabase();
-realSharing._resetProviderSharingCache();
-realSharing.setProviderSharingConfig({ agy: 'isolated', opencode: 'isolated' });
 
 const { AntigravityProviderModels } = await import('./antigravity/antigravity-models.provider.js');
 const { __resetAgyModelsCliCircuit } = await import('./antigravity/antigravity-models-cli.client.js');
@@ -141,11 +142,10 @@ test('B-1284: `opencode models` runs under each member\'s own XDG data home, wit
   assert.equal(firstEnv.JWT_SECRET, undefined, 'B-1375: JWT_SECRET must never reach the probe');
 });
 
-test('B-1284: the operator probe (null, stated explicitly) keeps the operator HOME but still drops host secrets', async () => {
-  await antigravity.getSupportedModels(null);
-  const env = onlySpawnEnv();
-  assert.equal(env.HOME, process.env.HOME);
-  assert.equal(env.JWT_SECRET, undefined);
+test('B-1284 / ADR-152 A1: a probe with no member spawns nothing and degrades (no operator HOME)', async () => {
+  const catalog = await antigravity.getSupportedModels(null);
+  assert.equal(spawns.length, 0, 'no probe child runs on the operator tree');
+  assert.equal(catalog.degraded, true);
 });
 
 test('B-1284 fail-closed: isolation unavailable → degraded fallback, no spawn, no fetch, no operator env', async () => {
@@ -164,14 +164,10 @@ test('B-1284 fail-closed: isolation unavailable → degraded fallback, no spawn,
   }
 });
 
-test('B-1284: a shared (admin policy) provider deliberately probes on the operator env, like its spawn', async () => {
-  try {
-    realSharing.setProviderSharingConfig({ agy: 'shared', opencode: 'isolated' });
-    await antigravity.getSupportedModels(1);
-    const env = onlySpawnEnv();
-    assert.equal(env.HOME, process.env.HOME, 'shared means the operator tree, by the admin\'s choice');
-    assert.equal(env.JWT_SECRET, undefined);
-  } finally {
-    realSharing.setProviderSharingConfig({ agy: 'isolated', opencode: 'isolated' });
-  }
+test('B-1284 / ADR-152 A1: a member\'s agy probe never runs on the operator tree', async () => {
+  await antigravity.getSupportedModels(1);
+  const env = onlySpawnEnv();
+  assert.notEqual(env.HOME, process.env.HOME, 'no sharing policy can hand a member the operator tree');
+  assert.ok(String(env.HOME).includes(`${path.sep}.nassaj-users${path.sep}1`), `member tree expected, got ${env.HOME}`);
+  assert.equal(env.JWT_SECRET, undefined);
 });

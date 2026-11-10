@@ -90,35 +90,61 @@ const openOpenCodeDatabase = (sessionId: string): OpenedOpenCodeDatabase | null 
   return { db: new Database(dbPath, { readonly: true, fileMustExist: true }), dbPath };
 };
 
-/**
- * OpenCode can persist the first prompt as a JSON string literal inside a text
- * part, for example `"hello"` instead of `hello`. Decode only complete JSON
- * string literals so normal assistant/user prose remains untouched.
- */
-const unwrapJsonStringLiteral = (value: string): string => {
-  const trimmed = value.trim();
-  if (!trimmed.startsWith('"') || !trimmed.endsWith('"')) {
-    return value;
-  }
+/** OpenCode's `run` quoting of one argument: `"…"` with each `"` as `\"`. */
+const quoteOpenCodeRunArgument = (text: string): string => `"${text.replace(/"/g, '\\"')}"`;
 
-  try {
-    const parsed = JSON.parse(trimmed);
-    return typeof parsed === 'string' ? parsed : value;
-  } catch {
-    return value;
-  }
+/**
+ * B-1750: `opencode run` stores an argument that holds a space as `"…"`, with
+ * each inner `"` written `\"` and backslashes left as they are. This is the
+ * exact inverse: the text is unwrapped only when quoting the result again
+ * reproduces it byte for byte, so a user's own backslashes survive and text
+ * OpenCode did not wrap is returned unchanged. JSON decoding is wrong here: it
+ * throws on raw newlines and would rewrite `\n` or `\\` the user typed.
+ */
+export const unwrapOpenCodeRunArgument = (value: string): string => {
+  if (value.length < 2 || !value.startsWith('"') || !value.endsWith('"')) return value;
+  const inner = value.slice(1, -1).replace(/\\"/g, '"');
+  return inner.includes(' ') && quoteOpenCodeRunArgument(inner) === value ? inner : value;
 };
 
 const extractText = (value: unknown): string => {
   if (typeof value === 'string') {
-    return unwrapJsonStringLiteral(value);
+    return unwrapOpenCodeRunArgument(value);
   }
 
   const record = readObjectRecord(value);
   const text = readOptionalString(record?.text)
     ?? readOptionalString(record?.content)
     ?? '';
-  return unwrapJsonStringLiteral(text);
+  return unwrapOpenCodeRunArgument(text);
+};
+
+/**
+ * B-1756: an assistant message OpenCode wrote to compact the context
+ * (`mode`/`agent` "compaction"). Its text is OpenCode's own summary for the
+ * model, not a reply; an error recorded on it is still shown.
+ */
+const isCompactionMessage = (info: AnyRecord | null | undefined): boolean =>
+  readOptionalString(info?.role) === 'assistant'
+  && (readOptionalString(info?.mode) === 'compaction' || readOptionalString(info?.agent) === 'compaction');
+
+/**
+ * B-1756: a user part OpenCode generated itself (`synthetic`, or the prompt it
+ * adds after a compaction), never typed by the user.
+ */
+const isSyntheticUserPart = (role: string | undefined, part: AnyRecord): boolean =>
+  role === 'user'
+  && (part.synthetic === true || readObjectRecord(part.metadata)?.compaction_continue === true);
+
+/**
+ * B-1751: real `opencode run --format json` lines carry the message and part
+ * ids only under `part`. History names the same part `${message_id}_${part_id}`,
+ * so the live row gets that id and the client can match the two.
+ */
+const livePartHistoryId = (part: AnyRecord | null | undefined): string | undefined => {
+  const messageId = readOptionalString(part?.messageID);
+  const partId = readOptionalString(part?.id);
+  return messageId && partId ? `${messageId}_${partId}` : undefined;
 };
 
 const hasUserRole = (value: unknown): boolean => {
@@ -336,7 +362,9 @@ export class OpenCodeSessionsProvider implements IProviderSessions {
     const type = readOptionalString(raw.type) ?? readOptionalString(raw.event);
     const eventSessionId = readOptionalString(raw.sessionID) ?? readOptionalString(raw.sessionId) ?? sessionId;
     const timestamp = normalizeProviderTimestamp(raw.time ?? raw.timestamp);
-    const baseId = readOptionalString(raw.id)
+    const part = readObjectRecord(raw.part);
+    const baseId = livePartHistoryId(part)
+      ?? readOptionalString(raw.id)
       ?? readOptionalString(raw.messageID)
       ?? generateMessageId('opencode');
 
@@ -367,7 +395,7 @@ export class OpenCodeSessionsProvider implements IProviderSessions {
         provider: PROVIDER,
         kind: 'stream_delta',
         content,
-        model: readResponseModel(raw.modelID ?? raw.message?.modelID),
+        model: readResponseModel(raw.modelID ?? raw.message?.modelID ?? part?.modelID),
       })];
     }
 
@@ -588,6 +616,10 @@ export class OpenCodeSessionsProvider implements IProviderSessions {
       const partData = readJsonRecord(row.part_data) ?? {};
       const partType = readOptionalString(partData.type);
       if (!partType) {
+        continue;
+      }
+
+      if (isCompactionMessage(messageInfo) || isSyntheticUserPart(messageRole, partData)) {
         continue;
       }
 

@@ -1,0 +1,1337 @@
+{
+ "withNassajLayer": [
+  {
+   "endpoint": "nassaj-pinned",
+   "method": "POST",
+   "url": "/v1/messages",
+   "headers": {
+    "host": "<FAKE_LLM_HOST>",
+    "user-agent": "deepseek-harness/0.2.2-rc.1 (+https://github.com/deepseek-ai/deepseek-harness)",
+    "content-type": "application/json",
+    "accept": "text/event-stream",
+    "x-api-key": "<FAKE_DEEPSEEK_KEY>",
+    "anthropic-version": "2023-06-01",
+    "x-deepseek-harness-user-id": "<UUID_6>",
+    "x-deepseek-harness-session-id": "<DSH_SESSION_ID>",
+    "accept-language": "*",
+    "sec-fetch-mode": "cors",
+    "accept-encoding": "gzip, deflate"
+   },
+   "bodyKeys": [
+    "model",
+    "stream",
+    "messages",
+    "max_tokens",
+    "thinking",
+    "output_config",
+    "system",
+    "tools"
+   ],
+   "body": {
+    "model": "deepseek-v4-pro",
+    "stream": true,
+    "messages": [
+     {
+      "role": "user",
+      "content": [
+       {
+        "type": "text",
+        "text": "hello there"
+       },
+       {
+        "type": "text",
+        "text": "Current runtime context. This snapshot supersedes earlier runtime-context snapshots.\n\nCurrent working directory: \"<WORKSPACE>\".\n\nCurrent DSH file policy: workspace-write. Any available operation enforced by the DSH file sandbox may modify files under the session workspace: \"<WORKSPACE>\". Some platform temporary areas may also be writable.\n\nApproval prompts are enabled in this session: operations that require approval may ask through the configured answerers; without an available answerer, the request fails closed."
+       }
+      ]
+     }
+    ],
+    "max_tokens": 256000,
+    "thinking": {
+     "type": "enabled"
+    },
+    "output_config": {
+     "effort": "high"
+    },
+    "systemSha256": "14fe02f4a5a3b5a7",
+    "toolNames": [
+     "bash",
+     "create_goal",
+     "edit",
+     "get_goal",
+     "glob",
+     "grep",
+     "interrupt_agent",
+     "job_kill",
+     "job_list",
+     "job_output",
+     "list_agents",
+     "read",
+     "read_image",
+     "send_message",
+     "skill",
+     "subagent",
+     "subagent_fork",
+     "todo_write",
+     "update_goal",
+     "web_fetch",
+     "web_search",
+     "workflow",
+     "working_directory",
+     "write"
+    ]
+   }
+  },
+  {
+   "endpoint": "nassaj-pinned",
+   "method": "POST",
+   "url": "/v1/messages",
+   "headers": {
+    "host": "<FAKE_LLM_HOST>",
+    "user-agent": "deepseek-harness/0.2.2-rc.1 (+https://github.com/deepseek-ai/deepseek-harness)",
+    "content-type": "application/json",
+    "accept": "text/event-stream",
+    "x-api-key": "<FAKE_DEEPSEEK_KEY>",
+    "anthropic-version": "2023-06-01",
+    "x-deepseek-harness-user-id": "<UUID_6>",
+    "x-deepseek-harness-session-id": "<DSH_SESSION_ID>",
+    "accept-language": "*",
+    "sec-fetch-mode": "cors",
+    "accept-encoding": "gzip, deflate"
+   },
+   "bodyKeys": [
+    "model",
+    "stream",
+    "messages",
+    "max_tokens",
+    "thinking",
+    "output_config",
+    "system",
+    "tools"
+   ],
+   "body": {
+    "model": "deepseek-v4-pro",
+    "stream": true,
+    "messages": [
+     {
+      "role": "user",
+      "content": [
+       {
+        "type": "text",
+        "text": "hello there"
+       },
+       {
+        "type": "text",
+        "text": "Current runtime context. This snapshot supersedes earlier runtime-context snapshots.\n\nCurrent working directory: \"<WORKSPACE>\".\n\nCurrent DSH file policy: workspace-write. Any available operation enforced by the DSH file sandbox may modify files under the session workspace: \"<WORKSPACE>\". Some platform temporary areas may also be writable.\n\nApproval prompts are enabled in this session: operations that require approval may ask through the configured answerers; without an available answerer, the request fails closed."
+       }
+      ]
+     },
+     {
+      "role": "assistant",
+      "content": [
+       {
+        "type": "text",
+        "text": "Hello from fake DeepSeek: hello thereCurrent runtime context. Thi"
+       }
+      ]
+     },
+     {
+      "role": "user",
+      "content": [
+       {
+        "type": "text",
+        "text": "NASSAJ_TOOL {\"name\":\"write\",\"input\":{\"file_path\":\"<OUTSIDE>/approved.txt\",\"content\":\"approved\",\"sandbox_permissions\":\"danger-full-access\",\"justification\":\"Test escalation outside the workspace.\"}}"
+       }
+      ]
+     }
+    ],
+    "max_tokens": 256000,
+    "thinking": {
+     "type": "enabled"
+    },
+    "output_config": {
+     "effort": "high"
+    },
+    "systemSha256": "14fe02f4a5a3b5a7",
+    "toolNames": [
+     "bash",
+     "create_goal",
+     "edit",
+     "get_goal",
+     "glob",
+     "grep",
+     "interrupt_agent",
+     "job_kill",
+     "job_list",
+     "job_output",
+     "list_agents",
+     "read",
+     "read_image",
+     "send_message",
+     "skill",
+     "subagent",
+     "subagent_fork",
+     "todo_write",
+     "update_goal",
+     "web_fetch",
+     "web_search",
+     "workflow",
+     "working_directory",
+     "write"
+    ]
+   }
+  },
+  {
+   "endpoint": "nassaj-pinned",
+   "method": "POST",
+   "url": "/v1/messages",
+   "headers": {
+    "host": "<FAKE_LLM_HOST>",
+    "user-agent": "deepseek-harness/0.2.2-rc.1 (+https://github.com/deepseek-ai/deepseek-harness)",
+    "content-type": "application/json",
+    "accept": "text/event-stream",
+    "x-api-key": "<FAKE_DEEPSEEK_KEY>",
+    "anthropic-version": "2023-06-01",
+    "x-deepseek-harness-user-id": "<UUID_6>",
+    "x-deepseek-harness-session-id": "<DSH_SESSION_ID>",
+    "accept-language": "*",
+    "sec-fetch-mode": "cors",
+    "accept-encoding": "gzip, deflate"
+   },
+   "bodyKeys": [
+    "model",
+    "stream",
+    "messages",
+    "max_tokens",
+    "thinking",
+    "output_config",
+    "system",
+    "tools"
+   ],
+   "body": {
+    "model": "deepseek-v4-pro",
+    "stream": true,
+    "messages": [
+     {
+      "role": "user",
+      "content": [
+       {
+        "type": "text",
+        "text": "hello there"
+       },
+       {
+        "type": "text",
+        "text": "Current runtime context. This snapshot supersedes earlier runtime-context snapshots.\n\nCurrent working directory: \"<WORKSPACE>\".\n\nCurrent DSH file policy: workspace-write. Any available operation enforced by the DSH file sandbox may modify files under the session workspace: \"<WORKSPACE>\". Some platform temporary areas may also be writable.\n\nApproval prompts are enabled in this session: operations that require approval may ask through the configured answerers; without an available answerer, the request fails closed."
+       }
+      ]
+     },
+     {
+      "role": "assistant",
+      "content": [
+       {
+        "type": "text",
+        "text": "Hello from fake DeepSeek: hello thereCurrent runtime context. Thi"
+       }
+      ]
+     },
+     {
+      "role": "user",
+      "content": [
+       {
+        "type": "text",
+        "text": "NASSAJ_TOOL {\"name\":\"write\",\"input\":{\"file_path\":\"<OUTSIDE>/approved.txt\",\"content\":\"approved\",\"sandbox_permissions\":\"danger-full-access\",\"justification\":\"Test escalation outside the workspace.\"}}"
+       }
+      ]
+     },
+     {
+      "role": "assistant",
+      "content": [
+       {
+        "type": "tool_use",
+        "id": "toolu_fake_2",
+        "name": "write",
+        "input": {
+         "file_path": "<OUTSIDE>/approved.txt",
+         "content": "approved",
+         "sandbox_permissions": "danger-full-access",
+         "justification": "Test escalation outside the workspace."
+        }
+       }
+      ]
+     },
+     {
+      "role": "user",
+      "content": [
+       {
+        "type": "tool_result",
+        "tool_use_id": "toolu_fake_2",
+        "content": [
+         {
+          "type": "text",
+          "text": "<path><OUTSIDE>/approved.txt</path>\n<type>file</type>\n<content>\nCreated file\n</content>"
+         }
+        ],
+        "is_error": false
+       }
+      ]
+     }
+    ],
+    "max_tokens": 256000,
+    "thinking": {
+     "type": "enabled"
+    },
+    "output_config": {
+     "effort": "high"
+    },
+    "systemSha256": "14fe02f4a5a3b5a7",
+    "toolNames": [
+     "bash",
+     "create_goal",
+     "edit",
+     "get_goal",
+     "glob",
+     "grep",
+     "interrupt_agent",
+     "job_kill",
+     "job_list",
+     "job_output",
+     "list_agents",
+     "read",
+     "read_image",
+     "send_message",
+     "skill",
+     "subagent",
+     "subagent_fork",
+     "todo_write",
+     "update_goal",
+     "web_fetch",
+     "web_search",
+     "workflow",
+     "working_directory",
+     "write"
+    ]
+   }
+  },
+  {
+   "endpoint": "nassaj-pinned",
+   "method": "POST",
+   "url": "/v1/messages",
+   "headers": {
+    "host": "<FAKE_LLM_HOST>",
+    "user-agent": "deepseek-harness/0.2.2-rc.1 (+https://github.com/deepseek-ai/deepseek-harness)",
+    "content-type": "application/json",
+    "accept": "text/event-stream",
+    "x-api-key": "<FAKE_DEEPSEEK_KEY>",
+    "anthropic-version": "2023-06-01",
+    "x-deepseek-harness-user-id": "<UUID_6>",
+    "x-deepseek-harness-session-id": "<DSH_SESSION_ID>",
+    "accept-language": "*",
+    "sec-fetch-mode": "cors",
+    "accept-encoding": "gzip, deflate"
+   },
+   "bodyKeys": [
+    "model",
+    "stream",
+    "messages",
+    "max_tokens",
+    "thinking",
+    "output_config",
+    "system",
+    "tools"
+   ],
+   "body": {
+    "model": "deepseek-v4-pro",
+    "stream": true,
+    "messages": [
+     {
+      "role": "user",
+      "content": [
+       {
+        "type": "text",
+        "text": "hello there"
+       },
+       {
+        "type": "text",
+        "text": "Current runtime context. This snapshot supersedes earlier runtime-context snapshots.\n\nCurrent working directory: \"<WORKSPACE>\".\n\nCurrent DSH file policy: workspace-write. Any available operation enforced by the DSH file sandbox may modify files under the session workspace: \"<WORKSPACE>\". Some platform temporary areas may also be writable.\n\nApproval prompts are enabled in this session: operations that require approval may ask through the configured answerers; without an available answerer, the request fails closed."
+       }
+      ]
+     },
+     {
+      "role": "assistant",
+      "content": [
+       {
+        "type": "text",
+        "text": "Hello from fake DeepSeek: hello thereCurrent runtime context. Thi"
+       }
+      ]
+     },
+     {
+      "role": "user",
+      "content": [
+       {
+        "type": "text",
+        "text": "NASSAJ_TOOL {\"name\":\"write\",\"input\":{\"file_path\":\"<OUTSIDE>/approved.txt\",\"content\":\"approved\",\"sandbox_permissions\":\"danger-full-access\",\"justification\":\"Test escalation outside the workspace.\"}}"
+       }
+      ]
+     },
+     {
+      "role": "assistant",
+      "content": [
+       {
+        "type": "tool_use",
+        "id": "toolu_fake_2",
+        "name": "write",
+        "input": {
+         "file_path": "<OUTSIDE>/approved.txt",
+         "content": "approved",
+         "sandbox_permissions": "danger-full-access",
+         "justification": "Test escalation outside the workspace."
+        }
+       }
+      ]
+     },
+     {
+      "role": "user",
+      "content": [
+       {
+        "type": "tool_result",
+        "tool_use_id": "toolu_fake_2",
+        "content": [
+         {
+          "type": "text",
+          "text": "<path><OUTSIDE>/approved.txt</path>\n<type>file</type>\n<content>\nCreated file\n</content>"
+         }
+        ],
+        "is_error": false
+       }
+      ]
+     },
+     {
+      "role": "assistant",
+      "content": [
+       {
+        "type": "text",
+        "text": "Tool step finished."
+       }
+      ]
+     },
+     {
+      "role": "user",
+      "content": [
+       {
+        "type": "text",
+        "text": "NASSAJ_TOOL {\"name\":\"write\",\"input\":{\"file_path\":\"<OUTSIDE>/rejected.txt\",\"content\":\"rejected\",\"sandbox_permissions\":\"danger-full-access\",\"justification\":\"Test escalation outside the workspace.\"}}"
+       }
+      ]
+     }
+    ],
+    "max_tokens": 256000,
+    "thinking": {
+     "type": "enabled"
+    },
+    "output_config": {
+     "effort": "high"
+    },
+    "systemSha256": "14fe02f4a5a3b5a7",
+    "toolNames": [
+     "bash",
+     "create_goal",
+     "edit",
+     "get_goal",
+     "glob",
+     "grep",
+     "interrupt_agent",
+     "job_kill",
+     "job_list",
+     "job_output",
+     "list_agents",
+     "read",
+     "read_image",
+     "send_message",
+     "skill",
+     "subagent",
+     "subagent_fork",
+     "todo_write",
+     "update_goal",
+     "web_fetch",
+     "web_search",
+     "workflow",
+     "working_directory",
+     "write"
+    ]
+   }
+  },
+  {
+   "endpoint": "nassaj-pinned",
+   "method": "POST",
+   "url": "/v1/messages",
+   "headers": {
+    "host": "<FAKE_LLM_HOST>",
+    "user-agent": "deepseek-harness/0.2.2-rc.1 (+https://github.com/deepseek-ai/deepseek-harness)",
+    "content-type": "application/json",
+    "accept": "text/event-stream",
+    "x-api-key": "<FAKE_DEEPSEEK_KEY>",
+    "anthropic-version": "2023-06-01",
+    "x-deepseek-harness-user-id": "<UUID_6>",
+    "x-deepseek-harness-session-id": "<DSH_SESSION_ID>",
+    "accept-language": "*",
+    "sec-fetch-mode": "cors",
+    "accept-encoding": "gzip, deflate"
+   },
+   "bodyKeys": [
+    "model",
+    "stream",
+    "messages",
+    "max_tokens",
+    "thinking",
+    "output_config",
+    "system",
+    "tools"
+   ],
+   "body": {
+    "model": "deepseek-v4-pro",
+    "stream": true,
+    "messages": [
+     {
+      "role": "user",
+      "content": [
+       {
+        "type": "text",
+        "text": "hello there"
+       },
+       {
+        "type": "text",
+        "text": "Current runtime context. This snapshot supersedes earlier runtime-context snapshots.\n\nCurrent working directory: \"<WORKSPACE>\".\n\nCurrent DSH file policy: workspace-write. Any available operation enforced by the DSH file sandbox may modify files under the session workspace: \"<WORKSPACE>\". Some platform temporary areas may also be writable.\n\nApproval prompts are enabled in this session: operations that require approval may ask through the configured answerers; without an available answerer, the request fails closed."
+       }
+      ]
+     },
+     {
+      "role": "assistant",
+      "content": [
+       {
+        "type": "text",
+        "text": "Hello from fake DeepSeek: hello thereCurrent runtime context. Thi"
+       }
+      ]
+     },
+     {
+      "role": "user",
+      "content": [
+       {
+        "type": "text",
+        "text": "NASSAJ_TOOL {\"name\":\"write\",\"input\":{\"file_path\":\"<OUTSIDE>/approved.txt\",\"content\":\"approved\",\"sandbox_permissions\":\"danger-full-access\",\"justification\":\"Test escalation outside the workspace.\"}}"
+       }
+      ]
+     },
+     {
+      "role": "assistant",
+      "content": [
+       {
+        "type": "tool_use",
+        "id": "toolu_fake_2",
+        "name": "write",
+        "input": {
+         "file_path": "<OUTSIDE>/approved.txt",
+         "content": "approved",
+         "sandbox_permissions": "danger-full-access",
+         "justification": "Test escalation outside the workspace."
+        }
+       }
+      ]
+     },
+     {
+      "role": "user",
+      "content": [
+       {
+        "type": "tool_result",
+        "tool_use_id": "toolu_fake_2",
+        "content": [
+         {
+          "type": "text",
+          "text": "<path><OUTSIDE>/approved.txt</path>\n<type>file</type>\n<content>\nCreated file\n</content>"
+         }
+        ],
+        "is_error": false
+       }
+      ]
+     },
+     {
+      "role": "assistant",
+      "content": [
+       {
+        "type": "text",
+        "text": "Tool step finished."
+       }
+      ]
+     },
+     {
+      "role": "user",
+      "content": [
+       {
+        "type": "text",
+        "text": "NASSAJ_TOOL {\"name\":\"write\",\"input\":{\"file_path\":\"<OUTSIDE>/rejected.txt\",\"content\":\"rejected\",\"sandbox_permissions\":\"danger-full-access\",\"justification\":\"Test escalation outside the workspace.\"}}"
+       }
+      ]
+     },
+     {
+      "role": "assistant",
+      "content": [
+       {
+        "type": "tool_use",
+        "id": "toolu_fake_4",
+        "name": "write",
+        "input": {
+         "file_path": "<OUTSIDE>/rejected.txt",
+         "content": "rejected",
+         "sandbox_permissions": "danger-full-access",
+         "justification": "Test escalation outside the workspace."
+        }
+       }
+      ]
+     },
+     {
+      "role": "user",
+      "content": [
+       {
+        "type": "tool_result",
+        "tool_use_id": "toolu_fake_4",
+        "content": [
+         {
+          "type": "text",
+          "text": "Error: the user rejected escalating this operation to \"danger-full-access\"; it stays denied, so stop and explain instead of working around it"
+         }
+        ],
+        "is_error": true
+       }
+      ]
+     }
+    ],
+    "max_tokens": 256000,
+    "thinking": {
+     "type": "enabled"
+    },
+    "output_config": {
+     "effort": "high"
+    },
+    "systemSha256": "14fe02f4a5a3b5a7",
+    "toolNames": [
+     "bash",
+     "create_goal",
+     "edit",
+     "get_goal",
+     "glob",
+     "grep",
+     "interrupt_agent",
+     "job_kill",
+     "job_list",
+     "job_output",
+     "list_agents",
+     "read",
+     "read_image",
+     "send_message",
+     "skill",
+     "subagent",
+     "subagent_fork",
+     "todo_write",
+     "update_goal",
+     "web_fetch",
+     "web_search",
+     "workflow",
+     "working_directory",
+     "write"
+    ]
+   }
+  },
+  {
+   "endpoint": "nassaj-pinned",
+   "method": "POST",
+   "url": "/v1/messages",
+   "headers": {
+    "host": "<FAKE_LLM_HOST>",
+    "user-agent": "deepseek-harness/0.2.2-rc.1 (+https://github.com/deepseek-ai/deepseek-harness)",
+    "content-type": "application/json",
+    "accept": "text/event-stream",
+    "x-api-key": "<FAKE_DEEPSEEK_KEY>",
+    "anthropic-version": "2023-06-01",
+    "x-deepseek-harness-user-id": "<UUID_6>",
+    "x-deepseek-harness-session-id": "<DSH_SESSION_ID>",
+    "accept-language": "*",
+    "sec-fetch-mode": "cors",
+    "accept-encoding": "gzip, deflate"
+   },
+   "bodyKeys": [
+    "model",
+    "stream",
+    "messages",
+    "max_tokens",
+    "thinking",
+    "output_config",
+    "system",
+    "tools"
+   ],
+   "body": {
+    "model": "deepseek-v4-pro",
+    "stream": true,
+    "messages": [
+     {
+      "role": "user",
+      "content": [
+       {
+        "type": "text",
+        "text": "hello there"
+       },
+       {
+        "type": "text",
+        "text": "Current runtime context. This snapshot supersedes earlier runtime-context snapshots.\n\nCurrent working directory: \"<WORKSPACE>\".\n\nCurrent DSH file policy: workspace-write. Any available operation enforced by the DSH file sandbox may modify files under the session workspace: \"<WORKSPACE>\". Some platform temporary areas may also be writable.\n\nApproval prompts are enabled in this session: operations that require approval may ask through the configured answerers; without an available answerer, the request fails closed."
+       }
+      ]
+     },
+     {
+      "role": "assistant",
+      "content": [
+       {
+        "type": "text",
+        "text": "Hello from fake DeepSeek: hello thereCurrent runtime context. Thi"
+       }
+      ]
+     },
+     {
+      "role": "user",
+      "content": [
+       {
+        "type": "text",
+        "text": "NASSAJ_TOOL {\"name\":\"write\",\"input\":{\"file_path\":\"<OUTSIDE>/approved.txt\",\"content\":\"approved\",\"sandbox_permissions\":\"danger-full-access\",\"justification\":\"Test escalation outside the workspace.\"}}"
+       }
+      ]
+     },
+     {
+      "role": "assistant",
+      "content": [
+       {
+        "type": "tool_use",
+        "id": "toolu_fake_2",
+        "name": "write",
+        "input": {
+         "file_path": "<OUTSIDE>/approved.txt",
+         "content": "approved",
+         "sandbox_permissions": "danger-full-access",
+         "justification": "Test escalation outside the workspace."
+        }
+       }
+      ]
+     },
+     {
+      "role": "user",
+      "content": [
+       {
+        "type": "tool_result",
+        "tool_use_id": "toolu_fake_2",
+        "content": [
+         {
+          "type": "text",
+          "text": "<path><OUTSIDE>/approved.txt</path>\n<type>file</type>\n<content>\nCreated file\n</content>"
+         }
+        ],
+        "is_error": false
+       }
+      ]
+     },
+     {
+      "role": "assistant",
+      "content": [
+       {
+        "type": "text",
+        "text": "Tool step finished."
+       }
+      ]
+     },
+     {
+      "role": "user",
+      "content": [
+       {
+        "type": "text",
+        "text": "NASSAJ_TOOL {\"name\":\"write\",\"input\":{\"file_path\":\"<OUTSIDE>/rejected.txt\",\"content\":\"rejected\",\"sandbox_permissions\":\"danger-full-access\",\"justification\":\"Test escalation outside the workspace.\"}}"
+       }
+      ]
+     },
+     {
+      "role": "assistant",
+      "content": [
+       {
+        "type": "tool_use",
+        "id": "toolu_fake_4",
+        "name": "write",
+        "input": {
+         "file_path": "<OUTSIDE>/rejected.txt",
+         "content": "rejected",
+         "sandbox_permissions": "danger-full-access",
+         "justification": "Test escalation outside the workspace."
+        }
+       }
+      ]
+     },
+     {
+      "role": "user",
+      "content": [
+       {
+        "type": "tool_result",
+        "tool_use_id": "toolu_fake_4",
+        "content": [
+         {
+          "type": "text",
+          "text": "Error: the user rejected escalating this operation to \"danger-full-access\"; it stays denied, so stop and explain instead of working around it"
+         }
+        ],
+        "is_error": true
+       }
+      ]
+     },
+     {
+      "role": "assistant",
+      "content": [
+       {
+        "type": "text",
+        "text": "Tool step finished."
+       }
+      ]
+     },
+     {
+      "role": "user",
+      "content": [
+       {
+        "type": "text",
+        "text": "NASSAJ_TOOL {\"name\":\"bash\",\"input\":{\"description\":\"Check other harnesses\",\"command\":\"command -v claude codex dsh node; echo PATH=$PATH; echo HOME=$HOME\"}}"
+       }
+      ]
+     }
+    ],
+    "max_tokens": 256000,
+    "thinking": {
+     "type": "enabled"
+    },
+    "output_config": {
+     "effort": "high"
+    },
+    "systemSha256": "14fe02f4a5a3b5a7",
+    "toolNames": [
+     "bash",
+     "create_goal",
+     "edit",
+     "get_goal",
+     "glob",
+     "grep",
+     "interrupt_agent",
+     "job_kill",
+     "job_list",
+     "job_output",
+     "list_agents",
+     "read",
+     "read_image",
+     "send_message",
+     "skill",
+     "subagent",
+     "subagent_fork",
+     "todo_write",
+     "update_goal",
+     "web_fetch",
+     "web_search",
+     "workflow",
+     "working_directory",
+     "write"
+    ]
+   }
+  },
+  {
+   "endpoint": "nassaj-pinned",
+   "method": "POST",
+   "url": "/v1/messages",
+   "headers": {
+    "host": "<FAKE_LLM_HOST>",
+    "user-agent": "deepseek-harness/0.2.2-rc.1 (+https://github.com/deepseek-ai/deepseek-harness)",
+    "content-type": "application/json",
+    "accept": "text/event-stream",
+    "x-api-key": "<FAKE_DEEPSEEK_KEY>",
+    "anthropic-version": "2023-06-01",
+    "x-deepseek-harness-user-id": "<UUID_6>",
+    "x-deepseek-harness-session-id": "<DSH_SESSION_ID>",
+    "accept-language": "*",
+    "sec-fetch-mode": "cors",
+    "accept-encoding": "gzip, deflate"
+   },
+   "bodyKeys": [
+    "model",
+    "stream",
+    "messages",
+    "max_tokens",
+    "thinking",
+    "output_config",
+    "system",
+    "tools"
+   ],
+   "body": {
+    "model": "deepseek-v4-pro",
+    "stream": true,
+    "messages": [
+     {
+      "role": "user",
+      "content": [
+       {
+        "type": "text",
+        "text": "hello there"
+       },
+       {
+        "type": "text",
+        "text": "Current runtime context. This snapshot supersedes earlier runtime-context snapshots.\n\nCurrent working directory: \"<WORKSPACE>\".\n\nCurrent DSH file policy: workspace-write. Any available operation enforced by the DSH file sandbox may modify files under the session workspace: \"<WORKSPACE>\". Some platform temporary areas may also be writable.\n\nApproval prompts are enabled in this session: operations that require approval may ask through the configured answerers; without an available answerer, the request fails closed."
+       }
+      ]
+     },
+     {
+      "role": "assistant",
+      "content": [
+       {
+        "type": "text",
+        "text": "Hello from fake DeepSeek: hello thereCurrent runtime context. Thi"
+       }
+      ]
+     },
+     {
+      "role": "user",
+      "content": [
+       {
+        "type": "text",
+        "text": "NASSAJ_TOOL {\"name\":\"write\",\"input\":{\"file_path\":\"<OUTSIDE>/approved.txt\",\"content\":\"approved\",\"sandbox_permissions\":\"danger-full-access\",\"justification\":\"Test escalation outside the workspace.\"}}"
+       }
+      ]
+     },
+     {
+      "role": "assistant",
+      "content": [
+       {
+        "type": "tool_use",
+        "id": "toolu_fake_2",
+        "name": "write",
+        "input": {
+         "file_path": "<OUTSIDE>/approved.txt",
+         "content": "approved",
+         "sandbox_permissions": "danger-full-access",
+         "justification": "Test escalation outside the workspace."
+        }
+       }
+      ]
+     },
+     {
+      "role": "user",
+      "content": [
+       {
+        "type": "tool_result",
+        "tool_use_id": "toolu_fake_2",
+        "content": [
+         {
+          "type": "text",
+          "text": "<path><OUTSIDE>/approved.txt</path>\n<type>file</type>\n<content>\nCreated file\n</content>"
+         }
+        ],
+        "is_error": false
+       }
+      ]
+     },
+     {
+      "role": "assistant",
+      "content": [
+       {
+        "type": "text",
+        "text": "Tool step finished."
+       }
+      ]
+     },
+     {
+      "role": "user",
+      "content": [
+       {
+        "type": "text",
+        "text": "NASSAJ_TOOL {\"name\":\"write\",\"input\":{\"file_path\":\"<OUTSIDE>/rejected.txt\",\"content\":\"rejected\",\"sandbox_permissions\":\"danger-full-access\",\"justification\":\"Test escalation outside the workspace.\"}}"
+       }
+      ]
+     },
+     {
+      "role": "assistant",
+      "content": [
+       {
+        "type": "tool_use",
+        "id": "toolu_fake_4",
+        "name": "write",
+        "input": {
+         "file_path": "<OUTSIDE>/rejected.txt",
+         "content": "rejected",
+         "sandbox_permissions": "danger-full-access",
+         "justification": "Test escalation outside the workspace."
+        }
+       }
+      ]
+     },
+     {
+      "role": "user",
+      "content": [
+       {
+        "type": "tool_result",
+        "tool_use_id": "toolu_fake_4",
+        "content": [
+         {
+          "type": "text",
+          "text": "Error: the user rejected escalating this operation to \"danger-full-access\"; it stays denied, so stop and explain instead of working around it"
+         }
+        ],
+        "is_error": true
+       }
+      ]
+     },
+     {
+      "role": "assistant",
+      "content": [
+       {
+        "type": "text",
+        "text": "Tool step finished."
+       }
+      ]
+     },
+     {
+      "role": "user",
+      "content": [
+       {
+        "type": "text",
+        "text": "NASSAJ_TOOL {\"name\":\"bash\",\"input\":{\"description\":\"Check other harnesses\",\"command\":\"command -v claude codex dsh node; echo PATH=$PATH; echo HOME=$HOME\"}}"
+       }
+      ]
+     },
+     {
+      "role": "assistant",
+      "content": [
+       {
+        "type": "tool_use",
+        "id": "toolu_fake_6",
+        "name": "bash",
+        "input": {
+         "description": "Check other harnesses",
+         "command": "command -v claude codex dsh node; echo PATH=$PATH; echo HOME=$HOME"
+        }
+       }
+      ]
+     },
+     {
+      "role": "user",
+      "content": [
+       {
+        "type": "tool_result",
+        "tool_use_id": "toolu_fake_6",
+        "content": [
+         {
+          "type": "text",
+          "text": "/usr/bin/node\nPATH=/usr/local/bin:/usr/bin:/bin\nHOME=<MEMBER_HOME>\n"
+         }
+        ],
+        "is_error": false
+       }
+      ]
+     }
+    ],
+    "max_tokens": 256000,
+    "thinking": {
+     "type": "enabled"
+    },
+    "output_config": {
+     "effort": "high"
+    },
+    "systemSha256": "14fe02f4a5a3b5a7",
+    "toolNames": [
+     "bash",
+     "create_goal",
+     "edit",
+     "get_goal",
+     "glob",
+     "grep",
+     "interrupt_agent",
+     "job_kill",
+     "job_list",
+     "job_output",
+     "list_agents",
+     "read",
+     "read_image",
+     "send_message",
+     "skill",
+     "subagent",
+     "subagent_fork",
+     "todo_write",
+     "update_goal",
+     "web_fetch",
+     "web_search",
+     "workflow",
+     "working_directory",
+     "write"
+    ]
+   }
+  },
+  {
+   "endpoint": "nassaj-pinned",
+   "method": "POST",
+   "url": "/v1/messages",
+   "headers": {
+    "host": "<FAKE_LLM_HOST>",
+    "user-agent": "deepseek-harness/0.2.2-rc.1 (+https://github.com/deepseek-ai/deepseek-harness)",
+    "content-type": "application/json",
+    "accept": "text/event-stream",
+    "x-api-key": "<FAKE_DEEPSEEK_KEY>",
+    "anthropic-version": "2023-06-01",
+    "x-deepseek-harness-user-id": "<UUID_6>",
+    "x-deepseek-harness-session-id": "<DSH_SESSION_ID>",
+    "accept-language": "*",
+    "sec-fetch-mode": "cors",
+    "accept-encoding": "gzip, deflate"
+   },
+   "bodyKeys": [
+    "model",
+    "stream",
+    "messages",
+    "max_tokens",
+    "thinking",
+    "output_config",
+    "system",
+    "tools"
+   ],
+   "body": {
+    "model": "deepseek-v4-pro",
+    "stream": true,
+    "messages": [
+     {
+      "role": "user",
+      "content": [
+       {
+        "type": "text",
+        "text": "hello there"
+       },
+       {
+        "type": "text",
+        "text": "Current runtime context. This snapshot supersedes earlier runtime-context snapshots.\n\nCurrent working directory: \"<WORKSPACE>\".\n\nCurrent DSH file policy: workspace-write. Any available operation enforced by the DSH file sandbox may modify files under the session workspace: \"<WORKSPACE>\". Some platform temporary areas may also be writable.\n\nApproval prompts are enabled in this session: operations that require approval may ask through the configured answerers; without an available answerer, the request fails closed."
+       }
+      ]
+     },
+     {
+      "role": "assistant",
+      "content": [
+       {
+        "type": "text",
+        "text": "Hello from fake DeepSeek: hello thereCurrent runtime context. Thi"
+       }
+      ]
+     },
+     {
+      "role": "user",
+      "content": [
+       {
+        "type": "text",
+        "text": "NASSAJ_TOOL {\"name\":\"write\",\"input\":{\"file_path\":\"<OUTSIDE>/approved.txt\",\"content\":\"approved\",\"sandbox_permissions\":\"danger-full-access\",\"justification\":\"Test escalation outside the workspace.\"}}"
+       }
+      ]
+     },
+     {
+      "role": "assistant",
+      "content": [
+       {
+        "type": "tool_use",
+        "id": "toolu_fake_2",
+        "name": "write",
+        "input": {
+         "file_path": "<OUTSIDE>/approved.txt",
+         "content": "approved",
+         "sandbox_permissions": "danger-full-access",
+         "justification": "Test escalation outside the workspace."
+        }
+       }
+      ]
+     },
+     {
+      "role": "user",
+      "content": [
+       {
+        "type": "tool_result",
+        "tool_use_id": "toolu_fake_2",
+        "content": [
+         {
+          "type": "text",
+          "text": "<path><OUTSIDE>/approved.txt</path>\n<type>file</type>\n<content>\nCreated file\n</content>"
+         }
+        ],
+        "is_error": false
+       }
+      ]
+     },
+     {
+      "role": "assistant",
+      "content": [
+       {
+        "type": "text",
+        "text": "Tool step finished."
+       }
+      ]
+     },
+     {
+      "role": "user",
+      "content": [
+       {
+        "type": "text",
+        "text": "NASSAJ_TOOL {\"name\":\"write\",\"input\":{\"file_path\":\"<OUTSIDE>/rejected.txt\",\"content\":\"rejected\",\"sandbox_permissions\":\"danger-full-access\",\"justification\":\"Test escalation outside the workspace.\"}}"
+       }
+      ]
+     },
+     {
+      "role": "assistant",
+      "content": [
+       {
+        "type": "tool_use",
+        "id": "toolu_fake_4",
+        "name": "write",
+        "input": {
+         "file_path": "<OUTSIDE>/rejected.txt",
+         "content": "rejected",
+         "sandbox_permissions": "danger-full-access",
+         "justification": "Test escalation outside the workspace."
+        }
+       }
+      ]
+     },
+     {
+      "role": "user",
+      "content": [
+       {
+        "type": "tool_result",
+        "tool_use_id": "toolu_fake_4",
+        "content": [
+         {
+          "type": "text",
+          "text": "Error: the user rejected escalating this operation to \"danger-full-access\"; it stays denied, so stop and explain instead of working around it"
+         }
+        ],
+        "is_error": true
+       }
+      ]
+     },
+     {
+      "role": "assistant",
+      "content": [
+       {
+        "type": "text",
+        "text": "Tool step finished."
+       }
+      ]
+     },
+     {
+      "role": "user",
+      "content": [
+       {
+        "type": "text",
+        "text": "NASSAJ_TOOL {\"name\":\"bash\",\"input\":{\"description\":\"Check other harnesses\",\"command\":\"command -v claude codex dsh node; echo PATH=$PATH; echo HOME=$HOME\"}}"
+       }
+      ]
+     },
+     {
+      "role": "assistant",
+      "content": [
+       {
+        "type": "tool_use",
+        "id": "toolu_fake_6",
+        "name": "bash",
+        "input": {
+         "description": "Check other harnesses",
+         "command": "command -v claude codex dsh node; echo PATH=$PATH; echo HOME=$HOME"
+        }
+       }
+      ]
+     },
+     {
+      "role": "user",
+      "content": [
+       {
+        "type": "tool_result",
+        "tool_use_id": "toolu_fake_6",
+        "content": [
+         {
+          "type": "text",
+          "text": "/usr/bin/node\nPATH=/usr/local/bin:/usr/bin:/bin\nHOME=<MEMBER_HOME>\n"
+         }
+        ],
+        "is_error": false
+       }
+      ]
+     },
+     {
+      "role": "assistant",
+      "content": [
+       {
+        "type": "text",
+        "text": "Tool step finished."
+       }
+      ]
+     },
+     {
+      "role": "user",
+      "content": [
+       {
+        "type": "text",
+        "text": "second message after refresh"
+       }
+      ]
+     }
+    ],
+    "max_tokens": 256000,
+    "thinking": {
+     "type": "enabled"
+    },
+    "output_config": {
+     "effort": "high"
+    },
+    "systemSha256": "14fe02f4a5a3b5a7",
+    "toolNames": [
+     "bash",
+     "create_goal",
+     "edit",
+     "get_goal",
+     "glob",
+     "grep",
+     "interrupt_agent",
+     "job_kill",
+     "job_list",
+     "job_output",
+     "list_agents",
+     "read",
+     "read_image",
+     "send_message",
+     "skill",
+     "subagent",
+     "subagent_fork",
+     "todo_write",
+     "update_goal",
+     "web_fetch",
+     "web_search",
+     "workflow",
+     "working_directory",
+     "write"
+    ]
+   }
+  }
+ ],
+ "withoutNassajLayer": [
+  {
+   "url": "/v1/messages",
+   "bodyKeys": [
+    "model",
+    "stream",
+    "messages",
+    "max_tokens",
+    "thinking",
+    "output_config",
+    "system",
+    "tools",
+    "dsh_session_log",
+    "dsh_plugin_packages"
+   ]
+  }
+ ]
+}

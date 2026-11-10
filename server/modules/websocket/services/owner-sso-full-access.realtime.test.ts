@@ -103,7 +103,7 @@ test('N2 withdrawn: an owner SSO session with no grant starts a claude turn; no 
   const launched: string[] = [];
   const socket = new FakeSocket();
   handleChatConnection(socket as never, { user: ownerPrincipal(tokenSid) } as never, {
-    getSessionProvider: () => null,
+    getSessionProvider: () => null, admitCredentialTurn: () => ({ principalId: 1, grantedBy: null }),
     getActiveClaudeSDKSessions: () => [],
     authorizeProviderExecution: () => ({
       kind: 'authorized' as const,

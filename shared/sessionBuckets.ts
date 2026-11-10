@@ -48,6 +48,9 @@ export const SESSION_BUCKET_PROVIDERS = [
   'glm',
   'hermes',
   'sakana',
+  // T-2086/ADR-224: the DeepSeek Harness body; its history is the Nassaj-owned
+  // vendor transcript, so a bucket is what keeps its conversations on screen.
+  'dsh',
 ] as const;
 
 export type SessionBucketProvider = (typeof SESSION_BUCKET_PROVIDERS)[number];

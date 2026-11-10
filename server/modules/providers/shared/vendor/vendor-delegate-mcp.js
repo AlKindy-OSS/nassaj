@@ -27,7 +27,7 @@ import {
   ENGINE_PROVIDERS,
   PROVIDER_ANTHROPIC_ENDPOINT,
 } from '../../../../services/isolation/provider-anthropic-endpoints.js';
-import { credentialPrincipalId } from '../../../../services/isolation/credential-principal.js';
+import { assertCredentialLinked, credentialNotLinkedPayload } from '../../../../services/isolation/credential-gate.js';
 import { isCanonicalVendorSecretId } from '../../../../services/isolation/provider-secrets-store.js';
 import { resolveSlotKey } from '../../../../services/isolation/provider-slot-key.js';
 
@@ -97,11 +97,21 @@ export function buildVendorDelegateMcp(userId) {
           }
 
           // Per-user key: scoped to the spawning user captured in this closure.
-          // T-1260 keeps `sharedFallback: false` — a delegated subtask must not
-          // reach a slot the member's own turns cannot reach (resolve-provider-env
-          // does not fall back either), or delegation would become a side door
-          // onto the org key.
-          const token = resolveSlotKey(credentialPrincipalId(userId, provider), provider, { sharedFallback: false })?.key ?? null;
+          // ADR-152 A1 §3.5: the credential gate admits the call on the member's
+          // own key or a grantor's; the install-wide slot is inert (§3.8), so
+          // delegation is no side door onto it.
+          let principalId;
+          try {
+            ({ principalId } = assertCredentialLinked({ actor: userId, provider }));
+          } catch (error) {
+            if (!credentialNotLinkedPayload(error) && error?.code !== 'CREDENTIAL_ACTOR_REQUIRED') throw error;
+            return textResult(
+              `CREDENTIAL_NOT_LINKED: no ${provider} credential is linked for you. Link your own key in `
+                + 'the agent settings, or ask a member to share theirs, then retry.',
+              true,
+            );
+          }
+          const token = resolveSlotKey(principalId, provider)?.key ?? null;
           if (!token) {
             return textResult(
               `No API key configured for ${provider}. Add one in the provider settings, ` +

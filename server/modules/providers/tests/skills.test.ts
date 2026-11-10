@@ -355,15 +355,26 @@ test('providerSkillsService lists codex repository, user, and system skills', { 
       'codex-user',
       'Codex user skill',
     );
+    // ADR-152 A1 §3.4: system skills live under the member's own CODEX_HOME.
     await writeSkill(
-      path.join(tempRoot, '.codex', 'skills', '.system'),
+      path.join(tempRoot, '.nassaj-users', '7', '.codex', 'skills', '.system'),
       'codex-system-dir',
       'codex-system',
       'Codex system skill',
     );
+    await writeSkill(
+      path.join(tempRoot, '.codex', 'skills', '.system'),
+      'operator-system-dir',
+      'operator-system',
+      'The operator\'s own system skill',
+    );
 
-    const skills = await providerSkillsService.listProviderSkills('codex', { workspacePath });
+    const skills = await providerSkillsService.listProviderSkills('codex', { workspacePath, userId: 7 });
     const byName = new Map(skills.map((skill) => [skill.name, skill]));
+    assert.equal(byName.has('operator-system'), false, 'never the operator\'s ~/.codex');
+    const anonymous = await providerSkillsService.listProviderSkills('codex', { workspacePath });
+    assert.equal(anonymous.some((skill) => skill.name === 'operator-system' || skill.name === 'codex-system'), false,
+      'no member: no Codex home is listed at all');
 
     assert.equal(byName.get('codex-cwd')?.scope, 'repo');
     assert.equal(byName.get('codex-parent')?.scope, 'repo');

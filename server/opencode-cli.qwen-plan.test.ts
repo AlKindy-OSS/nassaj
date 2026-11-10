@@ -18,6 +18,8 @@ import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
 import test, { after, beforeEach, mock } from 'node:test';
 
+import { fakeOpenCodeParityRuntime, fakeOpenCodePermissionParity } from './shared/__tests__/fake-opencode-parity.js';
+
 const url = (relativePath: string) => new URL(relativePath, import.meta.url).href;
 // A Token Plan key: no `sk-sp-` prefix, so only the literal layer can catch it.
 const KEY = ['tp', 'live-secret-ABCDEFGHIJ0123456789'].join('-');
@@ -110,16 +112,13 @@ mock.module(url('./services/isolation/provision-user-dirs.js'), {
   namedExports: { provisionUserDirs: () => undefined, userConfigDir: () => '/fake/config' },
 });
 mock.module(url('./services/isolation/resolve-provider-env.js'), {
-  namedExports: { resolveProviderEnv: () => ({ PATH: '/usr/bin', ...inheritedEnv }) },
+  namedExports: { resolveProviderEnv: () => ({ PATH: '/usr/bin', XDG_CONFIG_HOME: '/nonexistent-qwen-plan', XDG_DATA_HOME: '/nonexistent-qwen-plan-data', ...inheritedEnv }) },
 });
 mock.module(url('./services/provider-run-presence.js'), {
   namedExports: { beginProviderRun: () => ({ end: () => undefined, rekey: () => undefined, setPid: () => undefined }) },
 });
 mock.module(url('./modules/providers/harness-update/spawn-admission.js'), {
   namedExports: { refuseSpawnIfHarnessUpdating: () => false },
-});
-mock.module(url('./services/isolation/provider-cage-wiring.js'), {
-  namedExports: { resolveCagedLaunch: ({ cmd, args }: { cmd: string; args: string[] }) => ({ cmd, args }) },
 });
 mock.module(url('./services/isolation/vendor-binary-integrity.js'), {
   namedExports: { verifyVendorBinaryDigest: () => { digestChecks += 1; } },
@@ -148,14 +147,34 @@ mock.module(url('./services/isolation/local-model-config.js'), {
     authorizedLocalModelServers: () => [],
     isLocalModel: () => false,
     localModelsEnabled: () => false,
+    // B-1755: the pre-spawn context check runs only on a local turn.
+    localModelContextWindow: () => null,
+    LOCAL_MIN_WORKING_MARGIN_TOKENS: 4096,
+    localModelOutputReserve: () => 4096,
+    checkLocalModelContextFit: () => null,
+    estimatePromptTokens: () => 0,
+    LOCAL_MODEL_CONTEXT_EXCEEDED: 'LOCAL_MODEL_CONTEXT_EXCEEDED',
   },
 });
 mock.module(url('./services/isolation/local-model-timeout.js'), { namedExports: { watchLocalModelProgress: () => null } });
 mock.module(url('./services/isolation/opencode-config-material.js'), { namedExports: { materializeOpenCodeConfig: () => true } });
+// ADR-LOCAL-INSTR-TIER-001: local turns are not exercised here.
+mock.module(url('./modules/providers/list/opencode/opencode-local-tier.js'), {
+  namedExports: { prepareOpenCodeLocalTier: () => { throw new Error('local tier not expected in this suite'); } },
+});
 mock.module(url('./modules/providers/list/opencode/opencode-governance.js'), {
-  namedExports: { ensureOpenCodeGovernance: () => ({ ok: true }) },
+  namedExports: { ensureOpenCodeGovernance: () => ({ ok: true }), OPENCODE_GOVERNANCE_MISSING_MESSAGE: 'governance missing' },
 });
 
+// ADR-221: the parity self-test spawns the real binary and the ACK comes from the
+// plugin inside opencode; this suite's spawn is a fake, so both are stubbed here
+// (they are covered by opencode-cli.permissions-wiring and the E2E).
+// ADR-226: the parity launch (Claude's mode, L1, engine) and the fd-3 runtime are not under test here.
+const realPermissions = await import(url('./modules/providers/list/opencode/opencode-run-permissions.js'));
+mock.module(url('./modules/providers/list/opencode/opencode-run-permissions.js'), {
+  namedExports: { ...realPermissions, resolveOpenCodePermissionParity: fakeOpenCodePermissionParity },
+});
+mock.module(url('./modules/providers/list/opencode/opencode-parity-runtime.js'), { namedExports: fakeOpenCodeParityRuntime });
 const { spawnOpenCode } = await import('./opencode-cli.js');
 after(() => mock.restoreAll());
 
@@ -258,7 +277,8 @@ test('non-qwen runs never carry the key variable, even when it is inherited', as
   assert.equal(spawned.length, 1);
   // resolveProviderEnv is mocked here; the real host-secret deny list is
   // asserted in opencode-qwen-plan.test.ts. The launcher adds nothing itself:
-  assert.equal(spawned[0].env.OPENCODE_CONFIG_CONTENT, undefined);
+  // ADR-226: no provider block; the only inline config is nassaj's (parity plugin, lsp/formatter off).
+  assert.deepEqual(Object.keys(JSON.parse(spawned[0].env.OPENCODE_CONFIG_CONTENT ?? '{}')).sort(), ['formatter', 'lsp', 'plugin']);
   assert.equal(audits.length, 0);
   await finish(run);
 });
@@ -273,7 +293,12 @@ test('refused when the kill switch is off', async () => {
 test('refused without a key, and the key is always the SENDER\'s own', async () => {
   profiles = { 1: { plan: 'token_plan', region: 'international', key: KEY } };
   await refusedWith({}, 'missing_key', 7);
-  await refusedWith({}, 'missing_key', null);
+  // ADR-152 A1 §3.4: no member ⇒ refused before any key is read or child spawned.
+  const anonymous = await launch({}, null);
+  const refused = await anonymous.run;
+  assert.ok(refused instanceof Error);
+  assert.equal((refused as { code?: string }).code, 'CREDENTIAL_ACTOR_REQUIRED');
+  assert.equal(spawned.length, 0);
 });
 
 test('a stored Coding Plan or china profile is a legacy_profile and is never spent', async () => {

@@ -109,6 +109,8 @@ export const RUN_PROVIDER_TO_HARNESS = Object.freeze({
   qwen: 'qwen',
   kimi: 'kimi',
   deepseek: 'deepseek',
+  // T-2086 S4: a dsh update/rollback holds the dsh lease, so launches refuse.
+  dsh: 'dsh',
 });
 
 /**

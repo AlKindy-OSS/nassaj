@@ -2,9 +2,9 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { userDb } from '@/modules/database/index.js';
-import { readOptionalString } from '@/shared/utils.js';
 
 import { resolveProviderEnv } from './resolve-provider-env.js';
+import { resolvedKnob } from './resolved-knob.js';
 import { KIMI_HOME_SUBDIR } from './provision-user-dirs.js';
 
 /**
@@ -20,41 +20,37 @@ import { KIMI_HOME_SUBDIR } from './provision-user-dirs.js';
  * with no userId — so an isolated user's sessions would be written to their tree
  * yet never indexed, watched or surfaced. These helpers reuse the SAME central
  * resolver (resolveProviderEnv) rather than re-deriving the isolated path, so the
- * admin sharing policy and the anonymous/shared fallback stay in exactly one
- * place, and the config-home root has a SINGLE source of truth: KIMI_HOME_SUBDIR,
+ * isolation rule and the anonymous fallback stay in exactly one place, and the config-home root has a SINGLE source of truth: KIMI_HOME_SUBDIR,
  * imported from the provisioner that materializes the very tree (sessions/ and
  * .kimi-code/) beneath it — the env var and the on-disk layout can never drift.
  *
  * MODE MATTERS: kimi's config-home is isolated ONLY in AGENT mode (the native
  * CLI; the toolless chat path speaks a hosted HTTP wire and keeps no on-disk
  * tree), so every resolveProviderEnv call here passes mode='agent' — matching the
- * launcher (KM-1) exactly. In CHAT mode (or when kimi is admin-marked 'shared',
- * or the id is anonymous/null) resolveProviderEnv returns the base env with no
+ * launcher (KM-1) exactly. In CHAT mode (or when the id is anonymous/null)
+ * resolveProviderEnv returns the base env with no
  * KIMI_CODE_HOME and this falls back to the operator ~/.kimi.
  */
 
-/** Operator (non-isolated / shared) Kimi config-home: ~/.kimi. */
+/** Operator (anonymous caller) Kimi config-home: ~/.kimi. */
 export function operatorKimiHome(): string {
   return path.join(os.homedir(), KIMI_HOME_SUBDIR);
 }
 
 /**
  * Resolves one user's effective KIMI_CODE_HOME through the central SL-5 resolver
- * (agent mode). When kimi is isolated this is ~/.nassaj-users/<userId>/.kimi;
- * when kimi is admin-marked 'shared' or the id is anonymous/null,
- * resolveProviderEnv returns the base env with no KIMI_CODE_HOME and this falls
- * back to the operator ~/.kimi — i.e. the exact non-isolated behavior.
+ * (agent mode): ~/.nassaj-users/<userId>/.kimi (or a grantor's). A caller with
+ * no member is refused (ADR-152 A1 §3.4), never given the operator ~/.kimi.
  */
 export function resolveKimiHomeForUser(userId: string | number | null): string {
   const env = resolveProviderEnv(userId, 'kimi', process.env, 'agent');
-  return readOptionalString(env.KIMI_CODE_HOME) ?? operatorKimiHome();
+  return resolvedKnob(env, 'KIMI_CODE_HOME');
 }
 
 /**
  * The DISTINCT set of Kimi config-home dirs whose sessions must be indexed and
- * watched: the operator ~/.kimi plus, when kimi is isolated, each registered
- * user's per-user KIMI_CODE_HOME. Deduped via a Set so that in shared mode every
- * user collapses back to the single operator home.
+ * watched: the operator ~/.kimi plus each registered user's per-user
+ * KIMI_CODE_HOME (kimi is always isolated, ADR-152 A1), deduped via a Set.
  *
  * Enumerating users is best-effort: any DB anomaly degrades to scanning only the
  * operator home rather than throwing, so a transient failure can never take Kimi

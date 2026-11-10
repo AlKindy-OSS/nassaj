@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { resolveCodexHomeForUser } from '@/modules/providers/list/codex/codex-home.js';
+import { isMemberActor } from '@/services/isolation/credential-actor.js';
 import {
   SAFE_SEGMENT_RE,
   SKILLS_STATE_NAME,
@@ -111,11 +112,13 @@ export class CodexSkillsProvider extends SkillsProvider {
       rootDir: path.join('/etc', 'codex', 'skills'),
       commandPrefix: '$',
     });
-    addUniqueProviderSkillSource(sources, seenRootDirs, {
-      scope: 'system',
-      rootDir: path.join(resolveCodexHomeForUser(userId ?? null), 'skills', '.system'),
-      commandPrefix: '$',
-    });
+    if (isMemberActor(userId)) {
+      addUniqueProviderSkillSource(sources, seenRootDirs, {
+        scope: 'system',
+        rootDir: path.join(resolveCodexHomeForUser(userId as string | number), 'skills', '.system'),
+        commandPrefix: '$',
+      });
+    }
 
     return sources;
   }
@@ -143,6 +146,9 @@ export class CodexSkillsProvider extends SkillsProvider {
       return;
     }
     addUniqueProviderSkillSource(sources, seenRootDirs, { scope: 'user', rootDir: agentsRoot, commandPrefix: '$' });
+    // ADR-152 A1 §3.4: CODEX_HOME is a member's own tree; with no member there is
+    // no Codex home to list (never the operator's ~/.codex).
+    if (!isMemberActor(userId)) return;
     const sharedSkillsRoot = path.join(resolveCodexHomeForUser(userId), 'skills');
     addUniqueProviderSkillSource(sources, seenRootDirs, {
       scope: 'user',

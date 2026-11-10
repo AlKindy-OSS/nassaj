@@ -1,3 +1,7 @@
+// B-1771: FIRST import. Run ad hoc with the operator HOME, this test wrote into
+// the real home (member tree or provider state); the sandbox moves HOME first.
+import '@/shared/__tests__/sandbox-home.js';
+
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -16,6 +20,8 @@ type State = {
   appliedEngine: string | null | undefined;
   gateCalls: Array<{ userId: unknown; provider: string; options: unknown }>;
   gateError: Error | null;
+  credentialGateCalls: Array<{ actor: unknown; engine: string | null }>;
+  credentialGateError: Error | null;
 };
 
 const state: State = {
@@ -30,6 +36,8 @@ const state: State = {
   appliedEngine: undefined,
   gateCalls: [],
   gateError: null,
+  credentialGateCalls: [],
+  credentialGateError: null,
 };
 
 mock.module('@/modules/database/index.js', {
@@ -69,11 +77,14 @@ mock.module('@/modules/providers/index.js', {
 mock.module('@/services/isolation/resolve-provider-env.js', {
   namedExports: { resolveProviderEnv: (_userId: unknown, _provider: string, env: NodeJS.ProcessEnv) => ({ ...env }) },
 });
-mock.module('@/services/isolation/resolve-provider-env-strict.js', {
-  namedExports: { resolveProviderEnvStrict: (_userId: unknown, _provider: string, env: NodeJS.ProcessEnv) => ({ ...env }) },
-});
-mock.module('@/services/isolation/collect-settings-base-urls.js', {
-  namedExports: { collectSettingsBaseUrls: async () => [] },
+mock.module('@/services/isolation/credential-gate.js', {
+  namedExports: {
+    assertCredentialLinked: (input: { actor: unknown; engine: string | null }) => {
+      state.credentialGateCalls.push({ actor: input.actor, engine: input.engine });
+      if (state.credentialGateError) throw state.credentialGateError;
+      return { principalId: input.actor, grantedBy: null, unit: input.engine ?? 'claude', ownOnly: Boolean(input.engine) };
+    },
+  },
 });
 mock.module('@/services/isolation/apply-claude-engine-provider-env.js', {
   namedExports: {
@@ -102,6 +113,8 @@ mock.module('@/modules/providers/services/harness-link-mode.scope.js', {
 const profileModule = await import('./resolve-claude-run-profile.js');
 
 beforeEach(() => {
+  state.credentialGateCalls = [];
+  state.credentialGateError = null;
   state.pin = null;
   state.pinReadError = null;
   state.history = [];
@@ -281,6 +294,31 @@ test('final host guard rejects a disallowed base URL before returning a profile'
   );
 });
 
+test('B-1764: a base URL planted in the project settings refuses the profile, official and pinned', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'run-profile-b1764-'));
+  const project = path.join(root, 'project');
+  fs.mkdirSync(path.join(project, '.claude'), { recursive: true });
+  fs.writeFileSync(path.join(project, '.claude', 'settings.json'),
+    JSON.stringify({ env: { ANTHROPIC_BASE_URL: 'http://127.0.0.1:11434' } }));
+  try {
+    for (const clientEngine of [undefined, 'glm']) {
+      await assert.rejects(
+        profileModule.resolveClaudeRunProfileOrThrow({
+          userId: 7,
+          clientEngine,
+          baseEnv: { CLAUDE_CONFIG_DIR: path.join(root, '.claude'), HOME: root },
+          envAlreadyIsolated: true,
+          cwd: project,
+        }),
+        (err: { code?: string }) => err.code === 'ANTHROPIC_BASE_URL_NOT_ALLOWED',
+        `engine ${clientEngine ?? 'official'}`,
+      );
+    }
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 /** A user tree whose settings.json holds an API key for official turns (dummy). */
 function userTreeWithKey(): { root: string; configDir: string } {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'run-profile-s2-'));
@@ -382,4 +420,133 @@ test('ADR-200 S10: an engine-pinned run and the kill switch both skip the gate',
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
+});
+
+test('ADR-152 A1 §3.5: the credential gate admits on the resolved engine, before the engine env', async () => {
+  const { root, configDir } = userTreeWithKey();
+  try {
+    const profile = await profileModule.resolveClaudeRunProfileOrThrow({
+      userId: 7,
+      clientEngine: 'glm',
+      baseEnv: { CLAUDE_CONFIG_DIR: configDir, HOME: root },
+      envAlreadyIsolated: true,
+      cwd: path.join(root, 'project'),
+    });
+    assert.deepEqual(state.credentialGateCalls, [{ actor: 7, engine: 'glm' }]);
+    assert.deepEqual(profile.credential, { principalId: 7, grantedBy: null, unit: 'glm', ownOnly: true });
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('ADR-152 A1 §3.5: a credential refusal stops the run before any engine env is applied', async () => {
+  const { root, configDir } = userTreeWithKey();
+  state.credentialGateError = Object.assign(new Error('not linked'), { code: 'CREDENTIAL_NOT_LINKED' });
+  try {
+    await assert.rejects(profileModule.resolveClaudeRunProfileOrThrow({
+      userId: 7,
+      clientEngine: 'glm',
+      baseEnv: { CLAUDE_CONFIG_DIR: configDir, HOME: root },
+      envAlreadyIsolated: true,
+      cwd: path.join(root, 'project'),
+    }), (error: Error & { code?: string }) => error.code === 'CREDENTIAL_NOT_LINKED');
+    assert.equal(state.appliedEngine, undefined, 'no engine env was applied');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('ADR-152 A1 §3.5: a PTY terminal launch (honorGrants:false) is not gated — linking happens there', async () => {
+  const { root, configDir } = userTreeWithKey();
+  state.credentialGateError = new Error('must not be reached');
+  try {
+    await profileModule.resolveClaudeRunProfileOrThrow({
+      userId: 7,
+      baseEnv: { CLAUDE_CONFIG_DIR: configDir, HOME: root },
+      envAlreadyIsolated: true,
+      honorGrants: false,
+      cwd: path.join(root, 'project'),
+    });
+    assert.deepEqual(state.credentialGateCalls, []);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// ── ADR-227 / T-2098 stage 3a: the local-engine path ─────────────────────────
+
+const LOCAL_SERVER = {
+  id: '0b9c6a3e-6f1e-4c41-9a4e-2f1b9e0c7d11',
+  ownerId: 7,
+  providerId: 'nassaj_local_0b9c6a3e6f1e4c419a4e2f1b9e0c7d11',
+  baseUrl: 'http://127.0.0.1:18080/v1',
+  verifiedAddresses: ['127.0.0.1'],
+  models: [{ id: 'gpt-oss-20b', contextWindow: 32768 }],
+};
+const LOCAL_MODEL = `${LOCAL_SERVER.providerId}/gpt-oss-20b`;
+const localDeps = {
+  enabled: () => true,
+  runnable: () => true,
+  listServers: (userId: unknown) => (Number(userId) === 7 ? [LOCAL_SERVER] : []),
+  getSecret: () => null,
+  resolvePrivate: async () => ({ address: '127.0.0.1', family: 4 }),
+  cliVersionProven: async () => true,
+};
+const { formatLocalEnginePin } = await import('./local-engine-pin.js');
+const LOCAL_PIN = formatLocalEnginePin({ serverId: LOCAL_SERVER.id, ownerId: 7, origin: 'http://127.0.0.1:18080' });
+
+function localProfile(input: Record<string, unknown>) {
+  const { configDir, root } = userTreeWithKey();
+  return profileModule.resolveClaudeRunProfileOrThrow({
+    userId: 7,
+    baseEnv: { CLAUDE_CONFIG_DIR: configDir, HOME: root },
+    envAlreadyIsolated: true,
+    cwd: path.join(root, 'project'),
+    localEngineDeps: localDeps,
+    ...input,
+  });
+}
+
+const localRefusal = (reason: string) => (error: Error & { code?: string; reason?: string }) =>
+  error.code === 'ENGINE_PROVIDER_UNAVAILABLE' && error.reason === reason;
+
+test('ADR-227: a new session naming a local model runs local, on its own derived dir, without the link gate', async () => {
+  const profile = await localProfile({ requestedModel: LOCAL_MODEL });
+  assert.equal(profile.effectiveEngine, LOCAL_PIN);
+  assert.equal(profile.engineHosts?.size, 0);
+  assert.deepEqual([...(profile.engineOrigins ?? [])], ['http://127.0.0.1:18080']);
+  assert.match(profile.env.CLAUDE_CONFIG_DIR ?? '', /\.claude-engine-local-0b9c6a3e6f1e4c419a4e2f1b9e0c7d11$/u);
+  assert.equal(state.appliedEngine, undefined, 'the vendor-engine seam is never consulted');
+  assert.deepEqual(state.gateCalls, [], 'no Anthropic link-mode gate for a local run');
+  assert.deepEqual(state.credentialGateCalls, [{ actor: 7, engine: 'local' }]);
+});
+
+test('ADR-227: a local pin wins over the client and over shadow mode', async () => {
+  state.pin = LOCAL_PIN;
+  process.env.NASSAJ_ENGINE_PIN_ENFORCE = '0';
+  for (const clientEngine of [null, 'glm']) {
+    const profile = await localProfile({ sessionId: 'local-s', clientEngine, requireKnownResumePin: true });
+    assert.equal(profile.effectiveEngine, LOCAL_PIN);
+    assert.equal(profile.env.ANTHROPIC_BASE_URL, 'http://127.0.0.1:18080');
+  }
+  await assert.rejects(localProfile({ sessionId: 'local-s', requestedModel: 'claude-opus-5' }), localRefusal('pin_conflict'));
+});
+
+test('ADR-227: a local model on an existing non-local session, or with a vendor engine, is refused', async () => {
+  for (const stored of [null, 'anthropic', 'glm']) {
+    state.pin = stored;
+    await assert.rejects(localProfile({ sessionId: 'old', requestedModel: LOCAL_MODEL }), localRefusal('pin_conflict'));
+  }
+  state.pin = null;
+  await assert.rejects(localProfile({ requestedModel: LOCAL_MODEL, clientEngine: 'glm' }), localRefusal('pin_conflict'));
+  assert.deepEqual(state.storedPins, [], 'local is never inferred or written by the profile');
+});
+
+test('ADR-227: a NULL-pin resume keeps its existing inference path, untouched by local', async () => {
+  state.history = [{ agent_kind: 'model', agent_model: 'glm-model', agent_name: 'glm-model' }];
+  state.catalogs = { glm: ['glm-model'], kimi: ['kimi-model'], deepseek: ['deepseek-model'] };
+  const profile = await localProfile({ sessionId: 'legacy-null', authoritativeStoredPin: true, requireKnownResumePin: true });
+  assert.equal(profile.effectiveEngine, 'glm');
+  assert.equal(profile.local, null);
+  assert.equal(profile.engineOrigins, null);
 });

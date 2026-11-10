@@ -17,12 +17,17 @@
  *     binary), so its payload hosts are the script's choice. Its last step is
  *     `"$BINARY_PATH" install || true`, so a zero exit proves nothing: success
  *     is the launch resolver plus `agy --version` only.
+ *   - dsh (T-2086 S4, ADR-224): NO script and NO registry spec. `npm ci
+ *     --ignore-scripts` of the lockfile committed under server/harness-locks/
+ *     installs the reviewed pin; the full tree must match its committed sha256
+ *     manifest before the launcher link is switched (npm-lock/).
  */
 
 import path from 'node:path';
 
 import type { InstallableHarnessId } from '../../../../shared/harness-install.contract.js';
 
+import { DSH_NPM_LOCK_SOURCE, type NpmLockInstallSource } from './npm-lock/pins.js';
 import { CLAUDE_KEY, type SignedManifestSource } from './signed-manifest.js';
 
 /** A file the vendor installer may create (ADR-215 ش4/ش5 cleanup scope). */
@@ -67,7 +72,9 @@ export interface AssetInstallSource {
   kind: 'asset';
 }
 
-export type HarnessInstallSource = ScriptInstallSource | AssetInstallSource | SignedManifestSource;
+export type HarnessInstallSource = ScriptInstallSource | AssetInstallSource | SignedManifestSource | NpmLockInstallSource;
+
+export type { NpmLockInstallSource };
 
 /** Installer process timeout (qa C1: 5 min). */
 export const INSTALL_TIMEOUT_MS = 5 * 60 * 1000;
@@ -147,4 +154,7 @@ export const HARNESS_INSTALL_SOURCES: Readonly<Record<InstallableHarnessId, Harn
     minFreeBytes: 1536 * 1024 * 1024,
     ownedPaths: claudeOwnedPaths,
   }),
+  // T-2086 S4 (ADR-224): `npm ci` of the committed reviewed lockfile, verified
+  // against the committed full-tree manifest (npm-lock/pins.ts).
+  dsh: DSH_NPM_LOCK_SOURCE,
 });

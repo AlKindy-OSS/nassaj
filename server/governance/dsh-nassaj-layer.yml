@@ -1,0 +1,59 @@
+# Nassaj governance layer for the DeepSeek Harness (T-2086, ADR-224; T-2091).
+# Passed as the LAST `--patch` on every dsh launch, so it wins over the bundle
+# defaults and over any <DSH_HOME> user layer a turn could write. It ships in the
+# release tree (never in a member's tree) and is pinned by sha256 in
+# server/modules/providers/list/dsh/dsh-launch.js: an edit here must update the pin.
+# Disabled: the pi-ai LLM row, DeepSeek account login/LLM rows, the plugin
+# manager and its tool, OTEL session telemetry, and the two upload rows
+# (dsh_session_log / dsh_plugin_packages). The LLM origin is pinned to the official
+# endpoint, because a patch layer's baseURL can redirect the member's key.
+- id: llm-pi-ai
+  disabled: true
+- id: deepseek-account
+  disabled: true
+- id: llm-deepseek-account
+  disabled: true
+- id: plugin-manager
+  disabled: true
+- id: tool-plugin-manager
+  disabled: true
+- id: session-telemetry-otel
+  disabled: true
+- id: session-log-deepseek
+  disabled: true
+- id: plugin-package-inventory-deepseek
+  disabled: true
+- id: llm-deepseek
+  config:
+    baseURL: https://api.deepseek.com/anthropic
+# T-2089/T-2091 (ADR-225): tools are NOT disabled here: the Nassaj policy plugin below hides and
+# denies every tool outside server/services/permission-parity/dsh-tool-map.json (a newer dsh
+# adding tools keeps working). Only non-tool safety rows stay: self-prompt sources off (goal
+# round driver and its command), PTC runtime off, job completions do not wake the model, the
+# sandbox follows Claude (no Claude sandbox on this host: full access) and dsh never asks —
+# every decision is Nassaj's, through the plugin (index.mjs + package.json pinned like this file).
+- id: goal
+  disabled: true
+- id: goal-round-driver
+  disabled: true
+- id: command-goal
+  disabled: true
+- id: ptc-runtime
+  disabled: true
+- id: tool-jobs
+  config:
+    completionDelivery: quiet
+- id: sandbox-policy
+  config:
+    mode: danger-full-access
+- id: approval
+  config:
+    policy: never
+- id: permission
+  config:
+    defaultPreset: danger-full-access
+- insert:
+    - id: nassaj-policy
+      name: ./dsh-policy-plugin/index.mjs
+      config:
+        channelFd: 3

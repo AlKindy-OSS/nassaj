@@ -167,6 +167,22 @@ test('AUTOUPDATER_DISABLE_NONE lists only harnesses with no verified knob', () =
   assert.ok(!AUTOUPDATER_DISABLE_NONE.includes('opencode'));
 });
 
+test('dsh (T-2086 S4) is the npm-lock harness: button-only, reviewed pin, `npm ci` never @latest', () => {
+  const d = HARNESS_UPDATE_DESCRIPTORS.dsh;
+  assert.equal(d.installMethod, 'npm-lock');
+  assert.equal(d.manualOnly, true);
+  assert.equal(d.autoUpdaterDisableVerified, true);
+  assert.deepEqual(d.runProviders, ['dsh']);
+  assert.deepEqual(d.latestProbe, { kind: 'reviewed-pin', publishedPkg: '@deepseek-ai/dsh' });
+  const argv = d.updateArgv();
+  assert.ok(argv);
+  assert.equal(argv.args[1], 'ci');
+  assert.ok(argv.args.includes('--ignore-scripts'));
+  assert.ok(!argv.args.some((a) => a.includes('@latest') || a === 'install' || a.includes('@deepseek-ai/dsh')));
+  assert.equal(argv.env?.TMPDIR, '/var/tmp');
+  assert.ok(argv.cwd?.endsWith(path.join('.local', 'share', 'dsh', 'versions', '.staging-0.2.2-rc.1')), argv.cwd);
+});
+
 test('every descriptor is keyed by its own id', () => {
   for (const id of HARNESS_IDS) {
     assert.equal(HARNESS_UPDATE_DESCRIPTORS[id].id, id);
@@ -182,6 +198,8 @@ const EXPECTED_NOTICES: Record<string, { dataNotBackedUp: boolean; selfUpdating:
   opencode: null,
   qwen: { dataNotBackedUp: true, selfUpdating: true },
   kimi: { dataNotBackedUp: true, selfUpdating: false },
+  // dsh: member data (~/.dsh per member) is not copied; no self-updater (S0).
+  dsh: { dataNotBackedUp: true, selfUpdating: false },
   glm: null,
   deepseek: null,
 };

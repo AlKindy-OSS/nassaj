@@ -1,6 +1,5 @@
 import { useCallback, useState } from 'react';
 
-import { useAuth } from '../../../../../../auth';
 import { useAgyConnection } from '../../../../../hooks/useAgyConnection';
 import type { AuthStatus } from '../../../../../types/types';
 
@@ -25,9 +24,6 @@ type AgyConnectionSectionProps = {
  * is symbolically linked by the backend and never forced through the flow.
  */
 export default function AgyConnectionSection({ authStatus, onLogin }: AgyConnectionSectionProps) {
-  const { user } = useAuth();
-  const isOwner = user?.role === 'owner';
-
   const { connected, loading, error, refresh } = useAgyConnection(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
 
@@ -47,7 +43,6 @@ export default function AgyConnectionSection({ authStatus, onLogin }: AgyConnect
     connected,
     loading,
     error,
-    isOwner,
     i18nPrefix: 'agyConnection',
     command: 'agy',
     onLink: openModal,

@@ -12,6 +12,7 @@ import {
     runMigrations,
 } from "@/modules/database/migrations.js";
 import { migrateConnectorAuthSchema } from '@/modules/database/connector-auth.migration.js';
+import { retireProviderSharing } from "@/modules/database/provider-sharing-retirement.migration.js";
 import { migrateConnectorPolicyV2Substrate } from '@/modules/database/connector-policy-v2.migration.js';
 import { migrateConnectorProvisioning } from '@/modules/database/connector-provisioning.migration.js';
 import { startReconcileScheduler } from "@/modules/database/project-reconcile.service.js";
@@ -39,6 +40,7 @@ import { migrateAuthTokenEpoch } from './auth-token-epoch.migration.js';
 import { migrateShellOneShotRuns } from './shell-oneshot-runs.migration.js';
 import { migrateSsoLinkedSessions } from './sso-linked-sessions.migration.js';
 import { migratePeerMessages } from './peer-messages.migration.js';
+import { migratePeerHolds } from './peer-holds.migration.js';
 
 /** True when a ledger project path still resolves to a real directory. */
 const projectPathResolves = (projectPath: string): boolean => {
@@ -84,6 +86,12 @@ export const initializeAdmittedDatabase = (db: ReturnType<typeof getConnection>,
     // ADR-219 S1 (T-2072): the cross-session relay rows. Without them every relayed
     // SendMessage on a multi-member node is refused (fail closed).
     migratePeerMessages(db);
+    // ADR-219 P2a-min (T-2074): cross-member holds (new table + guarded hold_id column).
+    migratePeerHolds(db);
+    // ADR-152 A1 §3.2 (T-2083): retire the install-wide sharing policy on
+    // update-button nodes too (snapshot + strict audit + key deletion, one
+    // BEGIN IMMEDIATE on this connection). Never throws.
+    retireProviderSharing(db);
     const result = initializeConnectorPolicyV2SubstrateOnly(db, authorityRootPath);
     if (!result.ready) throw new Error(`existing_security_connector_initialization_failed:${result.reason}`);
 };
@@ -125,6 +133,8 @@ export const initializeDatabase = async () => {
             migrateSsoLinkedSessions(db);
             // ADR-219 S1 (T-2072): cross-session relay rows (idempotent).
             migratePeerMessages(db);
+            // ADR-219 P2a-min (T-2074): cross-member holds (idempotent).
+            migratePeerHolds(db);
             migrateConnectorAuthSchema(db);
             const existingInstallation = db.prepare(`SELECT installation_id AS installationId
                 FROM connector_installations WHERE singleton=1`).get() as { installationId: string } | undefined;
@@ -137,6 +147,9 @@ export const initializeDatabase = async () => {
         // Idempotent; the only place it runs when the fence wrapped runMigrations
         // in a transaction (B-1147).
         migrateSourceUpdateDeferral(db);
+        // ADR-152 A1 §3.2: same reason — BEGIN IMMEDIATE cannot run inside the
+        // fence, so the retirement migration completes here. Never throws.
+        retireProviderSharing(db);
 
         // Before readiness, ratchet every alias node that predates this release
         // to overlay. Invalid nodes are deny-fenced too: deleting corruption

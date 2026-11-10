@@ -29,15 +29,12 @@ function outcomeLines(outcome: RestoreOutcome, t: (key: string, vars?: Record<st
     ];
   }
   if (outcome.failure.code === 'VENDOR_BACKUP_UNAVAILABLE') return [t('vendors.restore.unavailable')];
-  if (outcome.failure.code === 'VENDOR_BACKUP_SHARED_SCOPE') return [t('vendors.restore.sharedScope')];
   if (outcome.failure.code === 'VENDOR_KEY_RATE_LIMITED') return [t('vendors.link.error.rateLimited')];
   return [outcome.failure.message];
 }
 
 function isDisabledOutcome(outcome: RestoreOutcome | undefined): boolean {
-  return Boolean(outcome && !outcome.restored
-    && (outcome.failure.code === 'VENDOR_BACKUP_UNAVAILABLE'
-      || outcome.failure.code === 'VENDOR_BACKUP_SHARED_SCOPE'));
+  return Boolean(outcome && !outcome.restored && outcome.failure.code === 'VENDOR_BACKUP_UNAVAILABLE');
 }
 
 /** Keys-only is the default; full is a danger dialog that wants the acknowledgement ticked. */

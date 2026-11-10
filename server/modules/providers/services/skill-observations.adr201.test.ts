@@ -28,10 +28,8 @@ test('M1: skill observations never read a transcript the pinned reader refuses',
   await fs.writeFile(process.env.DATABASE_PATH, '');
   const db = await import('@/modules/database/index.js');
   const { readSessionSkills } = await import('./skill-observations.service.js');
-  const sharing = await import('@/services/provider-sharing.js');
   db.closeConnection();
   await db.initializeDatabase();
-  sharing._resetProviderSharingCache();
   try {
     const alice = db.userDb.createUser('m1-alice', 'hash-a', 'user').id;
     const mallory = db.userDb.createUser('m1-mallory', 'hash-m', 'user').id;

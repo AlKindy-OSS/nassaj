@@ -137,7 +137,7 @@ async function turn(cwd: string, sessionId: string | null): Promise<Frame[]> {
     } as never,
     writer,
     {
-      getSessionProvider: () => 'antigravity',
+      getSessionProvider: () => 'antigravity', admitCredentialTurn: () => ({ principalId: 1, grantedBy: null }),
       authorizeProviderExecution: authorized,
       spawnAntigravity: agy.spawnAntigravity,
       abortAntigravitySession: agy.abortAntigravitySession,
@@ -284,7 +284,7 @@ test('the wrapper announces the handover once; replays drop, an undeclared ident
     'antigravity-command',
     { type: 'antigravity-command', command: 'x', options: { cwd: dir, clientMsgId: `cmid-${randomUUID()}` } } as never,
     new WebSocketWriter(socket as never, user.id),
-    { getSessionProvider: () => 'antigravity', authorizeProviderExecution: authorized, spawnAntigravity: runtime } as never,
+    { getSessionProvider: () => 'antigravity', admitCredentialTurn: () => ({ principalId: 1, grantedBy: null }), authorizeProviderExecution: authorized, spawnAntigravity: runtime } as never,
     user.id,
     Object.freeze({ id: user.id, role: 'user', authenticationKind: 'session', authorizationGeneration: 1 }),
   );

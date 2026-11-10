@@ -4,8 +4,32 @@ import {
   isLinkModeHarness,
   type SwitchLinkModeInput,
 } from '@/modules/providers/services/harness-link-mode.service.js';
+import { userDb } from '@/modules/database/index.js';
+import { isMemberActor } from '@/services/isolation/credential-actor.js';
+import { resolveCredentialPrincipal } from '@/services/isolation/credential-principal.js';
 import type { LLMProvider, ProviderAuthStatus } from '@/shared/types.js';
 import { AppError } from '@/shared/utils.js';
+
+/** The isolation key of a provider id ('antigravity' is stored as 'agy'). */
+const isolationKeyOf = (provider: string): string => (provider === 'antigravity' ? 'agy' : provider);
+
+/**
+ * ADR-152 A1 §3.9 (qa condition 10): status describes the caller's principal
+ * only. On a grant it names the grantor by USERNAME and drops the account email
+ * the grantor's tree carries; with no member it carries no email at all.
+ */
+export function presentGrantedStatus(
+  status: ProviderAuthStatus,
+  userId: string | number | null | undefined,
+  providerName: string,
+): ProviderAuthStatus {
+  if (!isMemberActor(userId)) return { ...status, email: null, grantedBy: null };
+  const { grantedBy } = resolveCredentialPrincipal(userId, isolationKeyOf(providerName));
+  if (grantedBy === null || grantedBy === undefined) return { ...status, grantedBy: null };
+  const grantorId = Number(grantedBy);
+  const username = userDb.getUserById(grantorId)?.username ?? null;
+  return { ...status, email: null, grantedBy: username ? { userId: grantorId, username } : null };
+}
 
 /** Antigravity is subscription-only and OpenCode key-only: neither has a link mode. */
 function assertLinkModeHarness(providerName: string): 'claude' | 'codex' {
@@ -27,7 +51,7 @@ export const providerAuthService = {
     userId?: string | number | null,
   ): Promise<ProviderAuthStatus> {
     const provider = providerRegistry.resolveProvider(providerName);
-    return provider.auth.getStatus(userId);
+    return presentGrantedStatus(await provider.auth.getStatus(userId), userId, providerName);
   },
 
   /**

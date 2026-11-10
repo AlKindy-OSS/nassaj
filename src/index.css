@@ -19,9 +19,11 @@
 /* ADR-219 S1 (T-2072): رسالة من جلسة أخرى — فيروزيٌّ ثابت لا يتبع --primary ولا
    --project-accent، فلا تُشبه فقاعة المستخدم ولا التوجيه (كهرمان) ولا محادثة الفريق.
    مقاسة: النص 6.09:1 على الأبيض و5.39:1 على السطح؛ الداكن 10.87:1 و8.31:1.
-   ‏--session-peer-problem للرفض/الفشل: 5.82:1 على السطح الفاتح و7.53:1 على الداكن. */
-:root { --session-peer-accent: #0F6E68; --session-peer-surface: #E6F4F2; --session-peer-rule: #0F6E68; --session-peer-problem: #B42318; }
-.dark { --session-peer-accent: #5ED1C6; --session-peer-surface: #10292A; --session-peer-rule: #5ED1C6; --session-peer-problem: #FF9B8F; }
+   ‏--session-peer-problem للرفض/الفشل: 5.82:1 على السطح الفاتح و7.53:1 على الداكن.
+   ‏--session-peer-muted للنص الثانوي على السطح (T-2074): 6.15:1 فاتحاً و7.53:1 داكناً؛
+   ‏--muted-foreground العام يبلغ 4.21:1 فقط على السطح الفاتح. */
+:root { --session-peer-accent: #0F6E68; --session-peer-surface: #E6F4F2; --session-peer-rule: #0F6E68; --session-peer-problem: #B42318; --session-peer-muted: #4B5B6E; }
+.dark { --session-peer-accent: #5ED1C6; --session-peer-surface: #10292A; --session-peer-rule: #5ED1C6; --session-peer-problem: #FF9B8F; --session-peer-muted: #A9B8C4; }
 
 /* ── Ultracode effort mode: terminal glow ring ──────────────────────────────
    ⚠ ميزانية 8px — لا تتجاوزها. المجموع (spread + blur) لكل ظلٍّ هنا يجب أن

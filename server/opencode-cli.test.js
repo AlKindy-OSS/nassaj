@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict';
 import { chmod, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
+
+import { FAKE_OPENCODE_PARITY_PRELUDE, installManagedClaudePlugins } from './shared/__tests__/fake-opencode-parity.ts';
 
 import {
   closeConnection,
@@ -12,12 +15,17 @@ import {
 } from './modules/database/index.js';
 import { spawnOpenCode } from './opencode-cli.js';
 
+// B-1761 (ADR-226): every OpenCode spawn attests governance, so the neutral source it copies
+// into the member's opencode config home must exist.
+mkdirSync(path.join(process.env.HOME, '.claude'), { recursive: true });
+writeFileSync(path.join(process.env.HOME, '.claude', 'AGENTS.md'), '# neutral governance\n');
+
 const findEnvKey = (name) =>
   Object.keys(process.env).find((key) => key.toLowerCase() === name.toLowerCase()) || name;
 
 async function createFakeOpenCodeExecutable(binDir) {
   const scriptPath = path.join(binDir, 'opencode.js');
-  await writeFile(scriptPath, `
+  await writeFile(scriptPath, `${FAKE_OPENCODE_PARITY_PRELUDE}
 const events = [
   { type: 'text', sessionID: 'open-live-1', text: 'assistant response' },
   { type: 'step_finish', sessionID: 'open-live-1' },
@@ -81,6 +89,7 @@ test('spawnOpenCode records the spawning user so the web session is native (T-85
 
     await withIsolatedDatabase(async () => {
       const userId = userDb.createUser(`u_oc_${Date.now()}`, 'hash', 'user').id;
+      installManagedClaudePlugins(process.env.HOME, userId);
       const messages = [];
       const writer = {
         userId,
@@ -136,8 +145,12 @@ test('spawnOpenCode emits session_created before normalized live messages for ne
   const pathExtKey = findEnvKey('PATHEXT');
   const previousPathExt = process.env[pathExtKey];
   const messages = [];
+  // ADR-152 A1 §3.4: a run needs a signed-in member, recorded on a real schema.
+  closeConnection();
+  process.env.DATABASE_PATH = path.join(tempRoot, 'auth.db');
+  await initializeDatabase();
   const writer = {
-    userId: null,
+    userId: userDb.createUser(`u_oc_new_${Date.now()}`, 'hash', 'user').id,
     sessionId: null,
     send(message) {
       messages.push(message);
@@ -146,6 +159,7 @@ test('spawnOpenCode emits session_created before normalized live messages for ne
       this.sessionId = sessionId;
     },
   };
+  installManagedClaudePlugins(process.env.HOME, writer.userId);
 
   try {
     await createFakeOpenCodeExecutable(tempRoot);

@@ -7,16 +7,8 @@
  * OPERATOR's agy state — brain sessions, CLI logs, and the Google e-mail parsed
  * out of them.
  *
- * That is only half a bug, and the half matters: `agy` defaults to
- * `sharing: 'shared'` (provider-sharing.js), and a shared provider deliberately
- * inherits the operator's tree — showing the operator's identity there is
- * CORRECT. The leak is the `isolated` case: `resolveProviderEnv` points a
- * spawned agy at `~/.nassaj-users/<id>/`, so the status panel described a tree
- * the user does not run on, and leaked an identity that is not theirs.
- *
- * These tests pin BOTH halves, because a fix that isolates unconditionally would
- * silently break the shared default (every member would suddenly read as
- * "not authenticated") — a regression that no existing test would catch.
+ * agy is always isolated (ADR-152 A1): a member's status is read from their own
+ * tree (or a grantor's), never from the operator's.
  *
  * RUNNER: node:test via `npm run test:server`.
  */
@@ -27,10 +19,6 @@ import path from 'node:path';
 import { after, before, describe, it } from 'node:test';
 
 import { AntigravityProviderAuth } from '../antigravity-auth.provider.js';
-import {
-  _resetProviderSharingCache,
-  setProviderSharingConfig,
-} from '../../../../../services/provider-sharing.js';
 import { userConfigDir } from '../../../../../services/isolation/provision-user-dirs.js';
 
 const OPERATOR_EMAIL = 'operator@example.com';
@@ -49,7 +37,7 @@ function seedAgyState(home: string, email: string): void {
   );
 }
 
-describe('agy auth status — per-user isolation honours the sharing policy (B-357)', () => {
+describe('agy auth status — always read from the caller\'s own tree (B-357)', () => {
   let realHome: string;
   let fakeOperatorHome: string;
 
@@ -69,11 +57,9 @@ describe('agy auth status — per-user isolation honours the sharing policy (B-3
 
   after(() => {
     os.homedir = () => realHome;
-    _resetProviderSharingCache();
   });
 
   it('isolated: a member never sees the operator identity', async () => {
-    setProviderSharingConfig({ agy: 'isolated' });
     seedAgyState(userConfigDir(USER_ID), MEMBER_EMAIL);
 
     const status = await new AntigravityProviderAuth().getStatus(USER_ID);
@@ -87,7 +73,6 @@ describe('agy auth status — per-user isolation honours the sharing policy (B-3
   });
 
   it('isolated: a member with no agy state reads unauthenticated, not the operator session', async () => {
-    setProviderSharingConfig({ agy: 'isolated' });
 
     const status = await new AntigravityProviderAuth().getStatus(999999);
 
@@ -95,16 +80,9 @@ describe('agy auth status — per-user isolation honours the sharing policy (B-3
     assert.equal(status.email, null, 'no state must mean no identity, not the operator identity');
   });
 
-  it('shared (the default): inheriting the operator tree is intended, not a leak', async () => {
-    setProviderSharingConfig({ agy: 'shared' });
+  it('a member with only operator agy state never reads the operator identity (no shared mode)', async () => {
+    const status = await new AntigravityProviderAuth().getStatus(USER_ID + 1);
 
-    const status = await new AntigravityProviderAuth().getStatus(USER_ID);
-
-    assert.equal(
-      status.email,
-      OPERATOR_EMAIL,
-      'a shared provider must keep inheriting the operator tree — isolating it unconditionally '
-        + 'would read every member as unauthenticated',
-    );
+    assert.notEqual(status.email, OPERATOR_EMAIL, 'no sharing policy can hand a member the operator identity');
   });
 });

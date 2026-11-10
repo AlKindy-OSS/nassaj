@@ -23,13 +23,14 @@
  */
 import { type VendorProvider } from '../../provider-auth/vendorProviders';
 import { isEngineProviderEligible } from '../../../../shared/engineProviders';
+import { LOCAL_ENGINE } from '../../../../shared/localEngine';
 
 /**
  * The active "Claude engine on a vendor endpoint" selection (ADR-037). A vendor
  * id means the Claude engine runs against that vendor's Anthropic-compatible
  * endpoint; null is the normal official-Anthropic path.
  */
-export type EngineProvider = VendorProvider | null;
+export type EngineProvider = VendorProvider | typeof LOCAL_ENGINE | null;
 
 const ENGINE_PROVIDER_STORAGE_KEY = 'claude-engine-provider';
 
@@ -53,6 +54,7 @@ const PENDING_ENGINE_STAMP_KEY = '__nassaj_pending_engine_stamp';
  * (ADR-073), so eligibility now comes from its own declaration.
  */
 export function sanitizeEngineProviderValue(stored: string | null): EngineProvider {
+  if (stored === LOCAL_ENGINE) return LOCAL_ENGINE;
   return stored && isEngineProviderEligible(stored) ? (stored as VendorProvider) : null;
 }
 

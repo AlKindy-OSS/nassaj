@@ -7,12 +7,10 @@
  *   1. resolveProviderEnv  — builds the child-process env and is the SOLE place
  *      a per-user CONFIG_DIR/HOME override is applied. We assert it (a) leaves
  *      the env untouched for anonymous/system spawns, (b) sets the right knob
- *      per provider when that provider is isolated, and (c) leaves the env
- *      untouched when the admin marks a provider 'shared'.
- *   2. provider-sharing    — the admin policy that decides which providers are
- *      isolated. We exercise the real DB round-trip: defaults, a write, the
- *      hot-path isProviderIsolated check, and a reload after a cache reset.
- *   3. provisionUserDirs   — creates the isolated tree + shared symlinks. We
+ *      per provider for every authenticated user, and (c) cannot be turned back
+ *      to the operator env by any stored policy (ADR-152 A1: isolation is a
+ *      constant; the install-wide sharing policy is retired).
+ *   2. provisionUserDirs   — creates the isolated tree + shared symlinks. We
  *      point os.homedir() at a tmp HOME and assert the .claude/.gemini/.codex
  *      dirs and the shared projects/ symlink are created.
  *
@@ -22,17 +20,12 @@
  *     real project DB at ~/.local/share/nassaj-dev/db.sqlite.
  *   - HOME is redirected to a tmp dir so provisionUserDirs/userConfigDir write
  *     only under tmp. (os.homedir() honors $HOME on this platform.)
- *   - isProviderIsolated is driven through the real DB policy via
- *     setProviderSharingConfig + _resetProviderSharingCache rather than a
- *     module mock (node:test module mocking is gated behind an experimental
- *     flag and not enabled here): controlling the policy controls exactly what
- *     resolveProviderEnv's isolation gate sees.
  *
  * Runner: Node built-in test runner (node:test + node:assert). No Jest/Vitest.
  */
 
 import assert from 'node:assert/strict';
-import { after, before, beforeEach, describe, it } from 'node:test';
+import { after, describe, it } from 'node:test';
 
 import fs from 'fs';
 import os from 'os';
@@ -70,17 +63,10 @@ assert.equal(
 
 // Now safe to import the modules under test (they pick up the tmp DB + HOME).
 const { initializeDatabase, closeConnection, getConnection } = await import('@/modules/database/index.js');
-const {
-  getProviderSharingConfig,
-  setProviderSharingConfig,
-  validateProviderSharingConfig,
-  isProviderIsolated,
-  _resetProviderSharingCache,
-} = await import('../provider-sharing.js');
 const { resolveProviderEnv } = await import('./resolve-provider-env.js');
 const { provisionUserDirs, userConfigDir } = await import('./provision-user-dirs.js');
 
-// Apply the full schema once so provider-sharing writes and audit_log records
+// Apply the full schema once so audit_log records
 // (emitted by provisionUserDirs through resolveProviderEnv) land in real tables.
 await initializeDatabase();
 
@@ -111,64 +97,25 @@ after(() => {
 // ===========================================================================
 // 1) resolveProviderEnv — isolation logic
 //
-// The isolation gate inside resolveProviderEnv calls isProviderIsolated, which
-// reads the DB-backed policy. We set that policy explicitly per case (reset
-// cache first) so "isolated"/"shared" is deterministic and independent of any
-// previously stored value — the equivalent of mocking isProviderIsolated.
-// A non-process baseEnv is passed so assertions never mutate the real env.
+// Isolation is a constant: no policy is set or read. A non-process baseEnv is
+// passed so assertions never mutate the real env.
 // ===========================================================================
-/**
- * 0d7a0bb93 (T-1749/ADR-159 D2) adds the built-in updater kill switch to EVERY
- * claude/opencode launch, including anonymous and shared ones. It is not a
- * credential or isolation knob, so "unchanged" below means unchanged apart
- * from that one flag.
- */
-function withUpdaterKillSwitch(provider: string, env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
-  if (provider === 'claude') return { ...env, DISABLE_AUTOUPDATER: '1' };
-  if (provider === 'opencode') return { ...env, OPENCODE_DISABLE_AUTOUPDATE: '1' };
-  return env;
-}
-
 describe('resolveProviderEnv isolation logic', () => {
-  /** Force a specific policy for the providers a case cares about. */
-  function setPolicy(patch: Record<string, 'shared' | 'isolated'>) {
-    _resetProviderSharingCache();
-    setProviderSharingConfig({
-      claude: 'isolated',
-      codex: 'isolated',
-      agy: 'shared',
-      cursor: 'shared',
-      ...patch,
-    });
-  }
-
-  it('returns base env unchanged for every provider when userId is null', () => {
-    // Anonymous/system/platform-mode spawn: no isolation regardless of policy.
-    setPolicy({ claude: 'isolated', agy: 'isolated' });
+  it('refuses a null, empty or undefined actor for every provider (ADR-152 A1 §3.4)', () => {
+    // No anonymous path to the operator environment exists any more.
     const base: NodeJS.ProcessEnv = { PATH: '/usr/bin', EXISTING: '1' };
-
     for (const provider of ['claude', 'codex', 'agy', 'cursor'] as const) {
-      const env = resolveProviderEnv(null, provider, { ...base });
-      assert.deepEqual(env, withUpdaterKillSwitch(provider, base), `${provider}: anonymous env must be unchanged`);
-      assert.equal(env.CLAUDE_CONFIG_DIR, undefined);
-      assert.equal(env.CODEX_HOME, undefined);
-      // HOME must not be rewritten for an anonymous agy spawn.
-      assert.equal(env.HOME, undefined);
+      for (const actor of [null, '', undefined]) {
+        assert.throws(
+          () => resolveProviderEnv(actor as unknown as null, provider, { ...base }),
+          { code: 'CREDENTIAL_ACTOR_REQUIRED' },
+          `${provider}/${String(actor)}`,
+        );
+      }
     }
   });
 
-  it('also treats empty-string and undefined userId as anonymous (no isolation)', () => {
-    setPolicy({ claude: 'isolated' });
-    const base: NodeJS.ProcessEnv = { PATH: '/usr/bin' };
-    assert.deepEqual(resolveProviderEnv('', 'claude', { ...base }), withUpdaterKillSwitch('claude', base));
-    assert.deepEqual(
-      resolveProviderEnv(undefined as unknown as null, 'claude', { ...base }),
-      withUpdaterKillSwitch('claude', base)
-    );
-  });
-
   it('sets CLAUDE_CONFIG_DIR to the per-user path when claude is isolated', () => {
-    setPolicy({ claude: 'isolated' });
     const env = resolveProviderEnv(42, 'claude', { PATH: '/usr/bin' });
 
     const expected = userConfigDir(42, '.claude');
@@ -181,18 +128,15 @@ describe('resolveProviderEnv isolation logic', () => {
     assert.equal(env.CODEX_HOME, undefined);
   });
 
-  it('leaves env unchanged when claude is marked shared (admin policy)', () => {
-    // Same user, but the admin shared claude → operator credentials, env intact.
-    setPolicy({ claude: 'shared' });
+  it('never hands a member the operator CLAUDE_CONFIG_DIR (no shared mode, ADR-152 A1)', () => {
     const base = { PATH: '/usr/bin', CLAUDE_CONFIG_DIR: '/operator/.claude' };
     const env = resolveProviderEnv(42, 'claude', { ...base });
 
-    assert.deepEqual(env, withUpdaterKillSwitch('claude', base), 'shared claude must not apply a per-user override');
-    assert.equal(env.CLAUDE_CONFIG_DIR, '/operator/.claude');
+    assert.equal(env.CLAUDE_CONFIG_DIR, userConfigDir(42, '.claude'));
+    assert.notEqual(env.CLAUDE_CONFIG_DIR, '/operator/.claude');
   });
 
   it('sets CODEX_HOME to the per-user path when isolated', () => {
-    setPolicy({ codex: 'isolated' });
 
     const cEnv = resolveProviderEnv(42, 'codex', { PATH: '/usr/bin' });
     assert.equal(cEnv.CODEX_HOME, userConfigDir(42, '.codex'));
@@ -201,101 +145,22 @@ describe('resolveProviderEnv isolation logic', () => {
   it('rewrites HOME to the per-user root when agy is isolated', () => {
     // agy has no dedicated knob: isolation works by pointing HOME at the
     // per-user root so its brain store resolves into the isolated tree.
-    setPolicy({ agy: 'isolated' });
     const env = resolveProviderEnv(42, 'agy', { PATH: '/usr/bin', HOME: '/operator/home' });
 
     assert.equal(env.HOME, userConfigDir(42, ''));
     assert.notEqual(env.HOME, '/operator/home', 'isolated agy must override HOME');
   });
 
-  it('leaves env (and HOME) unchanged when agy is shared (default policy)', () => {
-    setPolicy({ agy: 'shared' });
-    const base = { PATH: '/usr/bin', HOME: '/operator/home' };
-    const env = resolveProviderEnv(42, 'agy', { ...base });
-
-    assert.deepEqual(env, base, 'shared agy must not rewrite HOME');
-    assert.equal(env.HOME, '/operator/home');
+  it('never hands a member the operator HOME for agy or cursor (no shared mode, ADR-152 A1)', () => {
+    for (const provider of ['agy', 'cursor'] as const) {
+      const env = resolveProviderEnv(42, provider, { PATH: '/usr/bin', HOME: '/operator/home' });
+      assert.equal(env.HOME, userConfigDir(42, ''), provider);
+    }
   });
 });
 
 // ===========================================================================
-// 2) provider-sharing — config round-trip against the real (tmp) DB
-// ===========================================================================
-describe('provider-sharing config round-trip', () => {
-  beforeEach(() => {
-    // Each case starts from the persisted default so order never matters. The
-    // seed spells out only what it needs; every unnamed provider is filled from
-    // DEFAULT_CONFIG by setProviderSharingConfig. agy/cursor used to be seeded
-    // as 'shared' here to match the old defaults (ADR-105 made them isolated),
-    // which quietly turned this seed into an override of the very default the
-    // next test asserts.
-    _resetProviderSharingCache();
-    setProviderSharingConfig({
-      claude: 'isolated',
-      codex: 'isolated',
-    });
-  });
-
-  // ADR-105 — every provider defaults to isolated. The previous expectation
-  // (agy/cursor/opencode shared) encoded "whatever shipped before the isolation
-  // seam existed", which is the wrong tie-breaker for an open-source project: a
-  // fresh install is somebody else's team, and shared-by-default there means one
-  // person's credentials pay for everyone's work.
-  it('returns the documented default policy after a fresh default write', () => {
-    assert.deepEqual(getProviderSharingConfig(), {
-      claude: 'isolated',
-      codex: 'isolated',
-      agy: 'isolated',
-      cursor: 'isolated',
-      opencode: 'isolated',
-      kimi: 'isolated',
-      deepseek: 'isolated',
-      glm: 'isolated',
-      qwen: 'isolated',
-    });
-  });
-
-  it('persists a partial patch and keeps the other providers intact', () => {
-    const stored = setProviderSharingConfig({ claude: 'shared' } as Record<string, 'shared'>);
-
-    // setProviderSharingConfig normalizes a partial input: unspecified
-    // providers fall back to the documented default, not to the prior value.
-    assert.equal(stored.claude, 'shared');
-    assert.equal(getProviderSharingConfig().claude, 'shared');
-    assert.equal(getProviderSharingConfig().codex, 'isolated');
-  });
-
-  it('reflects the write through the isProviderIsolated hot path', () => {
-    setProviderSharingConfig({ claude: 'shared' } as Record<string, 'shared'>);
-
-    assert.equal(isProviderIsolated('claude'), false, 'claude was just marked shared');
-    assert.equal(isProviderIsolated('codex'), true, 'codex is unchanged → still isolated');
-    // An unknown provider is treated as not isolated (shared) by contract.
-    assert.equal(isProviderIsolated('totally-unknown'), false);
-  });
-
-  it('never permits an operator-wide Qwen Coding Plan account', () => {
-    const verdict = validateProviderSharingConfig({ qwen: 'shared' });
-    assert.equal(verdict.ok, false);
-    assert.equal(isProviderIsolated('qwen'), true);
-  });
-
-  it('reloads the same policy from the DB after the cache is dropped', () => {
-    setProviderSharingConfig({ claude: 'shared', codex: 'shared' } as Record<string, 'shared'>);
-    const beforeReset = getProviderSharingConfig();
-
-    // Drop the in-process cache so the next read re-parses from app_config.
-    _resetProviderSharingCache();
-    const afterReset = getProviderSharingConfig();
-
-    assert.deepEqual(afterReset, beforeReset, 'reload must reproduce the persisted policy');
-    assert.equal(afterReset.claude, 'shared');
-    assert.equal(afterReset.codex, 'shared');
-  });
-});
-
-// ===========================================================================
-// 3) provisionUserDirs — filesystem provisioning under the sandboxed HOME
+// 2) provisionUserDirs — filesystem provisioning under the sandboxed HOME
 // ===========================================================================
 describe('provisionUserDirs filesystem layout', () => {
   /** True if `p` is a symlink (even a dangling one). */

@@ -37,6 +37,11 @@ export type PeerMessageRow = {
   created_at: number;
   updated_at: number;
   delivered_at: number | null;
+  /** ADR-219 P2: the hold this row was promoted from (null for a same-user row). */
+  hold_id: string | null;
+  approved_by: number | null;
+  approval_text_hash: string | null;
+  approval_target_mode: string | null;
 };
 
 export type NewPeerMessage = Pick<PeerMessageRow,
@@ -48,7 +53,8 @@ export type OwnedSessionRow = { sessionId: string; title: string | null; project
 
 const COLUMNS = `id, ref_token, chain_id, from_user_id, from_session_id, from_agent_id, from_mode, to_user_id,
   to_session_id, project_id, body, body_sha256, body_bytes, summary, hop, parent_id, notify_when_idle, state,
-  cause, delivery_path, attempts, next_attempt_at, proof_scan_offset, cost_usd_charged, created_at, updated_at, delivered_at`;
+  cause, delivery_path, attempts, next_attempt_at, proof_scan_offset, cost_usd_charged, created_at, updated_at, delivered_at,
+  hold_id, approved_by, approval_text_hash, approval_target_mode`;
 
 export const peerMessagesDb = {
   /** Inserts one row; the id and ref token are unique (a collision throws). */

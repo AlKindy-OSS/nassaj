@@ -38,6 +38,7 @@ import { isScheduledMessagesCenterEnabled } from '../scheduled-messages/schedule
 import ScheduledMessagesCenterRoute from '../scheduled-messages/view/ScheduledMessagesCenterRoute';
 
 import BuildUpdateBanner from './BuildUpdateBanner';
+import RetirementNoticeBanner from '../credential-link/RetirementNoticeBanner';
 import { useUpdateCompletionNotice } from '../version-upgrade/useUpdateCompletionNotice';
 import { UpdateCompletionBanner } from '../version-upgrade/view/UpdateCompletionBanner';
 import { useWhatsNew } from '../version-upgrade/whatsNew/useWhatsNew';
@@ -634,14 +635,17 @@ function AppContentInner() {
       }}
     >
       <BuildUpdateBanner />
-      {updateCompletionNotice && (
-        <div className="fixed inset-x-4 top-4 z-[60] mx-auto max-w-md sm:inset-x-auto sm:end-4 sm:start-auto">
+      {/* Shell notices stack in one corner so they never overlap. The
+          retirement notice (ADR-152 A1 §3.10) renders nothing for non-owners. */}
+      <div className="pointer-events-none fixed inset-x-4 top-4 z-[60] mx-auto flex max-w-md flex-col gap-2 sm:inset-x-auto sm:end-4 sm:start-auto [&>*]:pointer-events-auto">
+        {updateCompletionNotice && (
           <UpdateCompletionBanner
             targetVersion={updateCompletionNotice.targetVersion}
             onDismiss={dismissUpdateCompletionNotice}
           />
-        </div>
-      )}
+        )}
+        <RetirementNoticeBanner isOwner={user?.role === 'owner'} />
+      </div>
       {whatsNew.version && whatsNew.items && (
         <WhatsNewDialog version={whatsNew.version} items={whatsNew.items} onDismiss={whatsNew.dismiss} />
       )}

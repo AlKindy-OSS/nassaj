@@ -7,84 +7,62 @@ import {
 } from './platform-isolation-guard.service.js';
 
 /**
- * B-5 boot guard. The dangerous combination is: platform mode ON +
- * Claude provider 'isolated' + more than one active user. Every other
- * combination must boot cleanly (no throw).
+ * B-5 boot guard, ADR-152 amendment 1 §3.6. Platform mode collapses every
+ * session onto the first active user, which is credential sharing for every
+ * provider. With more than one active user it refuses to boot; there is no
+ * "shared" policy that makes the combination acceptable.
  */
 describe('enforcePlatformIsolationGuard', () => {
-  const isolated = (p) => p === 'claude';
-  const shared = () => false;
-
-  it('throws when platform + claude isolated + >1 active user', () => {
+  it('throws when platform + >1 active user', () => {
     assert.throws(
-      () =>
-        enforcePlatformIsolationGuard({
-          isPlatform: true,
-          isIsolated: isolated,
-          activeUserCount: () => 2,
-        }),
-      PlatformIsolationViolationError
+      () => enforcePlatformIsolationGuard({ isPlatform: true, activeUserCount: () => 2 }),
+      PlatformIsolationViolationError,
     );
   });
 
   it('throws for many active users too', () => {
     assert.throws(
-      () =>
-        enforcePlatformIsolationGuard({
-          isPlatform: true,
-          isIsolated: isolated,
-          activeUserCount: () => 9,
-        }),
-      PlatformIsolationViolationError
+      () => enforcePlatformIsolationGuard({ isPlatform: true, activeUserCount: () => 9 }),
+      PlatformIsolationViolationError,
+    );
+  });
+
+  it('cannot be bypassed by an injected or stored sharing policy (no isIsolated seam)', () => {
+    assert.throws(
+      () => enforcePlatformIsolationGuard({ isPlatform: true, isIsolated: () => false, activeUserCount: () => 50 }),
+      PlatformIsolationViolationError,
+    );
+  });
+
+  it('lists only the remedies that keep credentials apart (no "set shared" advice)', () => {
+    assert.throws(
+      () => enforcePlatformIsolationGuard({ isPlatform: true, activeUserCount: () => 3 }),
+      (error) => {
+        assert.ok(error instanceof PlatformIsolationViolationError);
+        assert.doesNotMatch(error.message, /'shared'|sharing policy/i);
+        assert.match(error.message, /disable platform mode/i);
+        assert.match(error.message, /reduce active users to at most one/i);
+        return true;
+      },
     );
   });
 
   it('passes when platform mode is OFF (OSS JWT path), regardless of users', () => {
-    assert.doesNotThrow(() =>
-      enforcePlatformIsolationGuard({
-        isPlatform: false,
-        isIsolated: isolated,
-        activeUserCount: () => 50,
-      })
-    );
-  });
-
-  it("passes when claude is 'shared' (sharing is the intended policy)", () => {
-    assert.doesNotThrow(() =>
-      enforcePlatformIsolationGuard({
-        isPlatform: true,
-        isIsolated: shared,
-        activeUserCount: () => 50,
-      })
-    );
+    assert.doesNotThrow(() => enforcePlatformIsolationGuard({ isPlatform: false, activeUserCount: () => 50 }));
   });
 
   it('passes when exactly one active user exists', () => {
-    assert.doesNotThrow(() =>
-      enforcePlatformIsolationGuard({
-        isPlatform: true,
-        isIsolated: isolated,
-        activeUserCount: () => 1,
-      })
-    );
+    assert.doesNotThrow(() => enforcePlatformIsolationGuard({ isPlatform: true, activeUserCount: () => 1 }));
   });
 
   it('passes when zero active users exist', () => {
-    assert.doesNotThrow(() =>
-      enforcePlatformIsolationGuard({
-        isPlatform: true,
-        isIsolated: isolated,
-        activeUserCount: () => 0,
-      })
-    );
+    assert.doesNotThrow(() => enforcePlatformIsolationGuard({ isPlatform: true, activeUserCount: () => 0 }));
   });
 
-  it('only consults the active-user count for the guarded combination', () => {
+  it('only consults the active-user count in platform mode', () => {
     let called = 0;
-    // platform OFF → must short-circuit before counting users.
     enforcePlatformIsolationGuard({
       isPlatform: false,
-      isIsolated: isolated,
       activeUserCount: () => {
         called += 1;
         return 5;

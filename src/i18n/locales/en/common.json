@@ -968,7 +968,7 @@
   "governanceBadge": {
     "ungoverned": "Ungoverned",
     "tooltip": {
-      "none": "This session is running outside Nassaj governance — check provider settings"
+      "none": "This session is running outside Nassaj governance — check the coding agent settings"
     }
   },
   "onboarding": {
@@ -1186,5 +1186,35 @@
     "zoom": "Zoom diagram",
     "zoomedAria": "Zoomed Mermaid diagram",
     "close": "Close"
+  },
+  "credential": {
+    "notLinked": {
+      "title": "{{provider}} is not linked to your account",
+      "titleGeneric": "This agent is not linked to your account",
+      "body": "Link your account, or ask the account's owner to share it with you."
+    },
+    "grantorNotLinked": {
+      "body": "{{grantorUsername}} shared this with you, but their account is no longer linked. Link your own account, or ask {{grantorUsername}} to link theirs again."
+    },
+    "actions": {
+      "linkOwn": "Link my account",
+      "requestShare": "Ask a member to share",
+      "dismiss": "Dismiss"
+    }
+  },
+  "retirementNotice": {
+    "title": "Shared agent accounts have been retired",
+    "body": "Shared mode is gone: nobody's account is used by anyone else any more. An account reaches another member only when its owner shares it with them.",
+    "sharedProviders": "Agents that were shared: {{providers}}",
+    "noSharedProviders": "No agent was in shared mode.",
+    "orgKeyProviders": "Agents that had an installation-wide key (now unused): {{providers}}",
+    "orgKeyUnknown": "Whether an installation-wide key existed could not be read at retirement.",
+    "members": "Members active at retirement:",
+    "noMembers": "No other member was active at retirement.",
+    "membersNeedOwnOrGrant": "Each of them now needs their own account or a share from an account's owner.",
+    "ownersMustLink": "Owner accounts are included: link your own account to keep using these agents.",
+    "openGrants": "Open sharing settings",
+    "acknowledge": "Got it",
+    "ackFailed": "The notice could not be dismissed. Try again."
   }
 }

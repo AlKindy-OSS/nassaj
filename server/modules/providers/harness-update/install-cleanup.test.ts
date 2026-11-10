@@ -60,7 +60,8 @@ test('ش5 deny-list: the vendor files a descriptor owns are allowed', () => {
 
 test('ش5: no descriptor declares an owned path the deny-list refuses', () => {
   for (const [id, source] of Object.entries(HARNESS_INSTALL_SOURCES)) {
-    if (source.kind === 'asset') continue;
+    // npm-lock (dsh) owns only its versions dir, removed by its own flow.
+    if (source.kind === 'asset' || source.kind === 'npm-lock') continue;
     const ownedList = source.kind === 'script' ? source.ownedPaths(HOME) : source.ownedPaths(HOME, '2.1.304');
     for (const owned of ownedList) {
       assert.equal(isDeniedCleanupPath(owned.path, HOME), false, `${id}: ${owned.path}`);

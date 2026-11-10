@@ -2,13 +2,13 @@ import fs from 'node:fs';
 import type { Stats } from 'node:fs';
 import { open, readFile, rename, rm, stat } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
-import os from 'node:os';
 import path from 'node:path';
 
 import TOML from '@iarna/toml';
 
 import { McpProvider } from '@/modules/providers/shared/mcp/mcp.provider.js';
 import { resolveProviderEnv } from '@/services/isolation/resolve-provider-env.js';
+import { resolvedKnob } from '@/services/isolation/resolved-knob.js';
 import type { McpScope, ProviderMcpServer, UpsertProviderMcpServerInput } from '@/shared/types.js';
 import {
   AppError,
@@ -18,6 +18,8 @@ import {
   readStringArray,
   readStringRecord,
 } from '@/shared/utils.js';
+import os from 'node:os';
+import { isMemberActor } from '@/services/isolation/credential-actor.js';
 
 const parseTomlConfig = (content: string): Record<string, unknown> => {
   const parsed = TOML.parse(content) as Record<string, unknown>;
@@ -89,18 +91,14 @@ export class CodexMcpProvider extends McpProvider {
   }
 
   private userConfigPath(userId?: string | number | null): string {
-    // Internal/operator callers have no member identity to isolate.  Sending a
-    // null id through userConfigDir would create a literal `.nassaj-users/null`
-    // tree that no real Codex process reads. Authenticated routes always pass
-    // their member id and therefore still use the isolated CODEX_HOME below.
-    if (userId === null || userId === undefined || userId === '') {
-      return path.join(
-        process.env.CODEX_HOME || path.join(process.env.HOME || os.homedir(), '.codex'),
-        'config.toml',
-      );
+    // ADR-152 A1: an MCP config file is not a credential. A member always resolves to
+    // their own tree; a caller with NO member (an operator-scoped placement) names the
+    // operator's config file explicitly, never through the credential resolver.
+    if (!isMemberActor(userId)) {
+      return path.join(process.env.CODEX_HOME || path.join(process.env.HOME || os.homedir(), '.codex'), 'config.toml');
     }
-    const env = resolveProviderEnv(userId ?? null, 'codex', process.env);
-    return path.join(env.CODEX_HOME || path.join(os.homedir(), '.codex'), 'config.toml');
+    const env = resolveProviderEnv(userId, 'codex', process.env);
+    return path.join(resolvedKnob(env, 'CODEX_HOME'), 'config.toml');
   }
 
   protected scopedConfigPath(

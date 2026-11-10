@@ -148,7 +148,7 @@
     "ariaLabel": "자동화된 시스템 메시지"
   },
   "sessionNotResumable": {
-    "message": "이 세션을 재개할 수 없습니다 — 프로바이더에 더 이상 존재하지 않습니다.",
+    "message": "이 세션을 재개할 수 없습니다 — 코딩 에이전트에 더 이상 존재하지 않습니다.",
     "startNew": "새 세션 시작"
   },
   "tools": {
@@ -415,7 +415,7 @@
   },
   "providerSelection": {
     "title": "AI 어시스턴트 선택",
-    "description": "새 대화를 시작할 프로바이더를 선택하세요",
+    "description": "새 대화를 시작할 코딩 에이전트를 선택하세요",
     "selectModel": "모델 선택",
     "providerInfo": {
       "anthropic": "Anthropic 제공",
@@ -427,11 +427,11 @@
       "codex": "{{model}} 모델로 Codex를 사용할 준비가 되었습니다. 아래에 메시지를 입력하세요.",
       "antigravity": "Antigravity (agy)를 {{model}}(으)로 사용할 준비가 되었습니다. 아래에 메시지를 입력하세요.",
       "opencode": "{{model}} 모델로 OpenCode를 사용할 준비가 되었습니다. 아래에 메시지를 입력하세요.",
-      "default": "시작하려면 위에서 제공자를 선택하세요",
+      "default": "시작하려면 위에서 코딩 에이전트를 선택하세요",
       "kimi": "{{model}} 모델로 Kimi를 사용할 준비가 되었습니다. 아래에 메시지를 입력하세요.",
       "deepseek": "{{model}} 모델로 DeepSeek을 사용할 준비가 되었습니다. 아래에 메시지를 입력하세요.",
       "glm": "{{model}} 모델로 GLM을 사용할 준비가 되었습니다. 아래에 메시지를 입력하세요.",
-      "claudeEngine": "준비 완료: {{provider}}의 {{model}} 모델로 Claude 엔진이 실행됩니다. 아래에 메시지를 입력하세요."
+      "claudeEngine": "준비 완료: {{provider}}의 {{model}} 모델로 Claude 코딩 에이전트가 실행됩니다. 아래에 메시지를 입력하세요."
     },
     "antigravity": {
       "activeModel": "활성 모델",
@@ -444,10 +444,10 @@
       "button": "모델 및 인증 상태 새로고침",
       "refreshing": "새로고침 중…"
     },
-    "providerUnavailable": "프로바이더를 사용할 수 없습니다",
+    "providerUnavailable": "코딩 에이전트를 사용할 수 없습니다",
     "signIn": "로그인",
     "addApiKey": "{{provider}} API 키를 추가하여 활성화",
-    "engineOnVendor": "{{provider}}의 Claude 엔진"
+    "engineOnVendor": "{{provider}}의 Claude 에이전트"
   },
   "session": {
     "continue": {
@@ -596,7 +596,7 @@
     "modelsSection": "모델",
     "subagentsSection": "서브에이전트",
     "turns_other": "{{count}}회 턴",
-    "harnessLine": "하네스: {{harness}}",
+    "harnessLine": "코딩 에이전트: {{harness}}",
     "olderModels_other": "이전 모델 {{count}}개"
   },
   "composer": {

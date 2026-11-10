@@ -184,6 +184,7 @@ const PROGRESS_CAPABILITIES: Readonly<Record<string, ProgressCapability>> = Obje
   deepseek: PROGRESS_NONE,
   glm: PROGRESS_NONE,
   sakana: PROGRESS_NONE,
+  dsh: PROGRESS_NONE,
 });
 
 /** Progress capability for any provider id; unknown ids get `none`/`none`. */
@@ -394,6 +395,35 @@ export const PROVIDER_UI_CAPABILITIES: Record<ActiveBodyProvider, ProviderUiCapa
     // لا تنفيذ حقيقي لـchangeActiveModel؛ تفعيله يُضلِّل بلا تأثير فعلي.
     modelSwitch: { supported: false },
     progress: getProgressCapability('sakana'),
+  },
+  // T-2086/ADR-224: DeepSeek Harness over ACP. History is the Nassaj-owned
+  // transcript the runtime records (dsh has no session/load), read through the
+  // server's history-only reader — not dsh's own files.
+  dsh: {
+    id: 'dsh',
+    displayName: 'DeepSeek Harness',
+    // dsh offers reasoning_effort off|low|high|max; `none` sends nothing and
+    // leaves dsh's own default. medium/xhigh/ultracode have no dsh value.
+    effort: { supported: true, modes: ['none', 'low', 'high', 'max'] },
+    // No usage frame reaches the client from the ACP runtime yet.
+    tokenCounter: { supported: false },
+    command: { supportsImages: false },
+    // Owner decision 2026-11-07: Claude's exact mode set and default. The server
+    // resolves the turn's mode through Claude's own resolver (dsh-permission-
+    // parity.js) and refuses, with a named code, a mode dsh cannot enforce.
+    permissions: { modes: CLAUDE_PERMISSION_MODES },
+    // A DeepSeek API key: no subscription window to show.
+    quota: { isClaudeAccount: false, surface: 'none' },
+    posture: { supported: false },
+    sideChannel: { supported: false },
+    agentMode: { supported: false },
+    coordinationLevel: { supported: true, enforcement: COORDINATION_ENFORCEMENT.dsh },
+    // false: the in-chat switcher posts to /api/providers/dsh/sessions/<sid>/
+    // active-model, and the server registers no dsh model facet yet (only the
+    // history-only reader). The model is picked in the provider picker and sent
+    // with every turn instead.
+    modelSwitch: { supported: false },
+    progress: getProgressCapability('dsh'),
   },
 };
 

@@ -23,12 +23,18 @@
  * Runner: node:test with --experimental-test-module-mocks. The SDK mock MUST be
  * registered before importing the module-under-test, hence the dynamic import.
  */
+// B-1771: FIRST import — HOME, CLAUDE_CONFIG_DIR and provider credential env move
+// into a sandbox, so an ad-hoc run cannot touch the operator's live logins.
+import './shared/__tests__/sandbox-home.js';
 // T-1873: harness CLIs resolve to sandbox stubs, never the host's installs.
 import './shared/__tests__/stub-harness-binaries.js';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import fs from 'node:fs';
+import os from 'node:os';
 import test, { mock, beforeEach, afterEach, after } from 'node:test';
+
+import { assertOutsideRealCredentials } from './shared/__tests__/real-credential-guard.js';
 
 type SdkMessage = Record<string, unknown>;
 type HookEntry = { matcher?: string; hooks: unknown[] };
@@ -81,6 +87,14 @@ const sdk = (await import('./claude-sdk.js')) as unknown as {
 const database = await import('@/modules/database/index.js');
 await database.initializeDatabase();
 const boardActor = database.userDb.createUser('board_actor', 'hash', 'user') as { id: number };
+/** ADR-152 A1 §3.5: a Claude link in the member's own tree admits the turn. */
+function linkClaudeForTest(userId: number): void {
+  const dir = path.join(os.homedir(), '.nassaj-users', String(userId), '.claude');
+  assertOutsideRealCredentials(dir);
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, '.credentials.json'), JSON.stringify({ claudeAiOauth: { accessToken: 'sk-ant-oat01-test' } }));
+}
+for (const id of new Set([1, boardActor.id])) linkClaudeForTest(id);
 
 const SID = 'coordinator-gate-session-0001';
 
@@ -88,7 +102,7 @@ const resultMsg: SdkMessage = {
   type: 'result', session_id: SID, subtype: 'success', is_error: false, result: 'ok',
 };
 
-function makeWs(userId: number | null = null) {
+function makeWs(userId: number | null = 1) {
   return { send: () => {}, userId, ws: { readyState: 1 } };
 }
 

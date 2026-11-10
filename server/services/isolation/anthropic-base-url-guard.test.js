@@ -1,23 +1,11 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import test from 'node:test';
 
 import {
   assertAnthropicBaseUrlAllowed,
-  assertSettingsEnvAllowed,
+  assertSettingsRoutingAllowed,
   isAnthropicHostAllowed,
 } from './anthropic-base-url-guard.js';
-
-/** Creates a temp CLAUDE_CONFIG_DIR with the given settings.json contents. */
-function makeConfigDir(settingsContents) {
-  const dir = mkdtempSync(join(tmpdir(), 'anthropic-guard-test-'));
-  if (settingsContents !== undefined) {
-    writeFileSync(join(dir, 'settings.json'), settingsContents, 'utf8');
-  }
-  return dir;
-}
 
 // --- assertAnthropicBaseUrlAllowed: fail-closed contract ---
 
@@ -282,94 +270,57 @@ test('a trailing-dot Anthropic FQDN (anthropic.com.) is accepted', () => {
   );
 });
 
-// --- assertSettingsEnvAllowed: per-user settings.json env block ---
+// --- assertSettingsRoutingAllowed: one parsed settings object (any tier) ---
+// The file set (managed / user / project / local) is read by claude-spawn-env-guard.js
+// and covered in claude-settings-routing.acceptance.test.ts (B-1764).
 
-test('settings.json with a competitor ANTHROPIC_BASE_URL is rejected (closes the bypass)', () => {
-  const dir = makeConfigDir(
-    JSON.stringify({ env: { ANTHROPIC_BASE_URL: 'https://api.moonshot.cn/anthropic' } })
+const LABEL = 'project settings /p/.claude/settings.json';
+
+test('settings env with a competitor ANTHROPIC_BASE_URL is rejected (closes the bypass)', () => {
+  assert.throws(
+    () => assertSettingsRoutingAllowed({ env: { ANTHROPIC_BASE_URL: 'https://api.moonshot.cn/anthropic' } }, {}, LABEL),
+    (err) => {
+      assert.equal(err.code, 'ANTHROPIC_BASE_URL_NOT_ALLOWED');
+      assert.match(err.message, /api\.moonshot\.cn/);
+      assert.match(err.message, /project settings/);
+      return true;
+    }
   );
-  try {
+});
+
+test('settings env with an Anthropic ANTHROPIC_BASE_URL is allowed', () => {
+  assert.doesNotThrow(() =>
+    assertSettingsRoutingAllowed({ env: { ANTHROPIC_BASE_URL: 'https://api.anthropic.com' } }, {}, LABEL)
+  );
+});
+
+test('settings Bedrock base URL honored when the flag is in the spawn env', () => {
+  const settings = { env: { ANTHROPIC_BEDROCK_BASE_URL: 'https://bedrock-runtime.us-east-1.amazonaws.com' } };
+  // Flag in spawn env enables the cloud declared in the settings file.
+  assert.doesNotThrow(() => assertSettingsRoutingAllowed(settings, { CLAUDE_CODE_USE_BEDROCK: '1' }, LABEL));
+  // Without the flag anywhere: rejected.
+  assert.throws(() => assertSettingsRoutingAllowed(settings, {}, LABEL));
+});
+
+test('settings env with an unknown routing var is rejected', () => {
+  assert.throws(
+    () => assertSettingsRoutingAllowed({ env: { CLAUDE_GATEWAY_BASE_URL: 'https://api.anthropic.com' } }, {}, LABEL),
+    /CLAUDE_GATEWAY_BASE_URL/
+  );
+});
+
+test('a non-object settings env block fails closed (throws)', () => {
+  for (const env of [['ANTHROPIC_BASE_URL=http://x'], 'ANTHROPIC_BASE_URL=http://x', 7]) {
     assert.throws(
-      () => assertSettingsEnvAllowed(dir, {}),
-      (err) => {
-        assert.equal(err.code, 'ANTHROPIC_BASE_URL_NOT_ALLOWED');
-        assert.match(err.message, /api\.moonshot\.cn/);
-        return true;
-      }
+      () => assertSettingsRoutingAllowed({ env }, {}, LABEL),
+      (err) => err.code === 'ANTHROPIC_BASE_URL_NOT_ALLOWED'
     );
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
   }
 });
 
-test('settings.json with an Anthropic ANTHROPIC_BASE_URL is allowed', () => {
-  const dir = makeConfigDir(
-    JSON.stringify({ env: { ANTHROPIC_BASE_URL: 'https://api.anthropic.com' } })
-  );
-  try {
-    assert.doesNotThrow(() => assertSettingsEnvAllowed(dir, {}));
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-test('settings.json Bedrock base URL honored when the flag is in the spawn env', () => {
-  const dir = makeConfigDir(
-    JSON.stringify({
-      env: { ANTHROPIC_BEDROCK_BASE_URL: 'https://bedrock-runtime.us-east-1.amazonaws.com' },
-    })
-  );
-  try {
-    // Flag in spawn env enables the cloud declared in settings.json.
-    assert.doesNotThrow(() => assertSettingsEnvAllowed(dir, { CLAUDE_CODE_USE_BEDROCK: '1' }));
-    // Without the flag anywhere: rejected.
-    assert.throws(() => assertSettingsEnvAllowed(dir, {}));
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-test('settings.json with an unknown routing var is rejected', () => {
-  const dir = makeConfigDir(
-    JSON.stringify({ env: { CLAUDE_GATEWAY_BASE_URL: 'https://api.anthropic.com' } })
-  );
-  try {
-    assert.throws(() => assertSettingsEnvAllowed(dir, {}), /CLAUDE_GATEWAY_BASE_URL/);
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-test('invalid-JSON settings.json fails closed (throws)', () => {
-  const dir = makeConfigDir('{ not valid json');
-  try {
-    assert.throws(
-      () => assertSettingsEnvAllowed(dir, {}),
-      (err) => {
-        assert.equal(err.code, 'ANTHROPIC_BASE_URL_NOT_ALLOWED');
-        return true;
-      }
-    );
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-test('settings.json: missing file / no env block / falsy dir are all no-ops', () => {
-  // Falsy config dir.
-  assert.doesNotThrow(() => assertSettingsEnvAllowed('', {}));
-  assert.doesNotThrow(() => assertSettingsEnvAllowed(null, {}));
-  // Dir with no settings.json.
-  const emptyDir = makeConfigDir(undefined);
-  // settings.json present but no env block.
-  const noEnvDir = makeConfigDir(JSON.stringify({ theme: 'dark' }));
-  try {
-    assert.doesNotThrow(() => assertSettingsEnvAllowed(emptyDir, {}));
-    assert.doesNotThrow(() => assertSettingsEnvAllowed(noEnvDir, {}));
-  } finally {
-    rmSync(emptyDir, { recursive: true, force: true });
-    rmSync(noEnvDir, { recursive: true, force: true });
-  }
+test('settings without an env block (or a null one) are no-ops', () => {
+  assert.doesNotThrow(() => assertSettingsRoutingAllowed({ theme: 'dark' }, {}, LABEL));
+  assert.doesNotThrow(() => assertSettingsRoutingAllowed({ env: null }, {}, LABEL));
 });
 
 // --- isAnthropicHostAllowed: pure-function spot checks ---

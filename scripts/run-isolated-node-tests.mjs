@@ -5,6 +5,8 @@ import { globSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import os from 'node:os';
 import path from 'node:path';
 
+import { buildIsolatedTestEnv } from './lib/isolated-test-env.mjs';
+
 const scope = process.argv[2];
 // One hung test file must fail fast instead of holding a release run open for hours.
 const FILE_TIMEOUT_MS = Number(process.env.NASSAJ_TEST_FILE_TIMEOUT_MS || 10 * 60 * 1000);
@@ -28,13 +30,9 @@ if (files.length === 0) {
   process.exit(0);
 }
 
-// Provider/XDG roots that point at real operator state; unset so each resolver
-// falls back to the case-local HOME below (B-1420, extends the CODEX_HOME rule).
-const INHERITED_STATE_ROOT_KEYS = [
-  'CODEX_HOME', 'XDG_CONFIG_HOME', 'XDG_DATA_HOME', 'XDG_STATE_HOME', 'XDG_CACHE_HOME',
-  'QWEN_HOME', 'KIMI_SHARE_DIR', 'HERMES_HOME', 'OPENCODE_CONFIG',
-  'OPENCODE_CONFIG_DIR', 'CURSOR_CONFIG_DIR', 'WORKSPACES_ROOT', 'WORKFLOW_SUPERVISOR_STATE_DIR',
-];
+// Non-provider roots that point at real operator state. Provider credentials and
+// credential roots are dropped by buildIsolatedTestEnv (B-1420, B-1771).
+const INHERITED_STATE_ROOT_KEYS = ['WORKSPACES_ROOT', 'WORKFLOW_SUPERVISOR_STATE_DIR'];
 
 /**
  * Every inherited NASSAJ_* variable may name a live root (repo, deploy, governance,
@@ -64,26 +62,18 @@ try {
     mkdirSync(caseTmp, { mode: 0o700 });
     console.log(`## test:${scope}:${index + 1}/${files.length}:${file}`);
     const env = {
-      ...stripInheritedStateRoots({ ...process.env }),
+      // B-1420/B-1771: HOME, CLAUDE_CONFIG_DIR and every provider root derive from
+      // the case home; no provider credential is inherited. Inheriting the
+      // operator's values let fixtures write into live trees (a member's Claude
+      // login was overwritten on 2026-11-09).
+      ...buildIsolatedTestEnv(stripInheritedStateRoots({ ...process.env }), caseHome),
       DATABASE_PATH: path.join(caseRoot, 'auth.db'),
       TMPDIR: caseTmp,
       // T-1871: harness snapshots, spawn ledger and ack key stay inside the case.
       NASSAJ_HARNESS_DATA_HOME: caseRoot,
-      // B-1420: every provider home, the per-user root (~/.nassaj-users) and the
-      // vendor transcript root derive from HOME/CLAUDE_CONFIG_DIR. Inheriting the
-      // operator's values let fixtures write into trees the live server watches,
-      // which then registered case dirs as projects in the server database.
-      HOME: caseHome,
-      USERPROFILE: caseHome,
-      CLAUDE_CONFIG_DIR: path.join(caseHome, '.claude'),
       // The workspace validator defaults to HOME; fixtures create project dirs under
       // the repo checkout, so the checkout (not the operator home) is the root.
       WORKSPACES_ROOT: process.cwd(),
-      // git would otherwise lose the identity it read from the real ~/.gitconfig.
-      GIT_AUTHOR_NAME: process.env.GIT_AUTHOR_NAME || 'nassaj-test',
-      GIT_AUTHOR_EMAIL: process.env.GIT_AUTHOR_EMAIL || 'nassaj-test@localhost',
-      GIT_COMMITTER_NAME: process.env.GIT_COMMITTER_NAME || 'nassaj-test',
-      GIT_COMMITTER_EMAIL: process.env.GIT_COMMITTER_EMAIL || 'nassaj-test@localhost',
     };
     if (scope === 'server') env.TSX_TSCONFIG_PATH = path.resolve('server/tsconfig.json');
 

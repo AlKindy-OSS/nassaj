@@ -1,0 +1,1005 @@
+{
+ "provenance": {
+  "task": "T-2086 S1 (ADR-224)",
+  "package": "@deepseek-ai/dsh@0.2.2-rc.1",
+  "acpSdk": "@agentclientprotocol/sdk@1.4.0",
+  "protocolVersion": 1,
+  "node": "v24.18.1",
+  "recordedAt": "2026-11-07",
+  "launches": [
+   {
+    "name": "first-launch",
+    "argv": [
+     "nassaj-acp",
+     "--from-default-profile",
+     "acp",
+     "--patch",
+     "<NASSAJ_LAYER>"
+    ]
+   },
+   {
+    "name": "resume-after-refresh",
+    "argv": [
+     "--profile",
+     "nassaj-acp",
+     "--patch",
+     "<NASSAJ_LAYER>"
+    ],
+    "note": "hostile cordis.patch.yml left in place (no --from-default-profile reset) to prove the layer alone wins"
+   }
+  ],
+  "environment": [
+   "PATH=/usr/local/bin:/usr/bin:/bin",
+   "HOME=<MEMBER_HOME>",
+   "LANG",
+   "TERM",
+   "TMPDIR=<MEMBER_HOME>/.tmp",
+   "DSH_HOME=<MEMBER_HOME>/.dsh",
+   "DSH_AGENTS_HOME=<MEMBER_HOME>/.agents",
+   "DEEPSEEK_API_KEY=<FAKE_DEEPSEEK_KEY>",
+   "DSH_TELEMETRY_DISABLED=1",
+   "DEEPSEEK_BASE_URL=<FAKE_LLM_ORIGIN> (recording only)"
+  ],
+  "observations": [
+   "dsh advertises sessionCapabilities {close,list,resume} and NO loadSession: history must come from Nassaj.",
+   "--from-default-profile resets <DSH_HOME>/profiles/nassaj-acp/cordis.patch.yml to [] on every launch.",
+   "Without the Nassaj layer, every /v1/messages body carries dsh_session_log and dsh_plugin_packages even with DSH_TELEMETRY_DISABLED=1 (see withoutNassajLayer).",
+   "With the Nassaj --patch layer over a hostile user layer: zero requests reached the hostile origin, no dsh_session_log / dsh_plugin_packages field, telemetry row disabled.",
+   "request_permission offers allow-once / reject-once; allow wrote the outside file, reject left it absent.",
+   "Inside the bash tool, `command -v claude codex` resolved nothing on PATH=/usr/local/bin:/usr/bin:/bin.",
+   "After session/resume in a NEW process, the next /v1/messages carried all prior turns (15 messages).",
+   "Each request carries x-deepseek-harness-user-id (anonymous install id) and x-deepseek-harness-session-id."
+  ]
+ },
+ "runs": [
+  {
+   "name": "first-launch",
+   "traffic": [
+    {
+     "dir": "client->agent",
+     "msg": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "method": "initialize",
+      "params": {
+       "protocolVersion": 1,
+       "clientCapabilities": {
+        "fs": {
+         "readTextFile": false,
+         "writeTextFile": false
+        },
+        "terminal": false
+       },
+       "clientInfo": {
+        "name": "nassaj",
+        "version": "0"
+       }
+      }
+     }
+    },
+    {
+     "dir": "agent->client",
+     "msg": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": {
+       "protocolVersion": 1,
+       "agentInfo": {
+        "name": "deepseek-harness-acp",
+        "version": "0.0.1"
+       },
+       "agentCapabilities": {
+        "mcpCapabilities": {
+         "http": true
+        },
+        "promptCapabilities": {
+         "image": false,
+         "audio": false,
+         "embeddedContext": false
+        },
+        "sessionCapabilities": {
+         "close": {},
+         "list": {},
+         "resume": {}
+        }
+       },
+       "authMethods": []
+      }
+     }
+    },
+    {
+     "dir": "client->agent",
+     "msg": {
+      "jsonrpc": "2.0",
+      "id": 2,
+      "method": "session/new",
+      "params": {
+       "cwd": "<WORKSPACE>",
+       "mcpServers": []
+      }
+     }
+    },
+    {
+     "dir": "agent->client",
+     "msg": {
+      "jsonrpc": "2.0",
+      "id": 2,
+      "result": {
+       "sessionId": "<DSH_SESSION_ID>",
+       "configOptions": [
+        {
+         "id": "model",
+         "name": "Model",
+         "category": "model",
+         "type": "select",
+         "currentValue": "[\"deepseek-official\",\"deepseek-v4-flash\"]",
+         "options": [
+          {
+           "group": "deepseek-official",
+           "name": "DeepSeek",
+           "options": [
+            {
+             "value": "[\"deepseek-official\",\"deepseek-v4-flash\"]",
+             "name": "deepseek-v4-flash"
+            },
+            {
+             "value": "[\"deepseek-official\",\"deepseek-flash\"]",
+             "name": "DeepSeek-V4.1-Flash"
+            },
+            {
+             "value": "[\"deepseek-official\",\"deepseek-v4-pro\"]",
+             "name": "DeepSeek-V4-Pro",
+             "description": "Stronger agentic coding, knowledge, and difficult reasoning; suited to complex or quality-critical tasks at higher cost."
+            }
+           ]
+          }
+         ]
+        },
+        {
+         "id": "reasoning_effort",
+         "name": "Reasoning effort",
+         "category": "thought_level",
+         "type": "select",
+         "currentValue": "high",
+         "options": [
+          {
+           "value": "off",
+           "name": "Off",
+           "description": "Use for simple tasks that do not need reasoning."
+          },
+          {
+           "value": "low",
+           "name": "Low",
+           "description": "Prefer for routine or latency-sensitive tasks."
+          },
+          {
+           "value": "high",
+           "name": "High",
+           "description": "The default balance for most tasks."
+          },
+          {
+           "value": "max",
+           "name": "Max",
+           "description": "Reserve for the hardest quality-first tasks."
+          }
+         ]
+        }
+       ]
+      }
+     }
+    },
+    {
+     "dir": "client->agent",
+     "msg": {
+      "jsonrpc": "2.0",
+      "id": 3,
+      "method": "session/set_config_option",
+      "params": {
+       "sessionId": "<DSH_SESSION_ID>",
+       "configId": "model",
+       "value": "[\"deepseek-official\",\"deepseek-v4-pro\"]"
+      }
+     }
+    },
+    {
+     "dir": "agent->client",
+     "msg": {
+      "jsonrpc": "2.0",
+      "id": 3,
+      "result": {
+       "configOptions": [
+        {
+         "id": "model",
+         "name": "Model",
+         "category": "model",
+         "type": "select",
+         "currentValue": "[\"deepseek-official\",\"deepseek-v4-pro\"]",
+         "options": [
+          {
+           "group": "deepseek-official",
+           "name": "DeepSeek",
+           "options": [
+            {
+             "value": "[\"deepseek-official\",\"deepseek-flash\"]",
+             "name": "DeepSeek-V4.1-Flash"
+            },
+            {
+             "value": "[\"deepseek-official\",\"deepseek-v4-pro\"]",
+             "name": "DeepSeek-V4-Pro",
+             "description": "Stronger agentic coding, knowledge, and difficult reasoning; suited to complex or quality-critical tasks at higher cost."
+            }
+           ]
+          }
+         ]
+        },
+        {
+         "id": "reasoning_effort",
+         "name": "Reasoning effort",
+         "category": "thought_level",
+         "type": "select",
+         "currentValue": "high",
+         "options": [
+          {
+           "value": "off",
+           "name": "Off",
+           "description": "Use for simple tasks that do not need reasoning."
+          },
+          {
+           "value": "low",
+           "name": "Low",
+           "description": "Prefer for routine or latency-sensitive tasks."
+          },
+          {
+           "value": "high",
+           "name": "High",
+           "description": "The default balance for most tasks."
+          },
+          {
+           "value": "max",
+           "name": "Max",
+           "description": "Reserve for the hardest quality-first tasks."
+          }
+         ]
+        }
+       ]
+      }
+     }
+    },
+    {
+     "dir": "client->agent",
+     "msg": {
+      "jsonrpc": "2.0",
+      "id": 4,
+      "method": "session/prompt",
+      "params": {
+       "sessionId": "<DSH_SESSION_ID>",
+       "prompt": [
+        {
+         "type": "text",
+         "text": "hello there"
+        }
+       ]
+      }
+     }
+    },
+    {
+     "dir": "agent->client",
+     "msg": {
+      "jsonrpc": "2.0",
+      "method": "session/update",
+      "params": {
+       "sessionId": "<DSH_SESSION_ID>",
+       "update": {
+        "sessionUpdate": "agent_message_chunk",
+        "messageId": "<UUID_1>",
+        "content": {
+         "type": "text",
+         "text": "Hello from fake DeepSeek: hello thereCurrent runtime context. Thi"
+        }
+       }
+      }
+     }
+    },
+    {
+     "dir": "agent->client",
+     "msg": {
+      "jsonrpc": "2.0",
+      "method": "session/update",
+      "params": {
+       "sessionId": "<DSH_SESSION_ID>",
+       "update": {
+        "sessionUpdate": "usage_update",
+        "used": 5612,
+        "size": 1048576
+       }
+      }
+     }
+    },
+    {
+     "dir": "agent->client",
+     "msg": {
+      "jsonrpc": "2.0",
+      "id": 4,
+      "result": {
+       "stopReason": "end_turn"
+      }
+     }
+    },
+    {
+     "dir": "client->agent",
+     "msg": {
+      "jsonrpc": "2.0",
+      "id": 5,
+      "method": "session/prompt",
+      "params": {
+       "sessionId": "<DSH_SESSION_ID>",
+       "prompt": [
+        {
+         "type": "text",
+         "text": "NASSAJ_TOOL {\"name\":\"write\",\"input\":{\"file_path\":\"<OUTSIDE>/approved.txt\",\"content\":\"approved\",\"sandbox_permissions\":\"danger-full-access\",\"justification\":\"Test escalation outside the workspace.\"}}"
+        }
+       ]
+      }
+     }
+    },
+    {
+     "dir": "agent->client",
+     "msg": {
+      "jsonrpc": "2.0",
+      "method": "session/update",
+      "params": {
+       "sessionId": "<DSH_SESSION_ID>",
+       "update": {
+        "sessionUpdate": "usage_update",
+        "used": 5728,
+        "size": 1048576
+       }
+      }
+     }
+    },
+    {
+     "dir": "agent->client",
+     "msg": {
+      "jsonrpc": "2.0",
+      "method": "session/update",
+      "params": {
+       "sessionId": "<DSH_SESSION_ID>",
+       "update": {
+        "sessionUpdate": "tool_call",
+        "toolCallId": "toolu_fake_2",
+        "title": "write",
+        "kind": "other",
+        "status": "in_progress",
+        "rawInput": {
+         "file_path": "<OUTSIDE>/approved.txt",
+         "content": "approved",
+         "sandbox_permissions": "danger-full-access",
+         "justification": "Test escalation outside the workspace."
+        }
+       }
+      }
+     }
+    },
+    {
+     "dir": "agent->client",
+     "msg": {
+      "jsonrpc": "2.0",
+      "id": 0,
+      "method": "session/request_permission",
+      "params": {
+       "sessionId": "<DSH_SESSION_ID>",
+       "toolCall": {
+        "toolCallId": "toolu_fake_2"
+       },
+       "options": [
+        {
+         "optionId": "allow-once",
+         "name": "Allow once",
+         "kind": "allow_once"
+        },
+        {
+         "optionId": "reject-once",
+         "name": "Reject",
+         "kind": "reject_once"
+        }
+       ]
+      }
+     }
+    },
+    {
+     "dir": "client->agent",
+     "msg": {
+      "jsonrpc": "2.0",
+      "id": 0,
+      "result": {
+       "outcome": {
+        "outcome": "selected",
+        "optionId": "allow-once"
+       }
+      }
+     }
+    },
+    {
+     "dir": "agent->client",
+     "msg": {
+      "jsonrpc": "2.0",
+      "method": "session/update",
+      "params": {
+       "sessionId": "<DSH_SESSION_ID>",
+       "update": {
+        "sessionUpdate": "tool_call_update",
+        "toolCallId": "toolu_fake_2",
+        "status": "completed",
+        "content": [
+         {
+          "type": "content",
+          "content": {
+           "type": "text",
+           "text": "<path><OUTSIDE>/approved.txt</path>\n<type>file</type>\n<content>\nCreated file\n</content>"
+          }
+         }
+        ]
+       }
+      }
+     }
+    },
+    {
+     "dir": "agent->client",
+     "msg": {
+      "jsonrpc": "2.0",
+      "method": "session/update",
+      "params": {
+       "sessionId": "<DSH_SESSION_ID>",
+       "update": {
+        "sessionUpdate": "agent_message_chunk",
+        "messageId": "<UUID_2>",
+        "content": {
+         "type": "text",
+         "text": "Tool step finished."
+        }
+       }
+      }
+     }
+    },
+    {
+     "dir": "agent->client",
+     "msg": {
+      "jsonrpc": "2.0",
+      "method": "session/update",
+      "params": {
+       "sessionId": "<DSH_SESSION_ID>",
+       "update": {
+        "sessionUpdate": "usage_update",
+        "used": 5775,
+        "size": 1048576
+       }
+      }
+     }
+    },
+    {
+     "dir": "agent->client",
+     "msg": {
+      "jsonrpc": "2.0",
+      "id": 5,
+      "result": {
+       "stopReason": "end_turn"
+      }
+     }
+    },
+    {
+     "dir": "client->agent",
+     "msg": {
+      "jsonrpc": "2.0",
+      "id": 6,
+      "method": "session/prompt",
+      "params": {
+       "sessionId": "<DSH_SESSION_ID>",
+       "prompt": [
+        {
+         "type": "text",
+         "text": "NASSAJ_TOOL {\"name\":\"write\",\"input\":{\"file_path\":\"<OUTSIDE>/rejected.txt\",\"content\":\"rejected\",\"sandbox_permissions\":\"danger-full-access\",\"justification\":\"Test escalation outside the workspace.\"}}"
+        }
+       ]
+      }
+     }
+    },
+    {
+     "dir": "agent->client",
+     "msg": {
+      "jsonrpc": "2.0",
+      "method": "session/update",
+      "params": {
+       "sessionId": "<DSH_SESSION_ID>",
+       "update": {
+        "sessionUpdate": "usage_update",
+        "used": 5891,
+        "size": 1048576
+       }
+      }
+     }
+    },
+    {
+     "dir": "agent->client",
+     "msg": {
+      "jsonrpc": "2.0",
+      "method": "session/update",
+      "params": {
+       "sessionId": "<DSH_SESSION_ID>",
+       "update": {
+        "sessionUpdate": "tool_call",
+        "toolCallId": "toolu_fake_4",
+        "title": "write",
+        "kind": "other",
+        "status": "in_progress",
+        "rawInput": {
+         "file_path": "<OUTSIDE>/rejected.txt",
+         "content": "rejected",
+         "sandbox_permissions": "danger-full-access",
+         "justification": "Test escalation outside the workspace."
+        }
+       }
+      }
+     }
+    },
+    {
+     "dir": "agent->client",
+     "msg": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "method": "session/request_permission",
+      "params": {
+       "sessionId": "<DSH_SESSION_ID>",
+       "toolCall": {
+        "toolCallId": "toolu_fake_4"
+       },
+       "options": [
+        {
+         "optionId": "allow-once",
+         "name": "Allow once",
+         "kind": "allow_once"
+        },
+        {
+         "optionId": "reject-once",
+         "name": "Reject",
+         "kind": "reject_once"
+        }
+       ]
+      }
+     }
+    },
+    {
+     "dir": "client->agent",
+     "msg": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": {
+       "outcome": {
+        "outcome": "selected",
+        "optionId": "reject-once"
+       }
+      }
+     }
+    },
+    {
+     "dir": "agent->client",
+     "msg": {
+      "jsonrpc": "2.0",
+      "method": "session/update",
+      "params": {
+       "sessionId": "<DSH_SESSION_ID>",
+       "update": {
+        "sessionUpdate": "tool_call_update",
+        "toolCallId": "toolu_fake_4",
+        "status": "failed",
+        "content": [
+         {
+          "type": "content",
+          "content": {
+           "type": "text",
+           "text": "Error: the user rejected escalating this operation to \"danger-full-access\"; it stays denied, so stop and explain instead of working around it"
+          }
+         }
+        ]
+       }
+      }
+     }
+    },
+    {
+     "dir": "agent->client",
+     "msg": {
+      "jsonrpc": "2.0",
+      "method": "session/update",
+      "params": {
+       "sessionId": "<DSH_SESSION_ID>",
+       "update": {
+        "sessionUpdate": "agent_message_chunk",
+        "messageId": "<UUID_3>",
+        "content": {
+         "type": "text",
+         "text": "Tool step finished."
+        }
+       }
+      }
+     }
+    },
+    {
+     "dir": "agent->client",
+     "msg": {
+      "jsonrpc": "2.0",
+      "method": "session/update",
+      "params": {
+       "sessionId": "<DSH_SESSION_ID>",
+       "update": {
+        "sessionUpdate": "usage_update",
+        "used": 5948,
+        "size": 1048576
+       }
+      }
+     }
+    },
+    {
+     "dir": "agent->client",
+     "msg": {
+      "jsonrpc": "2.0",
+      "id": 6,
+      "result": {
+       "stopReason": "end_turn"
+      }
+     }
+    },
+    {
+     "dir": "client->agent",
+     "msg": {
+      "jsonrpc": "2.0",
+      "id": 7,
+      "method": "session/prompt",
+      "params": {
+       "sessionId": "<DSH_SESSION_ID>",
+       "prompt": [
+        {
+         "type": "text",
+         "text": "NASSAJ_TOOL {\"name\":\"bash\",\"input\":{\"description\":\"Check other harnesses\",\"command\":\"command -v claude codex dsh node; echo PATH=$PATH; echo HOME=$HOME\"}}"
+        }
+       ]
+      }
+     }
+    },
+    {
+     "dir": "agent->client",
+     "msg": {
+      "jsonrpc": "2.0",
+      "method": "session/update",
+      "params": {
+       "sessionId": "<DSH_SESSION_ID>",
+       "update": {
+        "sessionUpdate": "usage_update",
+        "used": 6034,
+        "size": 1048576
+       }
+      }
+     }
+    },
+    {
+     "dir": "agent->client",
+     "msg": {
+      "jsonrpc": "2.0",
+      "method": "session/update",
+      "params": {
+       "sessionId": "<DSH_SESSION_ID>",
+       "update": {
+        "sessionUpdate": "tool_call",
+        "toolCallId": "toolu_fake_6",
+        "title": "bash",
+        "kind": "other",
+        "status": "in_progress",
+        "rawInput": {
+         "description": "Check other harnesses",
+         "command": "command -v claude codex dsh node; echo PATH=$PATH; echo HOME=$HOME"
+        }
+       }
+      }
+     }
+    },
+    {
+     "dir": "agent->client",
+     "msg": {
+      "jsonrpc": "2.0",
+      "method": "session/update",
+      "params": {
+       "sessionId": "<DSH_SESSION_ID>",
+       "update": {
+        "sessionUpdate": "tool_call_update",
+        "toolCallId": "toolu_fake_6",
+        "status": "completed",
+        "content": [
+         {
+          "type": "content",
+          "content": {
+           "type": "text",
+           "text": "/usr/bin/node\nPATH=/usr/local/bin:/usr/bin:/bin\nHOME=<MEMBER_HOME>\n"
+          }
+         }
+        ]
+       }
+      }
+     }
+    },
+    {
+     "dir": "agent->client",
+     "msg": {
+      "jsonrpc": "2.0",
+      "method": "session/update",
+      "params": {
+       "sessionId": "<DSH_SESSION_ID>",
+       "update": {
+        "sessionUpdate": "agent_message_chunk",
+        "messageId": "<UUID_4>",
+        "content": {
+         "type": "text",
+         "text": "Tool step finished."
+        }
+       }
+      }
+     }
+    },
+    {
+     "dir": "agent->client",
+     "msg": {
+      "jsonrpc": "2.0",
+      "method": "session/update",
+      "params": {
+       "sessionId": "<DSH_SESSION_ID>",
+       "update": {
+        "sessionUpdate": "usage_update",
+        "used": 6075,
+        "size": 1048576
+       }
+      }
+     }
+    },
+    {
+     "dir": "agent->client",
+     "msg": {
+      "jsonrpc": "2.0",
+      "id": 7,
+      "result": {
+       "stopReason": "end_turn"
+      }
+     }
+    },
+    {
+     "dir": "client->agent",
+     "msg": {
+      "jsonrpc": "2.0",
+      "id": 8,
+      "method": "session/close",
+      "params": {
+       "sessionId": "<DSH_SESSION_ID>"
+      }
+     }
+    },
+    {
+     "dir": "agent->client",
+     "msg": {
+      "jsonrpc": "2.0",
+      "id": 8,
+      "result": {}
+     }
+    }
+   ]
+  },
+  {
+   "name": "resume-after-refresh",
+   "traffic": [
+    {
+     "dir": "client->agent",
+     "msg": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "method": "initialize",
+      "params": {
+       "protocolVersion": 1,
+       "clientCapabilities": {
+        "fs": {
+         "readTextFile": false,
+         "writeTextFile": false
+        },
+        "terminal": false
+       },
+       "clientInfo": {
+        "name": "nassaj",
+        "version": "0"
+       }
+      }
+     }
+    },
+    {
+     "dir": "agent->client",
+     "msg": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": {
+       "protocolVersion": 1,
+       "agentInfo": {
+        "name": "deepseek-harness-acp",
+        "version": "0.0.1"
+       },
+       "agentCapabilities": {
+        "mcpCapabilities": {
+         "http": true
+        },
+        "promptCapabilities": {
+         "image": false,
+         "audio": false,
+         "embeddedContext": false
+        },
+        "sessionCapabilities": {
+         "close": {},
+         "list": {},
+         "resume": {}
+        }
+       },
+       "authMethods": []
+      }
+     }
+    },
+    {
+     "dir": "client->agent",
+     "msg": {
+      "jsonrpc": "2.0",
+      "id": 2,
+      "method": "session/resume",
+      "params": {
+       "sessionId": "<DSH_SESSION_ID>",
+       "cwd": "<WORKSPACE>",
+       "mcpServers": []
+      }
+     }
+    },
+    {
+     "dir": "agent->client",
+     "msg": {
+      "jsonrpc": "2.0",
+      "id": 2,
+      "result": {
+       "configOptions": [
+        {
+         "id": "model",
+         "name": "Model",
+         "category": "model",
+         "type": "select",
+         "currentValue": "[\"deepseek-official\",\"deepseek-v4-pro\"]",
+         "options": [
+          {
+           "group": "deepseek-official",
+           "name": "DeepSeek",
+           "options": [
+            {
+             "value": "[\"deepseek-official\",\"deepseek-flash\"]",
+             "name": "DeepSeek-V4.1-Flash"
+            },
+            {
+             "value": "[\"deepseek-official\",\"deepseek-v4-pro\"]",
+             "name": "DeepSeek-V4-Pro",
+             "description": "Stronger agentic coding, knowledge, and difficult reasoning; suited to complex or quality-critical tasks at higher cost."
+            }
+           ]
+          }
+         ]
+        },
+        {
+         "id": "reasoning_effort",
+         "name": "Reasoning effort",
+         "category": "thought_level",
+         "type": "select",
+         "currentValue": "high",
+         "options": [
+          {
+           "value": "off",
+           "name": "Off",
+           "description": "Use for simple tasks that do not need reasoning."
+          },
+          {
+           "value": "low",
+           "name": "Low",
+           "description": "Prefer for routine or latency-sensitive tasks."
+          },
+          {
+           "value": "high",
+           "name": "High",
+           "description": "The default balance for most tasks."
+          },
+          {
+           "value": "max",
+           "name": "Max",
+           "description": "Reserve for the hardest quality-first tasks."
+          }
+         ]
+        }
+       ]
+      }
+     }
+    },
+    {
+     "dir": "client->agent",
+     "msg": {
+      "jsonrpc": "2.0",
+      "id": 3,
+      "method": "session/prompt",
+      "params": {
+       "sessionId": "<DSH_SESSION_ID>",
+       "prompt": [
+        {
+         "type": "text",
+         "text": "second message after refresh"
+        }
+       ]
+      }
+     }
+    },
+    {
+     "dir": "agent->client",
+     "msg": {
+      "jsonrpc": "2.0",
+      "method": "session/update",
+      "params": {
+       "sessionId": "<DSH_SESSION_ID>",
+       "update": {
+        "sessionUpdate": "agent_message_chunk",
+        "messageId": "<UUID_5>",
+        "content": {
+         "type": "text",
+         "text": "Hello from fake DeepSeek: second message after refresh"
+        }
+       }
+      }
+     }
+    },
+    {
+     "dir": "agent->client",
+     "msg": {
+      "jsonrpc": "2.0",
+      "method": "session/update",
+      "params": {
+       "sessionId": "<DSH_SESSION_ID>",
+       "update": {
+        "sessionUpdate": "usage_update",
+        "used": 6112,
+        "size": 1048576
+       }
+      }
+     }
+    },
+    {
+     "dir": "agent->client",
+     "msg": {
+      "jsonrpc": "2.0",
+      "id": 3,
+      "result": {
+       "stopReason": "end_turn"
+      }
+     }
+    },
+    {
+     "dir": "client->agent",
+     "msg": {
+      "jsonrpc": "2.0",
+      "id": 4,
+      "method": "session/close",
+      "params": {
+       "sessionId": "<DSH_SESSION_ID>"
+      }
+     }
+    },
+    {
+     "dir": "agent->client",
+     "msg": {
+      "jsonrpc": "2.0",
+      "id": 4,
+      "result": {}
+     }
+    }
+   ]
+  }
+ ]
+}
