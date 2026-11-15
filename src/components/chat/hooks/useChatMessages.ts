@@ -434,6 +434,9 @@ export function normalizedToChatMessages(messages: NormalizedMessage[]): ChatMes
               // Real author (users.id). Absent = unknown author; the renderer
               // must not attribute the message to the viewing user.
               userId: msg.userId,
+              // ADR-173 P6: a live colleague prompt (user_turn) names its author.
+              authorName: msg.authorName,
+              sharedImageCount: msg.sharedImageCount,
               ...sharedMetadata,
             });
           }
@@ -588,6 +591,18 @@ export function normalizedToChatMessages(messages: NormalizedMessage[]): ChatMes
       // an error bubble.
       case 'notice':
         if (msg.content) {
+          // T-2113: a newer sign-in warning replaces the earlier one (one per result).
+          if (msg.noticeCode === 'credential_expiring') {
+            const earlier = converted.findIndex(row => row.noticeCode === 'credential_expiring');
+            if (earlier !== -1) converted.splice(earlier, 1);
+          }
+          // An owner-only detail folds into its shared line (viewers and replay never get it).
+          const shared = msg.noticeDetailOf ? converted.find(row => row.id === msg.noticeDetailOf) : undefined;
+          if (shared) {
+            shared.noticeDetail = msg.content;
+            shared.noticeDetailAudience = msg.audienceUserId;
+            break;
+          }
           converted.push({
             id: msg.id,
             type: 'assistant',
@@ -596,6 +611,11 @@ export function normalizedToChatMessages(messages: NormalizedMessage[]): ChatMes
             isNotice: true,
             ...(msg.noticeCode ? { noticeCode: msg.noticeCode } : {}),
             ...(msg.noticeReason ? { noticeReason: msg.noticeReason } : {}),
+            ...(msg.noticeLevel ? { noticeLevel: msg.noticeLevel } : {}),
+            ...(Array.isArray(msg.lostWrites) ? { lostWrites: msg.lostWrites } : {}),
+            ...(msg.credentialExpiresAt ? { credentialExpiresAt: msg.credentialExpiresAt } : {}),
+            ...(msg.audienceUserId !== undefined ? { audienceUserId: msg.audienceUserId } : {}),
+            ...(msg.noticeDetailOf ? { noticeDetailOf: msg.noticeDetailOf } : {}),
             ...sharedMetadata,
           });
         }

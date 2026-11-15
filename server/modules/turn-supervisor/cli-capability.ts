@@ -1,74 +1,15 @@
-import { spawnSync } from 'node:child_process';
-
-import { tryResolveHarnessBinary } from '@/shared/harness-binaries.js';
-
-// eslint-disable-next-line boundaries/dependencies -- capability probes execute provider binaries and share the updater's atomic admission seam.
-import { beginHarnessLaunch } from '../providers/harness-update/spawn-admission.js';
-
-export type MechanicalCliHarnessProvider = 'codex' | 'qwen' | 'opencode';
+export type MechanicalCliHarnessProvider = 'codex' | 'opencode';
 export type MechanicalCliCapabilityProbe = (
   provider: MechanicalCliHarnessProvider, env: NodeJS.ProcessEnv,
 ) => boolean;
 
-const probeCache = new Map<string, boolean>();
-
-function output(
-  provider: MechanicalCliHarnessProvider,
-  binary: string,
-  args: readonly string[],
-  env: NodeJS.ProcessEnv,
-): string | null {
-  const releaseHarnessLaunch = beginHarnessLaunch(provider);
-  try {
-    const result = spawnSync(binary, args, {
-      env, shell: false, encoding: 'utf8', timeout: 10_000, windowsHide: true,
-    });
-    if (result.error || result.status !== 0) return null;
-    return `${result.stdout ?? ''}\n${result.stderr ?? ''}`;
-  } finally {
-    releaseHarnessLaunch();
-  }
-}
-
-function exactVersion(
-  provider: MechanicalCliHarnessProvider,
-  binary: string,
-  expected: string,
-  env: NodeJS.ProcessEnv,
-): boolean {
-  const value = output(provider, binary, ['--version'], env);
-  return value?.match(/\bv?(\d+\.\d+\.\d+)\b/u)?.[1] === expected;
-}
-
-function qwenProbe(env: NodeJS.ProcessEnv): boolean {
-  const releaseHarnessLaunch = beginHarnessLaunch('qwen');
-  try {
-    const binary = tryResolveHarnessBinary('qwen');
-    if (!binary) return false;
-    const help = output('qwen', binary, ['--help'], env);
-    if (!help || !exactVersion('qwen', binary, '0.21.12', env)) return false;
-    return [
-      '--system-prompt', '--safe-mode', '--sandbox', '--approval-mode',
-      '--max-tool-calls', '--exclude-tools', '--disabled-slash-commands',
-    ].every((option) => help.includes(option));
-  } finally {
-    releaseHarnessLaunch();
-  }
-}
-
-/** Installed-binary proof. Browser and environment claims cannot replace it. */
-export const installedMechanicalCliProbe: MechanicalCliCapabilityProbe = (provider, env) => {
-  if (provider === 'codex' || provider === 'opencode') return true;
-  // The binary comes from the harness registry (server env only, T-1873); the
-  // member env handed in here can never redirect it.
-  const binary = tryResolveHarnessBinary(provider);
-  if (!binary) return false;
-  const key = `${provider}:${binary}`;
-  if (probeCache.has(key)) return probeCache.get(key)!;
-  const result = qwenProbe(env);
-  probeCache.set(key, result);
-  return result;
-};
+/**
+ * Installed-binary proof. Browser and environment claims cannot replace it.
+ * codex and opencode prove their binaries in their own adapter probes, so the
+ * server-side capability check admits both without a separate spawn.
+ */
+export const installedMechanicalCliProbe: MechanicalCliCapabilityProbe = (provider) =>
+  provider === 'codex' || provider === 'opencode';
 
 function enabled(value: string | undefined): boolean {
   return ['1', 'true', 'yes', 'on'].includes(value?.trim().toLowerCase() ?? '');
@@ -83,10 +24,9 @@ export function isCliTurnSupervisorArmed(
   if (mode !== 'chat') return false;
   const flag = ({
     codex: env.NASSAJ_TURN_SUPERVISOR_CODEX_CHAT,
-    qwen: env.NASSAJ_TURN_SUPERVISOR_QWEN_CHAT,
     opencode: env.NASSAJ_TURN_SUPERVISOR_OPENCODE_CHAT,
   } as const)[provider as MechanicalCliHarnessProvider];
-  return ['codex', 'qwen', 'opencode'].includes(provider) && enabled(flag);
+  return ['codex', 'opencode'].includes(provider) && enabled(flag);
 }
 
 /** Armed plus installed-binary proof; false must never cue legacy fallback. */
@@ -99,10 +39,3 @@ export function isCliTurnSupervisorEnabled(
   return isCliTurnSupervisorArmed(provider, mode, env)
     && probe(provider as MechanicalCliHarnessProvider, env);
 }
-
-export const cliCapabilityInternals = Object.freeze({
-  qwenProbe,
-  exactVersion,
-  hasCachedProbe: (key: string) => probeCache.has(key),
-  clearProbeCache: () => probeCache.clear(),
-});

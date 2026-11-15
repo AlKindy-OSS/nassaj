@@ -8,7 +8,7 @@ import { spawnSync } from 'node:child_process';
 import { digest, measuredFile, measuredTree, measuredOperatingSystem, validateLocalBuildOptions,
     readBuildPlan, verifyWorkspaceInputs, verifyOidBuildSource, measuredBuildControls, CONTROL_ENV,
     planLocalForwardBuild, prepareLocalForwardWorkspace, verifyBuildDependencyLock, verifySourceGitlinks,
-    BUILD_IN_PROGRESS_MARKER } from './lib/release-build-workspace.mjs';
+    BUILD_IN_PROGRESS_MARKER, SDK_REFERENCE_RECORDS } from './lib/release-build-workspace.mjs';
 import { materializePreviewSnapshot } from './preview-oid-pipeline.mjs';
 import { measureLocalForwardOutput } from './build-local-forward-artifacts.mjs';
 import { collectUpdateRuntimeClosure } from './lib/update-runtime-bundle.mjs';
@@ -211,12 +211,13 @@ test('actual Git materializer feeds measured plan and workspace copy; stale sour
     t.after(()=>{spawnSync('/usr/bin/chmod',['-R','u+w',root]);fs.rmSync(root,{recursive:true,force:true});});
     const git=args=>{const r=spawnSync('/usr/bin/git',args,{cwd:root,encoding:'utf8',env:{...CONTROL_ENV,GIT_AUTHOR_NAME:'fixture',GIT_AUTHOR_EMAIL:'fixture@invalid',GIT_COMMITTER_NAME:'fixture',GIT_COMMITTER_EMAIL:'fixture@invalid'}});assert.equal(r.status,0,r.stderr);return r.stdout.trim();};
     write(path.join(root,'package.json'),'{"version":"1.2.3.4"}');
-    write(path.join(root,'package-lock.json'),JSON.stringify({lockfileVersion:3,packages:{'':{},'node_modules/@openai/codex-sdk':{version:'0.157.1',integrity:'sha512-YQ=='}}}));
+    write(path.join(root,'package-lock.json'),JSON.stringify({lockfileVersion:3,packages:{'':{},'node_modules/@openai/codex-sdk':{version:'0.169.0',integrity:'sha512-YQ=='}}}));
     write(path.join(root,'scripts/lib/release-build-isolation.c'),fs.readFileSync(path.join(ROOT,'scripts/lib/release-build-isolation.c')));
     git(['init','-q']);git(['add','package.json','package-lock.json','scripts/lib/release-build-isolation.c']);git(['update-index','--add','--cacheinfo','160000,4895cd3fd33362471e739b786493aba048487bcc,plugins/starter']);git(['commit','-qm','fixture']);const oid=git(['rev-parse','HEAD']);
     await materializePreviewSnapshot(root,oid);fs.mkdirSync(path.join(root,'.artifacts'));
     const sdk=path.join(root,'node_modules/@openai/codex-sdk');installCodexImageOnlyTestFixture(root);
-    for(let i=0;i<15;i++)write(path.join(sdk,`fixture-${i}.js`),'fixture reference only');
+    // package.json + dist/index.js + fillers = the reviewed SDK record count.
+    for(let i=0;i<SDK_REFERENCE_RECORDS-2;i++)write(path.join(sdk,`fixture-${i}.js`),'fixture reference only');
     const records=measuredTree(path.join(root,'node_modules')).map(file=>({path:file.path,size:file.size,sha256:file.sha256}));
     const reference=path.join(root,'.artifacts/sdk.json');write(reference,JSON.stringify({schema:'b890-isolated-measurement-dependencies/v1',records}));
     const options={kind:'owner-reviewed-local-build/v1',profile:'local-forward-349/v2',repoRoot:root,oid,

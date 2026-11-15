@@ -1,0 +1,31 @@
+{
+  "versions": {
+    "2.1.325": {
+      "modes": {
+        "file_link": {
+          "three_turns": "pass",
+          "compaction": "pass",
+          "subagent": "pass",
+          "tool_result": "fail",
+          "inode_stable": "pass",
+          "link_preserved": "pass",
+          "cleanup_safe": "pass"
+        },
+        "dir_link": {
+          "three_turns": "pass",
+          "compaction": "pass",
+          "subagent": "pass",
+          "tool_result": "fail",
+          "inode_stable": "pass",
+          "link_preserved": "pass",
+          "cleanup_safe": "pass"
+        }
+      },
+      "evidence": {
+        "probe": "prove-claude-shared-resume.mjs",
+        "model": "haiku"
+      },
+      "recordedAt": "2026-11-14T21:47:15.406Z"
+    }
+  }
+}

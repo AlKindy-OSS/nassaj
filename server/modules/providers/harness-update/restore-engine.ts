@@ -18,7 +18,6 @@
 import fs from 'node:fs';
 
 import { parseVersionOutput, type HarnessDescriptor } from './descriptors.js';
-import { assertNoPendingNativeStage, clearNativeStaging } from './native-staging.js';
 import { restoreBinary } from './snapshot/binary-snapshot.js';
 import { hashFile } from './snapshot/durable-fs.js';
 import {
@@ -105,11 +104,7 @@ export async function completeRestore(
     m = restoreData(rt, dir, m, kind);
     if (!m.binary) throw new Error('snapshot has no binary record');
     restoreBinary(m.binary, dir, m.jobId, rt.snapshotRoot);
-    // A pending native stage would swap itself in on the proof's own
-    // `--version` run (and on every later launch): remove it first.
-    if (d.stagesNativeUpdate) clearNativeStaging(resolveDescriptorBinary(d));
     await assertRestoredIdentity(rt, d, m);
-    if (d.stagesNativeUpdate) assertNoPendingNativeStage(resolveDescriptorBinary(d));
     m = transitionManifest(dir, settleRestoreRecord(dir, m), 'rolled_back', rt.now());
     rt.fence.clear(d.id);
     recordRestoredVersion(rt, d, m);

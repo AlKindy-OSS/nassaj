@@ -72,7 +72,7 @@ export class AttachmentStore {
       if (this.disposed) return { status: 'failed' };
       if (!result.ok) {
         const { failure } = result;
-        if (failure.kind === 'attachment-gone' || failure.kind === 'ended') return { status: 'gone' };
+        if (failure.kind === 'attachment-gone' || failure.kind === 'ended' || failure.kind === 'provider-removed') return { status: 'gone' };
         return { status: failure.kind === 'attachment-too-large' ? 'too-large' : 'failed' };
       }
       const type = result.value.type.split(';')[0].trim();

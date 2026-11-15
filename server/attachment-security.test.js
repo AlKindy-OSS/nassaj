@@ -543,3 +543,45 @@ test('drift guard — replica filter agrees with production policy on a real sam
     );
   }
 });
+
+test('drift guard — the attachment upload cap is read per request from the owner setting', () => {
+  const routeIndex = INDEX_SOURCE.indexOf(
+    "app.post('/api/projects/:projectId/upload-attachments'"
+  );
+  assert.notStrictEqual(routeIndex, -1, 'the attachment upload route must still exist');
+  const handler = INDEX_SOURCE.slice(routeIndex, routeIndex + 4000);
+  assert.match(
+    handler, /readAttachmentLimit\(\)/,
+    'the handler must read the attachment cap per request (owner setting, no restart)'
+  );
+  assert.match(
+    handler, /maxSizeBytes: attachmentLimit\.maxBytes/,
+    'the multer per-file limit must come from the per-request owner setting'
+  );
+  assert.match(
+    handler, /attachmentUploadErrorResponse\(err, \{\s*maxMb: attachmentLimit\.maxMb/,
+    'the refusal must report the real configured limit through the shared mapper'
+  );
+  assert.match(
+    INDEX_SOURCE, /from '\.\/services\/temp-upload-multer\.js'/,
+    'the route must use the shared disk-staged multer builder the acceptance test exercises'
+  );
+  assert.match(
+    handler, /checkAttachmentRequestSize\(req, attachmentLimit\)/,
+    'the whole request must be bounded by its declared length before multer reads it'
+  );
+  assert.ok(
+    handler.indexOf('checkAttachmentRequestSize(') < handler.indexOf('buildTempUploadMulter('),
+    'the total-size check must run before any byte is staged'
+  );
+  assert.match(
+    INDEX_SOURCE,
+    /app\.post\('\/api\/projects\/:projectId\/upload-attachments', authenticateToken, attachmentUploadLimiter,/,
+    'the per-user upload limiter must run right after authentication'
+  );
+  assert.match(
+    INDEX_SOURCE, /resolveUploadStagingRoot\(\{/,
+    'upload staging must use the disk-backed root resolver, not os.tmpdir()'
+  );
+  assert.doesNotMatch(INDEX_SOURCE, /MAX_ATTACHMENT_SIZE_BYTES/, 'the startup constant must be gone');
+});

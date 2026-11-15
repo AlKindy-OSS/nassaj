@@ -66,11 +66,8 @@ const AGENT_DISPLAY_NAMES: Record<AgentProvider, string> = {
   codex: 'Codex',
   antigravity: 'Antigravity (agy)',
   opencode: 'OpenCode',
-  qwen: 'Qwen Code',
-  kimi: 'Kimi',
   deepseek: 'DeepSeek',
   glm: 'GLM',
-  hermes: 'Hermes',
   sakana: 'Sakana',
   dsh: 'DeepSeek Harness',
 };
@@ -82,29 +79,10 @@ const AGENT_DISPLAY_NAMES: Record<AgentProvider, string> = {
  * generic `echo "No login command configured…"` fallback — the very bug this
  * list prevents by never showing the button.
  *
- * `kimi` is deliberately NOT here (ADR-062): unlike the other hosted vendors it
- * ALSO ships a native CLI (`@moonshot-ai/kimi-code`) with its own device-code
- * login, which is the only way to link a Kimi SUBSCRIPTION instead of a metered
- * API key. While it was listed here the account card hid the login row, so there
- * was no route in the whole UI to open a Kimi terminal and complete that login.
  * `glm` stays: it has no binary of its own — the carrier is OpenCode (GL-1), so
  * its key is written into opencode's auth.json and its "terminal" is OpenCode's.
- * Qwen is deliberately NOT here. Its discontinued `qwen-oauth` free tier does
- * not make the account action disappear: the action routes to Alibaba Coding
- * Plan in the sole encrypted credential surface. It must stay visible so a
- * disconnected account never reports a missing key without offering a way to
- * add it. The action does not open a terminal or create a second credential in
- * `~/.qwen`; Settings owns the routing to the encrypted store.
  */
 const PURE_API_PROVIDERS: AgentProvider[] = ['deepseek', 'glm', 'sakana'];
-
-/**
- * Providers that authenticate by EITHER a stored API key OR an interactive CLI
- * login. For these an already-configured key must not hide the login row — that
- * row is precisely how the operator switches from a metered key to a
- * subscription login.
- */
-const DUAL_AUTH_PROVIDERS: AgentProvider[] = ['kimi'];
 
 /** Inline copy button: icon toggles to checkmark for 1 second after click. */
 function CopyButton({ text }: { text: string }) {
@@ -145,7 +123,7 @@ function CopyButton({ text }: { text: string }) {
  * resolved environment for isolating providers, so the badge and the per-user
  * link reflect the same credential and are rendered as one status.
  *
- * API-key-capable providers (claude / opencode / codex / kimi / deepseek /
+ * API-key-capable providers (claude / opencode / codex / deepseek /
  * glm) once showed only a POINTER here, after key entry moved to Settings →
  * Vendors (B-350 / ADR-085) and `ProviderApiKeySection` was deleted with the
  * orphan sweep (T-1139). T-1205 closed that loop: the standalone Vendors tab is
@@ -156,11 +134,9 @@ function CopyButton({ text }: { text: string }) {
  * What stays here is what genuinely belongs to the agent: its own CLI login and
  * the per-user subscription link. A provider can
  * still have both an API key (over in Vendors) AND an interactive CLI login
- * (opencode, codex, kimi), or both a key AND the subscription link (claude).
+ * (opencode, codex), or both a key AND the subscription link (claude).
  * deepseek / glm have no CLI login at all — a stored key is their only
- * connection path (ADR-036 / ADR-030). kimi is the exception among the hosted
- * vendors: it ships the native `@moonshot-ai/kimi-code` CLI (ADR-062), so it
- * gets BOTH the API-key panel and the device-code login row.
+ * connection path (ADR-036 / ADR-030).
  */
 // `onRefreshAuthStatus` re-probes the CLI after an owner-started install
 // (T-2062) so the missing-CLI banner disappears without a reload.
@@ -226,14 +202,9 @@ export default function AccountContent({ agent, authStatus, onLogin, userLink, o
   // connect buttons.
   const isPureApiProvider = PURE_API_PROVIDERS.includes(agent);
   const onReauth = isAntigravity ? userLink?.onLink : onLogin;
-  // A key-authenticated provider normally needs no login CTA — except for the
-  // dual-auth ones (kimi), where the CLI login is the path to a subscription and
-  // must stay reachable even once a key is stored.
-  const apiKeyHidesLoginRow =
-    authStatus.method === 'api_key' && !DUAL_AUTH_PROVIDERS.includes(agent);
+  // A key-authenticated provider needs no login CTA.
+  const apiKeyHidesLoginRow = authStatus.method === 'api_key';
   // API-only providers (deepseek/glm/sakana) have no connection action here.
-  // Qwen is not in this list: its action opens the managed Alibaba setup
-  // terminal for Coding Plan or Token Plan credentials.
   const showLoginRow =
     !isPureApiProvider && Boolean(onReauth) && !apiKeyHidesLoginRow && !showLinkBanner;
 

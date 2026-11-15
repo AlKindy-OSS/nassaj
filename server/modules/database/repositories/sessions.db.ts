@@ -10,6 +10,7 @@ import {
   recordDiscoveredSession,
   refreshDiscoveredSession,
 } from '@/modules/database/repositories/session-discovery.db.js';
+import { visibleHistoryPredicateSql } from '@/modules/database/repositories/hidden-history.sql.js';
 import { normalizeProjectPath } from '@/shared/utils.js';
 
 type SessionRow = {
@@ -68,6 +69,13 @@ const NATIVE_SESSION_PREDICATE_SQL = `(
   EXISTS (SELECT 1 FROM session_participants sp WHERE sp.session_id = sessions.session_id)
   OR EXISTS (SELECT 1 FROM message_authors ma WHERE ma.session_id = sessions.session_id)
 )`;
+
+/**
+ * ADR-229: display reads hide the conversations of removed harnesses (kimi,
+ * qwen, hermes). Applied next to every NATIVE_SESSION_PREDICATE_SQL use and to
+ * the archived list; like that predicate it is a pure visibility filter.
+ */
+const VISIBLE_HISTORY_PREDICATE_SQL = visibleHistoryPredicateSql('sessions.provider');
 
 export const sessionsDb = {
   /**
@@ -345,6 +353,7 @@ export const sessionsDb = {
   /**
    * Archived rows are intentionally queried separately so the caller can render
    * them in a dedicated view without reintroducing them into active session lists.
+   * Display-only: conversations of removed harnesses are hidden (ADR-229).
    */
   getArchivedSessions(): SessionRow[] {
     const db = getConnection();
@@ -353,6 +362,7 @@ export const sessionsDb = {
         `SELECT ${SESSION_ROW_COLUMNS_SQL}
          FROM sessions
          WHERE isArchived = 1
+           AND ${VISIBLE_HISTORY_PREDICATE_SQL}
          ORDER BY datetime(COALESCE(updated_at, created_at)) DESC, session_id DESC`
       )
       .all() as SessionRow[];
@@ -369,6 +379,40 @@ export const sessionsDb = {
            AND isArchived = 0`
       )
       .all(normalizedProjectPath) as SessionRow[];
+  },
+
+  /**
+   * Display variant of {@link getSessionsByProjectPath} (ADR-229): the same
+   * active rows minus conversations of removed harnesses. Project stats use it;
+   * participant and skill scans keep the unfiltered reader.
+   */
+  getVisibleSessionsByProjectPath(projectPath: string): SessionRow[] {
+    return getConnection()
+      .prepare(
+        `SELECT ${SESSION_ROW_COLUMNS_SQL}
+         FROM sessions
+         WHERE project_path = ?
+           AND isArchived = 0
+           AND ${VISIBLE_HISTORY_PREDICATE_SQL}`
+      )
+      .all(normalizeProjectPath(projectPath)) as SessionRow[];
+  },
+
+  /**
+   * Display variant of {@link getSessionsByProjectPathIncludingArchived}
+   * (ADR-229): every row for the path, archived included, minus conversations
+   * of removed harnesses. Only the archived-project listing uses it; project
+   * delete and membership revocation must keep the unfiltered reader.
+   */
+  getVisibleSessionsByProjectPathIncludingArchived(projectPath: string): SessionRow[] {
+    return getConnection()
+      .prepare(
+        `SELECT ${SESSION_ROW_COLUMNS_SQL}
+         FROM sessions
+         WHERE project_path = ?
+           AND ${VISIBLE_HISTORY_PREDICATE_SQL}`
+      )
+      .all(normalizeProjectPath(projectPath)) as SessionRow[];
   },
 
   /**
@@ -402,6 +446,7 @@ export const sessionsDb = {
          WHERE project_path = ?
            AND isArchived = 0
            AND ${NATIVE_SESSION_PREDICATE_SQL}
+           AND ${VISIBLE_HISTORY_PREDICATE_SQL}
          ORDER BY julianday(COALESCE(updated_at, created_at)) DESC, session_id DESC
          LIMIT ? OFFSET ?`
       )
@@ -426,6 +471,7 @@ export const sessionsDb = {
          WHERE sessions.project_path = ?
            AND sessions.isArchived = 0
            AND ${NATIVE_SESSION_PREDICATE_SQL}
+           AND ${VISIBLE_HISTORY_PREDICATE_SQL}
          ORDER BY julianday(COALESCE(sessions.updated_at, sessions.created_at)) DESC,
                   sessions.session_id DESC`
       )
@@ -446,6 +492,7 @@ export const sessionsDb = {
          WHERE project_path = ?
            AND isArchived = 0
            AND ${NATIVE_SESSION_PREDICATE_SQL}
+           AND ${VISIBLE_HISTORY_PREDICATE_SQL}
          ORDER BY julianday(COALESCE(created_at, updated_at)) DESC, session_id DESC
          LIMIT 1`
       )
@@ -476,6 +523,7 @@ export const sessionsDb = {
          WHERE sessions.project_path = ?
            AND sessions.isArchived = 0
            AND ${NATIVE_SESSION_PREDICATE_SQL}
+           AND ${VISIBLE_HISTORY_PREDICATE_SQL}
            AND starred_sessions.session_id IS NULL
          ORDER BY julianday(COALESCE(sessions.updated_at, sessions.created_at)) DESC,
                   sessions.session_id DESC
@@ -498,6 +546,7 @@ export const sessionsDb = {
          WHERE sessions.project_path = ?
            AND sessions.isArchived = 0
            AND ${NATIVE_SESSION_PREDICATE_SQL}
+           AND ${VISIBLE_HISTORY_PREDICATE_SQL}
            AND starred_sessions.session_id IS NULL`
       )
       .get(userId, normalizedProjectPath) as { count: number } | undefined;
@@ -514,7 +563,8 @@ export const sessionsDb = {
          FROM sessions
          WHERE project_path = ?
            AND isArchived = 0
-           AND ${NATIVE_SESSION_PREDICATE_SQL}`
+           AND ${NATIVE_SESSION_PREDICATE_SQL}
+           AND ${VISIBLE_HISTORY_PREDICATE_SQL}`
       )
       .get(normalizedProjectPath) as { count: number } | undefined;
 
@@ -608,8 +658,8 @@ export const sessionsDb = {
       ).run(realId, stubId);
       db.prepare(
         `INSERT OR IGNORE INTO session_participants
-           (session_id, user_id, role, first_seen, last_seen, message_count)
-         SELECT ?, user_id, role, first_seen, last_seen, message_count
+           (session_id, user_id, role, first_seen, last_seen, message_count, attribution)
+         SELECT ?, user_id, role, first_seen, last_seen, message_count, attribution
          FROM session_participants WHERE session_id = ?`
       ).run(realId, stubId);
       db.prepare('DELETE FROM sessions WHERE session_id = ?').run(stubId);

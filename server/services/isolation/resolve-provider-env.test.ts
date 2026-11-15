@@ -39,10 +39,6 @@ const { initializeDatabase, closeConnection } = await import('@/modules/database
 const { resolveProviderEnv } = await import('./resolve-provider-env.js');
 const { SYSTEM_ACTOR } = await import('./credential-actor.js');
 const { setProviderKey, _resetProviderSecretsServerKeyCache } = await import('./provider-secrets-store.js');
-// KIMI_CODE_HOME's root is asserted from the SAME shared constant the production code
-// reads (provision-user-dirs.js), not a duplicated literal — so this test can never
-// pass against a drifted name (the .kimi vs .kimi-code bug this fix closes).
-const { KIMI_HOME_SUBDIR } = await import('./provision-user-dirs.js');
 
 await initializeDatabase();
 
@@ -120,7 +116,7 @@ describe('resolveProviderEnv — hosted vendor key injection', () => {
     assert.throws(() => resolveProviderEnv(null, 'kimi', { ...base }), { code: 'CREDENTIAL_ACTOR_REQUIRED' });
     const env = resolveProviderEnv(SYSTEM_ACTOR as never, 'kimi', { ...base });
     assert.equal(env.KIMI_API_KEY, undefined);
-    assert.equal(env.KIMI_CODE_NO_AUTO_UPDATE, '1');
+    assert.equal(env.KIMI_CODE_NO_AUTO_UPDATE, undefined, 'the kimi CLI is removed (ADR-229): no updater switch');
   });
 });
 
@@ -182,13 +178,6 @@ describe('resolveProviderEnv — the server working directory never reaches a ch
 });
 
 describe('resolveProviderEnv — updater policy covers every identity mode', () => {
-  it('kimi chat, agent, anonymous and default modes all disable self-update (T-1873)', () => {
-    for (const [userId, mode] of [[46, 'agent'], [47, 'chat'], [SYSTEM_ACTOR, 'agent'], [48, undefined]] as const) {
-      const env = resolveProviderEnv(userId as never, 'kimi', { PATH: '/usr/bin' }, mode);
-      assert.equal(env.KIMI_CODE_NO_AUTO_UPDATE, '1', `${userId}/${mode}`);
-    }
-  });
-
   it('claude anonymous and member modes all disable self-update', () => {
     for (const userId of [SYSTEM_ACTOR, 44, 45]) {
       assert.equal(resolveProviderEnv(userId as never, 'claude', { PATH: '/usr/bin' }).DISABLE_AUTOUPDATER, '1');
@@ -199,10 +188,11 @@ describe('resolveProviderEnv — updater policy covers every identity mode', () 
 /**
  * SL-5 / ADR-062 regression — the new `mode` parameter must be a strict
  * superset that changes NOTHING for any pre-existing provider branch. Every
- * provider resolveProviderEnv knows about is exercised here (not just kimi):
- * the seam is shared by ALL of them (ADR-014), so a signature change is only
- * safe if the default (chat) path is byte-for-byte identical to the legacy
- * 3-arg call, and mode is a pure no-op everywhere except kimi's agent path.
+ * provider resolveProviderEnv knows about is exercised here: the seam is shared
+ * by ALL of them (ADR-014), so a signature change is only safe if the default
+ * (chat) path is byte-for-byte identical to the legacy 3-arg call, and mode is a
+ * pure no-op everywhere except opencode's carrier sanitize. The kimi agent
+ * branch (KIMI_CODE_HOME) was removed with the kimi native body (ADR-229).
  */
 describe('SL-5 — mode parameter is backward-compatible across ALL providers', () => {
   const BASE: NodeJS.ProcessEnv = { PATH: '/usr/bin' };
@@ -213,10 +203,10 @@ describe('SL-5 — mode parameter is backward-compatible across ALL providers', 
     return sub ? path.join(root, sub) : root;
   }
 
-  // Every provider EXCEPT kimi must be totally mode-agnostic: the env produced
-  // by the legacy 3-arg call, by mode='chat', and by mode='agent' are identical.
+  // These providers are totally mode-agnostic: the env produced by the legacy
+  // 3-arg call, by mode='chat', and by mode='agent' are identical.
   const MODE_AGNOSTIC = [
-    'claude', 'codex', 'agy', 'opencode', 'deepseek', 'glm', 'qwen',
+    'claude', 'codex', 'agy', 'opencode', 'kimi', 'deepseek', 'glm', 'qwen',
   ] as const;
   for (const provider of MODE_AGNOSTIC) {
     it(`${provider}: legacy 3-arg === mode 'chat' === mode 'agent' (mode is a no-op)`, () => {
@@ -249,7 +239,7 @@ describe('SL-5 — mode parameter is backward-compatible across ALL providers', 
     assert.equal(resolveProviderEnv(uid, 'qwen', { ...BASE }).HOME, userDir(uid));
   });
 
-  it('deepseek/glm never get KIMI_CODE_HOME even in agent mode', () => {
+  it('deepseek/glm never get a KIMI_CODE_HOME even in agent mode', () => {
     _resetProviderSecretsServerKeyCache();
     setProviderKey(502, 'deepseek', 'sk-ds');
     setProviderKey(502, 'glm', 'sk-glm');
@@ -322,76 +312,20 @@ describe('SL-5 — mode parameter is backward-compatible across ALL providers', 
 });
 
 /**
- * SL-5 / ADR-062 — the ONE new behavior: kimi in agent mode gets an isolated
- * KIMI_CODE_HOME on top of its API-key injection, while chat mode (the default)
- * stays exactly as before (key only, no config-home).
+ * ADR-229 — the kimi native agent body is removed: agent mode no longer adds a
+ * KIMI_CODE_HOME; kimi resolves to its key only, like deepseek and glm.
  */
-describe('SL-5 — kimi agent-mode config-home isolation (KIMI_CODE_HOME)', () => {
+describe('ADR-229 — kimi agent mode is key-only (no KIMI_CODE_HOME)', () => {
   const BASE: NodeJS.ProcessEnv = { PATH: '/usr/bin' };
 
-  function isolateKimi(): void {
+  it('agent mode injects the key and sets no config-home, for members and the system actor', () => {
     _resetProviderSecretsServerKeyCache();
-  }
-
-  function kimiHome(uid: number): string {
-    return path.join(sandboxHome, '.nassaj-users', String(uid), KIMI_HOME_SUBDIR);
-  }
-
-  it("agent mode: sets KIMI_CODE_HOME to ~/.nassaj-users/<uid>/.kimi", () => {
-    isolateKimi();
     setProviderKey(600, 'kimi', 'sk-kimi-live');
     const env = resolveProviderEnv(600, 'kimi', { ...BASE }, 'agent');
-    assert.equal(env.KIMI_CODE_HOME, kimiHome(600));
-    // The API key is STILL injected in agent mode (native CLI reads it).
+    assert.equal(env.KIMI_CODE_HOME, undefined);
     assert.equal(env.KIMI_API_KEY, 'sk-kimi-live');
-  });
-
-  it('agent mode sets config-home even when the user has no stored key (OAuth path)', () => {
-    isolateKimi();
-    const env = resolveProviderEnv(601, 'kimi', { ...BASE }, 'agent');
-    assert.equal(env.KIMI_CODE_HOME, kimiHome(601));
-    assert.equal(env.KIMI_API_KEY, undefined);
-  });
-
-  it('chat mode (default) NEVER sets KIMI_CODE_HOME — legacy behavior preserved', () => {
-    isolateKimi();
-    setProviderKey(602, 'kimi', 'sk-kimi-live');
-    const legacy = resolveProviderEnv(602, 'kimi', { ...BASE });
-    const chat = resolveProviderEnv(602, 'kimi', { ...BASE }, 'chat');
-    assert.equal(legacy.KIMI_CODE_HOME, undefined);
-    assert.equal(chat.KIMI_CODE_HOME, undefined);
-    assert.equal(legacy.KIMI_API_KEY, 'sk-kimi-live');
-    assert.deepEqual(chat, legacy);
-  });
-
-  it('agent mode: per-user config-home isolation (two users never collide)', () => {
-    isolateKimi();
-    const a = resolveProviderEnv(701, 'kimi', { ...BASE }, 'agent');
-    const b = resolveProviderEnv(702, 'kimi', { ...BASE }, 'agent');
-    assert.equal(a.KIMI_CODE_HOME, kimiHome(701));
-    assert.equal(b.KIMI_CODE_HOME, kimiHome(702));
-    assert.notEqual(a.KIMI_CODE_HOME, b.KIMI_CODE_HOME);
-  });
-
-  it('agent mode: KIMI_CODE_HOME is outside the ANTHROPIC/CLAUDE namespace (IRON RULE)', () => {
-    isolateKimi();
-    setProviderKey(603, 'kimi', 'sk-kimi-live');
-    const env = resolveProviderEnv(603, 'kimi', { ...BASE }, 'agent');
     assertNoAnthropicNamespace(env);
-    assert.equal(env.ANTHROPIC_BASE_URL, undefined);
-  });
-
-  it('a null kimi agent actor is refused; the system actor gets the system tree, no key', () => {
-    isolateKimi();
-    assert.throws(() => resolveProviderEnv(null, 'kimi', { ...BASE }, 'agent'), { code: 'CREDENTIAL_ACTOR_REQUIRED' });
-    const env = resolveProviderEnv(SYSTEM_ACTOR as never, 'kimi', { ...BASE }, 'agent');
-    assert.equal(env.KIMI_CODE_HOME, path.join(sandboxHome, '.nassaj-users', '.system', KIMI_HOME_SUBDIR));
-    assert.equal(env.KIMI_API_KEY, undefined);
-  });
-
-  it('kimi agent mode always isolates the config-home for a member (no shared mode, ADR-152 A1)', () => {
-    const operator: NodeJS.ProcessEnv = { ...BASE, KIMI_CODE_HOME: path.join(sandboxHome, '.kimi') };
-    const env = resolveProviderEnv(604, 'kimi', operator, 'agent');
-    assert.equal(env.KIMI_CODE_HOME, kimiHome(604));
+    assert.equal(resolveProviderEnv(SYSTEM_ACTOR as never, 'kimi', { ...BASE }, 'agent').KIMI_CODE_HOME, undefined);
   });
 });
+

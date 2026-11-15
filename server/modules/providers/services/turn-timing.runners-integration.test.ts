@@ -68,9 +68,7 @@ test('shared runner timing keeps no-answer unknown and settles a terminal turn o
 const RUNNERS = [
   { provider: 'agy', file: '../../../agy-cli.js', outputGate: /const durableTiming = finalTranscriptMessage/ },
   { provider: 'cursor', file: '../../../cursor-cli.js', outputGate: /assistantMessageId: lastAssistantMessageId/ },
-  { provider: 'kimi', file: '../../../kimi-agent-cli.js', outputGate: /code === 0 && sawAssistantOutput/ },
   { provider: 'opencode', file: '../../../opencode-cli.js', outputGate: /assistantMessageId: lastAssistantMessageId/ },
-  { provider: 'qwen', file: '../../../qwen-cli.js', outputGate: /!failure && answer/ },
 ] as const;
 
 test('Codex completion carries its durable rollout id to the live reply bridge', async () => {
@@ -98,32 +96,14 @@ for (const runner of RUNNERS) {
   });
 }
 
-test('cursor and Qwen guard competing terminal paths from duplicate persistence', async () => {
+test('cursor guards competing terminal paths from duplicate persistence', async () => {
   const cursor = await readFile(new URL('../../../cursor-cli.js', import.meta.url), 'utf8');
   assert.match(cursor, /if \(timingSettled\) return \{\};\s*timingSettled = true;/,
     'Cursor can terminate on both result and child close');
-
-  const qwen = await readFile(new URL('../../../qwen-cli.js', import.meta.url), 'utf8');
-  assert.match(qwen, /if \(state\.finalized\) return;\s*state\.finalized = true;/,
-    'Qwen can terminate on both child error and child close');
-  assert.match(qwen, /child\.once\('close'/);
 });
 
 test('OpenCode recognizes its live stream_delta as the assistant answer', async () => {
   const opencode = await readFile(new URL('../../../opencode-cli.js', import.meta.url), 'utf8');
   assert.match(opencode, /msg\.kind === 'stream_delta' && msg\.content\?\.trim\(\)/,
     'the live normalizer never emits text/assistant, so that history-only shape cannot gate timing');
-});
-
-test('Qwen treats a trailing NDJSON answer without newline as model activity before finalization', async () => {
-  const qwen = await readFile(new URL('../../../qwen-cli.js', import.meta.url), 'utf8');
-  const closeHandler = qwen.slice(qwen.indexOf("child.once('close'"), qwen.indexOf('/** Builds the measured Qwen'));
-
-  assert.match(closeHandler, /state\.buffer\.trim\(\)/);
-  assert.match(closeHandler, /JSON\.parse\(state\.buffer\)/);
-  assert.match(closeHandler, /event\?\.type === 'stream_event' \|\| event\?\.type === 'assistant'/);
-  assert.ok(closeHandler.indexOf('turnTimer.markModelActivity()') < closeHandler.indexOf('parseQwenEvent(event'),
-    'the unterminated final answer must start timing before it is parsed');
-  assert.ok(closeHandler.indexOf('parseQwenEvent(event') < closeHandler.indexOf('void finalize(code)'),
-    'the final answer must exist before settlement runs');
 });

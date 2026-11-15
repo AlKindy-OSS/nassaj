@@ -6,12 +6,9 @@ export const PROVIDER_NAMES: Record<SkillsProvider, string> = {
   codex: 'Codex',
   cursor: 'Cursor',
   opencode: 'OpenCode',
-  qwen: 'Qwen Code',
   antigravity: 'Antigravity',
-  kimi: 'Kimi',
   deepseek: 'DeepSeek',
   glm: 'GLM',
-  hermes: 'Hermes',
   sakana: 'Sakana',
   dsh: 'DeepSeek Harness',
 };

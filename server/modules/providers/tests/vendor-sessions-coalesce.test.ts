@@ -15,10 +15,10 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { KimiSessionsProvider } from '@/modules/providers/list/kimi/kimi-sessions.provider.js';
+import { GlmSessionsProvider } from '@/modules/providers/list/glm/glm-sessions.provider.js';
 import { vendorTranscriptPath } from '@/modules/providers/shared/vendor/vendor-transcript.js';
 
-const provider = new KimiSessionsProvider();
+const provider = new GlmSessionsProvider();
 
 function ensureDir(filePath: string) {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
@@ -32,7 +32,7 @@ function writeTranscript(filePath: string, events: unknown[]) {
 test('fetchHistory coalesces consecutive stream_delta into one text message', async () => {
   const sessionId = 'coalesce-text-' + crypto.randomUUID();
   const projectPath = os.tmpdir();
-  const filePath = vendorTranscriptPath('kimi', sessionId, projectPath);
+  const filePath = vendorTranscriptPath('glm', sessionId, projectPath);
   try {
     const meta = { type: 'meta', projectPath, sessionName: 'coalesce text' };
     const userMsg = { type: 'message', message: { role: 'user', content: 'hi' } };
@@ -58,7 +58,7 @@ test('fetchHistory coalesces consecutive stream_delta into one text message', as
 test('fetchHistory coalesces consecutive thinking_delta into one thinking message', async () => {
   const sessionId = 'coalesce-thinking-' + crypto.randomUUID();
   const projectPath = os.tmpdir();
-  const filePath = vendorTranscriptPath('kimi', sessionId, projectPath);
+  const filePath = vendorTranscriptPath('glm', sessionId, projectPath);
   try {
     const meta = { type: 'meta', projectPath, sessionName: 'thinking test' };
     const deltas = [
@@ -81,7 +81,7 @@ test('fetchHistory coalesces consecutive thinking_delta into one thinking messag
 test('fetchHistory preserves separation between text and tool_use blocks', async () => {
   const sessionId = 'coalesce-tool-' + crypto.randomUUID();
   const projectPath = os.tmpdir();
-  const filePath = vendorTranscriptPath('kimi', sessionId, projectPath);
+  const filePath = vendorTranscriptPath('glm', sessionId, projectPath);
   try {
     const meta = { type: 'meta', projectPath, sessionName: 'tool test' };
     const deltas = [

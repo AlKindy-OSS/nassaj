@@ -62,12 +62,14 @@ import { useVendorKeyStatuses } from '../../../provider-auth/hooks/useVendorKeyS
 import type { EngineProvider } from '../../hooks/engineProviderSession';
 import { LOCAL_ENGINE } from '../../../../../shared/localEngine';
 import { usePaletteOps } from '../../../../contexts/PaletteOpsContext';
-import { useClaudeLocalOverlay } from '../../hooks/useClaudeLocalOverlay';
+import { useLocalOverlay } from '../../hooks/useLocalOverlay';
 
 import { engineModelLabel, resolveEffectiveEngine } from './engineGuard';
 import { rowsForBody, type PickerRow } from './modelPickerRows';
 import {
+  isLocalBody,
   isLocalChat,
+  localCellOpen,
   localChatServer,
   localModelLabel,
   localPickerBlocks,
@@ -182,9 +184,12 @@ export default function InlineModelSwitcher({
     chatEngine: engineProvider ?? null,
     chatModel: currentModel,
   };
-  const chatIsLocal = isClaudeBody && isLocalChat(localCtx);
-  const localOverlay = useClaudeLocalOverlay(isClaudeBody && (isOpen || chatIsLocal));
-  const localBlocks = isClaudeBody ? localPickerBlocks(localOverlay ?? [], localCtx) : [];
+  // T-2107: Claude and Codex run on local servers; the overlay is read only while
+  // the body × local matrix cell is open (a closed cell is hidden, not greyed).
+  const localBody = isLocalBody(provider) && localCellOpen(provider) ? provider : null;
+  const chatIsLocal = localBody !== null && isLocalChat(localCtx);
+  const localOverlay = useLocalOverlay(localBody ?? 'claude', localBody !== null && (isOpen || chatIsLocal));
+  const localBlocks = localBody ? localPickerBlocks(localBody, localOverlay ?? [], localCtx, true) : [];
   const localRows = localBlocks.flatMap((block) => block.rows);
   const { openSettings } = usePaletteOps();
 
@@ -343,7 +348,9 @@ export default function InlineModelSwitcher({
     setIsSwitching(true);
     try {
       // T-1021/6be3c7ab: قيمة الكتالوج تُمرَّر حرفياً — لا تشذيب ولا اشتقاق.
-      const result = await onSelect(model, engine);
+      // Only the Claude body has an engine axis; a Codex local row starts its local
+      // chat by the local model id alone (T-2107), so it sends no engine stamp.
+      const result = await onSelect(model, isClaudeBody ? engine : null);
       setLastResult({ kind: 'select', scope: result.scope, model: result.model });
       // إغلاق تلقائي بعد إظهار التأكيد
       confirmTimeoutRef.current = window.setTimeout(() => {
@@ -357,7 +364,7 @@ export default function InlineModelSwitcher({
     } finally {
       setIsSwitching(false);
     }
-  }, [isSwitching, isClearing, currentModel, effectiveEngine, onSelect, closeDropdown]);
+  }, [isSwitching, isClearing, currentModel, effectiveEngine, onSelect, closeDropdown, isClaudeBody]);
 
   /**
    * يمسح تثبيت النموذج (DELETE) ويعرض النموذج الجديد السائر. B-252
@@ -592,7 +599,7 @@ export default function InlineModelSwitcher({
                 </div>
                 {block.rows.map((row) => {
                   const isSelected = row.model === currentModel && effectiveEngine === LOCAL_ENGINE;
-                  const reason = row.blocked ? localBlockText(t, row.blocked) : null;
+                  const reason = row.blocked ? localBlockText(t, { ...row, blocked: row.blocked }) : null;
                   return (
                     <div key={row.key} className="flex items-center gap-1" data-local-blocked={row.blocked ?? undefined}>
                       <button

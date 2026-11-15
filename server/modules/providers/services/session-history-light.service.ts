@@ -20,6 +20,7 @@ import {
 import { isVendorTranscriptProvider, transcriptSpecOf } from '../shared/session-transcript-specs.js';
 import { copyClaudeHistoryReceipts } from '../list/claude/claude-receipt-identity.js';
 import { copyCodexHistoryIdentities } from '../list/codex/codex-receipt-identity.js';
+import { isHiddenHistoryProvider } from '../../../../shared/retiredProviders.js';
 
 import { isSessionAccessibleByUser } from './session-access.js';
 
@@ -393,6 +394,8 @@ export async function peekHistoryRevision(sessionId: string, requesterUserId: nu
   if (!session || !isSessionAccessibleByUser(sessionId, session.project_path, requesterUserId, 'read')) {
     throw new AppError(`Session "${sessionId}" was not found.`, { code: 'SESSION_NOT_FOUND', statusCode: 404 });
   }
+  // ADR-229: a removed harness's conversation is never read; same answer as fetchHistory's failed read.
+  if (isHiddenHistoryProvider(session.provider)) return { readFailed: true };
   const provider = session.provider as LLMProvider;
   const transcript = await openUnleasedTranscript(sessionId, requesterUserId, provider);
   if (transcript === null) return { readFailed: true };

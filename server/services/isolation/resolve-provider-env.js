@@ -37,21 +37,8 @@
  *              under the ANTHROPIC or CLAUDE namespace — doing so would route a
  *              Claude client to a competitor. The base URL is hard-coded in each
  *              vendor's own HTTP client, not here.
- *   - kimi (AGENT mode only, SL-5/ADR-062): kimi ALSO ships a native CLI
- *              (@moonshot-ai/kimi-code) that, unlike the toolless chat path, reads
- *              AND writes credential/session state to disk under KIMI_CODE_HOME.
- *              When resolveProviderEnv is called with mode==='agent' for kimi we
- *              additionally point KIMI_CODE_HOME at ~/.nassaj-users/<userId>/.kimi
- *              (the KIMI_HOME_SUBDIR constant, imported from provision-user-dirs.js —
- *              the single source of truth shared with the code that materializes the
- *              tree, so the env var and the on-disk root can never drift; the root is
- *              .kimi, NOT .kimi-code, because .kimi-code/mcp.json is a SUBDIR of it)
- *              so that on-disk state isolates per user (the config-home shape of
- *              the CLIs above), on TOP of the KIMI_API_KEY value injection. The
- *              default (chat) mode is byte-for-byte unchanged — no KIMI_CODE_HOME.
- *              KIMI_CODE_HOME is outside the ANTHROPIC/CLAUDE namespace, so the
- *              IRON RULE above is preserved. deepseek/glm have no native CLI and
- *              ignore mode entirely.
+ *              kimi/deepseek/glm have no native CLI here and ignore mode entirely
+ *              (the kimi native agent body was removed, ADR-229).
  *
  * Every known provider is ALWAYS isolated per user (ADR-152 amendment 1): the
  * install-wide sharing policy is retired, no role or stored value can return
@@ -72,8 +59,8 @@
  *
  * Spawn mode for a provider (SL-5/ADR-062). 'chat' is the historical toolless
  * HTTP path (the default — identical to the pre-SL-5 behavior for EVERY
- * provider); 'agent' is the governed native-CLI path that some providers (kimi)
- * back with an isolated config-home. Providers with no native CLI ignore mode.
+ * provider); 'agent' is the governed native-CLI path (opencode sanitizes its
+ * env for it). Providers with no native CLI ignore mode.
  * @typedef {'chat'|'agent'} ProviderMode
  */
 
@@ -88,7 +75,7 @@ import { INHERITED_CREDENTIAL_ENV } from './provider-credential-env.js';
 import { listDelegatedOwners, listDelegatedProvidersFromOwner, resolveCredentialPrincipal } from './credential-principal.js';
 import { materializeGrantHome, sweepGrantHomes } from './grant-home.js';
 import { resolveSlotKey } from './provider-slot-key.js';
-import { provisionUserDirs, userConfigDir, KIMI_HOME_SUBDIR } from './provision-user-dirs.js';
+import { provisionUserDirs, userConfigDir } from './provision-user-dirs.js';
 import { sanitizeHostSecretEnv, sanitizeVendorAgentEnv } from './sanitize-vendor-agent-env.js';
 
 /**
@@ -161,7 +148,7 @@ function resolveIsolatedProviderEnv(actor, provider, baseEnv, mode, honorGrants)
   // TERMINAL login can land in the owner's tree; agent turns DO run on the
   // owner's credential by design, and a copy taken there outlives the grant —
   // ADR-152 says so, and so does the settings page before a grant is made).
-  //   • dedicated-knob providers (claude/codex/kimi-agent/vendor keys) point at
+  //   • dedicated-knob providers (claude/codex/vendor keys) point at
   //     the OWNER's provider dir or key directly;
   //   • HOME/XDG-steered providers get a GRANT HOME: the caller's own tree with
   //     only the granted provider dirs linked to the owner's (grant-home.js) —
@@ -311,21 +298,6 @@ function resolveIsolatedProviderEnv(actor, provider, baseEnv, mode, honorGrants)
       if (resolved) {
         env[VENDOR_KEY_ENV[provider]] = resolved.key;
       }
-      // SL-5 (ADR-062): kimi's native CLI (agent mode) reads AND writes credential
-      // and session state to disk under KIMI_CODE_HOME. Isolate that config-home
-      // per user so the on-disk state never leaks across users. This runs ONLY for
-      // provider==='kimi' AND mode==='agent'; the default chat path (and every
-      // deepseek/glm path in any mode) is byte-for-byte unchanged. KIMI_CODE_HOME
-      // is outside the ANTHROPIC_*/CLAUDE_* namespace so the IRON RULE holds.
-      if (provider === 'kimi' && mode === 'agent') {
-        provisionUserDirs(credentialUserId);
-        // KIMI_HOME_SUBDIR is the SINGLE source of truth for this root (exported by
-        // provision-user-dirs.js, which materializes the very tree — sessions/ and
-        // .kimi-code/mcp.json — beneath it). Reading the shared constant instead of a
-        // literal makes env-var and on-disk layout impossible to drift apart, and any
-        // future correction (the layout is field-CONFIRMED at G-KIMI-LIVE) a one-point edit.
-        env.KIMI_CODE_HOME = userConfigDir(credentialUserId, KIMI_HOME_SUBDIR);
-      }
       return env;
     }
     default:
@@ -380,11 +352,8 @@ function systemActorEnv(provider, env, mode) {
       env.XDG_CACHE_HOME = path.join(root, '.cache');
       env.XDG_STATE_HOME = path.join(root, '.local', 'state');
       return mode === 'agent' ? sanitizeVendorAgentEnv(env) : env;
-    case 'kimi':
-      env.KIMI_CODE_HOME = path.join(root, KIMI_HOME_SUBDIR);
-      return env;
     default:
-      // deepseek/glm: hosted APIs with no tree; the system actor has no key.
+      // kimi/deepseek/glm: hosted APIs with no tree; the system actor has no key.
       return env;
   }
 }
@@ -400,11 +369,6 @@ function systemActorEnv(provider, env, mode) {
 function applyHarnessUpdaterPolicy(provider, env) {
   if (provider === 'claude') env.DISABLE_AUTOUPDATER = '1';
   if (provider === 'opencode') env.OPENCODE_DISABLE_AUTOUPDATE = '1';
-  // kimi-code: fully disables the auto-update check, background install and
-  // staged swap (vendor dist, isAutoUpdateDisabledByEnv). Every kimi child —
-  // agent turns AND the kimi terminal/login PTY — so only the update button
-  // moves the one installed copy (T-1873).
-  if (provider === 'kimi') env.KIMI_CODE_NO_AUTO_UPDATE = '1';
   return env;
 }
 
@@ -454,7 +418,7 @@ function dropInheritedWorkingDirEnv(env) {
  * host-application secrets (see NASSAJ_HOST_SECRET_EXACT_DENY); PATH, HOME,
  * USER, LOGNAME, SHELL, LANG, TERM, TMPDIR, XDG_*, NODE_*, npm_* and every
  * isolation knob this function itself sets (CLAUDE_CONFIG_DIR / CODEX_HOME /
- * KIMI_CODE_HOME / HOME / the vendor KEY vars) are preserved, so no provider
+ * HOME / the vendor KEY vars) are preserved, so no provider
  * loses anything it actually reads.
  *
  * Signature and every documented behavior are unchanged.
@@ -469,8 +433,8 @@ function dropInheritedWorkingDirEnv(env) {
  *   for home enumeration that must see every member's own tree.
  * @param {ProviderMode} [mode] spawn mode (SL-5). Defaults to 'chat' so every
  *   existing 3-arg caller keeps its exact prior behavior. Only 'agent' unlocks
- *   the native-CLI config-home isolation (today: KIMI_CODE_HOME for kimi); any
- *   other value is treated as the legacy default.
+ *   the agent-mode env sanitize (today: opencode); any other value is treated
+ *   as the legacy default.
  * @returns {NodeJS.ProcessEnv} env to pass to child_process spawn
  */
 export function resolveProviderEnv(userId, provider, baseEnv = process.env, mode = 'chat', options = {}) {

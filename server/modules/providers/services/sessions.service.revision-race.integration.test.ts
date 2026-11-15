@@ -40,13 +40,13 @@ async function withTranscript(runTest: (context: Context) => Promise<void>): Pro
   (os as unknown as { homedir: () => string }).homedir = () => tempRoot;
   try {
     const ownerId = userDb.createUser('owner', 'hash', 'user').id;
-    const dir = path.join(tempRoot, '.nassaj-vendor-sessions', 'kimi', vendorProjectHash(PROJECT_PATH));
+    const dir = path.join(tempRoot, '.nassaj-vendor-sessions', 'glm', vendorProjectHash(PROJECT_PATH));
     await fs.mkdir(dir, { recursive: true });
     const transcript = path.join(dir, `${SESSION_ID}.jsonl`);
     await fs.writeFile(transcript,
       JSON.stringify({ type: 'meta', projectPath: PROJECT_PATH, sessionName: 'race' }) + '\n'
       + line('user', 'first question') + line('assistant', 'first answer'));
-    sessionsDb.createSession(SESSION_ID, 'kimi', PROJECT_PATH);
+    sessionsDb.createSession(SESSION_ID, 'glm', PROJECT_PATH);
     participantsDb.recordSpawn(SESSION_ID, ownerId);
     await runTest({ ownerId, transcript });
   } finally {
@@ -88,7 +88,7 @@ test('a light400 read pinned to an outgrown revision is 409; without it, 200 wit
 
 test('a read that overlaps a write is 409 even without a revision (torn read)', async () => {
   await withTranscript(async ({ ownerId, transcript }) => {
-    const history = providerRegistry.resolveHistorySessions('kimi');
+    const history = providerRegistry.resolveHistorySessions('glm');
     const original = history.fetchHistory;
     let writes = 0;
     // Grow the transcript during every provider read of it, as an active run does.

@@ -10,7 +10,7 @@ import { normalizeHarnessProvider } from '../../../../../../hooks/harnessVersion
 import type { AgentSelectorSectionProps } from '../types';
 
 /**
- * Marks drawn as a FILLED rounded square (Claude, Kimi, Hermes) against ones
+ * Marks drawn as a FILLED rounded square (Claude) against ones
  * drawn as a line/figure on nothing (Codex's ring, Cursor's cube, the
  * Antigravity arch, OpenCode's brackets).
  *
@@ -30,10 +30,10 @@ import type { AgentSelectorSectionProps } from '../types';
 const TILE_SELECTED = 'bg-muted text-foreground ring-1 ring-inset ring-border';
 const TILE_IDLE = 'text-muted-foreground hover:bg-accent hover:text-foreground';
 
-const FILLED_SQUARE_MARKS: readonly string[] = ['claude', 'kimi', 'hermes'];
+const FILLED_SQUARE_MARKS: readonly string[] = ['claude'];
 
 /**
- * ‏**مصدَّرة** (T-1206): صارت تُقرأ خارج الشريط — «افتح حساب Kimi ←» في تبويب
+ * ‏**مصدَّرة** (T-1206): صارت تُقرأ خارج الشريط — في تبويب
  * المحرّكات، و«يُكتب داخل OpenCode» على صفّ الموضع الأجنبي، وصفوف تبويب
  * المورّدين. كلها تسمّي **بلاطةً في هذا الشريط بعينه**، فنسخةٌ ثانية من الأسماء
  * كانت ستسمّي وجهةً باسمٍ لا يظهر على الزرّ الذي تقود إليه.
@@ -44,11 +44,8 @@ export const AGENT_NAMES: Record<AgentProvider, string> = {
   codex: 'Codex',
   antigravity: 'Antigravity',
   opencode: 'OpenCode',
-  qwen: 'Qwen Code',
-  kimi: 'Kimi',
   deepseek: 'DeepSeek',
   glm: 'GLM',
-  hermes: 'Hermes',
   sakana: 'Sakana',
   dsh: 'DeepSeek Harness',
 };

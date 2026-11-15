@@ -104,7 +104,6 @@
     "codex": "Codex",
     "antigravity": "Antigravity",
     "opencode": "OpenCode",
-    "kimi": "Kimi",
     "deepseek": "DeepSeek",
     "glm": "GLM"
   },
@@ -141,6 +140,24 @@
       "listeners_gone": "Scheduled wake-ups stopped: nobody has had the conversation open for a while.",
       "quota": "Scheduled wake-ups stopped: usage is at or above 90%.",
       "disabled": "Scheduled wake-ups are turned off on this server."
+    },
+    "hookNoVerdict": {
+      "timed_out": "Проверка безопасности не ответила вовремя, поэтому это действие не проверено.",
+      "no_answer": "Проверка безопасности не дала пригодного ответа, поэтому это действие не проверено."
+    },
+    "hookFailed": "Хук завершился ошибкой при проверке этого шага.",
+    "hookDetails": "Показать подробности",
+    "sessionWritesLost": {
+      "ENOSPC": "Диск сервера заполнен, поэтому часть этой сессии не сохранена.",
+      "EDQUOT": "Дисковая квота сервера исчерпана, поэтому часть этой сессии не сохранена.",
+      "unknown": "Не удалось сохранить на диск часть этой сессии.",
+      "transcript": "При последующем возобновлении этого разговора часть может отсутствовать.",
+      "globalConfig": "Последние изменения настроек Claude не сохранены."
+    },
+    "credentialExpiring": {
+      "soon": "Ваш вход в Claude истекает {{date}}. Повторно привяжите аккаунт Claude, чтобы продолжать без перерыва.",
+      "expired": "Ваш вход в Claude, вероятно, истёк ({{date}}). Повторно привяжите аккаунт Claude, чтобы продолжить.",
+      "action": "Открыть настройки аккаунта"
     }
   },
   "systemMessage": {
@@ -373,7 +390,7 @@
     "removeFile": "Удалить файл",
     "uploading": "Загрузка…",
     "errorType": "Тип файла не разрешён",
-    "errorSize": "Файл слишком большой (макс. 50 МБ)",
+    "errorSize": "Файл слишком большой (макс. {{maxMb}} МБ)",
     "errorCount": "Прикреплено слишком много файлов (макс. {{max}})"
   },
   "effortMode": {
@@ -431,7 +448,6 @@
       "antigravity": "Готово к работе с Antigravity (agy) на {{model}}. Введите сообщение ниже.",
       "opencode": "Готов использовать OpenCode с {{model}}. Начните вводить сообщение ниже.",
       "default": "Выберите агента для программирования выше, чтобы начать",
-      "kimi": "Готов использовать Kimi с {{model}}. Начните вводить сообщение ниже.",
       "deepseek": "Готов использовать DeepSeek с {{model}}. Начните вводить сообщение ниже.",
       "glm": "Готов использовать GLM с {{model}}. Начните вводить сообщение ниже.",
       "claudeEngine": "Готов: агент для программирования Claude работает на {{provider}} с {{model}}. Начните вводить сообщение ниже."
@@ -507,7 +523,8 @@
       "working": "Работает",
       "computing": "Вычисляет",
       "reasoning": "Рассуждает",
-      "waitingPermission": "Ожидает разрешения"
+      "waitingPermission": "Ожидает разрешения",
+      "runningChecks": "Выполняет проверки"
     },
     "state": {
       "live": "В сети",

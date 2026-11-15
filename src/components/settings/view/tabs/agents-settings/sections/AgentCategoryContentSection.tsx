@@ -35,7 +35,7 @@ export default function AgentCategoryContentSection({
 }: AgentCategoryContentSectionProps) {
   // ADR-203: one harness-files state for the section and the list it scopes.
   const harnessFiles = useHarnessFiles(selectedCategory === 'skills');
-  // Coming-soon providers (e.g. deepseek T-1760): no categories, no tabs — show
+  // Coming-soon providers: no categories, no tabs — show
   // the coming-soon panel in place of the entire category content tree.
   if (COMING_SOON_SETTINGS_PROVIDERS.includes(selectedAgent)) {
     return (

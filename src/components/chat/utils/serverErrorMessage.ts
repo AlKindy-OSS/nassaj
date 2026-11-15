@@ -18,6 +18,13 @@ export const SERVER_ERROR_CODE_KEYS: Record<string, string> = {
   // `unknown` («حدث خطأ غير متوقع») فلا يفهم المستخدم أن رسالته لم تُرسل
   // أصلاً ولا ما يفعله، فيعيد الإرسال ويُرفض ثانيةً.
   session_busy: 'serverError.session_busy',
+  // ADR-173 P6: shared writing — refusals before anything ran, and a refused stop.
+  shared_writing_unsupported: 'serverError.shared_writing_unsupported',
+  shared_write_transcript_conflict: 'serverError.shared_write_transcript_conflict',
+  shared_write_transcript_unavailable: 'serverError.shared_write_transcript_unavailable',
+  shared_writing_cli_unproven: 'serverError.shared_writing_cli_unproven',
+  shared_writing_forbidden: 'serverError.shared_writing_forbidden',
+  turn_stop_forbidden: 'serverError.turn_stop_forbidden',
   // B-1374 / B-1367: قاطعان قبل أي تشغيل، وسببهما في يد المستخدم.
   attachment_rejected: 'serverError.attachment_rejected',
   opencode_project_config_refused: 'serverError.opencode_project_config_refused',
@@ -55,6 +62,9 @@ export const SERVER_ERROR_CODE_KEYS: Record<string, string> = {
   dsh_gate_bypassed: 'serverError.dsh_gate_bypassed',
   dsh_post_hook_skipped: 'serverError.dsh_post_hook_skipped',
   dsh_override_unverified: 'serverError.dsh_override_unverified',
+  // T-2108: engine refusals; the readable server sentence follows as the detail.
+  ENGINE_PROVIDER_UNAVAILABLE: 'serverError.ENGINE_PROVIDER_UNAVAILABLE',
+  ENGINE_PIN_WRITE_FAILED: 'serverError.ENGINE_PIN_WRITE_FAILED',
   opencode_parity_rules_invalid: 'serverError.opencode_parity_rules_invalid',
   opencode_parity_unavailable: 'serverError.opencode_parity_unavailable',
   opencode_parity_not_loaded: 'serverError.opencode_parity_not_loaded',
@@ -73,6 +83,21 @@ export const SERVER_ERROR_CODE_KEYS: Record<string, string> = {
   generation_blocked: 'outbox.reason.generation_blocked',
   generation_transitioning: 'outbox.reason.generation_transitioning',
 };
+
+/**
+ * ADR-173 P8: refusals of the user's own action whose sentence already says
+ * everything (what happened, what to do). They read without a raw code, and the
+ * outbox card keeps no server sentence beside them (it would mix languages).
+ */
+export const SELF_EXPLAINING_REFUSAL_CODES: ReadonlySet<string> = new Set([
+  'session_busy',
+  'shared_writing_unsupported',
+  'shared_write_transcript_conflict',
+  'shared_write_transcript_unavailable',
+  'shared_writing_cli_unproven',
+  'shared_writing_forbidden',
+  'turn_stop_forbidden',
+]);
 
 /** نطاق حجب الصلاحية كما يصل من الخادم. */
 export type OutboxFenceScopeKind = 'session' | 'user_provider_purpose' | 'generation';
@@ -228,6 +253,7 @@ export function resolveServerErrorMessage(
     ? structured.messageKey : null;
   const messageKey = mappedKey || trustedMessageKey;
   const headline = messageKey ? t(messageKey, { defaultValue: fallback }) : fallback;
+  if (mappedKey && SELF_EXPLAINING_REFUSAL_CODES.has(displayCode)) return headline;
   return `${headline}. ${t('serverError.codeLabel')}: ${displayCode}`;
 }
 

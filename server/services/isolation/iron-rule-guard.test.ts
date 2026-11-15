@@ -30,7 +30,6 @@ const serverRoot = path.resolve(here, '..', '..');
 /** The complete set of source files that make up the hosted vendor run seam. */
 const SEAM_FILES: string[] = [
   // Run seam (CLI entrypoints + shared HTTP runtime).
-  path.join(serverRoot, 'kimi-cli.js'),
   path.join(serverRoot, 'glm-cli.js'),
   path.join(serverRoot, 'modules', 'providers', 'shared', 'vendor', 'vendor-runtime.js'),
   // Provider/catalog/sessions/config that the seam pulls in.
@@ -40,7 +39,7 @@ const SEAM_FILES: string[] = [
   path.join(serverRoot, 'modules', 'providers', 'shared', 'vendor', 'vendor-models.provider.ts'),
   path.join(serverRoot, 'modules', 'providers', 'shared', 'vendor', 'vendor-auth.provider.ts'),
   path.join(serverRoot, 'modules', 'providers', 'shared', 'vendor', 'vendor-transcript.ts'),
-  path.join(serverRoot, 'modules', 'providers', 'list', 'kimi', 'kimi.provider.ts'),
+  path.join(serverRoot, 'modules', 'providers', 'list', 'kimi', 'kimi-engine.provider.ts'),
   path.join(serverRoot, 'modules', 'providers', 'list', 'deepseek', 'deepseek.provider.ts'),
   path.join(serverRoot, 'modules', 'providers', 'list', 'glm', 'glm.provider.ts'),
 ];

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { pickLocale, type ViewerStrings } from './i18n';
-import { createLiveClient } from './liveClient';
+import { createLiveClient, type LiveFailure } from './liveClient';
 import { loadShare, type LoadResult, type ShareCredentials } from './loadShare';
 import { LiveViewer } from './LiveViewer';
 import { ShareTranscript } from './ShareTranscript';
@@ -22,7 +22,9 @@ function StatusPage({ strings, state, onRetry }: { strings: ViewerStrings; state
     ? { title: strings.rateLimitedTitle, body: strings.rateLimited }
     : state.kind === 'network'
       ? { title: strings.networkTitle, body: strings.network }
-      : { title: strings.unavailableTitle, body: strings.unavailable };
+      : state.kind === 'provider-removed'
+        ? { title: strings.providerRemovedTitle, body: strings.providerRemoved }
+        : { title: strings.unavailableTitle, body: strings.unavailable };
   const retryable = state.kind === 'rate-limited' || state.kind === 'network';
   return (
     <main className="share-page share-status" role="alert">
@@ -31,6 +33,12 @@ function StatusPage({ strings, state, onRetry }: { strings: ViewerStrings; state
       {retryable ? <button type="button" className="share-retry" onClick={onRetry}>{strings.retry}</button> : null}
     </main>
   );
+}
+
+function failureState(failure: LiveFailure): LoadResult {
+  if (failure.kind === 'rate-limited') return { kind: 'rate-limited' };
+  if (failure.kind === 'temporary') return { kind: 'network' };
+  return failure.kind === 'provider-removed' ? { kind: 'provider-removed' } : { kind: 'unavailable' };
 }
 
 /** Public viewer root. `credentials` is null when the link has no usable token. */
@@ -54,7 +62,7 @@ export function ShareApp({ credentials, language = navigator.language }: { crede
       if (controller.signal.aborted) return;
       if (!meta.ok) {
         const { failure } = meta;
-        setState(failure.kind === 'rate-limited' ? { kind: 'rate-limited' } : failure.kind === 'temporary' ? { kind: 'network' } : { kind: 'unavailable' });
+        setState(failureState(failure));
         return;
       }
       if (meta.value.mode === 'live') { setState({ kind: 'live', meta: meta.value.meta }); return; }

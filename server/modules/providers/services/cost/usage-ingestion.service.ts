@@ -31,6 +31,7 @@ import {
 } from '@/modules/providers/shared/session-transcript-reader.js';
 
 import { calculateSessionCost, type SessionCost } from './cost-calculator.js';
+import { isLocalPinnedSession, localizeSessionUsage } from './local-engine-usage.js';
 import { emptyTotals, type ModelUsage, type SessionUsage } from './usage-extractors.js';
 import { buildCodexStatisticsV3 } from './usage-statistics-v3.service.js';
 
@@ -575,7 +576,10 @@ function writeSnapshot(
   generation: number,
   attribution: { kind: UsageAttributionKind; id: string; scope: UsageAttributionScope },
 ): void {
-  const usage = usageFromFacts(context.sessionId, attribution.kind === 'coordinator' ? undefined : attribution);
+  const usage = localizeSessionUsage(
+    usageFromFacts(context.sessionId, attribution.kind === 'coordinator' ? undefined : attribution),
+    isLocalPinnedSession(context.sessionId),
+  );
   usage.provider = context.provider;
   const cost = calculateSessionCost(usage);
   const totals = cost.perModel.reduce((sum, row) => ({

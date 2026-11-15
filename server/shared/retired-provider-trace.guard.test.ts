@@ -56,6 +56,7 @@ const ALLOWLIST: Readonly<Record<string, string>> = Object.freeze({
   'server/modules/websocket/services/session-handover.test.ts': AGY_HOME,
   'server/modules/websocket/services/chat-websocket.context-guard.test.ts': `${AGY_MODELS}: an agy session pinned to a gemini model`,
   'server/agy-cli.lifecycle.test.ts': AGY_HOME,
+  'server/removed-harness-hidden.acceptance.test.ts': "ADR-229 acceptance: retired 'gemini' rows must stay visible, not hidden",
   'server/agy-cli.model.test.ts': AGY_MODELS,
   'server/agy-cli.registry-integration.test.ts': AGY_HOME,
   'server/agy-cli.stderr-surface.test.ts': 'recorded agy stderr for a Gemini model quota error',
@@ -140,6 +141,7 @@ const ALLOWLIST: Readonly<Record<string, string>> = Object.freeze({
   'public/modelConstants.js': 'cursor/agy/opencode catalogs list Google gemini-* models',
   'src/components/chat/hooks/useProviderGovernance.ts': 'agy gemini-md governance mechanism id',
   'src/components/chat/view/ChatInterface.tsx': 'lists gemini among retired bodies never shown as an active provider',
+  'src/components/chat/view/subcomponents/InlineModelSwitcher.local.test.tsx': AGY_MODELS,
   'src/components/chat/view/subcomponents/MessageModelBadge.test.tsx': 'badge label for a Google gemini-* model',
   'src/components/provider-auth/providerSelectionEmptyState.antigravityRows.test.tsx': AGY_MODELS,
   'src/components/provider-auth/retiredProviderSurfaces.test.ts':

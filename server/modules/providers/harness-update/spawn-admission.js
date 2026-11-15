@@ -16,7 +16,7 @@
  * A spawn is refused when an update job holds the single-flight lease for the
  * harness that owns that run-provider id. glm rides the opencode harness, so a
  * glm-via-opencode spawn is blocked while opencode updates; the pure-HTTP hosted
- * vendors (deepseek, and the glm/kimi chat runtimes) have no updatable binary and
+ * vendors (deepseek, and the glm chat runtime) have no updatable binary and
  * are never blocked.
  */
 
@@ -27,8 +27,7 @@
  *
  * A. Chat entry points — `refuseSpawnIfHarnessUpdating` (writer frame):
  *    claude-sdk.js queryClaudeSDK → claude · openai-codex.js queryCodex → codex
- *    cursor-cli.js → cursor · qwen-cli.js → qwen
- *    kimi-agent-cli.js → kimi · opencode-cli.js → opencode · agy-cli.js → antigravity
+ *    cursor-cli.js → cursor · opencode-cli.js → opencode · agy-cli.js → antigravity
  *
  * B. Writer-less spawns — `assertHarnessNotUpdating` / `isSpawnBlockedForRunProvider`:
  *    claude-sdk.js probeClaudeBuiltInCommands → claude
@@ -41,11 +40,10 @@
  *    list/codex/codex-credentials.writer.ts (`codex login`) → codex
  *    turn-supervisor/adapters/claude-sdk-adapter.ts (probe+invoke) → claude
  *    turn-supervisor/adapters/codex-cli-adapter.ts (probe+invoke) → codex
- *    turn-supervisor/adapters/extended-cli-adapter.ts (probe+invoke) → qwen|opencode
+ *    turn-supervisor/adapters/extended-cli-adapter.ts (probe+invoke) → opencode
  *    list/cursor/cursor-models.provider.ts (`cursor-agent --list-models`) → cursor
  *    list/opencode/opencode-models.provider.ts (`opencode models`) → opencode
  *    list/antigravity/antigravity-models-cli.client.ts (`agy models`) → antigravity
- *    turn-supervisor/cli-capability.ts (`--version`/`--help`) → qwen
  *    websocket/shell-websocket.service.ts (provider PTY lifecycle) → selected harness
  *
  * C. Covered transitively (reach a guarded function, no own guard):
@@ -106,8 +104,6 @@ export const RUN_PROVIDER_TO_HARNESS = Object.freeze({
   cursor: 'cursor',
   opencode: 'opencode',
   glm: 'opencode',
-  qwen: 'qwen',
-  kimi: 'kimi',
   deepseek: 'deepseek',
   // T-2086 S4: a dsh update/rollback holds the dsh lease, so launches refuse.
   dsh: 'dsh',

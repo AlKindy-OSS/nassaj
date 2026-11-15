@@ -222,6 +222,14 @@ export type MessageKind =
   | 'status'
   | 'permission_request'
   | 'permission_cancelled'
+  /**
+   * ADR-173 P6: a shared writer's prompt as a live frame, so the creator and every
+   * other viewer of the session see it as it is sent (none existed before: viewers
+   * saw the reply stream only). Masked (ADR-210) and buffered for replay like any
+   * chat row; `authorUserId`/`authorName`/`clientMsgId` let the sender's own UI drop
+   * its echo. Live-only: the transcript row stays the source of history.
+   */
+  | 'user_turn'
   | 'session_created'
   | 'interactive_prompt'
   | 'task_notification'
@@ -532,6 +540,11 @@ export type FetchHistoryResult = {
    * the result is never cached.
    */
   readFailed?: true;
+  /**
+   * ADR-229: why the history is unavailable. `provider_removed` = the
+   * conversation belongs to a removed harness and is never read.
+   */
+  unavailableReason?: 'provider_removed';
   /**
    * Study §3.2 (P0): ids of delegations still unsettled when the transcript
    * recorded an owner interrupt. Server-internal input to the liveness overlay

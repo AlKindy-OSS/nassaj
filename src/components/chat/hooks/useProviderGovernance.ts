@@ -8,7 +8,6 @@ export type GovernanceMechanism =
   | 'codex-fingerprint'
   | 'claude-md'
   | 'opencode-agents'
-  | 'kimi-agents'
   | 'gemini-md'
   | 'nassaj-project-md'
   | 'none';

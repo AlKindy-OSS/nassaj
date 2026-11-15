@@ -19,6 +19,7 @@ import { codexLaunchIdentityFor, spawnReservedCodex } from '../modules/providers
 import { peekCodexRuntimeVerdict } from '../shared/codex-runtime-compat.js';
 
 import { assertLinkModeRunAllowed } from './isolation/link-mode-run-gate.js';
+import { LOCAL_ENGINE_SPAWN_UNSUPPORTED, localEngineSpawnRefusal } from './isolation/local-engine-pin.js';
 import { assertCredentialLinked, resolveModelRunEnv } from './isolation/credential-gate.js';
 
 /**
@@ -129,6 +130,10 @@ function validateCodexSession(sessionId, userId, accessMode, authorizeImpl) {
   if (session.provider !== 'codex') {
     throw new Error('The selected session is not a Codex thread.');
   }
+  // ADR-227 / T-2107: the App Server runs the member's cloud Codex config, so a
+  // chat pinned to a local model server never reaches it (/btw, /compact, fork).
+  const localRefusal = localEngineSpawnRefusal({ storedEngine: session.engine_provider ?? null, site: 'Codex App Server command' });
+  if (localRefusal) throw localRefusal;
   return session;
 }
 
@@ -361,7 +366,8 @@ export async function spawnCodexSideQuery(params = {}, callbacks = {}, options =
   try {
     session = validateCodexSession(sessionId, userId, 'read', authorizeImpl);
   } catch (error) {
-    onError('session_not_found', error instanceof Error ? error.message : String(error));
+    const code = error?.code === LOCAL_ENGINE_SPAWN_UNSUPPORTED ? LOCAL_ENGINE_SPAWN_UNSUPPORTED : 'session_not_found';
+    onError(code, error instanceof Error ? error.message : String(error));
     return;
   }
   try {

@@ -12,10 +12,7 @@ import { operatorClaudeHome, resolveClaudeHomeForUser } from './claude-home.js';
  * is the only source.
  */
 
-/** Claude's on-disk project folder name: every char outside [A-Za-z0-9-] → '-'. */
-export function encodeClaudeProjectDir(projectPath: string): string {
-  return projectPath.replace(/[^a-zA-Z0-9-]/g, '-');
-}
+export { encodeClaudeProjectDir } from './claude-project-dir.js';
 
 /**
  * Every `<claude home>/projects` root that may hold this user's transcripts.

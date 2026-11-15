@@ -54,12 +54,16 @@ export function createClaudeReceiptPrompt(input: {
     ? input.content.map(block => ({ type: 'text', text: block.text })) : input.content;
   let consumed = false;
   let promptUuid: string | null = null;
+  // ADR-173 P8 B1: a human prompt always carries a native uuid, chosen here so it is
+  // known before the SDK reads the stream. The CLI writes it as the transcript row's
+  // uuid, so the live `user_turn` and the synced row share one key. A relayed
+  // (synthetic) delivery is not a human row and carries none.
+  const nativeUuid: string | null = input.synthetic ? null : randomUUID();
   const make = async function* () {
     if (consumed) throw new Error('CLAUDE_PROMPT_ALREADY_DISPATCHED');
     consumed = true;
-    let uuid: string | undefined;
-    if (receipt && payloadSha256 && input.persistSession !== false && !input.synthetic) {
-      uuid = randomUUID();
+    const uuid = nativeUuid ?? undefined;
+    if (uuid && receipt && payloadSha256 && input.persistSession !== false) {
       if (!bind({ clientMsgId: receipt.clientMsgId as string, userId: receipt.userId as number,
         provider: 'claude', sessionId: input.sessionId, uuid, payloadSha256 })) {
         throw new Error('CLAUDE_RECEIPT_BINDING_CONFLICT');
@@ -81,7 +85,8 @@ export function createClaudeReceiptPrompt(input: {
   };
   // B-1694: the client uuid of this turn's message (null when none was stamped),
   // which the CLI echoes in a result's user_message_uuid(s) once it consumed it.
-  return { make, wasConsumed: () => consumed, promptUuid: () => promptUuid };
+  // ADR-173 P8 B1: `messageUuid` is that native uuid whether or not a receipt binds it.
+  return { make, wasConsumed: () => consumed, promptUuid: () => promptUuid, messageUuid: () => nativeUuid };
 }
 
 /** Raw model activity only: synthetic auth failures and replay cannot prove acceptance. */

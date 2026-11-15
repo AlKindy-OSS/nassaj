@@ -38,21 +38,21 @@
  * user+pid namespace, while the child still boots normally (whole FS read-only).
  *
  * Scope: caging is opt-in behind NASSAJ_PROVIDER_CAGE=true and applies to the
- * local-CLI providers (claude/agy/opencode/cursor/hermes/qwen). Two exemption
+ * local-CLI providers (claude/agy/opencode/cursor). Two exemption
  * classes never get wrapped — see CAGE_EXEMPT_PROVIDERS.
  *
- * Per-mode caging (SL-6 / ADR-062, 2026-07-22): kimi and glm live in
- * HTTP_HOSTED_PROVIDERS because their CHAT surface is a toolless HTTP client with
- * no child to sandbox — so they stay exempt in chat mode. But their AGENT surface
- * spawns a REAL local CLI (kimi = @moonshot-ai/kimi-code native; glm = via the
- * OpenCode carrier) that MUST be caged. The exempt-by-name test is therefore
+ * Per-mode caging (SL-6 / ADR-062, 2026-07-22): glm lives in
+ * HTTP_HOSTED_PROVIDERS because its CHAT surface is a toolless HTTP client with
+ * no child to sandbox — so it stays exempt in chat mode. But its AGENT surface
+ * spawns a REAL local CLI (via the OpenCode carrier) that MUST be caged. (The kimi
+ * native agent body that once shared this path was removed, ADR-229.) The exempt-by-name test is therefore
  * replaced by exempt-by-(name AND mode): the chat/agent distinction is drawn HERE,
  * by an EXPLICIT `mode` threaded through the launch seam, never by provider name
  * alone (a name-only switch would silently un-cage the agent path — the KG-9
  * hazard). See cageEnabled + CAGEABLE_AGENT_PROVIDERS. An omitted/`'chat'` mode is
  * byte-identical to the pre-SL-6 behaviour (kimi/glm/deepseek exempt).
  *
- * @typedef {'claude'|'codex'|'agy'|'cursor'|'opencode'|'hermes'|'kimi'|'deepseek'|'glm'|'qwen'} ProviderName
+ * @typedef {'claude'|'codex'|'agy'|'cursor'|'opencode'|'kimi'|'deepseek'|'glm'} ProviderName
  * @typedef {'chat'|'agent'|''|undefined|null} ProviderMode
  */
 
@@ -88,17 +88,16 @@ export const CAGE_EXEMPT_PROVIDERS = Object.freeze(
 /**
  * HTTP-hosted vendors that ALSO ship a local AGENT CLI which must be caged when
  * run in agent mode — the ONLY providers whose exemption is mode-dependent:
- *  - `kimi`: native `@moonshot-ai/kimi-code` spawn (ADR-062, KG-1).
  *  - `glm` : run through the OpenCode carrier (ADR-062, OCC-2). Included so that a
  *    launcher that identifies the carrier run as `glm` is caged too; the carrier's
  *    real binary is opencode (already caged), so in practice glm-agent reaches the
  *    cage as `opencode` — this entry makes the seam correct-by-construction either
  *    way.
- * `deepseek` is deliberately absent: it has no agent CLI, so it stays exempt in
- * every mode (chat-only HTTP client).
+ * `kimi` and `deepseek` are deliberately absent: they have no agent CLI, so they
+ * stay exempt in every mode (chat-only HTTP clients).
  * @type {ReadonlySet<string>}
  */
-export const CAGEABLE_AGENT_PROVIDERS = Object.freeze(new Set(['kimi', 'glm']));
+export const CAGEABLE_AGENT_PROVIDERS = Object.freeze(new Set(['glm']));
 
 /** @param {unknown} provider @returns {string} */
 function normalizeProvider(provider) {
@@ -137,7 +136,7 @@ export function cageEnabled(provider, mode) {
   if (name === '') return false;
   // Agent mode un-exempts the vendors that spawn a real local agent CLI. This is
   // the sole place the distinction is made, and it is made by explicit mode —
-  // never by the provider name alone (KG-9): a name-only switch on `kimi` would
+  // never by the provider name alone (KG-9): a name-only switch on `glm` would
   // silently leave the agent path un-caged.
   if (normalizeMode(mode) === 'agent' && CAGEABLE_AGENT_PROVIDERS.has(name)) {
     return true;

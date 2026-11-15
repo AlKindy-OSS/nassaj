@@ -41,7 +41,6 @@ import {
 
 export type HarnessInstallMethod =
   | 'native-self-update'
-  | 'npm-prefix'
   /** T-2086 S4: `npm ci` of a committed reviewed lockfile into versioned dirs (dsh). */
   | 'npm-lock'
   | 'none';
@@ -56,7 +55,7 @@ export interface HarnessUpdateArgv {
   cwd?: string;
   /**
    * Extra env merged OVER `cleanSpawnEnv()` for this harness's update AND its
-   * recovery run. One use today: `TMPDIR=/var/tmp` for the npm harness (qwen) —
+   * recovery run. One use today: `TMPDIR=/var/tmp` for the npm harness (dsh) —
    * npm stages the tarball in TMPDIR, and the host's /tmp is tmpfs = RAM (the
    * 2026-07 OOM incident). ADR-159 Addendum 3 makes /var/tmp binding for both.
    * Never secrets: this is a fixed, code-owned table (no request field reaches it).
@@ -128,7 +127,7 @@ export interface HarnessDescriptor {
    * always skips it (T-1871: every snapshot-backed native harness).
    */
   manualOnly: boolean;
-  /** Snapshot/rollback spec; null = the legacy recovery path (npm, git). */
+  /** Snapshot/rollback spec; null = no snapshot (npm-lock keeps its previous version; no-cli rows). */
   snapshot: HarnessSnapshotSpec | null;
   /** "Restore compatible version" source, or null when not offered. */
   restoreCompatible: HarnessRestoreCompatibleSpec | null;
@@ -154,15 +153,13 @@ export interface HarnessDescriptor {
    *              short-circuits on `config.autoupdate===false || env.OPENCODE_
    *              DISABLE_AUTOUPDATE`. Asserted on the resolved env by
    *              `resolve-provider-env.opencode-autoupdate.test.js`.
-   * Unverified entries (qwen `NO_UPDATE_NOTIFIER`) stay DATA-only: an
+   * Unverified entries stay DATA-only: an
    * unverified knob silently wired is a no-op that reads like a guarantee, and
    * the scheduler skips any harness whose knob is unverified.
    * `null` = no known knob (listed in AUTOUPDATER_DISABLE_NONE).
    */
   disableAutoUpdaterEnv: Record<string, string> | null;
   autoUpdaterDisableVerified: boolean;
-  /** For npm-prefix harnesses: the install prefix + package (update + recovery). */
-  npm?: { prefix: string; pkg: string };
   /**
    * Resolves the final spawn/version/update binary through the shared harness
    * registry (no env parameter: a member env can never redirect it). Throws
@@ -174,12 +171,6 @@ export interface HarnessDescriptor {
   /** Builds the exact fixed update argv, or null when not updatable. */
   updateArgv: (env?: NodeJS.ProcessEnv) => HarnessUpdateArgv | null;
   latestProbe: HarnessLatestProbe;
-  /**
-   * The CLI's own updater only STAGES the new exe in `<bin dir>/.staging` and
-   * swaps it in on the next run (kimi-code, native-staging.ts): the update
-   * forces that swap inside the lease, restores and launches clear any stage.
-   */
-  stagesNativeUpdate?: boolean;
 }
 
 const home = () => os.homedir();
@@ -223,9 +214,7 @@ export const NPM_UPDATE_TMPDIR = '/var/tmp';
  *                   `--disable <FEATURE>`, not an auto-updater switch.
  *   - antigravity:  no auto-update env in --help or bundled strings.
  *   - cursor:       no auto-update env in --help.
- *   - qwen:         npm-managed; NO_UPDATE_NOTIFIER is carried in the descriptor
- *                   but UNVERIFIED on-host, so it is not wired into the spawn env.
- * KNOB VERIFIED and WIRED (claude, opencode, kimi):
+ * KNOB VERIFIED and WIRED (claude, opencode):
  *   - claude:   DISABLE_AUTOUPDATER=1 — documented Anthropic knob, WIRED into the
  *               governed spawn env (resolve-provider-env.js) and asserted on the
  *               spawned env by claude-sdk.disable-autoupdater.test.ts.
@@ -234,32 +223,12 @@ export const NPM_UPDATE_TMPDIR = '/var/tmp';
  *               the auto-update check returns early on it. WIRED in
  *               resolve-provider-env.js, asserted by
  *               resolve-provider-env.opencode-autoupdate.test.js.
- *   - kimi:     KIMI_CODE_NO_AUTO_UPDATE=1 — read by the native binary
- *               (isAutoUpdateDisabledByEnv), WIRED in resolve-provider-env.js
- *               for every kimi child incl. the terminal PTY (T-1873).
  * A harness with `autoUpdaterDisableVerified !== true` is SKIPPED by the
  * auto-update scheduler (its built-in updater could still race the server).
  */
 export const AUTOUPDATER_DISABLE_NONE = Object.freeze([
-  'codex', 'antigravity', 'cursor', 'qwen',
+  'codex', 'antigravity', 'cursor',
 ]);
-
-/**
- * qwen's npm install prefix (T-1873): a USER-LEVEL GLOBAL install into
- * `~/.local` — `lib/node_modules/<pkg>` + `bin/qwen` — so the launcher the
- * registry resolves (`~/.local/bin/qwen`) is exactly what the update and the
- * recovery rewrite. (The update used to run WITHOUT `-g` and so wrote
- * `~/.local/node_modules`, a tree `~/.local/bin/qwen` never ran.)
- */
-const QWEN_NPM_PREFIX = path.join(home(), '.local');
-
-/**
- * The one npm argv for an npm-prefix harness install (update AND recovery):
- * a global install into `prefix`, so npm links `prefix/bin/<bin>`.
- */
-export function npmPrefixInstallArgs(prefix: string, spec: string): string[] {
-  return ['install', '--global', '--prefix', prefix, spec];
-}
 
 /**
  * The dsh update argv (documentation of the one install path; the npm-lock
@@ -401,71 +370,6 @@ export const HARNESS_UPDATE_DESCRIPTORS: Readonly<Record<string, HarnessDescript
     snapshot: { layout: 'single-file', linkMode: 'copy', stores: [OPENCODE_STORE], resolveLayout: singleFileLayout },
     restoreCompatible: { version: PINNED_VENDOR_DIGESTS.opencode.version },
   },
-  qwen: {
-    id: 'qwen',
-    aliases: [],
-    installMethod: 'npm-prefix',
-    state: 'updatable',
-    updatable: true,
-    reason: null,
-    runProviders: ['qwen'],
-    pinKey: null,
-    checksumSource: 'npm-registry',
-    // update-notifier honours NO_UPDATE_NOTIFIER; not yet host-verified for qwen.
-    disableAutoUpdaterEnv: { NO_UPDATE_NOTIFIER: '1' },
-    autoUpdaterDisableVerified: false,
-    npm: { prefix: QWEN_NPM_PREFIX, pkg: '@qwen-code/qwen-code' },
-    resolveBinary: fromRegistry('qwen'),
-    versionArgs: ['--version'],
-    // Deterministic npm reinstall into the MEASURED user prefix. `qwen update`
-    // exists ("check and install") but re-derives its own prefix; the fixed
-    // reinstall is prefix-correct, non-interactive and recoverable (D3/item 3).
-    updateArgv: () => ({
-      cmd: 'npm',
-      args: npmPrefixInstallArgs(QWEN_NPM_PREFIX, '@qwen-code/qwen-code@latest'),
-      // /tmp is tmpfs (RAM) on this host; npm stages tarballs in TMPDIR.
-      env: { TMPDIR: NPM_UPDATE_TMPDIR },
-    }),
-    latestProbe: { kind: 'npm', pkg: '@qwen-code/qwen-code' },
-    // Legacy exact-version recovery (npm reinstall / git reset); no snapshot yet.
-    manualOnly: false,
-    snapshot: null,
-    restoreCompatible: null,
-  },
-  kimi: {
-    id: 'kimi',
-    aliases: [],
-    // Owner decision (ADR-189): the vendor's official native install script,
-    // one self-contained binary at ~/.kimi-code/bin/kimi (measured 2.1.1).
-    installMethod: 'native-self-update',
-    state: 'updatable',
-    updatable: true,
-    reason: null,
-    runProviders: ['kimi'],
-    pinKey: 'kimi',
-    checksumSource: 'none',
-    // KIMI_CODE_NO_AUTO_UPDATE — verified in the native binary's bundled source
-    // (isAutoUpdateDisabledByEnv: no check, no background install, no staged
-    // swap) and WIRED for every kimi child in resolve-provider-env.js.
-    disableAutoUpdaterEnv: { KIMI_CODE_NO_AUTO_UPDATE: '1' },
-    autoUpdaterDisableVerified: true,
-    resolveBinary: fromRegistry('kimi'),
-    versionArgs: ['--version'],
-    // `kimi update --yes` (measured `kimi upgrade|update [-y]`): a manual,
-    // non-interactive native self-update of this same binary (staged, below).
-    updateArgv: () => nativeUpdateArgv('kimi', ['update', '--yes']),
-    // Measured: `kimi update` downloads into ~/.kimi-code/bin/.staging and the
-    // swap runs on the NEXT kimi start (even with KIMI_CODE_NO_AUTO_UPDATE=1).
-    stagesNativeUpdate: true,
-    // npm `latest` carries the same numbering as the native release.
-    latestProbe: { kind: 'npm', pkg: '@moonshot-ai/kimi-code' },
-    // Button-only: the one installed copy moves only when the owner updates it.
-    manualOnly: true,
-    // One native file replaced in place, copied like agy/opencode.
-    snapshot: { layout: 'single-file', linkMode: 'copy', stores: [], resolveLayout: singleFileLayout },
-    // kimi data (~/.kimi-code, per-user KIMI_CODE_HOME) is not snapshotted.
-    restoreCompatible: null,
-  },
   dsh: {
     id: 'dsh',
     aliases: [],
@@ -580,11 +484,11 @@ export function getHarnessDescriptor(idOrAlias: unknown): HarnessDescriptor | nu
  * notice can never drift from the facts it states. Null when nothing is true.
  *   - not updatable (no CLI, or a carrier-only row): null — no update, no warning.
  *   - dataNotBackedUp: the update keeps no copy of the harness's own data — a
- *     snapshot with no store, or no snapshot at all (npm legacy recovery
- *     reinstalls the package only).
+ *     snapshot with no store, or no snapshot at all (npm-lock keeps only its
+ *     previous package version).
  *   - selfUpdating: the built-in auto-updater is not proven off
  *     (`autoUpdaterDisableVerified`, the same fact the scheduler gates on). A
- *     verified knob is spawn-env scoped for claude, opencode and kimi alike, so
+ *     verified knob is spawn-env scoped for claude and opencode alike, so
  *     a run started outside Nassaj cannot single one of them out.
  */
 export function deriveHarnessNotices(descriptor: HarnessDescriptor): HarnessNotices | null {

@@ -4,6 +4,7 @@ import type { ShareCredentials } from './loadShare';
 /** Failure outcomes of one guest request. `ended` is the single uniform "no longer active" outcome. */
 export type LiveFailure =
   | { kind: 'ended' }
+  | { kind: 'provider-removed' }
   | { kind: 'cursor-stale' }
   | { kind: 'rate-limited'; retryAfterMs: number }
   | { kind: 'temporary'; retryAfterMs: number }
@@ -56,6 +57,8 @@ export async function classifyFailure(response: Response): Promise<LiveFailure> 
   if (status === 413 || code === 'ATTACHMENT_TOO_LARGE') return { kind: 'attachment-too-large' };
   if (status === 404) return code === 'ATTACHMENT_GONE' ? { kind: 'attachment-gone' } : { kind: 'ended' };
   if (status === 409 && code === 'CURSOR_STALE') return { kind: 'cursor-stale' };
+  // ADR-229: sent only after the token was accepted, so naming the cause leaks nothing.
+  if (status === 410 && code === 'provider_removed') return { kind: 'provider-removed' };
   if (status === 401 || status === 403 || status === 410) return { kind: 'ended' };
   // 503 HISTORY_UNAVAILABLE, maintenance 409 and any other 5xx are transient.
   return { kind: 'temporary', retryAfterMs: clampMs(retryAfterMs ?? header ?? DEFAULT_TEMP_MS) };

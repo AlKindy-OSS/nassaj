@@ -8,9 +8,17 @@ export { resolveCodexHomeForUser } from './list/codex/codex-home.js';
 export { ensureCodexGovernance } from './list/codex/codex-governance.js';
 export { CodexSessionsProvider } from './list/codex/codex-sessions.provider.js';
 export { codexReceiptPayloadHash } from './list/codex/codex-receipt-proof.js';
+export { composeCodexLaunchConfig } from './list/codex/codex-launch-config.js';
+export { codexMultiAgentConfig } from './list/codex/codex-multi-agent.js';
+export { codexTurnDeveloperInstructions } from './list/codex/codex-helpers-switch.js';
 export { participantsService } from './services/participants.service.js';
 // ADR-227 / T-2098: the local-engine CLI version gate reads the installed Claude version.
 export { readInstalledHarnessVersion } from './harness-update/version-status.service.js';
+// ADR-173 rev.3 P3: the transcript bridge; the composition root wires its writer authority.
+export { configureClaudeResumeBridge, ensureClaudeResumeReachable } from './list/claude/claude-resume-bridge.js';
+// ADR-173 rev.3 P5: non-starter approvals and stop rights; the composition root wires the authority.
+export { configureClaudeSharedTurnAuthority } from './list/claude/claude-shared-turn-authority.js';
+export { isSessionTurnStopPrivileged } from './services/session-access.js';
 export { providerModelsService } from './services/provider-models.service.js';
 export { providerAuthService } from './services/provider-auth.service.js';
 export { harnessLinkModeService } from './services/harness-link-mode.runtime.js';
@@ -76,6 +84,8 @@ export { vendorDisplayName, type VendorKey } from './services/cost/model-vendor.
 // narrower than 'write' on purpose, and a consumer that reached past the barrel
 // could pick the wrong one without the doc that explains why they differ.
 export { isSessionAccessibleByUser, assertSessionAccessible } from './services/sessions.service.js';
+// ADR-173 (owner decision 4): the project-owner arm of an overlay commit from another's conversation.
+export { isSessionOwnProjectOwner, isSessionProjectOwner } from './services/session-access.js';
 
 // ADR-099: the composition root injects the live-run probe the re-stamp route
 // consults. Exported here because the root may only reach a module through it.

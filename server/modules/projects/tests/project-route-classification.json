@@ -248,9 +248,9 @@
   "class": "global",
   "reason": "per-user usage (upstream 502 in tests)"
  },
- "GET /api/providers/claude/local-overlay": {
+ "GET /api/providers/:body/local-overlay": {
   "class": "global",
-  "reason": "picker block of the caller's own local model servers (ADR-227); identity from the session, no project context"
+  "reason": "picker block of the caller's own local model servers for Claude or Codex (ADR-227, T-2107); identity from the session, no project context"
  },
  "GET /api/providers/claude/api-spend": {
   "class": "global",
@@ -644,6 +644,10 @@
  "PUT /api/providers/local/settings": {
   "class": "global",
   "reason": "no project context: refused to every plain user by role or missing resource (403)"
+ },
+ "PUT /api/providers/local/settings/body": {
+  "class": "global",
+  "reason": "no project context: per-agent local switch, refused to every plain user by role (403)"
  },
  "PUT /api/providers/sessions/:sessionId": {
   "class": "project",

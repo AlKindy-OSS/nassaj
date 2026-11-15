@@ -8,7 +8,7 @@ import { isRunnableClaudeExecutable } from '@/shared/claude-cli-path.js';
  * Generic provider-CLI resolver (B-1138) — the B-1091 fix generalized beyond
  * claude. A server launched under pm2/systemd inherits a minimal PATH
  * (`/usr/local/bin:/usr/bin:/bin:/usr/games`) that omits the per-user dirs a
- * login shell adds from `.profile`, so a bare `codex`/`hermes`/`agy`/`kimi`
+ * login shell adds from `.profile`, so a bare `codex`/`agy`/`opencode`
  * fails ENOENT even though its native installer put it in `~/.local/bin`.
  * The result: a card that reads "Connected" next to "CLI is not installed",
  * and a spawn that dies ENOENT. Detection (isCliInstalled) and every spawn

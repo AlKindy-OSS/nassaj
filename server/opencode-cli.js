@@ -77,6 +77,8 @@ import {
   LOCAL_AGENT_CARDS_UNAVAILABLE,
   LOCAL_INSTRUCTIONS_UNAVAILABLE,
   LOCAL_INSTRUCTION_TIER,
+  localTierL1,
+  withLocalTierClaudeDenies,
 } from './services/isolation/opencode-local-tier-material.js';
 import { prepareOpenCodeLocalTier } from './modules/providers/list/opencode/opencode-local-tier.js';
 import { lastOpenCodeFill } from './modules/context-guard/adapters/opencode.adapter.js';
@@ -268,6 +270,17 @@ function isOpenCodeCarrierRun(options, env = process.env, resolvedModel = undefi
 function localServerOrigins(callerId) {
   return Object.fromEntries(authorizedLocalModelServers(callerId).map(server => [server.providerId, server.baseUrl]));
 }
+
+/**
+ * Env stripped from every carrier and local-model child besides the default deny list:
+ * extra config sources (B-1367), opencode's model-catalog overrides and the Zen key.
+ */
+const OPENCODE_CARRIER_EXTRA_DENY_ENV = Object.freeze([
+  ...OPENCODE_CONFIG_SOURCE_ENV,
+  'OPENCODE_MODELS_URL',
+  'OPENCODE_MODELS_PATH',
+  'OPENCODE_API_KEY',
+]);
 
 const spawnFunction = process.platform === 'win32' ? crossSpawn : spawn;
 
@@ -805,6 +818,9 @@ async function spawnOpenCode(command, options = {}, ws) {
       const pinnedLocalSession = Boolean(localFeatureOn && sessionId
         && sessionsDb.getSessionEnginePin(sessionId)?.engine === 'local');
       const opencodeBinary = resolveOpenCodeBinaryPath();
+      // Set once this turn runs under the local config dir; its L1 then carries the local
+      // permission block (owner decision 2026-11-13: no webfetch for the local coordinator).
+      let localTierRun = false;
       // B-1551 M1 (owner decision): a spawn-vendor turn is not grantable, so it
       // also runs on the SENDER's own opencode data dir — the sender's key and
       // the session it writes never land in a grantor's opencode.db.
@@ -868,6 +884,7 @@ async function spawnOpenCode(command, options = {}, ws) {
             const localTier = prepareOpenCodeLocalTier(callerId);
             childEnv.XDG_CONFIG_HOME = localTier.configHome;
             governance = localTier.governance;
+            localTierRun = true;
           } else {
             governance = ensureOpenCodeGovernance(callerId, openCodeConfigHomeOf(childEnv));
           }
@@ -900,7 +917,10 @@ async function spawnOpenCode(command, options = {}, ws) {
           // carrier child can never inherit the owner's Claude subscription/routing.
           // B-1367: also strip OPENCODE_CONFIG / _DIR / _CONTENT — extra config
           // sources the GL-3 file check never sees (qwen-plan re-adds its own below).
-          childEnv = sanitizeVendorAgentEnv(childEnv, { extraDeny: OPENCODE_CONFIG_SOURCE_ENV });
+          // qa round 1 (local researcher on Zen): also strip the catalog sources (the catalog
+          // names each provider's endpoint) and a Zen key, so a cloud subagent can only reach
+          // the real catalog's endpoint on the keyless free tier.
+          childEnv = sanitizeVendorAgentEnv(childEnv, { extraDeny: OPENCODE_CARRIER_EXTRA_DENY_ENV });
           // B-1367: opencode would merge the working tree's opencode.json(c), its
           // .opencode/ dirs (config, plugins) and project AGENTS.md over the per-user
           // file — a provider `api`, a `{file:…}` header or a plugin there could
@@ -967,7 +987,13 @@ async function spawnOpenCode(command, options = {}, ws) {
         throw new Error('opencode argv carries a flag that bypasses the nassaj parity plugin');
       }
       const mcpServers = configuredOpenCodeMcpServers(openCodeConfigHomeOf(childEnv), childEnv.OPENCODE_CONFIG_CONTENT);
-      childEnv = applyOpenCodeParityEnv(childEnv, { l1Text: permissionLaunch.permission, pluginFile: parityPlugin.file });
+      // A local-tier turn: the same L1 with the local block (task allow-list, webfetch deny)
+      // moved last. opencode merges L1 in the config FILE's key order, so this protects only
+      // keys the local opencode.json lacks; the task list rests on that file's leading "*".
+      // A tool Claude's own rules deny stays denied to the researcher, whose card allows it.
+      const l1Text = localTierRun ? localTierL1(permissionLaunch.permission) : permissionLaunch.permission;
+      if (localTierRun) childEnv = withLocalTierClaudeDenies(childEnv, permissionLaunch.permission);
+      childEnv = applyOpenCodeParityEnv(childEnv, { l1Text, pluginFile: parityPlugin.file });
       let parityPrepared;
       try {
         const mirrorHome = resolvedKnob(childEnv, 'XDG_DATA_HOME');
@@ -1252,9 +1278,10 @@ const MODEL_STAMPED_KINDS = new Set(['stream_delta', 'thinking', 'stream_end']);
 /**
  * B-1755 / I8: tokens OpenCode itself adds to every turn (its system prompt, skills
  * list and tool schemas), beyond the prompt nassaj sends and the AGENTS.md it loads,
- * per instruction tier. Local turns always run `local32`: 5 agents in the task tool,
- * webfetch kept. S0 (2026-11-09, real opencode 1.19.5 via llama-swap, empty AGENTS.md,
- * prompt "say ok"): qwen3.6-35b 11,780, gemma-4-26b 11,333, gpt-oss-20b 10,198
+ * per instruction tier. Local turns always run `local32`: 5 agents in the task tool.
+ * S0 was measured with webfetch in the schema; since the owner decision of 2026-11-13
+ * the local primary has none, so its real share is somewhat lower (not re-measured).
+ * S0 (2026-11-09, real opencode 1.19.5 via llama-swap, empty AGENTS.md, prompt "say ok"): qwen3.6-35b 11,780, gemma-4-26b 11,333, gpt-oss-20b 10,198
  * prompt_n; rounded DOWN from the smallest so the guard never refuses a turn that fits.
  * (The full tier measured ~11k on top of its AGENTS.md, B-1754.)
  */

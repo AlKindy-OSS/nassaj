@@ -26,8 +26,8 @@ import {
   createWindowLimiter, evaluateShareEligibility, resolveLiveCreateContext, shareSessionTitle,
 } from '../services/session-share-policy.js';
 import {
-  admittedOrThrow, assertGuestReadable, guestIpKey, releaseWhenDone, setGuestHeaders, shareUnavailable,
-  verifyGuestToken,
+  admittedOrThrow, assertGuestReadable, assertProviderNotRemoved, guestIpKey, releaseWhenDone, setGuestHeaders,
+  shareUnavailable, verifyGuestToken,
 } from '../services/share-guest-access.js';
 import { createGuestGuards } from '../services/share-guest-guards.js';
 import { parsePublicOrigin } from '../services/share-page.js';
@@ -311,13 +311,15 @@ export function isPublicSessionSharePath(pathname) {
 
 /**
  * D1 steps 1-4 for the legacy reader: shape, token, failure buckets, liveness,
- * and snapshot mode (live rows are read through /api/share-view only).
+ * removed harness (ADR-229, 410 before the blob is sent) and snapshot mode
+ * (live rows are read through /api/share-view only).
  */
 function authorizeLegacyRead(req, id, deps, nowMs) {
   if (!parsePublicOrigin(deps.publicOrigin) || !isShareId(id)) throw shareUnavailable();
   const row = verifyGuestToken(req, id, deps);
   if (row.mode === 'live' || !row.snapshot) throw shareUnavailable();
   assertGuestReadable(row, deps.policy, nowMs);
+  assertProviderNotRemoved(row, deps.policy);
   return row;
 }
 

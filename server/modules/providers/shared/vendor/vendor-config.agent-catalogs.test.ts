@@ -23,7 +23,6 @@ import {
   DEEPSEEK_FALLBACK_MODELS,
   GLM_CARRIER_BASE_URL,
   GLM_CARRIER_MODELS,
-  KIMI_AGENT_MODELS,
 } from './vendor-config.js';
 
 describe('vendor-config — GLM carrier constants (GL-2)', () => {
@@ -85,13 +84,6 @@ describe('vendor-config — GLM carrier constants (GL-2)', () => {
     // the working binding here stops a well-meaning revert to the "Anthropic-wire" SDK.
     assert.equal(OPENCODE_GLM_NPM, '@ai-sdk/openai-compatible');
     assert.notEqual(OPENCODE_GLM_NPM, '@ai-sdk/anthropic');
-  });
-});
-
-describe('vendor-config — Kimi agent catalog (KM-4)', () => {
-  it('KIMI_AGENT_MODELS reuses the conservative chat catalog (one source of truth)', () => {
-    assert.deepEqual(KIMI_AGENT_MODELS, KIMI_FALLBACK_MODELS);
-    assert.equal(KIMI_AGENT_MODELS.DEFAULT, 'kimi-k2.6');
   });
 });
 

@@ -32,6 +32,21 @@ export const DSH_SECURITY_EXPECTATIONS = Object.freeze({
   'nassaj-policy': {},
 });
 
+/**
+ * T-2108: the expectations of a LOCAL turn's composed tree: the LLM row on the turn's
+ * loopback corrector, the DeepSeek web rows off, every other row as above.
+ * @param {string} baseURL the corrector origin
+ * @returns {Record<string, {disabled?: boolean, config?: Record<string, string>}>}
+ */
+export function dshLocalSecurityExpectations(baseURL) {
+  return {
+    ...DSH_SECURITY_EXPECTATIONS,
+    'llm-deepseek': { config: { baseURL, apiKeyEnv: 'NASSAJ_DSH_LOCAL_TOKEN' } },
+    'web-search-deepseek': { disabled: true },
+    'web-deepseek-api': { disabled: true },
+  };
+}
+
 const unquote = (value) => value.trim().replace(/^'(.*)'$/s, '$1').replace(/^"(.*)"$/s, '$1');
 
 /**
@@ -67,11 +82,11 @@ export function checkSecurityRows(dump) {
   return DSH_SECURITY_ROWS.filter((id) => !ids.has(id));
 }
 
-/** Every security row whose state differs from DSH_SECURITY_EXPECTATIONS (`id.key`), missing rows included. */
-export function checkSecurityRowsSemantic(dump) {
+/** Every security row whose state differs from `expectations` (`id.key`), missing rows included. */
+export function checkSecurityRowsSemantic(dump, expectations = DSH_SECURITY_EXPECTATIONS) {
   const byId = new Map((dump?.rows ?? []).map((row) => [row.id, row]));
   const problems = [];
-  for (const [id, expected] of Object.entries(DSH_SECURITY_EXPECTATIONS)) {
+  for (const [id, expected] of Object.entries(expectations)) {
     const row = byId.get(id);
     if (!row) { problems.push(`${id}: missing`); continue; }
     if (expected.disabled === true && row.disabled !== true) problems.push(`${id}.disabled`);

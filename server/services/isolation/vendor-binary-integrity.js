@@ -4,9 +4,9 @@
  *
  * WHY
  * ---
- * Kimi (`@moonshot-ai/kimi-code`) and the GLM carrier (`sst/opencode`) are
- * third-party binaries downloaded from npm/GitHub. OCC-15 cleared their supply
- * chain for the pinned versions ONLY (opencode 1.18.32, kimi-code 0.28.1). A
+ * The GLM carrier (`sst/opencode`) is a third-party binary downloaded from
+ * GitHub. OCC-15 cleared its supply chain for the pinned version ONLY
+ * (opencode 1.18.32). A
  * later silent swap — a tampered install, a compromised npm tarball, a
  * PATH-shadowing `opencode` earlier in $PATH — would run un-reviewed code with
  * the vendor's cage/permission ceiling around it. This guard pins the exact
@@ -15,8 +15,7 @@
  *
  * M-4 (qa-critic condition, PROVEN from code): the digest is verified AFTER the
  * FINAL path is resolved — i.e. AFTER `OPENCODE_PATH` override, the standard
- * install location, and the bare-`opencode` PATH fallback (and, for kimi, its
- * own resolver). Verifying a hard-coded path instead would let an operator route
+ * install location, and the bare-`opencode` PATH fallback. Verifying a hard-coded path instead would let an operator route
  * around the pin with an env var. So `verifyVendorBinaryDigest` takes the
  * already-resolved path, and — for a bare command name — resolves it through
  * $PATH itself before hashing, so the PATH-fallback branch is covered too.
@@ -24,7 +23,7 @@
  * BACKWARD COMPATIBILITY / OPT-IN
  * -------------------------------
  * The guard is gated behind `NASSAJ_VENDOR_BINARY_PIN` (default OFF), mirroring
- * the fleet-flag posture of NASSAJ_OPENCODE_CARRIER / KIMI_ALLOW_* (owner
+ * the fleet-flag posture of NASSAJ_OPENCODE_CARRIER (owner
  * decision, plan §7.2). When the flag is OFF the guard is a strict no-op: it
  * does NOT hash, does NOT throw, and returns the path unchanged, so the live
  * opencode path keeps working byte-for-byte. When the flag is ON and the digest
@@ -56,12 +55,6 @@ export const PINNED_VENDOR_DIGESTS = Object.freeze({
     version: '1.18.32',
     artifact: 'opencode',
     sha256: '513f500a1a5ea1dc7d865547ac87b32a8936334e8d5abd5b3ff585c45a170080',
-  }),
-  // @moonshot-ai/kimi-code 0.28.1 — the bundled dist/main.mjs entrypoint (KG-1 §1.1).
-  kimi: Object.freeze({
-    version: '0.28.1',
-    artifact: 'dist/main.mjs',
-    sha256: '46a0095fa08385027e2e2d02d3c3ee274ecc2094f136dc745910bd72273f7763',
   }),
 });
 
@@ -108,7 +101,7 @@ export function isVendorBinaryPinEnabled(env = process.env) {
  * Resolves a spawn target to an absolute, readable file so it can be hashed.
  *
  * A resolved path that already contains a separator (absolute, or the standard
- * install location) is used verbatim. A BARE command name (`opencode`, `kimi`)
+ * install location) is used verbatim. A BARE command name (`opencode`)
  * — the PATH-fallback branch of the resolver — is walked through $PATH here so
  * the pin covers exactly the binary the OS would exec. Returns null when the
  * target cannot be located as a regular file (caller decides the fail-closed
@@ -179,7 +172,7 @@ export function computeFileSha256(filePath) {
  *   - guard ENABLED + UNVERIFIABLE (cannot locate/read the binary) → throws
  *     (fail-closed: un-hashable is treated as tampered).
  *
- * @param {string} vendorId e.g. 'opencode' | 'kimi'
+ * @param {string} vendorId e.g. 'opencode'
  * @param {string} binaryPath the FINAL resolved spawn target (post-override/PATH)
  * @param {object} [deps]
  * @param {NodeJS.ProcessEnv} [deps.env]

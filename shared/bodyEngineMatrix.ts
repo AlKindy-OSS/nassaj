@@ -65,9 +65,9 @@ export const BODY_AXIS_IDS = Object.freeze([
   'claude',
   'opencode',
   'codex',
-  'kimi',
   'antigravity',
   'cursor',
+  'dsh',
 ] as const);
 
 export type BodyAxisId = (typeof BODY_AXIS_IDS)[number];
@@ -199,7 +199,10 @@ const cell = (
 export const BODY_ENGINE_MATRIX: Readonly<Record<BodyAxisId, readonly BodyEngineCell[]>> =
   Object.freeze({
     claude: [
-      cell('local', 'blocked_by_us', 'inferred', 'claudeLocalForbidden', 'Local models on the Claude body are prohibited by ADR-163.'),
+      // ADR-227 (T-2098, opened by T-2107 stage 5): measured with the real CLI against
+      // a local server (header-echo proof, context floor measured on three models).
+      cell('local', 'available', 'measured', 'claudeLocal',
+        "Runs on the member's own local model server once the administrator turns it on for this agent in Local models."),
       cell('anthropic', 'native', 'measured', 'claudeNative',
         'The engine Claude Code ships with, on the account already signed in here.'),
       cell('glm', 'available', 'measured', 'claudeGlm',
@@ -241,6 +244,10 @@ export const BODY_ENGINE_MATRIX: Readonly<Record<BodyAxisId, readonly BodyEngine
         'Catalogued upstream; needs a DeepSeek key.'),
     ],
     codex: [
+      // T-2107 (ADR-227 "Codex and DSH bodies"): measured with the real CLI against a
+      // local server (header-echo proof in a sealed namespace, stage 3-4).
+      cell('local', 'available', 'measured', 'codexLocal',
+        "Runs on the member's own local model server once the administrator turns it on for this agent in Local models."),
       cell('anthropic', 'closed_at_vendor', 'inferred', 'codexAnthropic',
         'Codex speaks only the Responses protocol, and Anthropic does not serve it.'),
       cell('glm', 'closed_at_vendor', 'inferred', 'codexGlm',
@@ -252,39 +259,23 @@ export const BODY_ENGINE_MATRIX: Readonly<Record<BodyAxisId, readonly BodyEngine
       cell('zen', 'unverified', 'none', 'codexZen',
         'Zen does expose /responses, but this pair has never been run end to end.'),
     ],
-    kimi: [
-      cell('kimi', 'native', 'measured', 'kimiNative',
-        'Its own engine. A 402 here is the engine billing, not the body — the body runs without it.'),
-      cell('glm', 'blocked_by_us', 'measured', 'kimiGlm',
-        'Proven on the terminal, environment only. Inside nassaj it waits on its config guard — no launch before the guard.'),
-      // B-415 — these three used to read `blocked_by_owner` («needs a key»), which
-      // is a claim about a PURCHASE while the barrier standing in front of them is
-      // OURS. The missing guard named on the row above is a guard of the BODY, not
-      // of one engine: ADR-073 §4 forbids launching a non-Claude body on any custom
-      // engine until that body's config guard ships, so it stops kimi × anthropic
-      // exactly as it stops kimi × glm. One row cannot hold both verdicts for one
-      // barrier — and pricing a code barrier as a shopping trip is precisely the
-      // distinction this axis was created to keep (see `BodyEngineStatus`).
-      //
-      // معرّفات المفاتيح على حالها عمداً (لها ترجمات في تسع لغات)، والنصوص
-      // الإنجليزية أدناه هي الصياغة الصحيحة الواجب حملُها إلى ملفات اللغات:
-      // جملةُ «ينقصه مفتاح» المترجَمة اليوم تصف حاجزاً غير الحاجز. ولا تُقرأ على
-      // الشاشة الآن بحال — `actionableEngineCells` تُسقط `blocked_by_us` كلّه —
-      // فالتعارض محجوبٌ لا مؤجَّل، ويسقط نهائياً بتحديث السلاسل.
-      cell('anthropic', 'blocked_by_us', 'none', 'kimiAnthropic',
-        'Technically established at the vendor, but the Kimi body has no config guard yet — no launch before the guard.'),
-      cell('deepseek', 'blocked_by_us', 'none', 'kimiDeepseek',
-        'Catalogued, and held by the same missing guard: nassaj does not launch this body on a custom engine yet.'),
-      cell('zen', 'blocked_by_us', 'none', 'kimiZen',
-        'Catalogued, and held by the same missing guard — a Zen balance would not lift it.'),
-    ],
     antigravity: [
       cell('anthropic', 'closed_at_vendor', 'inferred', 'agyClosed',
         'Antigravity resolves its own model inside its CLI and accepts no external engine.'),
+      cell('local', 'closed_at_vendor', 'inferred', 'agyLocal',
+        'Antigravity exposes no base-URL or provider override, so it cannot be pointed at a local server.'),
     ],
     cursor: [
       cell('anthropic', 'closed_at_vendor', 'inferred', 'cursorClosed',
         'Cursor resolves its own model server-side and accepts no external engine.'),
+    ],
+    // T-2107: DeepSeek Harness. Its own engine is not declared here on purpose (a
+    // `native` cell is outside these tasks). T-2108 (ADR-227 "DSH local corrector"):
+    // measured with the real dsh through the corrector (sealed header-echo proof, and a
+    // write-then-read turn on a real llama.cpp server).
+    dsh: [
+      cell('local', 'available', 'measured', 'dshLocal',
+        "Runs on the member's own Anthropic-compatible local model server once the administrator turns it on for this agent in Local models."),
     ],
   });
 

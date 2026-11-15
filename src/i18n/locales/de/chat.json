@@ -104,7 +104,6 @@
     "codex": "Codex",
     "antigravity": "Antigravity",
     "opencode": "OpenCode",
-    "kimi": "Kimi",
     "deepseek": "DeepSeek",
     "glm": "GLM"
   },
@@ -141,6 +140,24 @@
       "listeners_gone": "Scheduled wake-ups stopped: nobody has had the conversation open for a while.",
       "quota": "Scheduled wake-ups stopped: usage is at or above 90%.",
       "disabled": "Scheduled wake-ups are turned off on this server."
+    },
+    "hookNoVerdict": {
+      "timed_out": "Eine Sicherheitsprüfung hat nicht rechtzeitig geantwortet, daher wurde diese Aktion nicht geprüft.",
+      "no_answer": "Eine Sicherheitsprüfung gab keine verwertbare Antwort, daher wurde diese Aktion nicht geprüft."
+    },
+    "hookFailed": "Ein Hook ist beim Prüfen dieses Schritts fehlgeschlagen.",
+    "hookDetails": "Details anzeigen",
+    "sessionWritesLost": {
+      "ENOSPC": "Der Datenträger des Servers ist voll, daher wurde ein Teil dieser Sitzung nicht gespeichert.",
+      "EDQUOT": "Das Speicherkontingent des Servers ist aufgebraucht, daher wurde ein Teil dieser Sitzung nicht gespeichert.",
+      "unknown": "Ein Teil dieser Sitzung konnte nicht gespeichert werden.",
+      "transcript": "Beim späteren Fortsetzen dieser Unterhaltung kann ein Teil fehlen.",
+      "globalConfig": "Die letzten Änderungen an den Claude-Einstellungen wurden nicht gespeichert."
+    },
+    "credentialExpiring": {
+      "soon": "Deine Claude-Anmeldung endet am {{date}}. Verknüpfe dein Claude-Konto neu, um ohne Unterbrechung weiterzuchatten.",
+      "expired": "Deine Claude-Anmeldung ist wahrscheinlich abgelaufen ({{date}}). Verknüpfe dein Claude-Konto neu, um weiterzuchatten.",
+      "action": "Kontoeinstellungen öffnen"
     }
   },
   "systemMessage": {
@@ -371,7 +388,7 @@
     "removeFile": "Datei entfernen",
     "uploading": "Wird hochgeladen…",
     "errorType": "Dateityp nicht erlaubt",
-    "errorSize": "Datei zu groß (max. 50 MB)",
+    "errorSize": "Datei zu groß (max. {{maxMb}} MB)",
     "errorCount": "Zu viele Dateien angehängt (max. {{max}})"
   },
   "effortMode": {
@@ -429,7 +446,6 @@
       "antigravity": "Bereit für Antigravity (agy) mit {{model}}. Schreiben Sie Ihre Nachricht unten.",
       "opencode": "Bereit, OpenCode mit {{model}} zu verwenden. Gib unten deine Nachricht ein.",
       "default": "Wähl oben einen Coding-Agenten, um zu beginnen",
-      "kimi": "Bereit, Kimi mit {{model}} zu verwenden. Gib unten deine Nachricht ein.",
       "deepseek": "Bereit, DeepSeek mit {{model}} zu verwenden. Gib unten deine Nachricht ein.",
       "glm": "Bereit, GLM mit {{model}} zu verwenden. Gib unten deine Nachricht ein.",
       "claudeEngine": "Bereit: der Coding-Agent Claude läuft auf {{provider}} mit {{model}}. Gib unten deine Nachricht ein."
@@ -505,7 +521,8 @@
       "working": "Arbeitet",
       "computing": "Berechnet",
       "reasoning": "Schlussfolgert",
-      "waitingPermission": "Wartet auf Berechtigung"
+      "waitingPermission": "Wartet auf Berechtigung",
+      "runningChecks": "Prüft"
     },
     "state": {
       "live": "Live",

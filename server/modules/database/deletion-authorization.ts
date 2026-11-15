@@ -11,13 +11,19 @@ export function requireActiveDeletionActor(db: Database.Database, actorId: numbe
   return {owner:user.role==='owner'};
 }
 
-/** ADR-104 existing consent predicate: spawn OR message_authors. JSON batch binds values, never identifiers. */
+/**
+ * ADR-104 existing consent predicate: spawn OR message_authors. ADR-173: the author arm
+ * never admits a shared writer of that session (his turns are not consent to delete).
+ * JSON batch binds values, never identifiers.
+ */
 export function readDeletionParticipants(db:Database.Database,sessionIds:readonly string[],actorId:number):ReadonlySet<string> {
   requireActiveDeletionActor(db,actorId);
   if(sessionIds.length>DELETION_MAX_SESSIONS)throw new DeletionOperationError('DELETION_BATCH_LIMIT');
   const rows=db.prepare(`SELECT value AS sessionId FROM json_each(?) candidate WHERE
     EXISTS(SELECT 1 FROM session_participants sp WHERE sp.session_id=candidate.value AND sp.user_id=? AND sp.attribution='spawn') OR
-    EXISTS(SELECT 1 FROM message_authors ma WHERE ma.session_id=candidate.value AND ma.user_id=?)`).all(JSON.stringify(sessionIds),actorId,actorId) as {sessionId:string}[];
+    (EXISTS(SELECT 1 FROM message_authors ma WHERE ma.session_id=candidate.value AND ma.user_id=?) AND
+     NOT EXISTS(SELECT 1 FROM session_participants sw WHERE sw.session_id=candidate.value AND sw.user_id=? AND sw.attribution='shared_write'))`)
+    .all(JSON.stringify(sessionIds),actorId,actorId,actorId) as {sessionId:string}[];
   return new Set(rows.map(row=>row.sessionId));
 }
 

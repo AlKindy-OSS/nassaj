@@ -29,7 +29,6 @@ import type {
   HarnessUpdateJob,
 } from '../../../../shared/harness-update.contract.js';
 
-import { clearStageBeforeProbe } from './native-staging.js';
 import { dataLossFacts, pinBreakFacts, verifyActionAcks } from './acks.js';
 import { getHarnessDescriptor, parseVersionOutput, type HarnessDescriptor } from './descriptors.js';
 import { releaseHarnessFileLock } from './harness-lock.js';
@@ -254,7 +253,6 @@ export async function startRestoreCompatible(
             spec: rt.compatAsset,
             destPath: ctx.layout.binaryPath,
             readVersion: async (bin) => {
-              clearStageBeforeProbe(d, bin);
               return parseVersionOutput(await rt.runVersion(bin, d.versionArgs));
             },
           });
@@ -334,7 +332,6 @@ function settleJournal(dir: string, m: HarnessSnapshotManifest): HarnessSnapshot
 
 async function acknowledgeRecovery(rt: SnapshotRuntime, d: HarnessDescriptor, userId: number | null): Promise<HarnessRecoveryAcknowledged> {
   const binary = resolveDescriptorBinary(d);
-  clearStageBeforeProbe(d, binary);
   const version = parseVersionOutput(await rt.runVersion(binary, d.versionArgs));
   if (!version) throw snapshotError('RECOVERY_UNVERIFIED');
   const failed = d.snapshot

@@ -20,19 +20,17 @@ const ROLE: EphemeralRoleHome = Object.freeze({
 });
 
 const output = {
-  qwen: `${JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: 'qwen answer' } })}\n`,
   opencode: `${JSON.stringify({ type: 'text', part: { type: 'text', text: 'opencode answer' } })}\n`,
 } as const;
 
 describe('extended CLI mechanical adapters', () => {
-  for (const provider of ['qwen', 'opencode'] as const) {
+  for (const provider of ['opencode'] as const) {
     it(`${provider} pins, cages and capture-only executes`, async () => {
       let spec: IsolatedCliProcessSpec | undefined;
       let cleaned = false;
       const adapter = createExtendedCliAdapter(provider, {
         executableProbe: async () => true,
-        versionProbe: async () => extendedCliAdapterInternals.EXACT_VERSIONS[provider] ?? '1.18.40',
-        qwenCapabilityProbe: async () => true,
+        versionProbe: async () => '1.18.40',
         opencodeCapabilityProbe: async () => true,
         resolveEnv: () => ({ PROVIDER_SECRET: 'server-only' }),
         createRoleHome: async () => ROLE,
@@ -58,46 +56,41 @@ describe('extended CLI mechanical adapters', () => {
       assert.equal(spec?.cwd, process.cwd());
       assert.equal(
         spec?.env.PROVIDER_SECRET,
-        provider === 'opencode' ? undefined : 'server-only',
+        undefined,
         'the governed OpenCode launcher strips inherited secret-shaped variables',
       );
       assert.deepEqual(events, [{ type: 'text', text: `${provider} answer` }, { type: 'complete' }]);
 
       const args = spec?.args ?? [];
       assert.equal(args.some((arg) => ['--continue', '-c', '--resume', '-r', '--session', '--session-id'].includes(arg)), false);
-      if (provider === 'qwen') {
-        assert.deepEqual(args.slice(args.indexOf('--max-tool-calls'), args.indexOf('--max-tool-calls') + 2), ['--max-tool-calls', '0']);
-        assert.ok(args.includes('--safe-mode')); assert.ok(args.includes('--approval-mode'));
-        assert.ok(args.join(' ').includes('subagent'));
-      } else {
-        assert.ok(args.includes('--pure')); assert.ok(args.includes('supervisor'));
-        const config = JSON.parse(String(spec?.env.OPENCODE_CONFIG_CONTENT)) as { tools: Record<string, boolean>; agent: Record<string, { tools: Record<string, boolean> }> };
-        assert.equal(config.tools['*'], false); assert.equal(config.tools.task, false);
-        assert.equal(config.agent.supervisor.tools['*'], false);
-      }
+      assert.ok(args.includes('--pure')); assert.ok(args.includes('supervisor'));
+      const config = JSON.parse(String(spec?.env.OPENCODE_CONFIG_CONTENT)) as { tools: Record<string, boolean>; agent: Record<string, { tools: Record<string, boolean> }> };
+      assert.equal(config.tools['*'], false); assert.equal(config.tools.task, false);
+      assert.equal(config.agent.supervisor.tools['*'], false);
     });
   }
 
-  it('fails closed without the exact pin or a successful prior probe', async () => {
+  it('fails closed without a reported version or a successful prior probe', async () => {
     const common = {
-      executableProbe: async () => true, versionProbe: async () => 'wrong',
+      executableProbe: async () => true, versionProbe: async () => '',
+      opencodeCapabilityProbe: async () => true, resolveEnv: () => ({}),
       createRoleHome: async () => ROLE, cleanupRoleHome: async () => {},
       spawnCapture: async () => ({ code: 0, stdout: 'answer', stderr: '' }),
     };
-    const qwen = createExtendedCliAdapter('qwen', common);
-    assert.equal(await qwen.probe({ provider: 'qwen', userId: 1 }), false);
-    await assert.rejects(qwen.invoke({
-      provider: 'qwen', userId: 1, model: 'x', prompt: 'x', persist: false,
+    const cell = createExtendedCliAdapter('opencode', common);
+    assert.equal(await cell.probe({ provider: 'opencode', userId: 1 }), false);
+    await assert.rejects(cell.invoke({
+      provider: 'opencode', userId: 1, model: 'x', prompt: 'x', persist: false,
       writer: { capture() {} },
     }), /not pinned and probed/u);
   });
 
   it('ADR-152 A1 §3.5: with the default (gated) env an unlinked member\'s cell does not probe', async () => {
-    for (const provider of ['opencode', 'qwen'] as const) {
+    for (const provider of ['opencode'] as const) {
       const options = {
         binary: '/fake/bin', executableProbe: async () => true,
-        versionProbe: async () => (provider === 'qwen' ? '0.21.12' : '1.18.40'),
-        opencodeCapabilityProbe: async () => true, qwenCapabilityProbe: async () => true,
+        versionProbe: async () => '1.18.40',
+        opencodeCapabilityProbe: async () => true,
       };
       assert.equal(await createExtendedCliAdapter(provider, options).probe({ provider, userId: 1 }), false, provider);
       // Control: the same cell probes once an env resolves (the gate is the only difference).
@@ -142,28 +135,16 @@ describe('extended CLI mechanical adapters', () => {
     for (const flag of OPENCODE_RUN_FLAGS) assert.ok(args.includes(flag), `cell uses ${flag}`);
   });
 
-  it('Qwen refuses capability when the installed help surface lacks any mechanical denial option', async () => {
-    const adapter = createExtendedCliAdapter('qwen', {
-      executableProbe: async () => true, versionProbe: async () => '0.21.12',
-      qwenCapabilityProbe: async () => false,
-    });
-    assert.equal(await adapter.probe({ provider: 'qwen', userId: 1 }), false);
-    await assert.rejects(adapter.invoke({
-      provider: 'qwen', userId: 1, model: 'x', prompt: 'x', persist: false,
-      writer: { capture() {} },
-    }), /not pinned and probed/u);
-  });
-
   it('never falls back on effects, cancellation, launch failure, or empty response', async () => {
     const controller = new AbortController(); controller.abort();
-    const adapter = createExtendedCliAdapter('qwen', {
-      executableProbe: async () => true, versionProbe: async () => '0.21.12',
-      qwenCapabilityProbe: async () => true, resolveEnv: () => ({}),
+    const adapter = createExtendedCliAdapter('opencode', {
+      executableProbe: async () => true, versionProbe: async () => '1.18.40',
+      opencodeCapabilityProbe: async () => true, resolveEnv: () => ({}),
       createRoleHome: async () => ROLE, cleanupRoleHome: async () => {},
       spawnCapture: async () => ({ code: 0, stdout: '', stderr: '' }),
     });
-    assert.equal(await adapter.probe({ provider: 'qwen', userId: 1 }), true);
-    const base = { provider: 'qwen' as const, userId: 1, model: 'x', prompt: 'x', persist: false as const, writer: { capture() {} } };
+    assert.equal(await adapter.probe({ provider: 'opencode', userId: 1 }), true);
+    const base = { provider: 'opencode' as const, userId: 1, model: 'x', prompt: 'x', persist: false as const, writer: { capture() {} } };
     await assert.rejects(adapter.invoke({ ...base, effects: [{}] }), /deny effects/u);
     await assert.rejects(adapter.invoke({ ...base, signal: controller.signal }), /aborted before launch/u);
     await assert.rejects(adapter.invoke(base), /no final assistant/u);

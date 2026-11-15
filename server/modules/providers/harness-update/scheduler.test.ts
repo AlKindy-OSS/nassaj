@@ -75,16 +75,14 @@ test('an enabled tick attempts ONLY harnesses whose built-in updater is verified
   assert.ok(!result.includes('deepseek'));
   assert.ok(!skipped.some((s) => s.provider === 'glm' || s.provider === 'deepseek'));
 
-  // Native self-updaters are ineligible without exact rollback, while the
-  // recoverable npm harness still lacks a verified built-in updater knob.
+  // Native self-updaters are ineligible without exact rollback.
   assert.deepEqual(result, []);
   assert.deepEqual(attempted, result);
   assert.equal(marked.length, 1); // last-run stamped once
 
-  // The knob gate keeps qwen manual until devops verifies its knob; kimi's knob is
-  // verified (T-1873) but kimi is button-only.
-  assert.ok(skipped.some((s) => s.provider === 'qwen' && s.reason === 'autoupdater-disable-unverified'));
-  assert.ok(skipped.some((s) => s.provider === 'kimi' && s.reason === 'manual-only'));
+  // claude's knob is verified, but claude is button-only.
+  assert.ok(skipped.some((s) => s.provider === 'claude' && s.reason === 'manual-only'));
+  assert.ok(!skipped.some((s) => s.provider === 'qwen' || s.provider === 'kimi'), 'removed harnesses (ADR-229)');
 });
 
 test('the scheduler never invokes an ineligible native self-updater', async () => {

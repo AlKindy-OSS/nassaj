@@ -23,7 +23,6 @@ import { AppError } from '@/shared/utils.js';
 
 import type { HarnessUpdateJob } from '../../../../shared/harness-update.contract.js';
 
-import { clearStageBeforeProbe } from './native-staging.js';
 import { parseVersionOutput, type HarnessDescriptor } from './descriptors.js';
 import { acquireHarnessFileLock, releaseHarnessFileLock, updaterGroupOf } from './harness-lock.js';
 import { pruneHarnessSnapshots } from './harness-retention.js';
@@ -254,7 +253,6 @@ function preflight(rt: SnapshotRuntime, d: HarnessDescriptor): Preflight {
 
 /** Live version + digests of the install, or null when the version is unreadable. */
 export async function readLiveFacts(rt: SnapshotRuntime, d: HarnessDescriptor, layout: BinaryLayoutSpec): Promise<VersionFacts | null> {
-  clearStageBeforeProbe(d, layout.binaryPath);
   const version = parseVersionOutput(await rt.runVersion(layout.binaryPath, d.versionArgs));
   if (!version) return null;
   const fp = liveBinaryFingerprint(layout, () => version);

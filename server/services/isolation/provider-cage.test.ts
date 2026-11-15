@@ -140,14 +140,18 @@ describe('cageEnabled — per-mode chat/agent distinction (SL-6)', () => {
     }
   });
 
-  it('kimi + glm agent runs are caged; their chat/omitted runs are NOT (byte-identical to pre-SL-6)', () => {
+  it('glm agent runs are caged; its chat/omitted runs are NOT (byte-identical to pre-SL-6)', () => {
     setCage(true);
-    assert.equal(cageEnabled('kimi', 'agent'), true);
     assert.equal(cageEnabled('glm', 'agent'), true);
     // chat / unspecified mode preserves the old exempt behaviour exactly
-    assert.equal(cageEnabled('kimi', 'chat'), false);
-    assert.equal(cageEnabled('kimi'), false, 'omitted mode must equal the pre-SL-6 exempt behaviour');
-    assert.equal(cageEnabled('glm'), false);
+    assert.equal(cageEnabled('glm', 'chat'), false);
+    assert.equal(cageEnabled('glm'), false, 'omitted mode must equal the pre-SL-6 exempt behaviour');
+  });
+
+  it('kimi is exempt in every mode: its native agent CLI was removed (ADR-229)', () => {
+    setCage(true);
+    for (const mode of ['agent', 'chat', undefined]) assert.equal(cageEnabled('kimi', mode), false, String(mode));
+    assert.equal(CAGEABLE_AGENT_PROVIDERS.has('kimi'), false);
   });
 
   it('deepseek stays exempt even in agent mode (no agent CLI to sandbox)', () => {
@@ -174,20 +178,19 @@ describe('cageEnabled — per-mode chat/agent distinction (SL-6)', () => {
 
   it('mode is case-insensitive and trims whitespace', () => {
     setCage(true);
-    assert.equal(cageEnabled('kimi', 'AGENT'), true);
-    assert.equal(cageEnabled('kimi', '  agent  '), true);
-    assert.equal(cageEnabled('kimi', 'Agent'), true);
+    assert.equal(cageEnabled('glm', 'AGENT'), true);
+    assert.equal(cageEnabled('glm', '  agent  '), true);
+    assert.equal(cageEnabled('glm', 'Agent'), true);
   });
 
   it('an unrecognized mode falls back to the static exempt behaviour', () => {
     setCage(true);
-    assert.equal(cageEnabled('kimi', 'weird'), false, 'only agent un-exempts');
+    assert.equal(cageEnabled('glm', 'weird'), false, 'only agent un-exempts');
     assert.equal(cageEnabled('claude', 'weird'), true, 'a non-hosted provider is unaffected by mode');
   });
 
   it('the flag still gates everything: agent mode is never caged with the flag off', () => {
     setCage(false);
-    assert.equal(cageEnabled('kimi', 'agent'), false);
     assert.equal(cageEnabled('glm', 'agent'), false);
   });
 });
@@ -592,17 +595,6 @@ describe('buildCagedLaunch — integration against a real bwrap sandbox', () => 
 describe('buildCagedLaunch — per-mode (SL-6)', () => {
   const FAKE = { resolveBwrapPath: () => '/opt/codex/bwrap' };
 
-  it('wraps a kimi AGENT launch in bwrap (mode: "agent")', () => {
-    setCage(true);
-    const out = buildCagedLaunch(
-      { userId: '1', provider: 'kimi', mode: 'agent', cmd: 'kimi', args: ['-p', 'hi'], cwd: '/w', usersRoot: '/u' },
-      FAKE,
-    );
-    assert.equal(out.cmd, '/opt/codex/bwrap');
-    const dash = out.args.indexOf('--');
-    assert.deepEqual(out.args.slice(dash + 1), ['kimi', '-p', 'hi'], 'the kimi command sits after the separator');
-  });
-
   it('wraps a glm AGENT launch in bwrap (mode: "agent")', () => {
     setCage(true);
     const out = buildCagedLaunch(
@@ -612,18 +604,23 @@ describe('buildCagedLaunch — per-mode (SL-6)', () => {
     assert.equal(out.cmd, '/opt/codex/bwrap');
   });
 
-  it('passes through a kimi CHAT / omitted-mode launch even with the flag on', () => {
+  it('passes through a glm CHAT / omitted-mode launch and any kimi launch even with the flag on', () => {
     setCage(true);
     const chat = buildCagedLaunch(
-      { userId: '1', provider: 'kimi', mode: 'chat', cmd: 'kimi', args: [], cwd: '/w', usersRoot: '/u' },
+      { userId: '1', provider: 'glm', mode: 'chat', cmd: 'opencode', args: [], cwd: '/w', usersRoot: '/u' },
       FAKE,
     );
-    assert.deepEqual(chat, { cmd: 'kimi', args: [] });
+    assert.deepEqual(chat, { cmd: 'opencode', args: [] });
     const omitted = buildCagedLaunch(
-      { userId: '1', provider: 'kimi', cmd: 'kimi', args: [], cwd: '/w', usersRoot: '/u' },
+      { userId: '1', provider: 'glm', cmd: 'opencode', args: [], cwd: '/w', usersRoot: '/u' },
       FAKE,
     );
-    assert.deepEqual(omitted, { cmd: 'kimi', args: [] });
+    assert.deepEqual(omitted, { cmd: 'opencode', args: [] });
+    const kimiAgent = buildCagedLaunch(
+      { userId: '1', provider: 'kimi', mode: 'agent', cmd: 'kimi', args: [], cwd: '/w', usersRoot: '/u' },
+      FAKE,
+    );
+    assert.deepEqual(kimiAgent, { cmd: 'kimi', args: [] });
   });
 
   it('passes through a deepseek AGENT launch (no agent CLI ⇒ still exempt)', () => {
@@ -659,7 +656,6 @@ describe('M-3 — cage never bakes env into argv (static guard)', () => {
     { provider: 'agy' },
     { provider: 'opencode' },
     { provider: 'hermes' },
-    { provider: 'kimi', mode: 'agent' },
     { provider: 'glm', mode: 'agent' },
   ];
 
@@ -691,7 +687,7 @@ describe('M-3 — cage never bakes env into argv (static guard)', () => {
   it('never bakes an ANTHROPIC_*/CLAUDE_* token into the cage argv', () => {
     setCage(true);
     const out = buildCagedLaunch(
-      { userId: '77', provider: 'kimi', mode: 'agent', cmd: 'kimi', args: ['-p', 'x'], cwd, usersRoot },
+      { userId: '77', provider: 'glm', mode: 'agent', cmd: 'opencode', args: ['run', 'x'], cwd, usersRoot },
       FAKE,
     );
     // the ONLY argv content is bwrap flags + mount paths + the wrapped command;
@@ -708,7 +704,7 @@ describe('M-3 — cage never bakes env into argv (static guard)', () => {
 
 describe('M-3 — real caged child inherits ONLY the passed env (integration)', () => {
   it(
-    'a kimi-agent cage leaks no ANTHROPIC_*/CLAUDE_CODE_OAUTH_TOKEN the spawn env omitted',
+    'a glm-agent cage leaks no ANTHROPIC_*/CLAUDE_CODE_OAUTH_TOKEN the spawn env omitted',
     { skip: cage.usable ? false : `bwrap/userns unavailable: ${cage.reason}` },
     () => {
       const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'nassaj-cage-m3-'));
@@ -728,13 +724,13 @@ describe('M-3 — real caged child inherits ONLY the passed env (integration)', 
         setCage(true);
         const launch = buildCagedLaunch({
           userId: null,
-          provider: 'kimi',
+          provider: 'glm',
           mode: 'agent', // agent run IS caged (SL-6)
           cmd: '/usr/bin/printenv',
           args: [],
           cwd,
         });
-        assert.equal(launch.cmd, resolveBwrapPath(), 'the kimi-agent run must actually be caged');
+        assert.equal(launch.cmd, resolveBwrapPath(), 'the glm-agent run must actually be caged');
 
         const res = spawnSync(launch.cmd, launch.args, { env: childEnv, encoding: 'utf8' });
         const out = `${res.stdout || ''}`;

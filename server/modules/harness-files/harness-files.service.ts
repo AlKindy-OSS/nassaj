@@ -54,12 +54,9 @@ export type HarnessSupport = { provider: string; support: 'full' | 'shared-only'
 export const HARNESS_SUPPORT: readonly HarnessSupport[] = Object.freeze([
   { provider: 'claude', support: 'full' },
   { provider: 'codex', support: 'full' },
-  { provider: 'qwen', support: 'shared-only', reason: 'no_shared_baseline' },
   { provider: 'opencode', support: 'shared-only', reason: 'shared_not_hideable' },
   { provider: 'glm', support: 'shared-only', reason: 'shared_not_hideable' },
   { provider: 'antigravity', support: 'shared-only', reason: 'no_shared_baseline' },
-  { provider: 'hermes', support: 'shared-only', reason: 'no_shared_baseline' },
-  { provider: 'kimi', support: 'shared-only', reason: 'no_managed_skills' },
   { provider: 'cursor', support: 'shared-only', reason: 'no_managed_skills' },
   { provider: 'deepseek', support: 'shared-only', reason: 'no_managed_skills' },
 ] as HarnessSupport[]);

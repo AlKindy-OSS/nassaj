@@ -2,8 +2,9 @@
  * retired-body.hermes-history.test.ts — T-1953 (ADR-192).
  *
  * The Hermes body is deleted: no launcher, no provider module, no login, no
- * updater. What must survive is the ability to LIST and OPEN the conversations
- * it left behind, through the history-only reader in `provider.registry.ts`.
+ * updater. ADR-229 S2 also removed its history-only reader, and S3 hides its
+ * conversations at read time: the rows stay, no list shows them, and opening one
+ * answers the typed `provider_removed` without serving the transcript.
  *
  * The fixtures reproduce the SHAPE of the records found on a real node (read
  * only; no content was copied), which differs from what today's shared writer
@@ -47,6 +48,7 @@ import providerRouter from '@/modules/providers/provider.routes.js';
 import { vendorProjectHash, vendorProviderRoot } from '@/modules/providers/shared/vendor/vendor-transcript.js';
 import { AppError } from '@/shared/utils.js';
 
+import { PROVIDER_REMOVED_CODE } from '../shared/retiredProviders.js';
 import { sessionBucketKey } from '../shared/sessionBuckets.js';
 
 const USER_ONLY_SESSION = '00000002-0000-4000-8000-0000000000e1';
@@ -160,9 +162,8 @@ describe('hermes is no longer a provider', () => {
     );
   });
 
-  it('keeps a history reader, and an unknown id still has none', () => {
-    assert.equal(typeof providerRegistry.resolveHistorySessions('hermes').fetchHistory, 'function');
-    for (const unknown of ['no-such-provider', 'constructor', 'toString', '__proto__']) {
+  it('has no history reader (ADR-229), like an unknown id', () => {
+    for (const unknown of ['hermes', 'no-such-provider', 'constructor', 'toString', '__proto__']) {
       assert.throws(
         () => providerRegistry.resolveHistorySessions(unknown),
         (error: unknown) => error instanceof AppError && error.code === 'UNSUPPORTED_PROVIDER',
@@ -172,39 +173,28 @@ describe('hermes is no longer a provider', () => {
   });
 });
 
-describe('a historical hermes conversation still lists and opens', () => {
-  it('lists both conversations in the hermes bucket of the project payload', async () => {
+describe('a historical hermes conversation row stays hidden; opening it answers provider_removed', () => {
+  it('the rows stay, but neither conversation is listed in the project payload (ADR-229)', async () => {
+    for (const sessionId of [USER_ONLY_SESSION, MULTI_TURN_SESSION]) {
+      assert.ok(sessionsDb.getSessionById(sessionId), `row ${sessionId} still exists`);
+    }
     const page = await getProjectSessionsPage(projectId, { currentUserId: requesterId }) as unknown as
-      Record<string, Array<{ id: string }>>;
+      Record<string, unknown>;
     const bucket = page[sessionBucketKey('hermes')];
-    assert.ok(Array.isArray(bucket), 'the hermes bucket exists');
-    const listed = bucket.map((session) => session.id);
-    assert.ok(listed.includes(USER_ONLY_SESSION), 'the user-only conversation is listed');
-    assert.ok(listed.includes(MULTI_TURN_SESSION), 'the multi-turn conversation is listed');
+    assert.ok(bucket === undefined || (Array.isArray(bucket) && bucket.length === 0), 'the hermes bucket is empty');
+    const listed = JSON.stringify(page);
+    assert.equal(listed.includes(USER_ONLY_SESSION), false, 'the user-only conversation is hidden');
+    assert.equal(listed.includes(MULTI_TURN_SESSION), false, 'the multi-turn conversation is hidden');
   });
 
-  it('opens a transcript that holds a single user line and no reply', async () => {
-    const history = await readHistory(USER_ONLY_SESSION);
-    assert.equal(history.status, 200, history.raw);
-    assert.deepEqual(
-      history.messages.map((message) => [message.role, message.content]),
-      [['user', 'a question with no reply']],
-    );
-  });
-
-  it('opens a multi-turn transcript in recorded order, line breaks intact, without message ids', async () => {
-    const history = await readHistory(MULTI_TURN_SESSION);
-    assert.equal(history.status, 200, history.raw);
-    assert.deepEqual(
-      history.messages.map((message) => [message.role, message.content]),
-      MULTI_TURN.map(([role, content]) => [role, content]),
-    );
-  });
-
-  it('attributes every message to hermes through the history-only reader', async () => {
-    const history = await providerRegistry.resolveHistorySessions('hermes')
-      .fetchHistory(MULTI_TURN_SESSION, { projectPath });
-    assert.equal(history.total, MULTI_TURN.length);
-    assert.ok(history.messages.every((message) => message.provider === 'hermes'));
+  it('opening a conversation answers provider_removed and never serves its transcript', async () => {
+    for (const sessionId of [USER_ONLY_SESSION, MULTI_TURN_SESSION]) {
+      const history = await readHistory(sessionId);
+      assert.ok(history.status < 500 && history.status !== 400, history.raw);
+      assert.ok(history.raw.includes(PROVIDER_REMOVED_CODE), history.raw);
+      assert.equal(history.messages.length, 0, history.raw);
+      assert.equal(history.raw.includes('first answer'), false, history.raw);
+      assert.equal(history.raw.includes('a question with no reply'), false, history.raw);
+    }
   });
 });

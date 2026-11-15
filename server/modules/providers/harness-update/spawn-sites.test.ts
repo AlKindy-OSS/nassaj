@@ -3,8 +3,8 @@
  * path (spawn-admission.isSpawnBlockedForRunProvider), which blocks it during
  * an update / failed recovery / boot reconcile and notes it in the durable
  * spawn ledger. Three layers:
- *   1. an enumeration of the spawn sites PER HARNESS (GLM carrier, kimi,
- *      workflow/agent runs, qwen, …) and the guard each one calls;
+ *   1. an enumeration of the spawn sites PER HARNESS (GLM carrier,
+ *      workflow/agent runs, …) and the guard each one calls;
  *   2. a discovery sweep: any server file that resolves a harness binary and
  *      spawns must be enumerated or explicitly exempted — a new bypass fails;
  *   3. behaviour: each guard form notes the spawn in the ledger.
@@ -71,14 +71,7 @@ const SPAWN_SITES: Readonly<Record<string, ReadonlyArray<{ file: string; needle:
     { file: 'modules/providers/list/opencode/opencode-models.provider.ts', needle: "beginHarnessLaunch('opencode')" },
     { file: 'modules/turn-supervisor/adapters/extended-cli-adapter.ts', needle: 'isSpawnBlockedForRunProvider(provider)' },
   ],
-  kimi: [
-    { file: 'kimi-agent-cli.js', needle: "beginHarnessLaunch('kimi')" },
-  ],
-  qwen: [
-    { file: 'qwen-cli.js', needle: "beginHarnessLaunch('qwen')" },
-    { file: 'modules/turn-supervisor/cli-capability.ts', needle: "beginHarnessLaunch('qwen')" },
-  ],
-  // Hosted vendor runtimes (glm/kimi chat, deepseek) register through beginProviderRun.
+  // Hosted vendor runtimes (glm chat, deepseek) register through beginProviderRun.
   vendor: [
     { file: 'modules/providers/shared/vendor/vendor-runtime.js', needle: 'beginProviderRun(' },
   ],
@@ -157,14 +150,14 @@ test('each guard form notes the admitted spawn in the ledger (GLM → opencode, 
   const ledger = new SpawnLedger(path.join(root, 'ledger.json'), () => now);
   _setSharedSpawnLedger(ledger);
   _resetHarnessLaunches();
-  for (const h of ['claude', 'codex', 'opencode', 'antigravity', 'kimi']) ledger.recordUpdateSuccess(h, `job-${h}`, 500);
+  for (const h of ['claude', 'codex', 'opencode', 'antigravity', 'cursor']) ledger.recordUpdateSuccess(h, `job-${h}`, 500);
   now = 2_000;
   assert.equal(refuseSpawnIfHarnessUpdating('glm', null), false);
-  assertHarnessNotUpdating('kimi');
+  assertHarnessNotUpdating('cursor');
   beginHarnessLaunch('agy')();
   assert.equal(isSpawnBlockedForRunProvider('codex'), false);
   beginHarnessLaunch('claude')();
-  for (const h of ['opencode', 'kimi', 'antigravity', 'codex', 'claude']) {
+  for (const h of ['opencode', 'cursor', 'antigravity', 'codex', 'claude']) {
     assert.deepEqual(ledger.spawnFactsSince(h, `job-${h}`), { firstSpawnAt: 2_000, count: 1, unknown: false }, h);
   }
   assert.equal(isSpawnBlockedForRunProvider('deepseek'), false, 'no binary, never blocked');

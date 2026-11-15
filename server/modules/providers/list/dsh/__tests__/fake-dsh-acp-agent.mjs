@@ -29,6 +29,13 @@
  *   `[grandchild]` — leaves a `sleep 60` in dsh's process group (cleanup test).
  *   `[malformed-args]` — fails the turn as real dsh does when the model streams invalid
  *     tool JSON (-32603, recorded T-2089 S0).
+ *   `[leak-stderr]` — prints the local turn token to stderr, then fails the turn.
+ *   `[probe]` — on a local turn, also tries the corrector with a wrong token, another
+ *     method and another path, and records the statuses.
+ *
+ * A LOCAL turn (T-2108: NASSAJ_DSH_LOCAL_TOKEN set, a generated JSON layer whose
+ * llm-deepseek row names a loopback baseURL) really calls that corrector with the
+ * token in `x-api-key`, as dsh does, and records each reply in local-calls.jsonl.
  */
 
 import { spawn } from 'node:child_process';
@@ -61,8 +68,20 @@ const record = (kind, value) => fs.appendFileSync(path.join(launchDir, `${kind}.
 // `--dump-config` (T-2091 DSH_PATH semantic check): the composed rows of the --patch layers.
 if (process.argv.includes('--dump-config')) {
   const patchFiles = process.argv.slice(2).flatMap((arg, k, all) => (arg === '--patch' ? [all[k + 1]] : []));
+  // A JSON layer (T-2108 local turns) is printed in dump form: scalar config keys only.
+  const dumpRow = (row) => [`- id: ${row.id}`, ...(row.name ? [`  name: ${row.name}`] : []),
+    ...(row.disabled === undefined ? [] : [`  disabled: ${row.disabled}`]),
+    ...(row.config ? ['  config:', ...Object.entries(row.config).filter(([, v]) => typeof v !== 'object').map(([k, v]) => `    ${k}: ${v}`)] : [])];
+  const jsonRows = (file) => {
+    try {
+      const rows = JSON.parse(fs.readFileSync(file, 'utf8'));
+      return rows.flatMap((row) => (Array.isArray(row.insert) ? row.insert : [row])).flatMap(dumpRow).join('\n');
+    } catch { return null; }
+  };
   // Inserted rows are dedented to the top level, as dsh composes them.
   const rows = patchFiles.map((file) => {
+    const json = jsonRows(file);
+    if (json !== null) return json;
     let inserting = false;
     return fs.readFileSync(file, 'utf8').split('\n').flatMap((line) => {
       if (/^- insert:/.test(line)) { inserting = true; return []; }
@@ -78,8 +97,9 @@ if (process.argv.includes('--dump-config')) {
 const argv = process.argv.slice(2);
 const resolvable = (command) => (process.env.PATH ?? '').split(':').filter(Boolean)
   .some((dir) => { try { fs.accessSync(path.join(dir, command), fs.constants.X_OK); return true; } catch { return false; } });
+const patchTexts = argv.flatMap((arg, i) => (arg === '--patch' ? [(() => { try { return fs.readFileSync(argv[i + 1], 'utf8'); } catch { return null; } })()] : []));
 record('launches', {
-  argv, cwd: process.cwd(), env: { ...process.env },
+  argv, cwd: process.cwd(), env: { ...process.env }, patchTexts,
   resolvable: Object.fromEntries(['claude', 'codex'].map((c) => [c, resolvable(c)])),
 });
 
@@ -96,6 +116,39 @@ const composed = composeDshLayers(
   [readPatchLayer(path.join(profileDir, 'cordis.patch.yml')), ...patches.map(readPatchLayer)],
   process.env,
 );
+
+// ---- local turn (T-2108) ------------------------------------------------------
+const localToken = process.env.NASSAJ_DSH_LOCAL_TOKEN;
+const localLlm = (() => {
+  for (const file of [...patches].reverse()) {
+    try {
+      const row = JSON.parse(fs.readFileSync(file, 'utf8')).find((entry) => entry?.id === 'llm-deepseek');
+      if (row?.config?.models) return row.config;
+    } catch { /* not a JSON layer */ }
+  }
+  return null;
+})();
+const localModelOption = (o) => ({ ...o, options: localLlm.models.map((m) => ({ value: JSON.stringify(['deepseek-official', m.id]), name: m.id })) });
+
+/** POSTs to the corrector as dsh would; returns { status, body }. */
+async function localCall({ token = localToken, method = 'POST', path: route = '/v1/messages', body = {} } = {}) {
+  const response = await fetch(`${localLlm.baseURL}${route}`, {
+    method, headers: { 'x-api-key': token, 'content-type': 'application/json', accept: 'text/event-stream' },
+    ...(method === 'POST' ? { body: JSON.stringify(body) } : {}),
+  });
+  return { status: response.status, body: await response.text() };
+}
+
+/** The local turn's upstream call (and, on `[probe]`, the refusal probes). */
+async function callLocal(s, text) {
+  const reply = await localCall({ body: { model: s.model, stream: true, messages: s.messages } });
+  const probes = text.includes('[probe]') ? {
+    wrongToken: (await localCall({ token: 'wrong' })).status,
+    otherMethod: (await localCall({ method: 'GET' })).status,
+    otherPath: (await localCall({ path: '/v1/messages/count_tokens' })).status,
+  } : null;
+  record('local-calls', { sessionId: s.id, baseURL: localLlm.baseURL, model: s.model, status: reply.status, body: reply.body, probes });
+}
 
 // ---- policy plugin emulation (fd 3) -------------------------------------------
 const policyTools = JSON.parse(fs.readFileSync(path.join(here, '..', '..', '..', '..', '..', 'services', 'permission-parity',
@@ -145,7 +198,7 @@ const save = (s) => { fs.mkdirSync(sessionsDir, { recursive: true }); fs.writeFi
 const load = (id) => { try { return JSON.parse(fs.readFileSync(sessionFile(id), 'utf8')); } catch { return null; } };
 const live = new Map();
 const configOptions = (s) => CONFIG_OPTIONS.map((o) => (o.id === 'model'
-  ? { ...o, currentValue: JSON.stringify(['deepseek-official', s.model]) } : o));
+  ? { ...(localLlm ? localModelOption(o) : o), currentValue: JSON.stringify(['deepseek-official', s.model]) } : o));
 
 // ---- wire --------------------------------------------------------------------
 const write = (msg) => process.stdout.write(`${JSON.stringify(msg)}\n`);
@@ -193,8 +246,13 @@ async function prompt(params) {
     const text = (params.prompt ?? []).filter((b) => b.type === 'text').map((b) => b.text).join('\n');
     s.messages.push({ role: 'user', content: [{ type: 'text', text }] });
     sendLlmRequest(s);
+    if (localToken && localLlm) await callLocal(s, text);
     if (text.includes('[slow]')) await sleep(800, controller.signal);
     if (controller.signal.aborted) return { stopReason: 'cancelled' };
+    if (text.includes('[leak-stderr]')) {
+      process.stderr.write(`token=${process.env.NASSAJ_DSH_LOCAL_TOKEN ?? ''}\n`);
+      fail(-32603, 'Internal error: turn failed');
+    }
     if (text.includes('[malformed-args]')) fail(-32603, 'Internal error: turn failed: DeepSeek Messages stream: tool input is invalid JSON');
     if (text.includes('[grandchild]')) {
       // A process left in dsh's group after the turn (a backgrounded bash job).
@@ -221,7 +279,7 @@ async function prompt(params) {
 const handlers = {
   initialize: () => INIT_RESULT,
   'session/new': (p) => {
-    const s = { id: crypto.randomUUID(), cwd: p.cwd, model: 'deepseek-v4-flash', messages: [] };
+    const s = { id: crypto.randomUUID(), cwd: p.cwd, model: localLlm?.models[0]?.id ?? 'deepseek-v4-flash', messages: [] };
     live.set(s.id, s);
     save(s);
     return { sessionId: s.id, configOptions: configOptions(s) };
@@ -235,7 +293,7 @@ const handlers = {
   },
   'session/set_config_option': (p) => {
     const s = live.get(p.sessionId) ?? fail(-32602, `unknown session: ${p.sessionId}`);
-    const option = CONFIG_OPTIONS.find((o) => o.id === p.configId) ?? fail(-32602, `unknown config option: ${p.configId}`);
+    const option = configOptions(s).find((o) => o.id === p.configId) ?? fail(-32602, `unknown config option: ${p.configId}`);
     const offered = (option.options ?? []).flatMap((o) => (o.options ? o.options : [o])).map((o) => o.value);
     if (!offered.includes(p.value)) fail(-32602, `value not offered for ${p.configId}: ${p.value}`);
     if (p.configId === 'model') s.model = JSON.parse(p.value)[1];

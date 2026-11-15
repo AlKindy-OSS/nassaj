@@ -14,11 +14,9 @@ const SERVER_ROOT = import.meta.dirname;
 
 const LAUNCHERS: Array<[file: string, spawnMarker: string]> = [
   ['agy-cli.js', 'agProcess = spawn(agyLaunch.cmd'],
-  ['qwen-cli.js', 'child = spawnFunction(launch.cmd'],
   ['modules/providers/shared/vendor/vendor-runtime.js', 'await fetch(config.messagesUrl'],
   ['cursor-cli.js', "runCursorProcess(baseArgs, 'initial')"],
   ['opencode-cli.js', 'opencodeProcess = spawnFunction(opencodeBinary'],
-  ['kimi-agent-cli.js', 'kimiProcess = spawn(launch.cmd'],
 ];
 
 for (const [file, spawnMarker] of LAUNCHERS) {
@@ -35,8 +33,6 @@ for (const [file, spawnMarker] of LAUNCHERS) {
 }
 
 const TRANSCRIPT_WRITES: Array<[file: string, writeMarker: string]> = [
-  ['qwen-cli.js', "await writeVendorTranscriptMeta('qwen'"],
-  ['qwen-cli.js', "await appendVendorTranscriptTurn('qwen', sessionId, workingDir, 'user'"],
   ['modules/providers/shared/vendor/vendor-runtime.js', 'await writeTranscriptMeta(provider'],
   ['modules/providers/shared/vendor/vendor-runtime.js', 'await appendTranscript(provider, effectiveSessionId'],
 ];

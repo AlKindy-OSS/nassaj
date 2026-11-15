@@ -40,7 +40,6 @@ const resolveProviderEnvStandIn = (
   }
   const userRoot = path.join(os.homedir(), '.nassaj-users', String(userId));
   if (provider === 'codex') env.CODEX_HOME = path.join(userRoot, '.codex');
-  if (provider === 'qwen') env.HOME = userRoot;
   return env;
 };
 
@@ -265,39 +264,5 @@ test('dedup keys on frontmatter name, case-sensitively', { concurrency: false },
     const lower = skills.filter((skill) => skill.name === 'mixed');
     assert.equal(lower.length, 1);
     assert.equal(lower[0].scope, 'repo');
-  });
-});
-
-test('qwen root linked into the shared library: tagged, per-skill readOnly by marker', { concurrency: false }, async () => {
-  await withTempHome('qwen', async (home, workspacePath) => {
-    const sharedRoot = path.join(home, '.qwen', 'skills');
-    const handmade = await writeSkill(sharedRoot, 'shared-q');
-    const appDir = await writeSkill(sharedRoot, 'app-q');
-    await fs.writeFile(path.join(appDir, MARKER_FILE), '{"managedBy":"nassaj"}', 'utf8');
-    const member = path.join(home, '.nassaj-users', '4');
-    await fs.mkdir(member, { recursive: true });
-    await fs.symlink(path.join(home, '.qwen'), path.join(member, '.qwen'));
-
-    const listed = await providerSkillsService.listProviderSkills('qwen', { workspacePath, userId: 4 });
-    const shared = listed.find((skill) => skill.name === 'shared-q');
-    assert.equal(shared?.readOnly, true);
-    assert.equal(shared?.origin, 'operator-shared');
-    assert.equal(listed.find((skill) => skill.name === 'app-q')?.readOnly, undefined);
-    await assert.rejects(
-      () => providerSkillsService.removeProviderSkill('qwen', 'shared-q', { userId: 4 }),
-      expectReadOnly,
-    );
-    assert.equal(await exists(path.join(handmade, 'SKILL.md')), true);
-    await providerSkillsService.removeProviderSkill('qwen', 'app-q', { userId: 4 });
-    assert.equal(await exists(appDir), false);
-
-    // A legacy REAL per-user folder is untagged; the B-175 marker guard applies.
-    const realMember = path.join(home, '.nassaj-users', '6', '.qwen', 'skills');
-    const ownDir = await writeSkill(realMember, 'own-q');
-    await fs.writeFile(path.join(ownDir, MARKER_FILE), '{"managedBy":"nassaj"}', 'utf8');
-    const own = await providerSkillsService.listProviderSkills('qwen', { workspacePath, userId: 6 });
-    assert.equal(own.find((skill) => skill.name === 'own-q')?.origin, undefined);
-    await providerSkillsService.removeProviderSkill('qwen', 'own-q', { userId: 6 });
-    assert.equal(await exists(ownDir), false);
   });
 });

@@ -107,3 +107,20 @@ export function localEngineSpawnRefusal({ storedEngine = null, model = null, sit
   );
   return Object.assign(error, { code: LOCAL_ENGINE_SPAWN_UNSUPPORTED });
 }
+
+/** Typed refusal code of an engine re-stamp across a local pin (ADR-227, T-2107). */
+export const ENGINE_RESTAMP_LOCAL_PIN = 'ENGINE_RESTAMP_LOCAL_PIN';
+
+/**
+ * ADR-227: a chat never moves between a local model server and any other engine,
+ * by a spawn or by the authenticated re-stamp route. Body-neutral: it reads only
+ * the stored and the requested engine values. Past local turns are booked at zero
+ * through the pin (T-2103), so a re-stamp would also re-attribute them.
+ * @param {unknown} fromEngine the stored pin (null when none)
+ * @param {unknown} toEngine the requested engine
+ * @returns {boolean} true when the re-stamp must be refused
+ */
+export function restampCrossesLocalPin(fromEngine, toEngine) {
+  if (fromEngine === toEngine) return false;
+  return isLocalEngineValue(fromEngine) || isLocalEngineValue(toEngine);
+}

@@ -17,28 +17,28 @@
     },
     {
       "path": "@openai/codex-sdk/dist/index.d.ts",
-      "sha256": "954d28bec3db17316c2f6acbbd157210ded9f75143c50827215739110327c7ac",
+      "sha256": "5b57ce417b5f6e608c8e52707761384be220ff27e0206e93e4c253e83f206a8f",
       "sourceMode": 420,
       "mode": 292,
-      "size": 10369
+      "size": 10649
     },
     {
       "path": "@openai/codex-sdk/dist/index.js",
-      "sha256": "f0741050088c636aef4ee970fd25e582ab1c961c18499702c26ae7962fe025d2",
+      "sha256": "b4357cffd17641cbaebf9f6a1836e4e2e5f63262ba927d987079f3c5056d321e",
       "sourceMode": 420,
       "mode": 292,
-      "size": 17265
+      "size": 17450
     },
     {
       "path": "@openai/codex-sdk/dist/index.js.map",
-      "sha256": "830f7fb2b7f1e3ff4aed4bfc48344159136a4050918676ddef77f5cf6c5af4b5",
+      "sha256": "40bad72fc396c58785e0177db3df956ffed7d5482e8ffc286fa19e8b5a7400bd",
       "sourceMode": 420,
       "mode": 292,
-      "size": 33926
+      "size": 34352
     },
     {
       "path": "@openai/codex-sdk/package.json",
-      "sha256": "16b5cd2e9361fbd20e107dc45334e8ee578e844f417155213129d2814974e286",
+      "sha256": "84e2823887d05de17c4735bbd3b71c7c5ec700436a346eefbe868ebe912e4e1c",
       "sourceMode": 420,
       "mode": 292,
       "size": 1955
@@ -52,14 +52,14 @@
     },
     {
       "path": "@openai/codex/bin/codex.js",
-      "sha256": "61b0194f3bb6534439c8d26a3ed57d0805f84b884588b761795323eeb92fcf70",
+      "sha256": "e14fc83739c13c1074b12bd1acce4010c893c7f6fbfc1593b4a31d74cabb57af",
       "sourceMode": 493,
       "mode": 365,
-      "size": 8790
+      "size": 9154
     },
     {
       "path": "@openai/codex/package.json",
-      "sha256": "42cc6481fe2366708e7963edbc6322508733a448837088d3a0c8a14e2cd7450d",
+      "sha256": "6e2d18e6fb273a1114992857f99b4d30cb320d6e978679894170dd18dbf32080",
       "sourceMode": 420,
       "mode": 292,
       "size": 1082
@@ -73,28 +73,28 @@
     },
     {
       "path": "@openai/codex-linux-x64/package.json",
-      "sha256": "746356e50c85689853089e40ab54186de18285398a2dfeba773e7075e3da3d65",
+      "sha256": "845d34dc6afad3edb8ea0be4238479fd397c43697d30843c8af03e08260fdd17",
       "sourceMode": 420,
       "mode": 292,
       "size": 511
     },
     {
       "path": "@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/bin/codex",
-      "sha256": "3e2584f3f3829a43a0495011a1cecb2facbe64a2403e2b682351fd9c2983f970",
+      "sha256": "b452ca20f838a8855a88a41050ee4a694033fff4ea3ecdad5633e6e0e8d13f2b",
       "sourceMode": 493,
       "mode": 365,
-      "size": 285340072
+      "size": 294277432
     },
     {
       "path": "@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/bin/codex-code-mode-host",
-      "sha256": "67b86142bac5cead11b8420cf32d3a2bf88c8868d71733f351ed7c5d95a953e0",
+      "sha256": "e9f2ef68671b2b6ac68902d19e8dafda3f5928e678ecf3f30c74b203a2c403ed",
       "sourceMode": 493,
       "mode": 365,
-      "size": 73962384
+      "size": 70023704
     },
     {
       "path": "@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-package.json",
-      "sha256": "f2902083d9f7c8973a50bab94aa45dc21e4a291640dae0ddde312e0d94476ddc",
+      "sha256": "28811e0083d220befc827d711fb8c9f4b7f85825b11164ff154e15cfe2540715",
       "sourceMode": 420,
       "mode": 292,
       "size": 205
@@ -108,23 +108,282 @@
     },
     {
       "path": "@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/bwrap",
-      "sha256": "77360cb751ccedc5971391444ac86a8a33c15b04d6b4a6fe45f5d25496e62c4c",
+      "sha256": "15fd5f2673d2e1c2f80e34e5108462fd014f5e8bbc7b0731f1ab23d1ff1ac140",
       "sourceMode": 493,
       "mode": 365,
-      "size": 529776
+      "size": 507960
     },
     {
-      "path": "@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/zsh/bin/zsh",
-      "sha256": "67faaaa89242c4a332e16e508a1977cffc24bf7fca31d4411cdfd101f3831ef3",
+      "path": "@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/NOTICE.md",
+      "sha256": "40097a1799441051aa0b6645cdc819cceb19be73cdd265eb602aa2b15e0b1f48",
+      "sourceMode": 420,
+      "mode": 292,
+      "size": 2403
+    },
+    {
+      "path": "@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/bin/codex-voice-host",
+      "sha256": "f8a5420d6feb71141f150369cd44964c037b7d340585a966175cafa11f91cc91",
       "sourceMode": 493,
       "mode": 365,
-      "size": 898480
+      "size": 40065936
+    },
+    {
+      "path": "@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/gstreamer-1.0/libgstapp.so",
+      "sha256": "30768970eaa85954b9a0c6116919cb451deb345461402a785e75002761a911a5",
+      "sourceMode": 493,
+      "mode": 365,
+      "size": 6488
+    },
+    {
+      "path": "@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/gstreamer-1.0/libgstaudioconvert.so",
+      "sha256": "8d3acfc4ffdec4270b9b8ae8b13fa740809e9f2fb5649fa455276da8ef2c6393",
+      "sourceMode": 493,
+      "mode": 365,
+      "size": 41040
+    },
+    {
+      "path": "@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/gstreamer-1.0/libgstaudioresample.so",
+      "sha256": "f7271c235477879dc386e4453e8ae136ac9b8c8597aa37422fb6c0e3531fc410",
+      "sourceMode": 493,
+      "mode": 365,
+      "size": 35248
+    },
+    {
+      "path": "@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/gstreamer-1.0/libgstcoreelements.so",
+      "sha256": "cdf833a5692c4b09e84bb5493518178e747d599873f1b5701f88e8781dd1044c",
+      "sourceMode": 493,
+      "mode": 365,
+      "size": 479464
+    },
+    {
+      "path": "@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/gstreamer-1.0/libgstopus.so",
+      "sha256": "2587b1f4058b96cb568caa744de4707f039987b0720a06b6d40a6889764a4ff2",
+      "sourceMode": 493,
+      "mode": 365,
+      "size": 73496
+    },
+    {
+      "path": "@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/gstreamer-1.0/libgstrtp.so",
+      "sha256": "67168150d1bbb045a68eb1244dd86b7ec8d883918e8e0b0d66d7cd42940e525a",
+      "sourceMode": 493,
+      "mode": 365,
+      "size": 759304
+    },
+    {
+      "path": "@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/gstreamer-1.0/libgstrtpmanager.so",
+      "sha256": "9e2edba8a3439ca0442e39c7164a6a73837e165466987a01ac5c2639e40ad472",
+      "sourceMode": 493,
+      "mode": 365,
+      "size": 563976
+    },
+    {
+      "path": "@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libffi.so.8",
+      "sha256": "9343712fef5adb7f0d00b6f9c96d3b76c7eaed0ff3f96b1db665c221e68c2c7c",
+      "sourceMode": 493,
+      "mode": 365,
+      "size": 63088
+    },
+    {
+      "path": "@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libgio-2.0.so.0",
+      "sha256": "a4f37d4a7c3fe0e80a1a290be55b8626b6ce8d0fabb5d8871ea27903ff76aaf3",
+      "sourceMode": 493,
+      "mode": 365,
+      "size": 2336176
+    },
+    {
+      "path": "@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libglib-2.0.so.0",
+      "sha256": "664b2bd9551b86d6916a5929b3869a85f47e917adfa5cf29260d4829faf5fc59",
+      "sourceMode": 493,
+      "mode": 365,
+      "size": 1520592
+    },
+    {
+      "path": "@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libgmodule-2.0.so.0",
+      "sha256": "24dcce22648887de4a26843fc186f0eb2c180301ab6e83e3d38effffe71dfb4e",
+      "sourceMode": 493,
+      "mode": 365,
+      "size": 15736
+    },
+    {
+      "path": "@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libgobject-2.0.so.0",
+      "sha256": "5f70b3be636eae5b2cc7a9b09d619d3c6c17b62cf9fb0287914de6bc40565f47",
+      "sourceMode": 493,
+      "mode": 365,
+      "size": 455408
+    },
+    {
+      "path": "@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libgstallocators-1.0.so.0",
+      "sha256": "283f6839a3653c8ee8f70169e4f2c41a54a6e9bbd8561ffecef7dcd628b3158a",
+      "sourceMode": 493,
+      "mode": 365,
+      "size": 30352
+    },
+    {
+      "path": "@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libgstapp-1.0.so.0",
+      "sha256": "d6428d2ed92cacadad80f55d5ea95966a062dba8a8172a740de17bfec944bf21",
+      "sourceMode": 493,
+      "mode": 365,
+      "size": 106128
+    },
+    {
+      "path": "@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libgstaudio-1.0.so.0",
+      "sha256": "878249171ded1a3235e890735a99294efa949285a26353d5cd2f966f2db14ea7",
+      "sourceMode": 493,
+      "mode": 365,
+      "size": 637664
+    },
+    {
+      "path": "@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libgstbase-1.0.so.0",
+      "sha256": "38414d2337eed2fe46bcab2a944426a2ce4ef6877526d7f27217dad2dc24e391",
+      "sourceMode": 493,
+      "mode": 365,
+      "size": 573472
+    },
+    {
+      "path": "@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libgstnet-1.0.so.0",
+      "sha256": "6505e55ed2346a7c66bf3c6daf7d999e83b5a9204d4158092d813b6c4f761e60",
+      "sourceMode": 493,
+      "mode": 365,
+      "size": 74160
+    },
+    {
+      "path": "@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libgstpbutils-1.0.so.0",
+      "sha256": "832ed10c118c4bb44f4a0e87c567c2c16f2907dbf6204aed11be48993a9fbc31",
+      "sourceMode": 493,
+      "mode": 365,
+      "size": 323208
+    },
+    {
+      "path": "@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libgstreamer-1.0.so.0",
+      "sha256": "7faf5c51aa680104f0f59c85d680584366b679ab0425ac06eed6013b54c230c5",
+      "sourceMode": 493,
+      "mode": 365,
+      "size": 1582984
+    },
+    {
+      "path": "@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libgstrtp-1.0.so.0",
+      "sha256": "813fbf164173d9dfede20ea9c263724fc8e9fdc3237210bb6b2731a297e397b4",
+      "sourceMode": 493,
+      "mode": 365,
+      "size": 211696
+    },
+    {
+      "path": "@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libgsttag-1.0.so.0",
+      "sha256": "3f10703ec29a96e87cbbb0046d5ae6752e618684b82e048ddbc98032d6ac2abf",
+      "sourceMode": 493,
+      "mode": 365,
+      "size": 273992
+    },
+    {
+      "path": "@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libgstvideo-1.0.so.0",
+      "sha256": "ac37bfbb4969b1127a36f65f43832fde34a1028b5a15e244e07f03ac2da1a088",
+      "sourceMode": 493,
+      "mode": 365,
+      "size": 1006016
+    },
+    {
+      "path": "@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libintl.so.8",
+      "sha256": "52508cf6dadff7cc431dd76d1f36754eb4184f56a49f93442f1a48bcb240df20",
+      "sourceMode": 493,
+      "mode": 365,
+      "size": 6304
+    },
+    {
+      "path": "@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libopus.so.0",
+      "sha256": "d42be3ac7baaffd5ca3eef695b63cad6069f80de4e0a042e593fe1bc730b851f",
+      "sourceMode": 493,
+      "mode": 365,
+      "size": 563184
+    },
+    {
+      "path": "@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libpcre2-8.so.0",
+      "sha256": "6d589f935f093df4fbcebf01b7f8afa997378f4a4ac5fd0a76e0c5f604af64b7",
+      "sourceMode": 493,
+      "mode": 365,
+      "size": 441864
+    },
+    {
+      "path": "@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libz.so.1",
+      "sha256": "7088b2cc0f2812f6617666d851bd779925de4350a87ef0a288bbedda87e76083",
+      "sourceMode": 493,
+      "mode": 365,
+      "size": 110112
+    },
+    {
+      "path": "@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/licenses/LGPL-2.1.txt",
+      "sha256": "ad2eec519ebd4b5df86ea84dff24ae3bfa2edea846a703b58902dd221ae375db",
+      "sourceMode": 420,
+      "mode": 292,
+      "size": 26431
+    },
+    {
+      "path": "@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/licenses/Opus.txt",
+      "sha256": "01e1167d54a096d123cf6dfbbeb19587278845c6481d2d66d545669846079551",
+      "sourceMode": 420,
+      "mode": 292,
+      "size": 1945
+    },
+    {
+      "path": "@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/licenses/PCRE2.md",
+      "sha256": "197d8a73ffee0d6b09adba2f9c677b5f5aede24edf89258a68e48248d010d811",
+      "sourceMode": 420,
+      "mode": 292,
+      "size": 4011
+    },
+    {
+      "path": "@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/licenses/libffi.txt",
+      "sha256": "17b64dc60f3b6897a60f971e288b973f655c2edcdf08b25f3c3dd5549857881c",
+      "sourceMode": 420,
+      "mode": 292,
+      "size": 1132
+    },
+    {
+      "path": "@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/licenses/proxy-libintl.txt",
+      "sha256": "d245807f90032872d1438d741ed21e2490e1175dc8aa3afa5ddb6c8e529b58e5",
+      "sourceMode": 420,
+      "mode": 292,
+      "size": 25292
+    },
+    {
+      "path": "@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/licenses/sljit.txt",
+      "sha256": "5f216505c0f6ea3273caec89e766eef93cdeb7bbb0c429f9360116d7c938feeb",
+      "sourceMode": 420,
+      "mode": 292,
+      "size": 1444
+    },
+    {
+      "path": "@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/licenses/zlib.txt",
+      "sha256": "e32ff4e00d9d94930537635291da39e7e612703334bf6fde8c7f1686fe8a45a2",
+      "sourceMode": 420,
+      "mode": 292,
+      "size": 1002
+    },
+    {
+      "path": "@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/manifest.json",
+      "sha256": "58f2d08a5ddfe689b52c173631cb8dbd105aaa2396d3a0c5b75fb510c8042bba",
+      "sourceMode": 420,
+      "mode": 292,
+      "size": 4768
+    },
+    {
+      "path": "@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/runtime.json",
+      "sha256": "665cf878bb240eadc764828ac6215ac8d050375ed379d957f9625a61ed44561c",
+      "sourceMode": 493,
+      "mode": 365,
+      "size": 13941
+    },
+    {
+      "path": "@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/sources.json",
+      "sha256": "5613f37012effc3e28cdad52a7c88b9098aaaf7aae43f3cb7199f55ffbb15908",
+      "sourceMode": 420,
+      "mode": 292,
+      "size": 4911
     }
   ],
   "patch": {
     "issue": "B-990",
-    "sdkVersion": "0.157.1",
-    "upstreamIntegrity": "sha512-JPfUXFtXnADlOFYNlf3WzwOEbhQ4zpn4d53ikAF9UjVy2Fr3vESuhvGZquoENW8h60Gskx9spwO20EoZAbKI0g==",
-    "patchedEntrySha256": "f0741050088c636aef4ee970fd25e582ab1c961c18499702c26ae7962fe025d2"
+    "sdkVersion": "0.169.0",
+    "upstreamIntegrity": "sha512-N2ZApXiOjjDiWKuoyaW3zdww9ggFtxKjeMp5qq+kW77UXDOxY2O6hg60ahip319Tlt6iwYEoDfPQzn9a6d3jFA==",
+    "patchedEntrySha256": "b4357cffd17641cbaebf9f6a1836e4e2e5f63262ba927d987079f3c5056d321e"
   }
 }

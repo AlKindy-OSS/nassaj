@@ -52,7 +52,14 @@ after(() => {
 let sequence = 0;
 type ActorKind = 'jwt' | 'device' | 'ck';
 
-function createFixture(kind: ActorKind = 'jwt', actorOwnsProject = false) {
+/**
+ * Who the actor is to the session (ADR-173 R2): the project owner with no participant row,
+ * the strict spawn owner (a member who started it), or a writer whose only row is a
+ * participant one (`spawn` from a later run, or `shared_write`).
+ */
+type Mandate = 'project_owner' | 'strict_owner' | 'writer' | 'shared_writer';
+
+function createFixture(kind: ActorKind = 'jwt', mandate: Mandate = 'project_owner') {
   sequence += 1;
   const suffix = String(sequence);
   const creator = database.userDb.createUser(`creator_${suffix}`, 'hash', 'user').id;
@@ -62,7 +69,7 @@ function createFixture(kind: ActorKind = 'jwt', actorOwnsProject = false) {
   const projectPath = fs.mkdtempSync(path.join(root, `project-${suffix}-`));
   const project = database.projectsDb.createProjectPath(projectPath, null, creator).project!;
   database.projectMembersDb.addAndRotateProjectAccess(project.project_id, actorUser, 'member', creator);
-  if (actorOwnsProject) {
+  if (mandate === 'project_owner') {
     database.getConnection().prepare('UPDATE projects SET created_by = ? WHERE project_id = ?')
       .run(actorUser, project.project_id);
     database.getConnection().prepare('DELETE FROM project_members WHERE project_id = ? AND user_id = ?')
@@ -70,8 +77,12 @@ function createFixture(kind: ActorKind = 'jwt', actorOwnsProject = false) {
   }
   const sessionId = `session-${suffix}`;
   database.sessionsDb.createSession(sessionId, 'claude', projectPath);
-  database.participantsDb.recordSpawn(sessionId, controller, { provider: 'claude', projectPath });
-  database.participantsDb.recordSpawn(sessionId, actorUser, { provider: 'claude', projectPath });
+  const owner = mandate === 'strict_owner' ? actorUser : controller;
+  database.participantsDb.recordSpawn(sessionId, owner, { provider: 'claude', projectPath });
+  if (mandate === 'writer' || mandate === 'shared_writer') {
+    database.participantsDb.recordSpawn(sessionId, actorUser, { provider: 'claude', projectPath,
+      sharedWriter: mandate === 'shared_writer' });
+  }
   const db = database.getConnection();
   db.prepare(`UPDATE sessions SET engine_provider = 'anthropic',
     engine_provider_source = 'server_verdict' WHERE session_id = ?`).run(sessionId);
@@ -99,7 +110,7 @@ function createFixture(kind: ActorKind = 'jwt', actorOwnsProject = false) {
     sessionId, consent: 'control',
   })!;
   const captured = authority.captureEngineRestampAuthority({ sessionId, actor,
-    workspaceFence: fence, controllerUserId: controller });
+    workspaceFence: fence, controllerUserId: owner });
   const prepared = {
     schema: 'nassaj-engine-restamp-intent/v1', operationId: `123e4567-e89b-42d3-a456-${suffix.padStart(12, '0')}`,
     sessionId, ownerProcess: { uid: process.getuid(), pid: process.pid,
@@ -228,11 +239,34 @@ test('CK credential follows the T-1946 SSO window of a linked member', (t) => {
   }
 });
 
-test('participant and controller rows are independently required', () => {
-  const participant = createFixture();
-  participant.db.prepare('DELETE FROM session_participants WHERE session_id = ? AND user_id = ?')
-    .run(participant.sessionId, participant.actorUser);
-  assertBlocked(participant);
+test('ADR-173 R2: the project owner restamps without a participant row of his own', () => {
+  const fixture = createFixture('jwt', 'project_owner');
+  assert.equal(fixture.db.prepare('SELECT 1 FROM session_participants WHERE session_id = ? AND user_id = ?')
+    .get(fixture.sessionId, fixture.actorUser), undefined);
+  settlement.commitEngineRestampTarget(fixture.captured, fixture.intent, fixture.canonical);
+  assert.deepEqual(database.sessionsDb.getSessionEnginePin(fixture.sessionId), {
+    engine: 'openai', source: 'user_switch',
+  });
+});
+
+test('ADR-173 R2: the strict spawn owner restamps as a plain project member', () => {
+  const fixture = createFixture('jwt', 'strict_owner');
+  settlement.commitEngineRestampTarget(fixture.captured, fixture.intent, fixture.canonical);
+  assert.deepEqual(database.sessionsDb.getSessionEnginePin(fixture.sessionId), {
+    engine: 'openai', source: 'user_switch',
+  });
+});
+
+test('ADR-173 R2: a writer who is neither strict owner nor project owner is refused', () => {
+  for (const mandate of ['writer', 'shared_writer'] as const) {
+    const fixture = createFixture('jwt', mandate);
+    assert.throws(() => settlement.commitEngineRestampTarget(
+      fixture.captured, fixture.intent, fixture.canonical), /ENGINE_RESTAMP_PARTICIPANT_STALE/u, mandate);
+    assertBlocked(fixture);
+  }
+});
+
+test('the controller row is required even for the project owner', () => {
   const controller = createFixture();
   controller.db.prepare('DELETE FROM session_participants WHERE session_id = ? AND user_id = ?')
     .run(controller.sessionId, controller.controller);
@@ -243,12 +277,12 @@ test('the captured controller must remain the sole spawn owner', () => {
   const fixture = createFixture();
   fixture.db.exec('DROP INDEX idx_session_participants_single_owner');
   try {
-    fixture.db.prepare(`UPDATE session_participants SET role = 'owner'
-      WHERE session_id = ? AND user_id = ?`).run(fixture.sessionId, fixture.actorUser);
+    fixture.db.prepare(`INSERT INTO session_participants (session_id, user_id, role, attribution)
+      VALUES (?, ?, 'owner', 'spawn')`).run(fixture.sessionId, fixture.actorUser);
     assertBlocked(fixture);
   } finally {
-    fixture.db.prepare(`UPDATE session_participants SET role = 'participant'
-      WHERE session_id = ? AND user_id = ?`).run(fixture.sessionId, fixture.actorUser);
+    fixture.db.prepare('DELETE FROM session_participants WHERE session_id = ? AND user_id = ?')
+      .run(fixture.sessionId, fixture.actorUser);
     fixture.db.exec(`CREATE UNIQUE INDEX idx_session_participants_single_owner
       ON session_participants(session_id) WHERE role = 'owner'`);
   }
@@ -262,7 +296,7 @@ test('the session remains a Claude session inside the final transaction', () => 
 });
 
 test('project fence revocation after an await cannot be replaced by residual session access', async () => {
-  const fixture = createFixture();
+  const fixture = createFixture('jwt', 'strict_owner');
   await Promise.resolve();
   assert.equal(database.projectMembersDb.removeAndRotateProjectAccess(
     fixture.project.project_id, fixture.actorUser), true);
@@ -270,7 +304,7 @@ test('project fence revocation after an await cannot be replaced by residual ses
 });
 
 test('project creator authority is rechecked rather than inferred from the old capture', () => {
-  const fixture = createFixture('jwt', true);
+  const fixture = createFixture('jwt', 'project_owner');
   fixture.db.prepare('UPDATE projects SET created_by = ? WHERE project_id = ?')
     .run(fixture.controller, fixture.project.project_id);
   assertBlocked(fixture);

@@ -5,6 +5,7 @@
  * injected dependencies so the router, the public reader and the sweeper share
  * one definition of every rule.
  */
+import { PROVIDER_REMOVED_CODE, isHiddenHistoryProvider } from '../../shared/retiredProviders.js';
 
 /** Allowed expiry keys; the server computes the date, clients never send one. */
 export const SHARE_EXPIRY_MS = Object.freeze({
@@ -63,6 +64,8 @@ export function resolveLiveCreateContext(user, sessionId, deps) {
   const ownerUserId = deps.resolveOwner(sessionId);
   if (ownerUserId === null || ownerUserId !== user.id) throw new SessionShareError('OWNER_ONLY', 403);
   if (!deps.isSessionReadable(sessionId, session.project_path, user.id)) throw new SessionShareError('ACCESS_DENIED', 403);
+  // ADR-229: no new link for a removed harness's conversation (after the owner/read checks: no oracle).
+  if (isHiddenHistoryProvider(session.provider)) throw new SessionShareError(PROVIDER_REMOVED_CODE, 410);
   const project = lookupProject(deps, session.project_path);
   if (!project) throw new SessionShareError('SESSION_PROJECT_UNREGISTERED', 422);
   if (project.isArchived) throw new SessionShareError('SESSION_PROJECT_ARCHIVED', 422);

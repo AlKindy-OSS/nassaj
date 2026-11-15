@@ -3,31 +3,25 @@ import test from 'node:test';
 
 import { findModelPrice, todayIso } from '@/modules/providers/services/cost/model-pricing.js';
 
-test('سونيت 5 اليوم بالسعر الترويجي', () => {
+// B-1796: صفحة التسعير (platform.claude.com/docs/en/about-claude/pricing،
+// مقروءة 2026-11-14، الحاشية 3) تقول إن $2/$10 صار السعر القياسي لسونيت 5
+// وإن الرفع المجدول إلى $3/$15 في 2026-09-01 «لن يحدث».
+test('سونيت 5 بسعره القياسي $2/$10 قبل 2026-09-01', () => {
   const price = findModelPrice('claude-sonnet-5', '2026-07-28');
   assert.equal(price?.inputPerMTok, 2);
   assert.equal(price?.outputPerMTok, 10);
 });
 
-test('آخر يوم في الفترة الترويجية ما زال ترويجياً', () => {
-  const price = findModelPrice('claude-sonnet-5', '2026-08-31');
-  assert.equal(price?.inputPerMTok, 2);
-});
-
-test('من 2026-09-01 ينتقل تلقائياً إلى السعر المعلَن — لا بخس صامت بالثلث', () => {
-  const price = findModelPrice('claude-sonnet-5', '2026-09-01');
-  assert.equal(price?.inputPerMTok, 3);
-  assert.equal(price?.outputPerMTok, 15);
-  assert.equal(price?.cacheWrite5mPerMTok, 3.75);
-  assert.equal(price?.cacheWrite1hPerMTok, 6);
-  assert.equal(price?.cacheReadPerMTok, 0.3);
-});
-
-test('السعر المجدول يطابق سونيت 4.6 — مرساة تحقّق مستقلة', () => {
-  const future = findModelPrice('claude-sonnet-5', '2026-12-01');
-  const anchor = findModelPrice('claude-sonnet-4-6', '2026-12-01');
-  assert.equal(future?.inputPerMTok, anchor?.inputPerMTok);
-  assert.equal(future?.outputPerMTok, anchor?.outputPerMTok);
+test('لا رفع وهمياً لسونيت 5 من 2026-09-01 فما بعد (B-1796)', () => {
+  for (const day of ['2026-09-01', '2026-11-14', '2027-06-01']) {
+    const price = findModelPrice('claude-sonnet-5', day);
+    assert.equal(price?.inputPerMTok, 2, day);
+    assert.equal(price?.outputPerMTok, 10, day);
+    assert.equal(price?.cacheWrite5mPerMTok, 2.5, day);
+    assert.equal(price?.cacheWrite1hPerMTok, 4, day);
+    assert.equal(price?.cacheReadPerMTok, 0.2, day);
+    assert.equal(price?.scheduled, undefined, day);
+  }
 });
 
 test('نموذج بلا جدولة لا يتأثر بمرور الزمن', () => {

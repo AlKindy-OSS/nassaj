@@ -197,10 +197,14 @@ export type ScrollResyncRoute = 'retryHistory' | 'manualRefresh' | 'scrollOnly';
 export function resolveScrollResyncRoute({
   historyError,
   showManualRefresh,
+  historyRemoved = false,
 }: {
   historyError: boolean;
   showManualRefresh: boolean;
+  /** ADR-229: the conversation's tool was removed — re-reading can never succeed. */
+  historyRemoved?: boolean;
 }): ScrollResyncRoute {
+  if (historyRemoved) return 'scrollOnly';
   if (historyError) return 'retryHistory';
   if (showManualRefresh) return 'manualRefresh';
   return 'scrollOnly';
@@ -221,9 +225,12 @@ export function resolveScrollResyncRoute({
 export function shouldShowResyncArrow({
   hasHistoryError,
   isStuck,
+  historyRemoved = false,
 }: {
   hasHistoryError: boolean;
   isStuck: boolean;
+  /** ADR-229: the conversation's tool was removed — a resync can never help. */
+  historyRemoved?: boolean;
 }): boolean {
-  return hasHistoryError || isStuck;
+  return !historyRemoved && (hasHistoryError || isStuck);
 }

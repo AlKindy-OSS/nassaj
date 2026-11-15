@@ -99,7 +99,7 @@ describe('resolveProviderEnv — the actor contract', () => {
     };
     const knobs: Record<string, string[]> = {
       claude: ['CLAUDE_CONFIG_DIR'], codex: ['CODEX_HOME'], agy: ['HOME'], cursor: ['HOME'], qwen: ['HOME'],
-      opencode: ['XDG_DATA_HOME', 'XDG_CONFIG_HOME', 'XDG_CACHE_HOME', 'XDG_STATE_HOME'], kimi: ['KIMI_CODE_HOME'],
+      opencode: ['XDG_DATA_HOME', 'XDG_CONFIG_HOME', 'XDG_CACHE_HOME', 'XDG_STATE_HOME'], kimi: [],
       deepseek: [], glm: [], dsh: ['HOME'],
     };
     for (const provider of KNOWN_PROVIDERS as string[]) {

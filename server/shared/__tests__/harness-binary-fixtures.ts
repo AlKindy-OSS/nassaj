@@ -6,7 +6,7 @@
  * B-1349: a stub must NEVER land outside a test sandbox. Every write here
  * refuses the operator's real home, refuses any directory that does not
  * resolve (realpath) inside a temp root, and never writes THROUGH a symlink
- * (an existing `~/.local/bin/qwen` link would otherwise overwrite the real
+ * (an existing `~/.local/bin/agy` link would otherwise overwrite the real
  * package entry it points at).
  */
 
@@ -85,7 +85,7 @@ function writeStub(file: string): void {
 
 /**
  * Writes `#!/bin/sh exit 0` (mode 0755) at the measured path of `id` under a sandbox
- * `home`, and clears that harness's server override env (e.g. `KIMI_PATH` set by the
+ * `home`, and clears that harness's server override env (e.g. `OPENCODE_PATH` set by the
  * isolated runner, B-1420) so the resolver actually lands on the stub.
  */
 export function installFakeHarnessBinary(home: string, id: HarnessBinaryId): string {
@@ -99,7 +99,7 @@ export function installFakeHarnessBinary(home: string, id: HarnessBinaryId): str
 
 /**
  * Points every non-codex registry harness at an executable stub in the sandbox
- * `dir` through its SERVER override env (`KIMI_PATH`, …), so a test never
+ * `dir` through its SERVER override env (`OPENCODE_PATH`, …), so a test never
  * depends on what the host has installed. Returns a restore function.
  */
 export function installFakeHarnessOverrides(dir: string): () => void {

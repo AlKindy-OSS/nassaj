@@ -8,15 +8,14 @@ const MAIN_TABS = new Set<SettingsMainTab>([
 ]);
 
 /**
- * The full agent union, for upstream-sync friendliness — kept complete even
- * though `isAgentDeepLinkable` below rejects the globally disabled ids
- * (T-864/T-1906): a deep link naming `qwen` or `hermes` must fall back to the
- * default agent rather than pin a hidden one that renders no category
- * content.
+ * Every agent a settings deep link may name. The removed harnesses (kimi, qwen,
+ * hermes — ADR-229) are not agents any more, and `isAgentDeepLinkable` below
+ * also rejects the globally disabled ids (T-864/T-1906): a deep link naming one
+ * falls back to the default agent rather than pin a tile that renders nothing.
  */
 const AGENTS = new Set<AgentProvider>([
-  'claude', 'cursor', 'codex', 'antigravity', 'opencode', 'qwen',
-  'kimi', 'deepseek', 'glm', 'hermes', 'sakana',
+  'claude', 'cursor', 'codex', 'antigravity', 'opencode',
+  'deepseek', 'dsh', 'glm', 'sakana',
 ]);
 
 /** A deep-linkable agent: known to the union AND not globally disabled. */

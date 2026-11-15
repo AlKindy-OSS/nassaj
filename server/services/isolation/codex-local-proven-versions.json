@@ -1,0 +1,9 @@
+{
+  "versions": {
+    "0.166.0": {
+      "probe": "codex-local-engine.header-echo.test.ts",
+      "pass": 8,
+      "provenAt": "2026-11-13T19:30:16.854Z"
+    }
+  }
+}

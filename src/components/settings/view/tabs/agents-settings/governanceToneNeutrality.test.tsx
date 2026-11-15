@@ -2,7 +2,7 @@
  * governanceToneNeutrality.test.tsx — **«لا قناة أصلاً» لا تُصبغ إنذاراً، في أي
  * سطح** (‏B-415).
  *
- * الشارة كانت تتفرّع على `status` وحده، والخادم يُجيب لـ`cursor`/`hermes` وأخواتِها
+ * الشارة كانت تتفرّع على `status` وحده، والخادم يُجيب لـ`cursor`/`sakana` وأخواتِها
  * `{status:'ungoverned', mechanism:'none'}` — أي «لا قناة تعليمات لهذا المحرّك
  * أصلاً» — فخرج مثلثٌ كهرماني يَعِد بإصلاحٍ لا وجود له. وتبويب «التعليمات»،
  * المبنيّ على **الواصف نفسه**، يحرّم ذلك بالنصّ: «غيابُ القناة ليس عطلاً ولا
@@ -63,15 +63,15 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe('نبرة الحوكمة: `mechanism:none` حالةٌ محايدة (B-415)', () => {
-  it('الشارة تختفي حين لا قناة — وهو جواب الخادم لـcursor/hermes حرفياً', async () => {
+  it('الشارة تختفي حين لا قناة — وهو جواب الخادم لـcursor/sakana حرفياً', async () => {
     payload = {
-      provider: 'hermes',
+      provider: 'sakana',
       status: 'ungoverned',
       enforced: false,
       mechanism: 'none',
       sources: [noMechanismChannel],
     };
-    const { container } = render(<GovernanceBadge provider="hermes" />);
+    const { container } = render(<GovernanceBadge provider="sakana" />);
     await waitFor(() => expect(container.innerHTML).toBe(''));
   });
 
@@ -86,17 +86,17 @@ describe('نبرة الحوكمة: `mechanism:none` حالةٌ محايدة (B-4
 
   it('لا سطحَ يُنذر على غياب القناة — الشارة ولوح التعليمات معاً', async () => {
     payload = {
-      provider: 'hermes',
+      provider: 'sakana',
       status: 'ungoverned',
       enforced: false,
       mechanism: 'none',
       sources: [noMechanismChannel],
     };
 
-    const badge = render(<GovernanceBadge provider="hermes" />);
+    const badge = render(<GovernanceBadge provider="sakana" />);
     await waitFor(() => expect(badge.container.innerHTML).toBe(''));
 
-    const panel = render(<InstructionSourcesContent agent="hermes" standalone />);
+    const panel = render(<InstructionSourcesContent agent="sakana" standalone />);
     await waitFor(() =>
       expect((panel.container.textContent ?? '').trim().length).toBeGreaterThan(0),
     );
@@ -108,7 +108,7 @@ describe('نبرة الحوكمة: `mechanism:none` حالةٌ محايدة (B-4
 
   it('الشارة تظهر ⟺ للواصف آليةٌ قائمة — مسحاً على الاتحاد كلّه', async () => {
     const mechanisms: GovernanceMechanism[] = [
-      'codex-fingerprint', 'claude-md', 'opencode-agents', 'kimi-agents',
+      'codex-fingerprint', 'claude-md', 'opencode-agents',
       'gemini-md', 'nassaj-project-md', 'none',
     ];
     for (const mechanism of mechanisms) {

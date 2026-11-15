@@ -1,0 +1,9 @@
+{
+  "versions": {
+    "0.2.2-rc.1": {
+      "probe": "dsh-local-engine.header-echo.test.ts",
+      "pass": 4,
+      "provenAt": "2026-11-13T20:55:43.068Z"
+    }
+  }
+}

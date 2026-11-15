@@ -45,6 +45,22 @@ type AgyTranscriptLine = {
   model?: string;
 };
 
+const INJECTED_USER_INPUT_TAGS = [
+  'instructions',
+  'nassaj_document_sharing',
+  'nassaj_public_pages',
+  'nassaj_quick_replies',
+  'coordination',
+  'ADDITIONAL_METADATA',
+  'USER_SETTINGS_CHANGE',
+  'SYSTEM_MESSAGE',
+];
+
+const INJECTED_TAGS_PATTERN = new RegExp(
+  INJECTED_USER_INPUT_TAGS.map((tag) => `<${tag}[^>]*>[\\s\\S]*?<\\/\\s*${tag}\\s*>`).join('|'),
+  'gi',
+);
+
 /**
  * Extracts the user-authored text from a USER_INPUT transcript line.
  *
@@ -52,10 +68,10 @@ type AgyTranscriptLine = {
  * environment metadata blocks after it. If the markers are missing we fall back
  * to the raw content so we never drop a user turn just because the wrapper drifts.
  *
- * `<instructions>...</instructions>` blocks are stripped because agy injects them
- * as system-level directives (e.g. response-language rules); they are not part of
- * what the human typed, so surfacing them as the user turn would be misleading.
- * The match is global so every injected block is removed, not just the first.
+ * System directives injected by Nassaj/agy (`<instructions>`, `<nassaj_document_sharing>`,
+ * `<nassaj_public_pages>`, `<nassaj_quick_replies>`, `<coordination>`, and metadata)
+ * are stripped because they are not part of what the human typed, so surfacing them as
+ * the user turn would be misleading. The match is global so every injected block is removed.
  */
 function extractUserRequest(rawContent: string | undefined): string {
   if (!rawContent) {
@@ -68,7 +84,7 @@ function extractUserRequest(rawContent: string | undefined): string {
     text = match[1];
   }
 
-  text = text.replace(/<instructions>[\s\S]*?<\/instructions>/gi, '');
+  text = text.replace(INJECTED_TAGS_PATTERN, '');
 
   return text.trim();
 }

@@ -12,6 +12,7 @@ import {
   type ForkExtraMessage,
 } from '@/modules/providers/list/claude/claude-transcript-fork.js';
 import { isLinkModeRunRefusal } from '@/modules/providers/services/harness-link-mode.service.js';
+import { localEngineSpawnRefusal } from '@/services/isolation/local-engine-pin.js';
 import { sessionSynchronizerService } from '@/modules/providers/services/session-synchronizer.service.js';
 import { notifySessionMetadataChanged } from '@/modules/providers/services/sessions-watcher.service.js';
 
@@ -106,7 +107,9 @@ export type SessionForkErrorCode =
   | 'fork_failed'
   /** B-1546/B-1547: the link-mode run gate refused the Codex fork before any submit. */
   | 'LINK_MODE_KEY_MISSING'
-  | 'LINK_MODE_RECORD_UNREADABLE';
+  | 'LINK_MODE_RECORD_UNREADABLE'
+  /** ADR-227 / T-2107: a chat pinned to a local model server is not forked. */
+  | 'local_engine_unsupported';
 
 export class SessionForkError extends Error {
   readonly code: SessionForkErrorCode;
@@ -488,6 +491,9 @@ async function authorizeCodexFork(params: ForkSessionAtMessageParams) {
   if (row.provider !== 'codex') {
     throw new SessionForkError('session_not_found', 'Session not found.');
   }
+  // ADR-227 / T-2107: the fork runs on the cloud App Server; a local chat is refused.
+  const localRefusal = localEngineSpawnRefusal({ storedEngine: row.engine_provider ?? null, site: 'fork' });
+  if (localRefusal) throw new SessionForkError('local_engine_unsupported', localRefusal.message);
   return row;
 }
 

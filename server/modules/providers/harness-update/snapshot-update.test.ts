@@ -56,7 +56,7 @@ beforeEach(() => {
   _resetHarnessLeases();
   _resetHarnessJobs();
   _resetHarnessLaunches();
-  for (const id of ['claude', 'codex', 'antigravity', 'cursor', 'opencode', 'kimi']) clearHarnessRecoveryBlocked(id);
+  for (const id of ['claude', 'codex', 'antigravity', 'cursor', 'opencode']) clearHarnessRecoveryBlocked(id);
   w = makeWorld();
   worlds.push(w);
   _setSnapshotRuntimeOverrides(w.rt);
@@ -158,89 +158,6 @@ test('same version but changed bytes is rolled back (never a silent success)', a
   const { final } = await run('agy');
   assert.equal(final.status, 'rolled_back');
   assert.equal(fs.readFileSync(file, 'utf8'), 'agy 1.2.12');
-});
-
-test('kimi (native single file, ADR-189): `kimi update --yes` succeeds, and a failed update is restored', async () => {
-  const file = installSingleFile(w, '.kimi-code/bin/kimi', 'kimi 2.1.1');
-  w.updater = (cmd, args) => {
-    assert.equal(cmd, file, 'the update runs the registry kimi itself');
-    assert.deepEqual(args, ['update', '--yes']);
-    fs.writeFileSync(file, 'kimi 2.2.0');
-    return ok();
-  };
-  const success = await run('kimi');
-  assert.equal(success.final.status, 'succeeded');
-  assert.equal(liveVersion(file), '2.2.0');
-
-  _resetHarnessLeases();
-  w.updater = () => {
-    fs.writeFileSync(file, 'kimi 2.3.0-broken');
-    return ok({ code: 1 });
-  };
-  const failed = await run('kimi');
-  assert.equal(failed.final.status, 'rolled_back');
-  assert.equal(fs.readFileSync(file, 'utf8'), 'kimi 2.2.0');
-  assert.equal(isHarnessRecoveryBlocked('kimi'), false);
-});
-
-/** Emulates kimi-code's `kimi update`: download into <bin dir>/.staging, no swap. */
-function stageKimi(file: string, text: string): void {
-  const staging = path.join(path.dirname(file), '.staging');
-  fs.mkdirSync(staging, { recursive: true });
-  fs.writeFileSync(path.join(staging, 'kimi-next'), text);
-  fs.writeFileSync(path.join(staging, 'staged.json'), JSON.stringify({ version: 'next', exeFileName: 'kimi-next', manual: true }));
-}
-
-/** Emulates kimi-code's next-start swap (`maybeRelaunchWithStagedNativeUpdate`). */
-function swapStagedKimi(file: string): void {
-  const staging = path.join(path.dirname(file), '.staging');
-  if (!fs.existsSync(path.join(staging, 'staged.json'))) return;
-  fs.renameSync(file, `${file}.bak`);
-  fs.renameSync(path.join(staging, 'kimi-next'), file);
-  fs.rmSync(staging, { recursive: true, force: true });
-}
-
-test('kimi staged update: the swap is forced inside the lease and verified; .bak leftovers are tolerated', async () => {
-  const file = installSingleFile(w, '.kimi-code/bin/kimi', 'kimi 2.1.1');
-  writeFixtureFile(`${file}.4242.bak`, 'kimi 2.0.0', 0o755); // an old kimi-code backup
-  const calls: string[][] = [];
-  w.updater = (cmd, args) => {
-    calls.push([cmd, ...args]);
-    if (args[0] === 'update') stageKimi(file, 'kimi 2.2.0');
-    else swapStagedKimi(file); // the forced `kimi --version` run
-    return ok();
-  };
-  const { final } = await run('kimi');
-  assert.equal(final.status, 'succeeded');
-  assert.deepEqual(calls, [[file, 'update', '--yes'], [file, '--version']]);
-  assert.equal(liveVersion(file), '2.2.0');
-  assert.equal(fs.existsSync(path.join(path.dirname(file), '.staging')), false, 'no stage left behind');
-});
-
-test('kimi: a stage the swap did not apply fails the update, and the restore leaves no stage', async () => {
-  const file = installSingleFile(w, '.kimi-code/bin/kimi', 'kimi 2.1.1');
-  w.updater = (_cmd, args) => {
-    if (args[0] === 'update') stageKimi(file, 'kimi 2.2.0');
-    return ok(); // the forced run did NOT swap (e.g. another instance's claim)
-  };
-  const { final } = await run('kimi');
-  assert.equal(final.status, 'rolled_back');
-  assert.equal(fs.readFileSync(file, 'utf8'), 'kimi 2.1.1');
-  assert.equal(fs.existsSync(path.join(path.dirname(file), '.staging')), false, 'the stage is gone after restore');
-});
-
-test('kimi: a stale stage from outside Nassaj is removed before the snapshot and never rides along', async () => {
-  const file = installSingleFile(w, '.kimi-code/bin/kimi', 'kimi 2.1.1');
-  stageKimi(file, 'kimi 6.6.6-foreign');
-  w.updater = (_cmd, args) => {
-    assert.equal(fs.existsSync(path.join(path.dirname(file), '.staging')), args[0] !== 'update',
-      'the foreign stage is gone before the updater runs');
-    return ok({ code: 1 });
-  };
-  const { final } = await run('kimi');
-  assert.equal(final.status, 'rolled_back');
-  assert.equal(fs.readFileSync(file, 'utf8'), 'kimi 2.1.1');
-  assert.equal(fs.existsSync(path.join(path.dirname(file), '.staging')), false);
 });
 
 test('a downgrade is rolled back', async () => {

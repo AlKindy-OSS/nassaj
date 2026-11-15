@@ -197,7 +197,6 @@
     "codex": "Codex",
     "antigravity": "Antigravity",
     "opencode": "OpenCode",
-    "kimi": "Kimi",
     "deepseek": "DeepSeek",
     "glm": "GLM"
   },
@@ -244,6 +243,24 @@
       "listeners_gone": "Scheduled wake-ups stopped: nobody has had the conversation open for a while.",
       "quota": "Scheduled wake-ups stopped: usage is at or above 90%.",
       "disabled": "Scheduled wake-ups are turned off on this server."
+    },
+    "hookNoVerdict": {
+      "timed_out": "A safety check didn't respond in time, so it didn't check this action.",
+      "no_answer": "A safety check gave no usable answer, so it didn't check this action."
+    },
+    "hookFailed": "A hook failed while checking this step.",
+    "hookDetails": "Show details",
+    "sessionWritesLost": {
+      "ENOSPC": "The server's disk is full, so part of this session wasn't saved.",
+      "EDQUOT": "The server's disk quota is used up, so part of this session wasn't saved.",
+      "unknown": "Part of this session couldn't be saved to disk.",
+      "transcript": "Resuming this conversation later may miss part of it.",
+      "globalConfig": "Recent Claude settings changes weren't saved."
+    },
+    "credentialExpiring": {
+      "soon": "Your Claude sign-in ends {{date}}. Re-link your Claude account to keep chatting without interruption.",
+      "expired": "Your Claude sign-in has probably ended ({{date}}). Re-link your Claude account to keep chatting.",
+      "action": "Open account settings"
     }
   },
   "systemMessage": {
@@ -340,7 +357,8 @@
     "generating": "Generating plan…",
     "rawParams": "raw params",
     "revise": "Revise",
-    "build": "Build"
+    "build": "Build",
+    "waitingStarter": "Waiting for {{name}} to approve this plan."
   },
   "usageLimit": {
     "resetAt": "Claude usage limit reached. Your limit will reset at **{{time}} {{timezone}}** - {{date}}"
@@ -526,7 +544,9 @@
     "removeFile": "Remove file",
     "uploading": "Uploading…",
     "errorType": "File type not allowed",
-    "errorSize": "File too large (max 50 MB)",
+    "errorSize": "File too large (max {{maxMb}} MB)",
+    "errorProxyTooLarge": "The upload was refused on the way to the server because it is too large. Try a smaller file.",
+    "errorUpload": "Could not upload the attached files.",
     "errorCount": "Too many files attached (max {{max}})"
   },
   "effortMode": {
@@ -584,7 +604,6 @@
       "antigravity": "Ready to use Antigravity (agy) with {{model}}. Start typing your message below.",
       "opencode": "Ready to use OpenCode with {{model}}. Start typing your message below.",
       "default": "Select a coding agent above to begin",
-      "kimi": "Ready to use Kimi with {{model}}. Start typing your message below.",
       "deepseek": "Ready to use DeepSeek with {{model}}. Start typing your message below.",
       "glm": "Ready to use GLM with {{model}}. Start typing your message below.",
       "claudeEngine": "Ready: the Claude coding agent runs on {{provider}} with {{model}}. Start typing your message below.",
@@ -633,7 +652,8 @@
     "chooseModel": "Choose a model",
     "dshDisclosure": {
       "title": "<b>DeepSeek Harness</b> is a developer preview (<b>rc</b>)",
-      "body": "<b>DeepSeek</b>'s <b>SAFETY.md</b> says it has not had a security audit. Your conversation and project content are sent to <b>DeepSeek</b>, and each request carries a fixed anonymous installation identifier. Its tools run on the server under the same system account as the other agents, so it can read files by absolute path."
+      "body": "<b>DeepSeek</b>'s <b>SAFETY.md</b> says it has not had a security audit. Your conversation and project content are sent to <b>DeepSeek</b>, and each request carries a fixed anonymous installation identifier. Its tools run on the server under the same system account as the other agents, so it can read files by absolute path.",
+      "body_local": "<b>DeepSeek</b>'s <b>SAFETY.md</b> says it has not had a security audit. With a local model, your conversation and project content go to your own local model server, not to <b>DeepSeek</b>. Its tools run on the server under the same system account as the other agents, so it can read files by absolute path."
     }
   },
   "session": {
@@ -642,6 +662,7 @@
       "incomplete": "Conversation history is currently incomplete. Try again later.",
       "busy": "The service is busy. Please wait before trying again.",
       "timeout": "Loading conversation history timed out.",
+      "removed": "This conversation belongs to a tool that was removed from Nassaj. It can no longer be opened or continued.",
       "unavailable": "Conversation history could not be loaded.",
       "retained": "Displayed and pending messages have been kept.",
       "wait": "Please wait before trying again"
@@ -700,7 +721,8 @@
       "working": "Working",
       "computing": "Computing",
       "reasoning": "Reasoning",
-      "waitingPermission": "Waiting for permission"
+      "waitingPermission": "Waiting for permission",
+      "runningChecks": "Running checks"
     },
     "state": {
       "live": "Live",
@@ -881,6 +903,8 @@
     "cli_not_installed": "CLI not installed — please install the required CLI tool",
     "spawn_failed": "Failed to start the process — check server logs for details",
     "session_create_failed": "Could not start a new session — please try again",
+    "ENGINE_PROVIDER_UNAVAILABLE": "The selected engine could not run this message, and it was not sent to any other provider",
+    "ENGINE_PIN_WRITE_FAILED": "The local server of this chat could not be recorded, so the run was stopped",
     "session_busy": "Your message was not sent: this conversation has a run in progress. Wait for it to finish or stop it, then send again",
     "attachment_rejected": "Your message was not sent: an attachment is not a file uploaded to this project. Attach the file again from your device, then send",
     "opencode_project_config_refused": "Could not start: this project has an OpenCode config file (opencode.json or a .opencode folder) that sets provider or MCP endpoints, which is not allowed in this mode. Remove its provider and mcp sections or delete the file, then send again",
@@ -927,7 +951,13 @@
     "dsh_cap_gate": "Not started: Nassaj could not confirm it decides every tool in this DeepSeek Harness version. Use Claude for this conversation",
     "dsh_gate_bypassed": "Stopped: a tool reached execution without Nassaj's decision, so DeepSeek Harness was stopped. Please report this to the server owner",
     "dsh_post_hook_skipped": "Stopped: a tool ran without passing the after-run checks, so DeepSeek Harness was stopped. Please report this to the server owner",
-    "dsh_override_unverified": "Not started: the DeepSeek Harness copy set by hand on this server lacks the required safety settings. Ask the server owner to fix it"
+    "dsh_override_unverified": "Not started: the DeepSeek Harness copy set by hand on this server lacks the required safety settings. Ask the server owner to fix it",
+    "shared_writing_unsupported": "Not sent: only the member who started this conversation can continue it on this provider. Branch it to continue on your own account",
+    "shared_write_transcript_conflict": "Not sent: your account already holds a different record under this conversation's name, so it can't be continued from your account. Branch it instead",
+    "shared_write_transcript_unavailable": "Not sent: this conversation's record can't be reached right now, so it can't be continued from your account. Try again later or branch it",
+    "shared_writing_cli_unproven": "Not sent: the installed Claude version hasn't been verified for continuing another member's conversation. Ask the administrator to verify it, or branch the conversation",
+    "shared_writing_forbidden": "Not sent: you don't have permission to write in this conversation",
+    "turn_stop_forbidden": "Not stopped: only the member who started this reply, the project owner or an administrator can stop it now; other members can stop it once it is stuck"
   },
   "outbox": {
     "cardLabel": "Unsent message",
@@ -1680,19 +1710,51 @@
   "localModels": {
     "blockHeading": "Local models · {{server}}",
     "engineLine": "On your own server; no Anthropic account is used",
+    "engineLine_codex": "On your own server; no OpenAI account is used",
+    "engineLine_dsh": "On your own server; no DeepSeek account is used",
     "serverName": "Your local server · {{server}}",
     "deletedServer": "Deleted local server",
     "engineShort": "Local",
     "openSettings": "Server settings",
     "blocked": {
       "context_unknown": "Set the context window",
-      "context_too_small": "Needs at least 18,096 tokens",
+      "context_too_small": "Needs at least {{tokens}} tokens",
       "address_untested": "Re-test the connection",
       "tls_name_requires_relay": "https with a host name is not supported yet; use http or an IP address",
       "base_url_unsupported": "This server address is not supported; use a private address on your network",
       "model_id_reserved": "This model id is reserved and cannot run on the Claude coding agent",
       "new_chat_only": "Start a new chat",
       "other_server": "Runs on another server; start a new chat"
+    }
+  },
+  "sharedWriting": {
+    "regionLabel": "Conversation shared with another member",
+    "someone": "a colleague",
+    "busy": {
+      "running": "The reply to {{name}} is running now. Your message is back in the box; send it when the reply ends.",
+      "post_result": "The reply to {{name}} has finished, but its background work is still running. Your message is back in the box; send it once that work ends.",
+      "scheduled_wake": "{{name}}'s turn is waiting for a scheduled wake-up. Your message is back in the box; send it after that turn ends.",
+      "launching": "A reply to {{name}} is starting. Your message is back in the box; send it again in a moment.",
+      "stuck": "This reply has shown no activity for a long time and looks stuck."
+    },
+    "stopStuck": "Stop the stuck reply",
+    "stopForbidden": "You can't stop the reply to {{name}} while it is still active; you can stop it once it is stuck.",
+    "stoppedBy": "{{name}} stopped this reply.",
+    "unsupported": "This conversation is continued by {{creator}} on {{provider}}. Branch it to continue on your own account.",
+    "unsupportedNoFork": "This conversation is continued by {{creator}} on {{provider}}, and only they can write in it. Start a new conversation to continue on your own account.",
+    "creatorFallback": "the member who started it",
+    "fork": "Branch to my account",
+    "forking": "Branching…",
+    "dismiss": "Dismiss",
+    "turnImages": "{{count}} image(s) attached",
+    "approval": {
+      "waitingFor": "Waiting for {{name}} to answer: this tool acts with their own account.",
+      "waitingQuestion": "Waiting for {{name}} to answer this question.",
+      "starterFallback": "the member who started this turn",
+      "nonStarterNote": "You're answering for {{name}}'s turn: allow once or deny only.",
+      "denyNoteLabel": "Reason for denying (optional)",
+      "denyNoteHint": "Sent to the conversation with your name.",
+      "counter": "{{count}} / {{max}}"
     }
   }
 }

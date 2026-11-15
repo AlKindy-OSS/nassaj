@@ -35,7 +35,7 @@ import { probeProcess } from './watchdog.js';
 export type CliHarnessProvider = Exclude<CliTurnProvider, 'claude'>;
 export type CliHarnessMode = 'chat';
 
-const SUPERVISED_PROVIDERS = Object.freeze(['codex', 'qwen', 'opencode'] as const);
+const SUPERVISED_PROVIDERS = Object.freeze(['codex', 'opencode'] as const);
 
 /**
  * ADR-200 §8 / M-6: an opencode turn redacts every key that can enter the
@@ -83,15 +83,15 @@ export const cliTurnSupervisorRedactionInternals = Object.freeze({
   redactOpenCodePrompt, redactOpenCodeSessionText, redactingResultRepository,
 });
 const ADAPTER_IDS: Readonly<Record<CliHarnessProvider, string>> = Object.freeze({
-  codex: 'codex-cli-ephemeral', qwen: 'qwen-cli-supervisor-ephemeral',
+  codex: 'codex-cli-ephemeral',
   opencode: 'opencode-cli-supervisor-ephemeral',
 });
 const RUNTIMES = Object.freeze({
-  codex: 'codex_cli_ephemeral', qwen: 'qwen_cli_ephemeral',
+  codex: 'codex_cli_ephemeral',
   opencode: 'opencode_cli_ephemeral',
 } as const);
 const DEFAULT_MODELS: Readonly<Record<CliHarnessProvider, string>> = Object.freeze({
-  codex: 'gpt-5.3-codex', qwen: 'qwen3-coder-plus',
+  codex: 'gpt-5.3-codex',
   opencode: 'opencode/default',
 });
 export const CLI_TURN_SUPERVISOR_OWNER_ID = `cli-turn-supervisor:${process.pid}:${randomUUID()}`;
@@ -99,12 +99,8 @@ export const CLI_TURN_SUPERVISOR_OWNER_ID = `cli-turn-supervisor:${process.pid}:
 export const CLI_HARNESS_MATRIX = Object.freeze([
   ...(['codex', 'opencode'] as const).map((provider) => Object.freeze({ provider, mode: 'chat', runtime: 'ephemeral_cli', supported: true,
     levels: Object.freeze(['direct', 'delegate', 'delegate_review'] as const) })),
-  ...(['qwen'] as const).map((provider) => Object.freeze({
-    provider, mode: 'chat', runtime: 'ephemeral_cli', supported: false,
-    levels: Object.freeze([]), reason: 'installed_binary_capability_probe_failed' as const,
-  })),
-  ...(['cursor', 'antigravity', 'kimi'] as const).map((provider) =>
-    Object.freeze({ provider, mode: provider === 'kimi' ? 'agent' : 'chat', runtime: 'legacy_cli',
+  ...(['cursor', 'antigravity'] as const).map((provider) =>
+    Object.freeze({ provider, mode: 'chat', runtime: 'legacy_cli',
       supported: false, levels: Object.freeze([]),
       reason: 'runtime_persists_state_or_exposes_effectful_tools_without_supervisor_role_cage' as const })),
 ]);
@@ -140,8 +136,7 @@ export class CliTurnSupervisorRuntime {
   constructor(
     private readonly env: NodeJS.ProcessEnv = process.env,
     adapterOrAdapters: TurnAdapterRegistration | readonly TurnAdapterRegistration[] = [
-      createCodexCliAdapter(), createExtendedCliAdapter('qwen'),
-      createExtendedCliAdapter('opencode'),
+      createCodexCliAdapter(), createExtendedCliAdapter('opencode'),
     ],
   ) {
     const adapters = Array.isArray(adapterOrAdapters) ? adapterOrAdapters : [adapterOrAdapters];

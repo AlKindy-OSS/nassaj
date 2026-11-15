@@ -1,6 +1,6 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Bot, ChevronDown, Clock3, GitFork, ImageOff, Info, Sparkles } from 'lucide-react';
+import { Bot, ChevronDown, Clock3, GitFork, ImageOff, Sparkles } from 'lucide-react';
 
 import SessionProviderLogo from '../../../llm-logo-provider/SessionProviderLogo';
 import ParticipantAvatar from '../../../participants/ParticipantAvatar';
@@ -29,7 +29,8 @@ import SteerBubble from '../../../session-steer/SteerBubble';
 import { useTurnCostMap } from '../../context/TurnCostContext';
 
 import { Markdown } from './Markdown';
-import { noticeText } from './noticeText';
+import ChatNoticeLine from './ChatNoticeLine';
+import { isNoticeForUser } from './noticeText';
 import AgyTextToolCalls from './AgyTextToolCalls';
 import ChatMessageImage from './ChatMessageImage';
 import MessageCopyControl from './MessageCopyControl';
@@ -69,6 +70,12 @@ type MessageComponentProps = {
   // message's `userId` author stamp to the real sender's avatar/name/colour
   // (B-MU-UX-FIX-MSG-AUTHOR). Optional so standalone renders degrade safely.
   participantsById?: Map<string, SessionParticipant>;
+  /**
+   * ADR-173 P8: the conversation has user messages by more than one human. Then
+   * every prompt (the viewer's own too) is captioned with its author; a solo
+   * conversation keeps its earlier look.
+   */
+  isMultiAuthor?: boolean;
   provider: Provider | string;
   onRequestDeferredHistory?: () => void;
   /** زرّ «استكمِل الآن» على صفّ `stream_recovery_gap` (bypass صريح، بلا إخفاء تلقائي للتنبيه). */
@@ -92,7 +99,7 @@ type InteractiveOption = {
 
 const COPY_HIDDEN_TOOL_NAMES = new Set(['Bash', 'Edit', 'Write', 'ApplyPatch']);
 
-const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, onStartNewSession, onForkFromMessage, isForkingMessage, autoExpandTools, showRawParameters, showThinking, showToolCalls, selectedProject, owner, participantsById, provider, onRequestDeferredHistory, onResumeStreamRecovery, sessionId = null, quickReplyEligible = false, onQuickReply }: MessageComponentProps) => {
+const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, onStartNewSession, onForkFromMessage, isForkingMessage, autoExpandTools, showRawParameters, showThinking, showToolCalls, selectedProject, owner, participantsById, isMultiAuthor = false, provider, onRequestDeferredHistory, onResumeStreamRecovery, sessionId = null, quickReplyEligible = false, onQuickReply }: MessageComponentProps) => {
   const { t, i18n } = useTranslation('chat');
   // خريطة الأدوار (turns) من TurnCostContext — بلا جلب إضافي (البيانات يجلبها
   // ChatInterface مرّة واحدة وتُشارَك عبر السياق).
@@ -162,13 +169,14 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, o
     if (known) return known;
     return {
       userId: messageUserId,
-      username: '',
+      // ADR-173 P6: a live colleague prompt names itself before the roster loads.
+      username: message.authorName ?? '',
       role: 'user',
       first_seen: '',
       last_seen: '',
       message_count: 0,
     };
-  }, [messageUserId, isOwnMessage, currentUserParticipant, participantsById]);
+  }, [messageUserId, isOwnMessage, currentUserParticipant, participantsById, message.authorName]);
 
   // Per-message coordinator attribution (server commit 9c61b60). An assistant
   // reply carries `coordinatorId` = the participant who LAUNCHED the run that
@@ -217,6 +225,15 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, o
     owner != null &&
     messageUserId !== undefined &&
     messageUserId === owner.userId;
+
+  // ADR-173 P6: a prompt by another member (not the owner) in a
+  // shared conversation carries the same "User: <name>" caption, live and on
+  // reload, so the reader knows who wrote it even where the avatar is hidden.
+  // P8: with more than one human author, the viewer's own prompt carries its name
+  // too, live as after reload (the owner arm above needs the owner, unknown live
+  // for a fresh conversation). A solo conversation keeps its earlier look.
+  const authorCaptionName = message.type === 'user' && !isOwnerAuthoredMessage && (isMultiAuthor || !isOwnMessage)
+    && messageUserId !== undefined && authorParticipant?.username ? authorParticipant.username : null;
 
   // Externally-originated user prompt: a user row with NO userId stamp. These
   // rows were written straight into the provider transcript from outside the
@@ -447,6 +464,11 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, o
     return null;
   }
 
+  // T-2113: an owner-only notice (an ending sign-in) is not rendered for anyone else.
+  if (message.isNotice && !isNoticeForUser(message, user?.id)) {
+    return null;
+  }
+
   return (
     <div
       ref={messageRef}
@@ -460,13 +482,9 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, o
     >
       {message.isNotice ? (
         /* B-1624: a neutral server notice (a Codex user stop, a B-1699 scheduled wake-up): one muted line,
-         * no error colour, no copy control, never grouped with a reply. */
-        <p className="flex w-full items-start gap-2 py-0.5 text-xs text-muted-foreground" data-chat-notice>
-          <Info className="mt-0.5 h-3.5 w-3.5 flex-shrink-0" aria-hidden="true" />
-          <span className="min-w-0 flex-1 whitespace-pre-wrap break-words" dir={contentDir}>
-            {noticeText(message, t)}
-          </span>
-        </p>
+         * no error colour, no copy control, never grouped with a reply. T-2113 adds hook-health,
+         * lost-writes and sign-in-ending lines with their own tone (ChatNoticeLine). */
+        <ChatNoticeLine message={message} contentDir={contentDir} viewerUserId={user?.id} />
       ) : message.isSkillLoad ? (
         /* Skill body injected by Claude after a Skill tool call: one compact,
          * expandable line instead of a bubble. Logical properties only. */
@@ -608,6 +626,13 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, o
                 </span>
               </div>
             )}
+            {authorCaptionName && !isGrouped && (
+              <div className="mb-1 flex items-center gap-1 text-[11px] font-medium text-[hsl(var(--user-bubble-muted-foreground,var(--primary-foreground)))]">
+                <span dir="auto">
+                  {t('userAuthor.withName', { username: authorCaptionName, defaultValue: 'User: {{username}}' })}
+                </span>
+              </div>
+            )}
             {/* Externally-originated prompt: explicit terminal-icon caption so
              * the bubble is never mistaken for a human sender (the grey
              * terminal avatar beside the bubble carries the same identity, but
@@ -636,6 +661,12 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, o
                      hostile-SVG surface and, on mobile, a dead end. */
                   <ChatMessageImage key={img.name || idx} src={img.data} alt={img.name} />
                 ))}
+              </div>
+            )}
+            {typeof message.sharedImageCount === 'number' && message.sharedImageCount > 0 && (
+              <div className="mt-2 flex items-center gap-1.5 text-xs text-[hsl(var(--user-bubble-muted-foreground,var(--primary-foreground)))]">
+                <ImageOff className="h-3.5 w-3.5 flex-shrink-0" aria-hidden="true" />
+                <span>{t('sharedWriting.turnImages', { count: message.sharedImageCount })}</span>
               </div>
             )}
             {typeof message.imagesOmitted === 'number' && message.imagesOmitted > 0 && (

@@ -20,8 +20,8 @@ import { SessionShareError, createViewRecorder } from '../services/session-share
 import { LiveProjectionError } from '../services/session-share-live-errors.js';
 import { providerLabelFor, sanitizeTitle } from '../services/session-share-snapshot.js';
 import {
-  admittedOrThrow, assertGuestReadable, guestIpKey, releaseWhenDone, setGuestHeaders, shareUnavailable,
-  verifyGuestToken,
+  admittedOrThrow, assertGuestReadable, assertProviderNotRemoved, guestIpKey, releaseWhenDone, setGuestHeaders,
+  shareUnavailable, verifyGuestToken,
 } from '../services/share-guest-access.js';
 import { createGuestGuards } from '../services/share-guest-guards.js';
 import { parsePublicOrigin } from '../services/share-page.js';
@@ -92,11 +92,15 @@ function respondGuestError(res, error) {
   }
 }
 
-/** D1 steps 1-4: token, failure buckets, liveness (+ owner_unreadable), live mode for data endpoints. */
+/**
+ * D1 steps 1-4: token, failure buckets, liveness (+ owner_unreadable), removed
+ * harness (ADR-229, 410 after the token verified), live mode for data endpoints.
+ */
 function authorize(req, parsed, ctx) {
   if (!parsePublicOrigin(ctx.publicOrigin)) throw shareUnavailable();
   const row = verifyGuestToken(req, parsed.id, ctx);
   assertGuestReadable(row, ctx.policy, ctx.now());
+  assertProviderNotRemoved(row, ctx.policy);
   if (parsed.endpoint !== 'meta' && (row.mode !== 'live' || !row.ref_key)) throw shareUnavailable();
   return row;
 }

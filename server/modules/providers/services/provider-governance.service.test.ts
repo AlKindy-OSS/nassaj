@@ -366,9 +366,8 @@ describe('provider-governance — antigravity/agy (GEMINI.md, present-not-enforc
 });
 
 describe('provider-governance — engines with no mechanism are always ungoverned', () => {
-  // `kimi` was here until ADR-093 §2.3-1: it HAS a fail-closed channel (traced to
-  // the live agent launch path), so it now lives in its own suite below.
-  for (const provider of ['hermes', 'cursor', 'deepseek', 'glm', 'sakana'] as const) {
+  // kimi and qwen joined this list when their native bodies were removed (ADR-229).
+  for (const provider of ['hermes', 'kimi', 'qwen', 'cursor', 'deepseek', 'glm', 'sakana'] as const) {
     it(`${provider} ⇒ ungoverned/none (no 404 — an unknown engine still answers honestly)`, () => {
       assert.deepEqual(legacy(providerGovernanceService.getGovernance(provider, 9001)), {
         status: 'ungoverned',
@@ -486,8 +485,8 @@ describe('ADR-093 — channels carry the path, the link target and the verificat
 
   it('every provider answers with at least one channel (never an empty list)', () => {
     for (const provider of [
-      'codex', 'claude', 'opencode', 'kimi', 'antigravity',
-      'hermes', 'cursor', 'deepseek', 'glm', 'sakana',
+      'codex', 'claude', 'opencode', 'antigravity',
+      'hermes', 'kimi', 'cursor', 'deepseek', 'glm', 'sakana',
     ] as const) {
       const desc = providerGovernanceService.getGovernance(provider, 9101);
       assert.ok(desc.sources.length >= 1, `${provider} must report a channel`);
@@ -563,41 +562,6 @@ describe('ADR-093 §2.2 — the six reasons, each from a real on-disk situation'
   });
 });
 
-describe('ADR-093 §2.3-1 — kimi is FAIL-CLOSED and must say so (the corrected lie)', () => {
-  // Traced before wiring (ADR §7-أ): chat-websocket.service.ts:707 → spawnKimiAgent
-  // → prepareKimiAgentLaunch (kimi-agent-cli.js:305) → ensureVendorCliGovernance
-  // (kimi-agent-cli.js:243), which THROWS on an unattested launch.
-  const KIMI_USER = 9301;
-
-  it('declares the kimi-agents mechanism with fail-closed enforcement (was: none/false)', () => {
-    const desc = providerGovernanceService.getGovernance('kimi', KIMI_USER);
-    assert.equal(desc.mechanism, 'kimi-agents');
-    assert.equal(desc.enforced, true, 'the launch gate refuses an ungoverned kimi turn');
-    const [channel] = desc.sources;
-    assert.equal(channel.id, 'kimi-home');
-    assert.equal(channel.verification, 'fingerprint');
-    assert.equal(channel.enforcement, 'fail-closed');
-    assert.equal(
-      channel.path,
-      userConfigDir(KIMI_USER, path.join('.kimi', CODEX_AGENTS_FILENAME)),
-      'the path must be the isolated KIMI_CODE_HOME the agent launcher resolves',
-    );
-  });
-
-  it('reports the real disk verdict: ungoverned before the copy, governed after', () => {
-    assert.equal(providerGovernanceService.getGovernance('kimi', KIMI_USER).status, 'ungoverned');
-    assert.equal(
-      providerGovernanceService.getGovernance('kimi', KIMI_USER).sources[0].reason,
-      'copy_missing',
-    );
-    // Materialize the REAL artifact the launch gate would install (setup only).
-    assert.equal(materializeGovernanceCopy(userConfigDir(KIMI_USER, '.kimi')), true);
-    const desc = providerGovernanceService.getGovernance('kimi', KIMI_USER);
-    assert.equal(desc.status, 'governed');
-    assert.equal(desc.sources[0].reason, null);
-  });
-});
-
 describe('ADR-093 §2.3-3 — agy has a SECOND, project-scoped channel', () => {
   it('two channels: the home GEMINI.md (best-effort) and the project NASSAJ.md (informational)', () => {
     const desc = providerGovernanceService.getGovernance('antigravity', 8301);
@@ -657,10 +621,10 @@ describe('ADR-093 §2.3-3 — agy has a SECOND, project-scoped channel', () => {
 });
 
 describe('ADR-093 — READ-ONLY still holds for every new channel', () => {
-  it('querying kimi/agy/claude writes nothing to a bare tree', () => {
+  it('querying agy/claude/codex writes nothing to a bare tree', () => {
     const USER = 9401;
     const root = userConfigDir(USER, '');
-    for (const provider of ['kimi', 'antigravity', 'claude', 'codex'] as const) {
+    for (const provider of ['antigravity', 'claude', 'codex'] as const) {
       providerGovernanceService.getGovernance(provider, USER, {
         projectPath: path.join(sandbox, 'never-created-project'),
       });
@@ -692,7 +656,7 @@ describe('ADR-093 §4.1 — which engines have a link action at all', () => {
   });
 
   it('mechanism-less engines have none (a button that lies is worse than no button)', () => {
-    for (const provider of ['hermes', 'cursor', 'deepseek', 'glm', 'sakana'] as const) {
+    for (const provider of ['hermes', 'kimi', 'qwen', 'cursor', 'deepseek', 'glm', 'sakana'] as const) {
       const plan = resolveGovernanceLinkPlan(provider, 7101);
       assert.equal(plan.linkable, false, provider);
       assert.equal(plan.refusal, 'no_mechanism', provider);
@@ -713,15 +677,11 @@ describe('ADR-093 §4.1 — which engines have a link action at all', () => {
     assert.equal(plan.filename, 'GEMINI.md');
   });
 
-  it('codex/opencode/kimi are linkable, each at the home its LAUNCH path resolves', () => {
+  it('codex/opencode are linkable, each at the home its LAUNCH path resolves', () => {
     const codex = resolveGovernanceLinkPlan('codex', 9503);
     assert.equal(codex.linkable, true);
     assert.equal(codex.home, userConfigDir(9503, '.codex'), 'codex is isolated by policy here');
     assert.equal(codex.linkScope, 'user');
-
-    const kimi = resolveGovernanceLinkPlan('kimi', 9503);
-    assert.equal(kimi.home, userConfigDir(9503, '.kimi'));
-    assert.equal(kimi.linkScope, 'user', 'kimi isolates for any authenticated user');
 
     // ADR-105: opencode defaults to ISOLATED now, so the link lands in the caller's
     // own config-home. Under the old default it landed in the operator's — which is
@@ -734,12 +694,11 @@ describe('ADR-093 §4.1 — which engines have a link action at all', () => {
 
   it('an anonymous caller resolves to the OPERATOR home, which the route then gates', () => {
     assert.equal(resolveGovernanceLinkPlan('codex', null).linkScope, 'operator');
-    assert.equal(resolveGovernanceLinkPlan('kimi', null).linkScope, 'operator');
   });
 
   it('computing a plan writes NOTHING (it is path arithmetic, not provisioning)', () => {
     const USER = 9504;
-    for (const provider of ['codex', 'kimi', 'opencode', 'antigravity', 'claude'] as const) {
+    for (const provider of ['codex', 'opencode', 'antigravity', 'claude'] as const) {
       resolveGovernanceLinkPlan(provider, USER);
     }
     assert.equal(fs.existsSync(userConfigDir(USER, '')), false);

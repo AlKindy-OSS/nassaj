@@ -36,6 +36,9 @@ import {
 } from './apply-claude-local-engine-env.js';
 import { assertClaudeSpawnEnvAllowed } from './claude-spawn-env-guard.js';
 import { localEngineDerivedDirName, prepareEnginePinConfigDir } from './engine-pin-config-dir.js';
+import {
+  assertRecorderCatches, netnsAvailable, packetRecorderAvailable, recordInNetns, strayAttempts, type Attempt, type Listen,
+} from './netns-recorder.fixture-helper.js';
 
 const HARNESS = path.join(path.dirname(fileURLToPath(import.meta.url)), 'engine-pin-header-echo.fixture.mjs');
 // Built at runtime so the source carries no token-shaped literal for the export leak scan.
@@ -55,7 +58,7 @@ const MODEL = `${SERVER.providerId}/gpt-oss-20b`;
 
 /**
  * Absolute path of the `claude` binary under test: NASSAJ_TEST_CLAUDE_BIN (set by
- * scripts/prove-claude-local-engine.mjs), else the first one on PATH, or null.
+ * scripts/prove-local-engine.mjs), else the first one on PATH, or null.
  */
 function findClaude(): string | null {
   const pinned = process.env.NASSAJ_TEST_CLAUDE_BIN;
@@ -65,11 +68,6 @@ function findClaude(): string | null {
     if (dir && fs.existsSync(candidate)) return fs.realpathSync(candidate);
   }
   return null;
-}
-
-/** True when an unprivileged loopback-only network namespace can be created. */
-function netnsAvailable(): boolean {
-  return spawnSync('unshare', ['-rn', 'sh', '-c', 'ip link set lo up'], { timeout: 10_000 }).status === 0;
 }
 
 const CLAUDE_BIN = findClaude();
@@ -125,7 +123,6 @@ function memberEnv(sb: Sandbox): NodeJS.ProcessEnv {
   };
 }
 
-type Listen = { host: string; port: number };
 
 /**
  * Runs the real CLI against the echo endpoint inside a loopback-only netns. With
@@ -239,32 +236,8 @@ for (const [label, resolved, listen] of [
 // (netns-connect-recorder.fixture.py) logs it. The only permitted attempt is the
 // TCP connect to the echo endpoint (the local server).
 
-const RECORDER = path.join(path.dirname(fileURLToPath(import.meta.url)), 'netns-connect-recorder.fixture.py');
-const PYTHON = spawnSync('python3', ['-c', 'import socket; socket.AF_PACKET'], { timeout: 10_000 }).status === 0;
-const RECORD_SKIP = SKIP || (PYTHON ? false : 'python3 with AF_PACKET unavailable');
-type Attempt = { proto: string; dst: string; port: number };
+const RECORD_SKIP = SKIP || (packetRecorderAvailable() ? false : 'python3 with AF_PACKET unavailable');
 type Recorded = { requests: RequestSummary[]; attempts: Attempt[]; status: number | null };
-
-/** Runs `inner` (argv) inside a namespace that routes everything to lo, with the recorder on. */
-function recordInNetns(sb: Sandbox, tag: string, inner: string[]): { attempts: Attempt[]; stdout: string; status: number | null } {
-  const out = path.join(sb.root, `attempts-${tag}.json`);
-  const ready = path.join(sb.root, `ready-${tag}`);
-  const script = [
-    'ip link set lo up',
-    'ip route add local 0.0.0.0/0 dev lo table local',
-    'ip -6 route add local ::/0 dev lo table local',
-    'python3 -I "$0" "$1" "$2" & rec=$!',
-    'i=0; while [ ! -e "$2" ] && [ $i -lt 200 ]; do sleep 0.05; i=$((i+1)); done',
-    'shift 3; "$@"; rc=$?',
-    'sleep 0.3; kill -TERM $rec; wait $rec; exit $rc',
-  ].join('\n');
-  const result = spawnSync('unshare', ['-rn', 'sh', '-c', script, RECORDER, out, ready, 'x', ...inner], {
-    encoding: 'utf8', timeout: 120_000,
-  });
-  const attempts = fs.existsSync(out) ? (JSON.parse(fs.readFileSync(out, 'utf8')).attempts as Attempt[]) : [];
-  assert.ok(fs.existsSync(out), `recorder wrote nothing: ${result.stderr?.slice(0, 300)}`);
-  return { attempts, stdout: result.stdout ?? '', status: result.status };
-}
 
 /** The echo harness under the recorder; the endpoint listens at `listen`, the env is used as is. */
 function runRecorded(sb: Sandbox, env: NodeJS.ProcessEnv, bearer: string, tag: string, listen: Listen,
@@ -274,24 +247,14 @@ function runRecorded(sb: Sandbox, env: NodeJS.ProcessEnv, bearer: string, tag: s
     claudeBin: CLAUDE_BIN, env, cwd: sb.cwd, listen, ...extra,
     markers: { engine: bearer, dummies: [DUMMY_OAUTH, DUMMY_REFRESH] },
   });
-  const run = recordInNetns(sb, tag, [process.execPath, HARNESS, specPath]);
+  const run = recordInNetns(sb.root, tag, [process.execPath, HARNESS, specPath]);
   assert.equal(run.status, 0, `harness failed in ${tag}`);
   const requests = JSON.parse(run.stdout.trim().split('\n').pop() ?? '{}').requests ?? [];
   return { requests, attempts: run.attempts, status: run.status };
 }
 
-/** Attempts other than the TCP connect to the echo endpoint. */
-function strayAttempts(attempts: Attempt[], listen: Listen): Attempt[] {
-  return attempts.filter((a) => !(a.proto === 'tcp' && a.dst === listen.host && a.port === listen.port));
-}
-
 test('recorder control: a dial and a DNS query to the outside world are both caught', { skip: RECORD_SKIP }, () => {
-  const sb = makeSandbox();
-  const probe = "import socket\ns=socket.socket(); s.settimeout(0.5); s.connect_ex(('198.51.100.7', 443))\n"
-    + "try:\n  socket.getaddrinfo('api.anthropic.com', 443)\nexcept OSError:\n  pass\n";
-  const { attempts } = recordInNetns(sb, 'control', ['python3', '-I', '-c', probe]);
-  assert.ok(attempts.some((a) => a.proto === 'tcp' && a.dst === '198.51.100.7' && a.port === 443), 'dial seen');
-  assert.ok(attempts.some((a) => a.proto === 'udp' && a.port === 53), 'DNS query seen');
+  assertRecorderCatches(makeSandbox().root, 'api.anthropic.com');
 });
 
 const ECHO: Listen = { host: '127.0.0.1', port: 18080 };

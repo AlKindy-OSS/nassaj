@@ -3,11 +3,11 @@
  * reconciler ask about the per-engine governance switch (owner decision
  * 2026-08-08): "did this user exempt this engine?"
  *
- * WHY IT SITS IN THE ISOLATION LAYER, not in the providers module. Its four
- * callers span three layers that cannot import each other: two providers-module
- * gates (codex, opencode), a root-level launcher (kimi-agent-cli.js), and
- * provision-user-dirs.js in this same folder. The isolation layer is the only
- * one all four may reach without a cross-module barrel import (and without
+ * WHY IT SITS IN THE ISOLATION LAYER, not in the providers module. Its
+ * callers span two layers that cannot import each other: two providers-module
+ * gates (codex, opencode) and provision-user-dirs.js in this same folder. The
+ * isolation layer is the only one all of them may reach without a cross-module
+ * barrel import (and without
  * dragging the providers barrel — and its session/watcher graph — into the
  * provisioning path).
  *
@@ -42,7 +42,6 @@ const governanceExemptionsDb = databaseModule.governanceExemptionsDb ?? {
 export const GOVERNANCE_EXEMPTION_PROVIDERS = Object.freeze([
   'codex',
   'opencode',
-  'kimi',
   'antigravity',
   'claude',
 ]);

@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "reviewedSiteDigest": "sha256:5854451e5d76c9578a9cdb49ca6284499c7b9989625aea8c924afde715e4decf",
+  "reviewedSiteDigest": "sha256:8f26415282c438944716fb7f3daa22316ae27f27770766ca4d0eb44f24609529",
   "exact": {
     "server/services/document-share-preview.js#child_process.spawn#1": {
       "classification": "bounded_local_compute",
@@ -428,6 +428,60 @@
       "adapter": "header-echo harness",
       "test": "engine-pin-header-echo.matrix.test.ts and claude-auth.precedence.header-echo.test.ts"
     },
+    "server/services/isolation/codex-local-header-echo.fixture.mjs#codex_sdk.startThread#1": {
+      "classification": "test_only",
+      "owner": "Codex local-engine header-echo test fixture (T-2107)",
+      "purpose": "synthetic_header_echo_fixture",
+      "actorSource": "test-only callers; spec file written by the test with dummy credentials and a throwaway CODEX_HOME",
+      "gate": "script executed only by tests under unshare -rn (loopback-only netns); base URL pinned to a local echo server; sandboxMode read-only; no production importer or route",
+      "adapter": "header-echo harness",
+      "test": "codex-local-engine.header-echo.test.ts"
+    },
+    "server/services/isolation/codex-local-header-echo.fixture.mjs#codex_sdk.runStreamed#1": {
+      "classification": "test_only",
+      "owner": "Codex local-engine header-echo test fixture (T-2107)",
+      "purpose": "synthetic_header_echo_fixture",
+      "actorSource": "test-only callers; spec file written by the test with dummy credentials and a throwaway CODEX_HOME",
+      "gate": "script executed only by tests under unshare -rn (loopback-only netns); base URL pinned to a local echo server; 60 s abort; no production importer or route",
+      "adapter": "header-echo harness",
+      "test": "codex-local-engine.header-echo.test.ts"
+    },
+    "server/services/isolation/dsh-local-header-echo.fixture.mjs#child_process.spawn#1": {
+      "classification": "test_only",
+      "owner": "DSH local-engine header-echo test fixture (T-2108)",
+      "purpose": "synthetic_header_echo_fixture",
+      "actorSource": "test-only callers; spec file written by the test with dummy credentials and a throwaway home",
+      "gate": "script executed only by tests under unshare -rn (loopback-only netns); local echo server on 127.0.0.1; 90 s turn timeout; shell false; no production importer or route",
+      "adapter": "header-echo harness",
+      "test": "dsh-local-engine.header-echo.test.ts"
+    },
+    "server/services/isolation/netns-recorder.fixture-helper.ts#child_process.spawnSync#1": {
+      "classification": "test_only",
+      "owner": "sealed-namespace recorder test fixture (ADR-227)",
+      "purpose": "synthetic_netns_capability_probe",
+      "actorSource": "test-only importers; fixed argv",
+      "gate": "test helper imported only by local-engine header-echo tests; fixed unshare -rn argv, 10 s timeout; no production importer or route",
+      "adapter": "netnsAvailable",
+      "test": "claude-local-engine.header-echo.test.ts and codex-local-engine.header-echo.test.ts"
+    },
+    "server/services/isolation/netns-recorder.fixture-helper.ts#child_process.spawnSync#2": {
+      "classification": "test_only",
+      "owner": "sealed-namespace recorder test fixture (ADR-227)",
+      "purpose": "synthetic_packet_recorder_capability_probe",
+      "actorSource": "test-only importers; fixed argv",
+      "gate": "test helper imported only by local-engine header-echo tests; fixed python3 -c AF_PACKET probe, 10 s timeout; no production importer or route",
+      "adapter": "packetRecorderAvailable",
+      "test": "claude-local-engine.header-echo.test.ts and codex-local-engine.header-echo.test.ts"
+    },
+    "server/services/isolation/netns-recorder.fixture-helper.ts#child_process.spawnSync#3": {
+      "classification": "test_only",
+      "owner": "sealed-namespace recorder test fixture (ADR-227)",
+      "purpose": "synthetic_netns_egress_recorder",
+      "actorSource": "test-only importers; inner argv supplied by the test (node plus the header-echo harness, or the python control probe)",
+      "gate": "test helper imported only by local-engine header-echo tests; runs inside unshare -rn with every route sent to lo and a packet recorder; 120 s timeout; no production importer or route",
+      "adapter": "recordInNetns",
+      "test": "claude-local-engine.header-echo.test.ts and codex-local-engine.header-echo.test.ts"
+    },
     "server/services/source-update-candidate-retention.js#child_process.spawn#1": {
       "classification": "release_infrastructure_effect",
       "owner": "source update candidate retention (B-1626, ADR-207 slice R)",
@@ -542,16 +596,6 @@
       "test": "vendor runtime and WS tests"
     },
     {
-      "prefix": "server/kimi-cli.js#provider_launcher.import#",
-      "classification": "composition_binding",
-      "owner": "Kimi vendor adapter",
-      "purpose": "dependency_wiring",
-      "actorSource": "enclosing WS/REST caller",
-      "gate": "caller ADR-134 permit",
-      "adapter": "vendor runtime alias",
-      "test": "vendor runtime and WS tests"
-    },
-    {
       "prefix": "server/routes/commands.js#provider_launcher.import#",
       "classification": "composition_binding",
       "owner": "authenticated command routes",
@@ -612,16 +656,6 @@
       "test": "chat websocket and execution adapter tests"
     },
     {
-      "prefix": "runtime#qwen.cli",
-      "classification": "provider_effect_enclosed",
-      "owner": "Qwen CLI adapter",
-      "purpose": "spawn",
-      "actorSource": "enclosed WS caller",
-      "gate": "caller ADR-134 LaunchPermit",
-      "adapter": "spawnQwen",
-      "test": "chat websocket and execution adapter tests"
-    },
-    {
       "prefix": "runtime#vendor.cli",
       "classification": "provider_effect_enclosed",
       "owner": "vendor CLI adapter",
@@ -629,16 +663,6 @@
       "actorSource": "enclosed WS caller",
       "gate": "caller ADR-134 LaunchPermit",
       "adapter": "spawnVendor",
-      "test": "chat websocket and execution adapter tests"
-    },
-    {
-      "prefix": "runtime#kimi.agent-cli",
-      "classification": "provider_effect_enclosed",
-      "owner": "Kimi native agent CLI",
-      "purpose": "spawn",
-      "actorSource": "enclosed WS/REST caller",
-      "gate": "caller ADR-134 LaunchPermit",
-      "adapter": "spawnKimiAgent",
       "test": "chat websocket and execution adapter tests"
     },
     {

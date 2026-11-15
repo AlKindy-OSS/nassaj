@@ -27,11 +27,12 @@ mock.module('@/modules/database/index.js', {
     projectsDb: { getProjectPath: () => null, isProjectVisibleToUser: () => true },
     sessionsDb: { getSessionById: () => null },
     sessionOutcomesDb: { getOutcomeForBroadcast: () => null },
-    userDb: { getUserById: () => null, getFirstUser: () => null },
+    userDb: { getUserById: (id: number) => (id === 2 ? { id: 2, username: 'sara' } : null), getFirstUser: () => null },
   },
 });
 
-const { resolveSessionControlProvider } = await import('./chat-websocket.service.js');
+const { decideTurnStopRequest, refuseForeignTurnStop, resolveSessionControlProvider } =
+  await import('./chat-websocket.service.js');
 
 test('the session\'s persisted provider wins over the client-declared global', () => {
   const provider = resolveSessionControlProvider(
@@ -74,4 +75,62 @@ test('an unpersisted session (null lookup) falls back to the client provider', (
 test('an unknown control provider remains unknown and never falls back to Claude', () => {
   assert.equal(resolveSessionControlProvider('', null, () => 'claude'), null);
   assert.equal(resolveSessionControlProvider('missing', null, () => null), null);
+});
+
+// ADR-173 rev.3 P5: abort-session asks the Claude run for the stop right after the write gate.
+type StopVerdict = { allowed: boolean; role: string | null; stuck: boolean; starterUserId: unknown };
+function stopDeps(verdict: StopVerdict, provider: LLMProvider | null = 'claude') {
+  const asked: Array<[string, number | null]> = [];
+  return {
+    asked,
+    deps: {
+      getSessionProvider: () => provider,
+      authorizeClaudeTurnStop: (sessionId: string, userId: number | null) => {
+        asked.push([sessionId, userId]);
+        return verdict;
+      },
+    },
+  };
+}
+
+test('P5: a refused stop of a Claude turn answers turn_stop_forbidden and stops nothing', () => {
+  const { deps, asked } = stopDeps({ allowed: false, role: null, stuck: false, starterUserId: 1 });
+  const frame = refuseForeignTurnStop(deps as never, 'sess-busy', 'claude', '2') as Record<string, unknown>;
+  assert.deepEqual(asked, [['sess-busy', 2]]);
+  assert.deepEqual({
+    kind: frame.kind, code: frame.code, aborted: frame.aborted, success: frame.success,
+    abortFailed: frame.abortFailed, notStarted: frame.notStarted, sessionId: frame.sessionId,
+    provider: frame.provider, busyBy: frame.busyBy, stuck: frame.stuck, canStop: frame.canStop,
+  }, {
+    kind: 'complete', code: 'turn_stop_forbidden', aborted: true, success: false, abortFailed: true,
+    notStarted: true, sessionId: 'sess-busy', provider: 'claude', busyBy: 1, stuck: false, canStop: false,
+  });
+});
+
+test('P5: an allowed stop, another provider, an empty id or no wiring never refuse', () => {
+  const allowed = stopDeps({ allowed: true, role: 'stuck_writer', stuck: true, starterUserId: 1 });
+  assert.equal(refuseForeignTurnStop(allowed.deps as never, 'sess', 'claude', 2), null);
+  const codex = stopDeps({ allowed: false, role: null, stuck: false, starterUserId: 1 }, 'codex');
+  assert.equal(refuseForeignTurnStop(codex.deps as never, 'sess', 'claude', 2), null);
+  assert.deepEqual(codex.asked, [], 'only a Claude turn is asked');
+  assert.equal(refuseForeignTurnStop(codex.deps as never, '', 'claude', 2), null);
+  assert.equal(refuseForeignTurnStop({ getSessionProvider: () => 'claude' } as never, 'sess', 'claude', 2), null);
+});
+
+test('P8 B4: a stop by someone other than the starter names the stopper; the starter\'s own stop does not', () => {
+  const foreign = stopDeps({ allowed: true, role: 'privileged', stuck: false, starterUserId: 1 });
+  assert.deepEqual(decideTurnStopRequest(foreign.deps as never, 'sess', 'claude', '2'),
+    { refusal: null, stoppedBy: { userId: 2, name: 'sara' } });
+  const own = stopDeps({ allowed: true, role: 'starter', stuck: false, starterUserId: 2 });
+  assert.deepEqual(decideTurnStopRequest(own.deps as never, 'sess', 'claude', 2), { refusal: null, stoppedBy: null });
+  const unnamed = stopDeps({ allowed: true, role: 'stuck_writer', stuck: true, starterUserId: 1 });
+  assert.deepEqual(decideTurnStopRequest(unnamed.deps as never, 'sess', 'claude', 9).stoppedBy,
+    { userId: 9, name: 'member 9' }, 'a neutral label when the name cannot be read');
+  const refused = stopDeps({ allowed: false, role: null, stuck: false, starterUserId: 1 });
+  const verdict = decideTurnStopRequest(refused.deps as never, 'sess', 'claude', 2);
+  assert.equal(verdict.stoppedBy, null);
+  assert.equal((verdict.refusal as Record<string, unknown>).code, 'turn_stop_forbidden');
+  assert.equal(refused.asked.length, 1, 'the run decides (and audits) once');
+  const noRun = stopDeps({ allowed: true, role: null, stuck: false, starterUserId: null });
+  assert.deepEqual(decideTurnStopRequest(noRun.deps as never, 'sess', 'claude', 2), { refusal: null, stoppedBy: null });
 });

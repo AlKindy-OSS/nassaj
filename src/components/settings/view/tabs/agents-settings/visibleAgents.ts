@@ -43,7 +43,7 @@ import type { AgentProvider } from '../../../types/types';
  */
 export const SETTINGS_AGENT_ORDER: readonly AgentProvider[] = Object.freeze([
   'antigravity', 'codex', 'claude',
-  'deepseek', 'opencode', 'glm',
+  'deepseek', 'dsh', 'opencode', 'glm',
 ] as AgentProvider[]);
 
 /**
@@ -56,8 +56,8 @@ export const SETTINGS_AGENT_ORDER: readonly AgentProvider[] = Object.freeze([
  * They keep their place in `SETTINGS_AGENT_ORDER` like any other tile. `glm`
  * stays hidden entirely (folded into OpenCode carrier, ADR-062).
  *
- * T-1760: added 2026-09-12. Emptied 2026-09-29 — the owner hid `deepseek`
- * entirely; the mechanism stays for future planned bodies.
+ * T-1760: added 2026-09-12. The mechanism stays available for future planned
+ * bodies; the active DeepSeek Harness (`dsh`) is not a coming-soon provider.
  */
 export const COMING_SOON_SETTINGS_PROVIDERS: readonly AgentProvider[] = Object.freeze(
   [] as AgentProvider[],

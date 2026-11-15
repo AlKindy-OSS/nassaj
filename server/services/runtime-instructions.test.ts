@@ -23,7 +23,7 @@ import { resolvePublicPagePublisher } from './public-page-agent-guidance.js';
 /** المُشعِلات، بمسارها من جذر المستودع. */
 const LAUNCHERS = [
   'server/claude-sdk.js', 'server/openai-codex.js', 'server/agy-cli.js',
-  'server/opencode-cli.js', 'server/qwen-cli.js', 'server/kimi-agent-cli.js', 'server/cursor-cli.js',
+  'server/opencode-cli.js', 'server/cursor-cli.js',
   'server/modules/providers/shared/vendor/vendor-runtime.js',
 ];
 
@@ -87,8 +87,6 @@ const CHANNEL_SOURCES: Array<[string, RegExp]> = [
   ['server/agy-cli.js', /commandToSend = withCoordinationDirective\(commandToSend, opts\.coordinationLevel\)/],
   ['server/cursor-cli.js', /'-p', withCoordinationDirective\(command, options\.coordinationLevel\)/],
   ['server/opencode-cli.js', /promptToSend = withCoordinationDirective\(/],
-  ['server/kimi-agent-cli.js', /command: withCoordinationDirective\(command, coordinationLevel\)/],
-  ['server/qwen-cli.js', /'--prompt', withCoordinationDirective\(command, options\?\.coordinationLevel\)/],
 ];
 
 test('every delivery channel still routes through the facade at its launch site', () => {

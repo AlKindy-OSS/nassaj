@@ -117,19 +117,15 @@ mock.module('@/services/isolation/resolve-provider-env.js', {
       resolveCalls.push({ userId, provider, mode });
       const isolatedHome = isolatedHomeByUser.get(String(userId));
       // Mirror the shape of the real seam per provider: claude → CLAUDE_CONFIG_DIR,
-      // opencode → XDG_DATA_HOME (B5), kimi → KIMI_CODE_HOME but ONLY in agent
-      // mode (SL-5/ADR-062 — the real resolver gates that knob on mode==='agent').
-      // This lets the isolation tests prove the handler forwarded the RIGHT
-      // provider AND the right mode, so the correct knob is applied.
+      // opencode → XDG_DATA_HOME (B5). This lets the isolation tests prove the
+      // handler forwarded the RIGHT provider, so the correct knob is applied.
       const providerKnob = provider === 'opencode'
         ? { XDG_DATA_HOME: `/isolated/${String(userId)}/.local/share` }
-        : provider === 'kimi'
-          ? (mode === 'agent' ? { KIMI_CODE_HOME: `/isolated/${String(userId)}/.kimi` } : {})
-          // ADR-152 A1: the real seam always sets CODEX_HOME for codex; readers
-          // (the link-mode gate) refuse an env without it.
-          : provider === 'codex'
-            ? { CODEX_HOME: `/isolated/${String(userId)}/.codex` }
-            : { CLAUDE_CONFIG_DIR: `/isolated/${String(userId)}/.claude` };
+        // ADR-152 A1: the real seam always sets CODEX_HOME for codex; readers
+        // (the link-mode gate) refuse an env without it.
+        : provider === 'codex'
+          ? { CODEX_HOME: `/isolated/${String(userId)}/.codex` }
+          : { CLAUDE_CONFIG_DIR: `/isolated/${String(userId)}/.claude` };
       return {
         ...baseEnv,
         ...(isolatedHome ? { HOME: isolatedHome } : {}),
@@ -293,12 +289,12 @@ for (const retired of RETIRED_PROVIDER_IDS) {
 // refused under its own provider. The third column is the refusal a MEMBER gets
 // when the command is paired with a live provider instead: a command still in
 // PROVIDER_CANONICAL_LOGIN_COMMANDS fails the command-provider binding, while
-// the hermes login left that map with its body and is now an arbitrary shell
-// command, which the role gate forbids to members.
+// the hermes and kimi logins left that map with their bodies (T-1953, ADR-229)
+// and are now arbitrary shell commands, which the role gate forbids to members.
 const RETIRED_LOGIN_COMMANDS: ReadonlyArray<[string, string, string]> = [
   ['cursor', 'cursor-agent login', 'provider_mismatch'],
   ['hermes', 'hermes setup --portal', 'forbidden'],
-  ['kimi', 'kimi login', 'provider_mismatch'],
+  ['kimi', 'kimi login', 'forbidden'],
 ];
 
 for (const [provider, initialCommand, smuggledRefusal] of RETIRED_LOGIN_COMMANDS) {
@@ -682,12 +678,11 @@ test('B5: an opencode PTY for a non-owner resolves the opencode (XDG) isolation,
 
 // --- ADR-062 / B-KIMI-TERM: the Kimi login terminal --------------------------
 //
-// T-1953: the kimi body is retired, so its login terminal is refused as
+// T-1953/ADR-229: the kimi body is removed, so its login terminal is refused as
 // `provider_removed` before env resolution (asserted with the retired login
-// commands above). The agent-mode seam assertion that lived here is gone with
-// the terminal it described; what remains is that no other PTY drifted.
+// commands above). What remains is that every PTY resolves in chat mode.
 
-test('B-KIMI-TERM: every non-kimi PTY still resolves in chat mode (no behaviour drift)', async () => {
+test('B-KIMI-TERM: every PTY resolves in chat mode (no behaviour drift)', async () => {
   await withIsolatedDatabase(() => {
     spawnCalls.length = 0;
     resolveCalls.length = 0;

@@ -85,7 +85,7 @@ const AUTH_STATUS = {
 const agentContextById = Object.fromEntries(
   ([
     'claude', 'codex', 'cursor', 'antigravity', 'opencode',
-    'qwen', 'kimi', 'deepseek', 'glm', 'hermes', 'sakana',
+    'qwen', 'kimi', 'deepseek', 'glm', 'hermes', 'sakana', 'dsh',
   ] as AgentProvider[]).map((agent) => [agent, { authStatus: AUTH_STATUS, onLogin: () => {} }]),
 ) as Record<AgentProvider, AgentContext>;
 

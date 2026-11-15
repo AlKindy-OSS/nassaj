@@ -59,6 +59,10 @@ export interface ChatMessage {
    * neutral avatar, never the viewing user's.
    */
   userId?: number;
+  /** ADR-173 P6: live author name of a colleague's prompt (see NormalizedMessage.authorName). */
+  authorName?: string;
+  /** ADR-173 P6: images a colleague's live prompt carried (count only). */
+  sharedImageCount?: number;
   /**
    * Coordinator attribution for an `assistant` message (server commit 9c61b60):
    * the users.id of the participant who launched the run that produced this
@@ -202,6 +206,19 @@ export interface ChatMessage {
   noticeCode?: string;
   /** B-1699: why a scheduled wake-up hold closed (`scheduled_wakeup_closed`). */
   noticeReason?: string;
+  /** T-2113: notice tone; absent = neutral muted line. */
+  noticeLevel?: 'warning' | 'error';
+  /** T-2113: what a `session_writes_lost` notice says was not saved. */
+  lostWrites?: string[];
+  /** T-2113: ISO end of the Claude sign-in on a `credential_expiring` notice. */
+  credentialExpiresAt?: string;
+  /** T-2113: the only user a notice is meant for (the run owner); absent = everyone. */
+  audienceUserId?: number | string;
+  /** Owner-only detail row of the shared notice with this id (a hook failure's server text). */
+  noticeDetailOf?: string;
+  /** Owner-only detail folded into this shared notice, and the one user who may see it. */
+  noticeDetail?: string;
+  noticeDetailAudience?: number | string;
   /** Task notification fields (B-94). */
   isTaskNotification?: boolean;
   taskStatus?: string;
@@ -252,6 +269,13 @@ export interface PendingPermissionRequest {
    * — only once/deny are offered.
    */
   steerTainted?: boolean;
+  /**
+   * ADR-173 P5: a connector (mcp__*) prompt acts under the starter's own
+   * identity — only the starter may answer it; other members see it read-only.
+   */
+  externalIdentity?: boolean;
+  /** ADR-173 P5: users.id of the turn's starter, sent with external-identity prompts. */
+  starterUserId?: number | null;
 }
 
 export interface QuestionOption {

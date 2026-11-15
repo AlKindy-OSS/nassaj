@@ -14,7 +14,7 @@ import type { AdmissionVerdict } from './resource-admission.js';
 import type { OrchestratorConfig, OrchestratorInput } from './orchestrator.js';
 import type { RunRecord, TurnRecord } from './types.js';
 import { createHostedVendorAdapter } from './adapters/hosted-vendor-adapter.js';
-import { createExtendedCliAdapter, extendedCliAdapterInternals, type ExtendedCliProvider } from './adapters/extended-cli-adapter.js';
+import { createExtendedCliAdapter, type ExtendedCliProvider } from './adapters/extended-cli-adapter.js';
 import type { EphemeralRoleHome } from './adapters/isolated-cli-cage.js';
 import { TurnAdapterRegistry } from './adapters/registry.js';
 
@@ -171,13 +171,12 @@ function extendedCliHarness(provider: ExtendedCliProvider) {
   const calls: string[] = [];
   const adapter = createExtendedCliAdapter(provider, {
     executableProbe: async () => true,
-    versionProbe: async () => extendedCliAdapterInternals.EXACT_VERSIONS[provider] ?? '1.18.40',
-    qwenCapabilityProbe: async () => true,
+    versionProbe: async () => '1.18.40',
     opencodeCapabilityProbe: async () => true,
     resolveEnv: () => ({}), createRoleHome: async () => fakeRole, cleanupRoleHome: async () => {},
     spawnCapture: async ({ args }) => {
       const model = args[args.indexOf('--model') + 1] ?? '';
-      const prompt = provider === 'qwen' ? args[args.indexOf('--prompt') + 1] : args.at(-1) ?? '';
+      const prompt = args.at(-1) ?? '';
       calls.push(model);
       let text = 'root answer';
       if (model.endsWith('-planner')) text = JSON.stringify({
@@ -190,10 +189,7 @@ function extendedCliHarness(provider: ExtendedCliProvider) {
         const artifactHash = prompt.match(/CURRENT ARTIFACT SHA256: ([a-f0-9]{64})/u)?.[1];
         text = JSON.stringify({ verdict: 'pass', artifactHash, feedback: '' });
       }
-      const stdout = provider === 'qwen'
-        ? `${JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: text } })}\n`
-        : provider === 'opencode'
-          ? `${JSON.stringify({ type: 'text', part: { type: 'text', text } })}\n` : `${text}\n`;
+      const stdout = `${JSON.stringify({ type: 'text', part: { type: 'text', text } })}\n`;
       return { code: 0, stdout, stderr: '' };
     },
   });
@@ -240,7 +236,7 @@ test('Codex mechanical cell appears only behind its exact server flag', () => {
   assert.deepEqual(withReview?.supportedLevels, ['direct', 'delegate', 'delegate_review']);
 });
 
-test('Qwen and OpenCode mechanical cells are server-authoritative and default OFF', () => {
+test('the OpenCode mechanical cell is server-authoritative and default OFF', () => {
   const proved = () => true;
   const listed = (env: NodeJS.ProcessEnv) => new Set(getServerHarnessConformance(env, proved)
     .map(({ provider, runtime }) => `${provider}:${runtime}`));
@@ -252,21 +248,21 @@ test('Qwen and OpenCode mechanical cells are server-authoritative and default OF
     NASSAJ_TURN_SUPERVISOR_OPENCODE_CHAT: 'true',
     NASSAJ_TURN_SUPERVISOR_HERMES_CHAT: 'on',
   });
-  assert.equal(on.has('qwen:qwen_cli_ephemeral'), true);
+  assert.equal(on.has('qwen:qwen_cli_ephemeral'), false, 'the deleted qwen cell is never listed (ADR-229)');
   assert.equal(on.has('opencode:opencode_cli_ephemeral'), true);
   assert.equal(on.has('hermes:hermes_cli_ephemeral'), false, 'the deleted hermes cell is never listed');
   assert.equal(listed({ NASSAJ_TURN_SUPERVISOR_QWEN_AGENT: '1' }).has('qwen:qwen_cli_ephemeral'), false);
 });
 
-test('Qwen is absent from the mechanical matrix when installed-binary proof fails', () => {
+test('OpenCode is absent from the mechanical matrix when installed-binary proof fails', () => {
   const env = {
-    NASSAJ_TURN_SUPERVISOR_QWEN_CHAT: '1',
+    NASSAJ_TURN_SUPERVISOR_OPENCODE_CHAT: '1',
   };
-  const cells = getServerHarnessConformance(env, (provider) => provider !== 'qwen');
-  assert.equal(cells.some(({ provider }) => provider === 'qwen'), false);
+  const cells = getServerHarnessConformance(env, (provider) => provider !== 'opencode');
+  assert.equal(cells.some(({ provider }) => provider === 'opencode'), false);
 });
 
-for (const provider of ['qwen', 'opencode'] as const) {
+for (const provider of ['opencode'] as const) {
   test(`${provider} CLI conformance crosses executeConformantTurn for all three levels`, async () => {
     const flag = `NASSAJ_TURN_SUPERVISOR_${provider.toUpperCase()}_CHAT`;
     for (const level of ['direct', 'delegate', 'delegate_review'] as const) {

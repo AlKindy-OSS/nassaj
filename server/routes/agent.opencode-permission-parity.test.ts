@@ -31,7 +31,6 @@ mock.module('@/claude-sdk.js', {
   },
 });
 mock.module('@/cursor-cli.js', { namedExports: { spawnCursor: recorder('cursor') } });
-mock.module('@/kimi-agent-cli.js', { namedExports: { spawnKimiAgent: recorder('kimi') } });
 mock.module('@/openai-codex.js', { namedExports: { queryCodex: recorder('codex') } });
 mock.module('@/opencode-cli.js', { namedExports: { spawnOpenCode: recorder('opencode') } });
 // ADR-152 A1 §3.5: the credential gate is covered by credential-gate.entry-points.test.ts;

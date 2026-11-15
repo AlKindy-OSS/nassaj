@@ -152,7 +152,7 @@ test('armed Qwen/Hermes cells are unreachable: the retired refusal precedes the 
   }
 });
 
-test('CLI abort bridge is identity scoped to the three supervised providers', () => {
+test('CLI abort bridge is identity scoped to the two supervised providers', () => {
   const seen: unknown[] = [];
   const supervisor = {
     supports: () => true, execute: async () => { throw new Error('unused'); },
@@ -160,7 +160,7 @@ test('CLI abort bridge is identity scoped to the three supervised providers', ()
   };
   assert.equal(abortCliSupervisedTurn(supervisor as never, 'codex', 's-1', 41), true);
   assert.deepEqual(seen, [{ provider: 'codex', sessionId: 's-1', userId: 41 }]);
-  assert.equal(abortCliSupervisedTurn(supervisor as never, 'qwen', 's-2', 41), true);
+  assert.equal(abortCliSupervisedTurn(supervisor as never, 'qwen', 's-2', 41), false, 'the qwen cell is deleted');
   assert.equal(abortCliSupervisedTurn(supervisor as never, 'opencode', 's-3', 41), true);
   assert.equal(abortCliSupervisedTurn(supervisor as never, 'hermes', 's-4', 41), false, 'the hermes cell is deleted');
   assert.equal(abortCliSupervisedTurn(supervisor as never, 'cursor', 's-1', 41), false);

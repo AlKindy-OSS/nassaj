@@ -18,6 +18,7 @@ import {
   BODY_ENGINE_MATRIX,
   BODY_AXIS_IDS,
   ENGINE_AXIS_IDS,
+  actionableEngineCells,
   bodyEngineCells,
   bodyHasEngineAxis,
   engineHasStorableKey,
@@ -144,13 +145,58 @@ describe('B-343 — a key box only where the body actually reads that slot', () 
   });
 
   it('offers no box for a pair whose body reads no slot at all', () => {
-    // opencode has no kimi/deepseek credential target, and the kimi body is
-    // handed only its OWN vendor key at spawn (resolve-provider-env.js).
+    // opencode has no kimi/deepseek credential target.
     expect(engineKeySlot('opencode', 'kimi')).toBeNull();
     expect(engineKeySlot('opencode', 'deepseek')).toBeNull();
-    expect(engineKeySlot('kimi', 'deepseek')).toBeNull();
     // And the axes that are not keys at all stay empty for both bodies.
     expect(engineKeySlot('claude', 'anthropic')).toBeNull();
     expect(engineKeySlot('opencode', 'zen')).toBeNull();
+  });
+});
+
+describe('T-2107 — local models on the Codex and DSH bodies (ADR-227 extension)', () => {
+  const localCell = (body: string) => bodyEngineCells(body).find((cell) => cell.engine === 'local');
+
+  it('puts dsh on the body axis with its own row', () => {
+    expect(BODY_AXIS_IDS).toContain('dsh');
+  });
+
+  it('keeps the removed Kimi body off the body axis (ADR-229)', () => {
+    expect(BODY_AXIS_IDS).not.toContain('kimi');
+    expect(bodyEngineCells('kimi')).toEqual([]);
+  });
+
+  it('opens claude × local, codex × local and (T-2108) dsh × local as measured', () => {
+    for (const body of ['claude', 'codex', 'dsh']) {
+      expect(localCell(body), `${body} × local`).toMatchObject({ status: 'available', evidence: 'measured' });
+      expect(actionableEngineCells(body).map((cell) => cell.engine)).toContain('local');
+    }
+  });
+
+  it('never offers a key box for a local cell: the key belongs to the member\'s server', () => {
+    for (const body of ['claude', 'codex', 'dsh']) expect(engineKeySlot(body, 'local')).toBeNull();
+    // T-2108: the open local cell gives dsh an Engines tab, as for codex.
+    expect(bodyHasEngineAxis('dsh')).toBe(true);
+  });
+
+  it('states the open local cells without the retired ADR-163 prohibition', () => {
+    for (const body of ['claude', 'codex']) {
+      const cell = localCell(body)!;
+      expect(cell.noteDefault).not.toMatch(/prohibit|wait/i);
+      expect((enSettings as { engines: { cell: Record<string, string> } }).engines.cell[cell.note]).not.toMatch(/prohibit|wait/i);
+      expect((arSettings as { engines: { cell: Record<string, string> } }).engines.cell[cell.note]).toBeTruthy();
+    }
+  });
+
+  it('declares antigravity × local closed: agy accepts no external engine', () => {
+    expect(localCell('antigravity')?.status).toBe('closed_at_vendor');
+  });
+});
+
+describe('dsh x local copy (T-2108)', () => {
+  it('the English cell text is the matrix noteDefault, and both locales say Anthropic-compatible', () => {
+    const cell = BODY_ENGINE_MATRIX.dsh.find((entry) => entry.engine === 'local');
+    expect(enSettings.engines.cell.dshLocal).toBe(cell?.noteDefault);
+    expect(arSettings.engines.cell.dshLocal).toContain('Anthropic');
   });
 });

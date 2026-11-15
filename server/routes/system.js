@@ -157,6 +157,9 @@ import {
     captureDatabaseSnapshot,
 } from '../../scripts/lib/source-update-database-snapshot.mjs';
 import { resolveDatabaseFilePath } from '../modules/database/database-path.js';
+import {
+    ATTACHMENT_MAX_MB_BOUNDS, ATTACHMENT_MAX_MB_KEY, parseStoredAttachmentMb, readAttachmentLimit,
+} from '../services/attachment-limits.js';
 import { appendGateStderr, gateReasonFromStderr } from '../shared/action-gate-reason.js';
 import {
     isBootstrapHandoffPending, readOpenMaintenanceGate, readQueuedActionEvidence, settleSourceUpdateJobRows,
@@ -1799,7 +1802,7 @@ router.put('/tmpfs-policy', requireRole('owner'), (req, res) => {
 
 // ── سياسة التخزين: عمر المحادثة وحدود صورها (ADR-100 / T-1242) ─────────────
 //
-// ثلاث قيم يملكها المالك في مكان واحد، لأنها في ذهنه سؤال واحد: «كم أحتفظ،
+// أربع قيم يملكها المالك في مكان واحد، لأنها في ذهنه سؤال واحد: «كم أحتفظ،
 // وبأي حجم؟».
 //
 //   retention_days   — عمر المحادثة قبل حذفها. يُطبَّق عبر `cleanupPeriodDays`
@@ -1808,6 +1811,7 @@ router.put('/tmpfs-policy', requireRole('owner'), (req, res) => {
 //                      موازياً لما يكنسه المحرّك بنفسه.
 //   image_max_mb     — سقف حجم الصورة الواحدة.
 //   image_max_count  — سقف عدد الصور في الرسالة.
+//   attachment_max_mb — سقف حجم الملف المرفق الواحد في المحادثة (يُقرأ لكل طلب).
 //
 // القياس الذي فرض هذا (2026-08-04): `cleanupPeriodDays` **لم يكن مضبوطاً في أي
 // طبقة**، فالسائد هو افتراض Claude (30 يوماً) لا الستّون التي كان المالك يظنّها
@@ -1817,6 +1821,7 @@ const STORAGE_POLICY_KEYS = {
     retentionDays: 'session_retention_days',
     imageMaxMb: 'chat_image_max_mb',
     imageMaxCount: 'chat_image_max_count',
+    attachmentMaxMb: ATTACHMENT_MAX_MB_KEY,
 };
 
 /** الحدود: الأدنى يمنع الحماقة، والأعلى يمنع الوعد الذي لا يُوفى. */
@@ -1824,17 +1829,31 @@ const STORAGE_POLICY_BOUNDS = {
     retentionDays: { min: 7, max: 365, fallback: 30 },
     imageMaxMb: { min: 1, max: 25, fallback: 5 },
     imageMaxCount: { min: 1, max: 50, fallback: 15 },
+    attachmentMaxMb: ATTACHMENT_MAX_MB_BOUNDS,
 };
+
+/**
+ * Fields whose stored value has an owning parser elsewhere; the settings read
+ * uses that same parser so it can never disagree with the enforcement path.
+ */
+const STORAGE_POLICY_PARSERS = {
+    attachmentMaxMb: parseStoredAttachmentMb,
+};
+
+function parseStoredPolicyValue(field, stored) {
+    const owned = STORAGE_POLICY_PARSERS[field];
+    if (owned) return owned(stored);
+    const value = Number(stored);
+    const bounds = STORAGE_POLICY_BOUNDS[field];
+    return Number.isInteger(value) && value >= bounds.min && value <= bounds.max ? value : null;
+}
 
 function readStoragePolicy() {
     const out = {};
     for (const [field, key] of Object.entries(STORAGE_POLICY_KEYS)) {
-        const stored = Number(appConfigDb.get(key));
-        const bounds = STORAGE_POLICY_BOUNDS[field];
-        out[field] = Number.isInteger(stored) && stored >= bounds.min && stored <= bounds.max
-            ? stored
-            : bounds.fallback;
-        out[`${field}IsDefault`] = !(Number.isInteger(stored) && stored >= bounds.min && stored <= bounds.max);
+        const parsed = parseStoredPolicyValue(field, appConfigDb.get(key));
+        out[field] = parsed ?? STORAGE_POLICY_BOUNDS[field].fallback;
+        out[`${field}IsDefault`] = parsed === null;
     }
     return out;
 }
@@ -1850,14 +1869,22 @@ router.get('/storage-policy', statsLimiter, requireRole('owner'), (req, res) => 
     }
 });
 
+// GET /api/system/attachment-limit — سقف الملف المرفق الساري لأي مستخدم مصادَق
+// (T-2116): العضو يرفع المرفقات فيحتاج أن يرى الحدّ قبل الرفع، وتغييره يبقى
+// للمالك عبر PUT /storage-policy. الخادم يفرضه في مسار الرفع نفسه.
+router.get('/attachment-limit', statsLimiter, (req, res) => {
+    res.json({ attachmentMaxMb: readAttachmentLimit().maxMb });
+});
+
 // PUT /api/system/storage-policy — المالك وحده (B-1341).
 router.put('/storage-policy', requireRole('owner'), (req, res) => {
     const updates = {};
     for (const field of Object.keys(STORAGE_POLICY_KEYS)) {
         if (req.body?.[field] === undefined) continue;
-        const value = Number(req.body[field]);
+        // JSON number only: Number() would coerce '120', true, [120] or null.
+        const value = req.body[field];
         const bounds = STORAGE_POLICY_BOUNDS[field];
-        if (!Number.isInteger(value) || value < bounds.min || value > bounds.max) {
+        if (typeof value !== 'number' || !Number.isInteger(value) || value < bounds.min || value > bounds.max) {
             return res.status(400).json({
                 error: `${field} must be an integer between ${bounds.min} and ${bounds.max}`,
             });

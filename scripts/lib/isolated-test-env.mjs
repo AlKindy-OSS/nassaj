@@ -9,8 +9,8 @@
  * now builds its child environment here: every provider credential variable and
  * credential-root knob is dropped (the list is shared with the spawn isolation
  * seam), and HOME / CLAUDE_CONFIG_DIR point into a directory the run owns, so
- * dotfile credentials (~/.codex, ~/.gemini, ~/.hermes, ~/.cursor, ~/.qwen,
- * ~/.kimi-code, ~/.nassaj-users) resolve there too.
+ * dotfile credentials (~/.codex, ~/.gemini, ~/.cursor, ~/.nassaj-users) resolve
+ * there too.
  *
  * CLI: `node scripts/lib/isolated-test-env.mjs <command> [args...]` runs the
  * command in a fresh home under TMPDIR, removes it afterwards, and exits with

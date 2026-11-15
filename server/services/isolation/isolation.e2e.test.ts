@@ -172,7 +172,7 @@ describe('provisionUserDirs filesystem layout', () => {
     }
   }
 
-  it('creates the isolated first-party CLI trees, including .qwen', () => {
+  it('creates the isolated first-party CLI trees, and no removed-body home (ADR-229)', () => {
     // Use a fresh userId per assertion run so the in-process "provisioned"
     // guard inside provisionUserDirs never short-circuits this case.
     const userId = 9001;
@@ -180,10 +180,13 @@ describe('provisionUserDirs filesystem layout', () => {
 
     provisionUserDirs(userId);
 
-    for (const sub of ['.claude', '.gemini', '.codex', '.qwen']) {
+    for (const sub of ['.claude', '.gemini', '.codex']) {
       const dir = path.join(root, sub);
       assert.ok(fs.existsSync(dir), `${sub} should be created`);
       assert.ok(fs.statSync(dir).isDirectory(), `${sub} should be a directory`);
+    }
+    for (const sub of ['.qwen', '.kimi']) {
+      assert.equal(fs.existsSync(path.join(root, sub)), false, `${sub} is no longer created`);
     }
   });
 

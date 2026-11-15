@@ -32,9 +32,12 @@ describe('BILLING_LINKS', () => {
     }
   });
 
-  it('includes the three previously-absent providers', () => {
+  it('includes the previously-absent providers', () => {
     expect(Object.keys(BILLING_LINKS)).toContain('opencode');
-    expect(Object.keys(BILLING_LINKS)).toContain('qwen');
     expect(Object.keys(BILLING_LINKS)).toContain('sakana');
+  });
+
+  it('has no link for a removed harness (ADR-229)', () => {
+    for (const removed of ['kimi', 'qwen', 'hermes']) expect(Object.keys(BILLING_LINKS)).not.toContain(removed);
   });
 });

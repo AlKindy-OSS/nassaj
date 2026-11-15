@@ -84,12 +84,6 @@ export const PROVIDER_MODELS_DEGRADED_CACHE_TTL_MS = 5 * 60 * 1000;
  */
 export const PROVIDER_MODELS_CACHE_VERSION = 7;
 
-// Qwen's catalog is selected from immutable in-process constants plus the
-// caller's already-decrypted plan profile. It starts no process and performs no
-// network I/O, so it is not a runtime effect and must not mint an execution
-// permit. Live CLI/network catalog adapters continue through runCatalogProbe.
-const STATIC_CATALOG_PROVIDERS = new Set<LLMProvider>(['qwen']);
-
 /** T-1906: an unreadable secrets store means "no qwen-plan models", never a failed catalog. */
 function readQwenProfileSafely(userId: string | number | null | undefined) {
   try {
@@ -394,9 +388,7 @@ export const createProviderModelsService = (dependencies: ProviderModelsServiceD
     // `userId` reaches the adapter so credential-isolating providers (Claude)
     // probe under the right subscription; non-isolated adapters ignore it.
     const loadCatalog = () => resolveProvider(provider).models.getSupportedModels(userId ?? null);
-    const request = (STATIC_CATALOG_PROVIDERS.has(provider)
-      ? loadCatalog()
-      : runCatalogProbe(provider, userId, authenticatedPrincipal, loadCatalog))
+    const request = runCatalogProbe(provider, userId, authenticatedPrincipal, loadCatalog)
       .then(async (models) => {
         const entry = await setCacheEntry(cacheKey, models);
         return {

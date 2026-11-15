@@ -1,6 +1,6 @@
-import type { LLMProvider } from '../../types/app';
+import type { KnownBodyProvider } from '../../types/app';
 
-export type SkillsProvider = LLMProvider;
+export type SkillsProvider = KnownBodyProvider;
 export type SkillsScope = 'user' | 'project' | 'plugin' | 'repo' | 'admin' | 'system';
 
 export type SkillsProject = {

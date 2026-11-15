@@ -49,14 +49,6 @@
  *                  the operator Codex credential so an isolated owner never re-logs
  *                  in — mirrors .claude/.credentials.json. Non-owners run `codex
  *                  login` to authenticate their own isolated ~/.codex.)
- *     .kimi/                             (KIMI_CODE_HOME — native kimi agent CLI, M-1)
- *       AGENTS.md   (read-only 0444 COPY of the NEUTRAL governance — soft reference,
- *                  best-effort, NOT fail-closed: kimi has no native bypass block, so
- *                  the hard controls are cage + permission ceiling + env sanitize.)
- *       sessions/                        (per-user session store; wire.jsonl per turn)
- *       .kimi-code/                      (holds mcp.json, written at launch by KM-4)
- *       auth.json -> ~/.kimi-code/auth.json  (OWNER ONLY, best-effort — exact operator
- *                  path confirmed at G-KIMI-LIVE. Non-owners authenticate their own.)
  *     .config/opencode/                  (REAL per-user config-home — GL-5 stops the old
  *                  shared operator whole-dir symlink so governance is a per-user COPY,
  *                  never a followed link into the shared fleet source)
@@ -92,10 +84,9 @@ import {
 import { listGovernanceExemptions } from './governance-exemption.js';
 import { reconcileClaudeSkillsLink } from './claude-skills-link.js';
 // SL-1 neutral primitive (aliased — codex-governance-material re-exports a same-named
-// single-arg Codex facade above). Used directly for the Kimi governance COPY (M-1).
+// single-arg Codex facade above). Used directly for the OpenCode governance COPY.
 import { materializeGovernanceCopy as materializeVendorGovernanceCopy } from './vendor-cli-governance-material.js';
 import { materializeOpenCodeConfig } from './opencode-config-material.js';
-import { QWEN_HOME_SUBDIR, QWEN_SETTINGS_FILENAME } from './qwen-settings-material.js';
 import { SYSTEM_ACTOR_DIRNAME } from './credential-actor.js';
 import { assertNotRealHomeUnderTest } from './test-home-guard.js';
 
@@ -130,53 +121,16 @@ const AGY_CREDENTIAL_FILES = ['antigravity-oauth-token'];
 // settings.json are reused for continuity when present.
 const AGY_OWNER_LINKED_FILES = ['antigravity-oauth-token', 'installation_id', 'settings.json'];
 
-// --- Kimi (native @moonshot-ai/kimi-code agent CLI) config-home (M-1, ADR-062) ---
-// kimi RESPECTS KIMI_CODE_HOME as its config-home (KG-1 §1.1), so per-user isolation
-// needs a dedicated home under the user tree (mirrors .codex — no HOME override).
-// resolveProviderEnv (SL-5) imports THIS exact constant to set KIMI_CODE_HOME to
-// userConfigDir(userId, KIMI_HOME_SUBDIR), so the config-home root now has a SINGLE
-// source of truth here — the two files can no longer drift (the .kimi vs .kimi-code
-// mismatch that broke isolation is impossible once both read this name). Inside the
-// home: sessions/ (kimi writes <KIMI_CODE_HOME>/sessions/<id>/agents/<agentId>/wire.jsonl
-// — natural subagent folding) and, FLAT in the home, config.toml / mcp.json /
-// credentials/ / device_id / logs/. Governance (AGENTS.md) is a read-only COPY; kimi
-// ingests it as SOFT reference only (enforced:false — no native bypass block), so the
-// copy is best-effort here (the hard controls are cage + permission ceiling + env
-// sanitize + per-user isolation, ADR-062 §2).
-//
-// LAYOUT CORRECTED 2026-08-01 (B-383). This comment used to claim mcp.json lived in a
-// `.kimi-code/` SUBDIR of the home. It does not: kimi v0.28.1 reads the user-global
-// file at <KIMI_CODE_HOME>/mcp.json, flat, and `.kimi-code/mcp.json` is resolved
-// against the CWD instead. Verified against the bundled /mcp-config skill in
-// dist/main.mjs and against the live tree (~/.nassaj-users/1/.kimi holds config.toml,
-// credentials/, device_id and logs/ at its root; its .kimi-code/ is empty).
+// --- Removed bodies (ADR-229): Kimi and Qwen Code ---
+// Their native CLIs are gone, so nothing is created for them any more. Member trees
+// provisioned earlier still hold their homes, and a tree from before ADR-105 may
+// still hold a link to the operator's credential there; those links are reaped on
+// every pass (the Hermes precedent, T-1953). KIMI_HOME_SUBDIR also names the legacy
+// credential row (provider-credential-files.ts), so writes there stay recorded.
 export const KIMI_HOME_SUBDIR = '.kimi';
-// ADR-101/T-1374: Qwen Code resolves its user state below HOME/.qwen, so HOME is
-// the isolation primitive — a platform contract rather than a vendor knob nobody
-// has measured. (This comment once recorded the CLI as absent from the host;
-// qwen-code 0.23.0 is installed here and its registry contract was measured
-// 2026-09-07.) The layout constants live with the module that writes the file,
-// exactly as CODEX_AGENTS_FILENAME and GEMINI_GOVERNANCE_FILENAME do, so the
-// launcher and the provisioner cannot drift apart on where the tree is.
-// Re-exported: this was the constant's public home before the registry landed.
-export { QWEN_HOME_SUBDIR };
-// ADR-101 records that Qwen reads QWEN.md and AGENTS.md. AGENTS.md is the
-// filename the CLI's own user-level rule discovery looks for, and the neutral
-// source is the same one Codex/Kimi/opencode copy.
-const QWEN_AGENTS_FILENAME = 'AGENTS.md';
-const KIMI_SESSIONS_SUBDIR = 'sessions';
-// The OPERATOR's own kimi home, which really is `~/.kimi-code` (kimi's default when
-// KIMI_CODE_HOME is unset). Used only to link the owner's existing credential into the
-// isolated tree — it is NOT a subdir of a per-user home; conflating the two was B-383.
-const KIMI_OPERATOR_HOME_SUBDIR = '.kimi-code';
-const KIMI_AGENTS_FILENAME = 'AGENTS.md';
-
-// kimi writes an API-key/OAuth credential + state to disk (KG-1 §1.1) ⇒ config-home
-// isolation is mandatory (not conditional). The owner reuses the operator credential;
-// a non-owner's own credential is a real 0600 file. The exact operator credential
-// filename/path is confirmed at the G-KIMI-LIVE field gate — the owner symlink below
-// is best-effort (no-op while the target is absent, e.g. before kimi is installed).
 const KIMI_CREDENTIAL_FILES = ['auth.json'];
+const QWEN_HOME_SUBDIR = '.qwen';
+const QWEN_SETTINGS_FILENAME = 'settings.json';
 
 // --- OpenCode carrier config-home layout (GL-5, ADR-062) ---
 // opencode's config-home is a REAL per-user dir (NOT the old whole-dir operator
@@ -329,6 +283,30 @@ function ensureSymlink(target, link) {
   }
 }
 
+// ADR-173 M7: users already warned about a real `.claude/projects` this server lifetime.
+const warnedRealProjectsDir = new Set();
+
+/**
+ * ADR-173 rev.3 M7: a member's `.claude/projects` should link to the shared store; a real
+ * directory there is drift (its shared conversations then need bridge links). Warns once
+ * per user; never migrates or moves anything (consolidation is a separate permissioned step).
+ * @param {string|number} userId
+ * @param {string} projectsDir the member's `<.claude>/projects`
+ * @param {(...args: unknown[]) => void} [warn]
+ */
+export function warnRealClaudeProjectsDirOnce(userId, projectsDir, warn = console.warn) {
+  const key = String(userId);
+  if (warnedRealProjectsDir.has(key)) return;
+  try {
+    if (!fs.lstatSync(projectsDir).isDirectory()) return;
+  } catch {
+    return;
+  }
+  warnedRealProjectsDir.add(key);
+  warn('[ADR-173] member Claude projects is a real directory; shared conversations reach it '
+    + 'through bridge links (no migration)', { userId: key });
+}
+
 /** True if `p` is a symlink (even if dangling). */
 function isSymlink(p) {
   try {
@@ -378,16 +356,10 @@ function hardenUserTree(userRoot) {
     chmodIfPresent(path.join(userRoot, sub), DIR_MODE);
   }
 
-  // kimi config-home subdirs to 0700, and any real (owner: symlink → skipped)
-  // credential file to 0600. (B-MU-OS-PERM, ADR-023.) `.kimi-code/` is still hardened
-  // when present because older trees have one (B-383 stopped creating it), and a
-  // stray 0755 dir under a member home is worth closing either way.
-  const kimiHome = path.join(userRoot, KIMI_HOME_SUBDIR);
-  for (const sub of [KIMI_SESSIONS_SUBDIR, KIMI_OPERATOR_HOME_SUBDIR]) {
-    chmodIfPresent(path.join(kimiHome, sub), DIR_MODE);
-  }
+  // A legacy kimi credential left in an existing tree stays owner-only (0600);
+  // symlinks are skipped. (B-MU-OS-PERM, ADR-023.)
   for (const name of KIMI_CREDENTIAL_FILES) {
-    chmodIfPresent(path.join(kimiHome, name), FILE_MODE);
+    chmodIfPresent(path.join(userRoot, KIMI_HOME_SUBDIR, name), FILE_MODE);
   }
 
   // agy lives under .gemini/antigravity-cli; tighten that dir too (0700) so a
@@ -487,6 +459,7 @@ export function provisionUserDirs(userId) {
     const claudeDir = path.join(userRoot, '.claude');
     ensureDir(claudeDir);
     ensureSymlink(path.join(home, '.claude', 'projects'), path.join(claudeDir, 'projects'));
+    warnRealClaudeProjectsDirOnce(userId, path.join(claudeDir, 'projects'));
 
     // claude's instruction channel — A LINK, NOT A COPY, deliberately (ADR-093
     // §4.1/§9): the coordinator's instructions must stay live rather than freeze
@@ -631,100 +604,15 @@ export function provisionUserDirs(userId) {
     // one person's subscription serve several.
     unlinkForeignCredential(path.join(codexDir, 'auth.json'));
 
-    // --- Kimi (M-1, ADR-062: isolated KIMI_CODE_HOME + soft governance COPY) ---
-    // Mirrors the Codex block: a dedicated per-user config-home kimi keys all of its
-    // state off (sessions/, .kimi-code/, credential). resolveProviderEnv (SL-5) sets
-    // KIMI_CODE_HOME to this exact dir so an isolated user's kimi turns read/write here.
-    const kimiHome = path.join(userRoot, KIMI_HOME_SUBDIR);
-    ensureDir(kimiHome);
-
-    // Neutral governance COPY (SL-1 primitive, aliased) at <KIMI_CODE_HOME>/AGENTS.md —
-    // the SAME neutral source the Codex/Claude provisioning uses (~/.claude/AGENTS.md).
-    // A real read-only (0444) COPY, never a symlink, for the write-through reason (a
-    // full-access kimi turn must never reach the shared fleet source). UNLIKE Codex
-    // this is BEST-EFFORT, not fail-closed: kimi's governance is SOFT (enforced:false,
-    // no native mechanism to block a cwd AGENTS.md override — KG-1 §1.1/ADR-062 §2), so
-    // a missing/failed copy must not block a launch. A non-blocking warning is logged.
-    reconcileEngineGovernance(
-      exemptions,
-      'kimi',
-      [path.join(kimiHome, KIMI_AGENTS_FILENAME)],
-      () =>
-        materializeVendorGovernanceCopy(kimiHome, KIMI_AGENTS_FILENAME, neutralGovernanceSource(), {
-          mode: 0o444,
-          onError: (err) => {
-            console.warn('[Kimi] governance copy materialize failed (non-blocking)', {
-              kimiHome,
-              error: err instanceof Error ? err.message : String(err),
-            });
-          },
-        }),
-    );
-
-    // Pre-create sessions/ (per-user session store — kimi writes
-    // sessions/<id>/agents/<agentId>/wire.jsonl) as an owner-only (0700) dir. The
-    // user-global mcp.json is FLAT in this home (B-383), so no config subdir is
-    // created any more; the old `.kimi-code/` was never read by kimi and is left
-    // in place on existing trees rather than removed under a live process.
-    ensureDir(path.join(kimiHome, KIMI_SESSIONS_SUBDIR));
-
-    // NO credential is linked here for anyone (ADR-105): each user authenticates
-    // their own kimi, by device code or by storing their key.
+    // --- Kimi and Qwen Code (bodies removed, ADR-229) ---
+    // Nothing is created for them any more. The security repair stays: a tree
+    // provisioned before ADR-105 may still link the operator's credential (or
+    // Qwen's settings.json, which carries the operator key in its `env` block),
+    // so the link is reaped on every pass, as for Hermes below.
     for (const name of KIMI_CREDENTIAL_FILES) {
-      unlinkForeignCredential(path.join(kimiHome, name));
+      unlinkForeignCredential(path.join(userRoot, KIMI_HOME_SUBDIR, name));
     }
-
-    // --- Qwen (ADR-101: isolated credential + shared knowledge, ADR-105's split) ---
-    // resolveProviderEnv points HOME at userRoot, so the CLI's ~/.qwen tree is
-    // this real 0700 directory. That tree mixes two things:
-    // the ACCOUNT (sessions/, projects/, usage/, the credential) and the SETUP
-    // (skills, collective memory, nassaj's rules). The account stays per-user;
-    // the knowledge is linked back, because a member launched without it is a
-    // body that has never heard of nassaj and says nothing about it.
-    const qwenHome = path.join(userRoot, QWEN_HOME_SUBDIR);
-    ensureDir(qwenHome);
-
-    // Collective memory — owner decision 2026-08-13: memory is SHARED, not
-    // per-user («ذاكرة جماعية كما هو النظام مع باقي الاجساد»). The mirror of
-    // .claude/projects and the agy brain: knowledge, not a credential.
-    ensureSymlink(
-      path.join(home, QWEN_HOME_SUBDIR, 'memories'),
-      path.join(qwenHome, 'memories'),
-    );
-
-    // Skills are fleet-standard and non-security — the .claude/skills and
-    // opencode agent|command|skills model. ensureSymlink no-ops where an older
-    // pass already made this a REAL dir, so legacy trees keep what they have.
-    ensureSymlink(
-      path.join(home, QWEN_HOME_SUBDIR, 'skills'),
-      path.join(qwenHome, 'skills'),
-    );
-
-    // Neutral governance COPY of the SAME source Codex/Kimi/opencode use. A COPY,
-    // never a symlink, for the write-through reason: a full-access turn must not
-    // reach the shared fleet source. BEST-EFFORT, not fail-closed — Qwen has no
-    // spawn-time governance guard yet, and 'qwen' is not a channel in
-    // GOVERNANCE_EXEMPTION_PROVIDERS, so there is no exemption to reconcile here
-    // (adding one is an owner policy decision, not this block's to make). Without
-    // the copy the body launches with zero nassaj rules — measured 2026-09-07:
-    // "Loaded 0 global rule(s) / 0 project rule(s)".
-    materializeVendorGovernanceCopy(qwenHome, QWEN_AGENTS_FILENAME, neutralGovernanceSource(), {
-      mode: 0o444,
-      onError: (err) => {
-        console.warn('[Qwen] governance copy materialize failed (non-blocking)', {
-          qwenHome,
-          error: err instanceof Error ? err.message : String(err),
-        });
-      },
-    });
-
-    // settings.json is NOT linked: the operator's own copy carries the operator's
-    // key in its `env` block, so a link would put one person's subscription in
-    // every member's hands (ADR-105, and qwen-cli.js's own header invariant).
-    // qwen-settings-material.js writes each member's registry at spawn from their
-    // stored plan, with `envKey` naming the variable and the value arriving
-    // through the child environment. A link left by an older pass is reaped.
-    unlinkForeignCredential(path.join(qwenHome, QWEN_SETTINGS_FILENAME));
+    unlinkForeignCredential(path.join(userRoot, QWEN_HOME_SUBDIR, QWEN_SETTINGS_FILENAME));
 
     // --- Hermes (body deleted, T-1953 / ADR-192) ---
     // Nothing is created for hermes any more. The one thing that stays is the
@@ -779,7 +667,7 @@ export function provisionUserDirs(userId) {
     // Neutral governance COPY at <config>/opencode/AGENTS.md — a real read-only (0444)
     // COPY of the SAME neutral source Codex/Claude use (~/.claude/AGENTS.md), NEVER a
     // symlink (write-through invariant). opencode ingests AGENTS.md and OBEYS it at the
-    // codex/gemini ENFORCED tier, so unlike kimi's SOFT copy this is FAIL-CLOSED at
+    // codex/gemini ENFORCED tier, so this copy is FAIL-CLOSED at
     // spawn: the GL-5 gate (opencode-governance.ts ensureOpenCodeGovernance) re-verifies
     // the fingerprint and BLOCKS the carrier launch if it cannot be attested. This fast
     // path just establishes the copy; the spawn guard is the hard enforcement (mirrors

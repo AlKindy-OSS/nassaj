@@ -19,6 +19,24 @@ export function localModelsEnabled() {
 export function claudeLocalEngineEnabled() {
   return localModelsEnabled() && appConfigDb.get('local_models.claude_enabled') === 'true';
 }
+/**
+ * ADR-227 extension / T-2107: the Codex body on a local server has its OWN switch,
+ * `local_models.codex_enabled`, off unless exactly 'true', under the same master
+ * consent. Neither the OpenCode nor the Claude local switch enables it.
+ * @returns {boolean}
+ */
+export function codexLocalEngineEnabled() {
+  return localModelsEnabled() && appConfigDb.get('local_models.codex_enabled') === 'true';
+}
+/**
+ * ADR-227 "DSH local corrector" / T-2108: the DSH body on a local server has its OWN
+ * switch, `local_models.dsh_enabled`, off unless exactly 'true', under the same
+ * master consent. No other local switch enables it.
+ * @returns {boolean}
+ */
+export function dshLocalEngineEnabled() {
+  return localModelsEnabled() && appConfigDb.get('local_models.dsh_enabled') === 'true';
+}
 const LIST_PAGE_SIZE = 100;
 /**
  * Caller-owned servers only, read fresh on every invocation and never from generated
@@ -162,6 +180,24 @@ export function localModelsRunnable(callerId) {
  */
 export function claudeLocalModelsRunnable(callerId) {
   return localModelsRunnable(callerId) && resolveCredentialPrincipal(Number(callerId), 'claude').grantedBy === null;
+}
+/**
+ * T-2107: the Codex body may use the caller's local servers only on the caller's
+ * OWN Codex tree (no grant), as for the Claude body.
+ * @param {string|number|null|undefined} callerId
+ * @returns {boolean}
+ */
+export function codexLocalModelsRunnable(callerId) {
+  return localModelsRunnable(callerId) && resolveCredentialPrincipal(Number(callerId), 'codex').grantedBy === null;
+}
+/**
+ * T-2108: the DSH body never honours a credential grant (it runs on the member's
+ * own tree), so it may use the caller's local servers under the shared rule only.
+ * @param {string|number|null|undefined} callerId
+ * @returns {boolean}
+ */
+export function dshLocalModelsRunnable(callerId) {
+  return localModelsRunnable(callerId);
 }
 /**
  * True ONLY when the activated feature leaves this caller with a local server they may

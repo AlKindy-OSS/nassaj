@@ -8,7 +8,7 @@
  * own, and resolveProviderEnv builds the spawn environment for the owner's
  * credential of THAT PROVIDER ONLY:
  *   • providers with a dedicated knob (claude → CLAUDE_CONFIG_DIR, codex →
- *     CODEX_HOME, kimi agent → KIMI_CODE_HOME, vendor keys) point straight at
+ *     CODEX_HOME, vendor keys) point straight at
  *     the owner's provider dir / key;
  *   • providers steered by HOME or XDG (agy, cursor, opencode)
  *     get a GRANT HOME (grant-home.js): the grantee's own tree with just the

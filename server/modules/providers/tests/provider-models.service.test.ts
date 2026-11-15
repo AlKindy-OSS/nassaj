@@ -74,7 +74,7 @@ test('provider models service delegates to the resolved provider model adapter',
   assert.equal(models.cache.source, 'fresh');
 });
 
-test('static Qwen catalog bypasses execution admission while live catalogs remain admitted', async () => {
+test('every catalog load passes execution admission (ADR-229 removed the static Qwen bypass)', async () => {
   const admitted: LLMProvider[] = [];
   const service = createProviderModelsService({
     cachePath: createEphemeralCachePath(),
@@ -91,7 +91,6 @@ test('static Qwen catalog bypasses execution admission while live catalogs remai
     }),
   });
 
-  await service.getProviderModels('qwen', { bypassCache: true }, 1, { id: 1 });
   await service.getProviderModels('codex', { bypassCache: true }, 1, { id: 1 });
 
   assert.deepEqual(admitted, ['codex']);

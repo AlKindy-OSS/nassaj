@@ -173,7 +173,7 @@ test('GET /preferences returns { channels } with the exact contract fields', asy
   assert.ok(Array.isArray(channels), 'the body must be { channels: [...] }, not an envelope');
   assert.deepEqual(
     channels.map((channel) => channel.provider),
-    ['codex', 'opencode', 'kimi', 'antigravity', 'claude'],
+    ['codex', 'opencode', 'antigravity', 'claude'],
   );
 
   for (const channel of channels) {
@@ -184,12 +184,11 @@ test('GET /preferences returns { channels } with the exact contract fields', asy
       `enforcement must be one of the three contract values, got ${channel.enforcement}`,
     );
   }
-  // The three fail-closed engines are declared as such — the switch has to tell a
+  // The two fail-closed engines are declared as such — the switch has to tell a
   // member whether flipping it changes whether a launch is BLOCKED.
   const byProvider = new Map(channels.map((channel) => [channel.provider, channel]));
   assert.equal(byProvider.get('codex')?.enforcement, 'fail-closed');
   assert.equal(byProvider.get('opencode')?.enforcement, 'fail-closed');
-  assert.equal(byProvider.get('kimi')?.enforcement, 'fail-closed');
   assert.equal(byProvider.get('antigravity')?.enforcement, 'best-effort');
   assert.equal(byProvider.get('claude')?.enforcement, 'none');
 });
@@ -267,15 +266,15 @@ test('a member may always bind themselves back under governance', async () => {
   // Seeded by an elevated actor's decision (the only way a member gets a row).
   getConnection()
     .prepare('INSERT INTO governance_exemptions (user_id, provider, granted_by, expires_at) VALUES (?, ?, ?, ?)')
-    .run(memberUser.id, 'kimi', ownerUser.id, new Date(Date.now() + 60_000).toISOString());
+    .run(memberUser.id, 'opencode', ownerUser.id, new Date(Date.now() + 60_000).toISOString());
 
-  const response = await call('PUT', '/api/governance/preferences/kimi', memberUser, {
+  const response = await call('PUT', '/api/governance/preferences/opencode', memberUser, {
     mode: 'governed',
   });
   assert.equal(response.status, 200, 'binding yourself must never require elevation');
   assert.equal(response.json.mode, 'governed');
   assert.equal(
-    exemptionRows().filter((row) => row.user_id === memberUser.id && row.provider === 'kimi').length,
+    exemptionRows().filter((row) => row.user_id === memberUser.id && row.provider === 'opencode').length,
     0,
   );
 });

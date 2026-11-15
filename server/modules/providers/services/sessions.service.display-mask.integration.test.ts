@@ -1,7 +1,7 @@
 /**
  * ADR-210 (T-2036): history served to a viewer is masked and its revision
  * folds in the mask version; the raw read (share snapshots, internal callers)
- * is unchanged. A real kimi vendor transcript is read through the live path.
+ * is unchanged. A real glm vendor transcript is read through the live path.
  */
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
@@ -29,7 +29,7 @@ async function withSession(runTest: (ownerId: number) => Promise<void>): Promise
   (os as unknown as { homedir: () => string }).homedir = () => tempRoot;
   try {
     const ownerId = userDb.createUser('alice', 'hash-a', 'user').id;
-    const dir = path.join(tempRoot, '.nassaj-vendor-sessions', 'kimi', vendorProjectHash(PROJECT_PATH));
+    const dir = path.join(tempRoot, '.nassaj-vendor-sessions', 'glm', vendorProjectHash(PROJECT_PATH));
     await fs.mkdir(dir, { recursive: true });
     const lines = [
       JSON.stringify({ type: 'meta', projectPath: PROJECT_PATH, sessionName: 'mask' }),
@@ -37,7 +37,7 @@ async function withSession(runTest: (ownerId: number) => Promise<void>): Promise
       JSON.stringify({ type: 'message', message: { role: 'assistant', content: 'commit 3636a7419ff81202f2b224e8e953781cdf8c7ace' } }),
     ];
     await fs.writeFile(path.join(dir, `${SESSION_ID}.jsonl`), `${lines.join('\n')}\n`);
-    sessionsDb.createSession(SESSION_ID, 'kimi', PROJECT_PATH);
+    sessionsDb.createSession(SESSION_ID, 'glm', PROJECT_PATH);
     participantsDb.recordSpawn(SESSION_ID, ownerId);
     configureDisplayMaskForTests({ env: () => undefined, serviceLiterals: () => [], allUserIds: () => [] });
     await runTest(ownerId);

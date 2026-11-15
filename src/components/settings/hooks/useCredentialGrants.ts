@@ -15,7 +15,6 @@ export type GrantProvider =
   | 'agy'
   | 'opencode'
   | 'cursor'
-  | 'hermes'
   | 'kimi'
   | 'deepseek'
   | 'glm';
@@ -33,7 +32,6 @@ const GRANT_PROVIDERS: GrantProvider[] = filterDisabledProviders([
   'agy',
   'opencode',
   'cursor',
-  'hermes',
   'kimi',
   'deepseek',
   'glm',

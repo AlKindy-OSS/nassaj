@@ -11,7 +11,7 @@ import {
   isProjectPathWritableByUser,
   readRequestUserId,
 } from '@/modules/websocket/services/chat-websocket.service.js';
-import { shellOneShotRunsDb, userDb } from '@/modules/database/index.js';
+import { sessionsDb, shellOneShotRunsDb, userDb } from '@/modules/database/index.js';
 import {
   findOwningProject,
   isProjectMembershipEnforced,
@@ -19,11 +19,11 @@ import {
 } from '@/modules/database/repositories/project-access.js';
 import { resolveProviderEnv } from '@/services/isolation/resolve-provider-env.js';
 import { assertLinkModeRunAllowed } from '@/services/isolation/link-mode-run-gate.js';
+import { localEngineSpawnRefusal } from '@/services/isolation/local-engine-pin.js';
 import { installManagedClaudeTerminalEnv } from '@/services/isolation/managed-claude-terminal-env.js';
 import {
   HarnessBinaryUnresolvedError,
   quotedHarnessBinary,
-  resolveHarnessBinary,
   type HarnessBinaryId,
 } from '@/shared/harness-binaries.js';
 import {
@@ -41,7 +41,6 @@ import {
   isRetiredProvider,
 } from '../../../../shared/retiredProviders.js';
 import { beginHarnessLaunch } from '@/modules/providers/harness-update/spawn-admission.js';
-import { clearStaleNativeStageBeforeLaunch } from '@/modules/providers/harness-update/native-staging.js';
 import {
   acquireCodexLaunchIdentity,
   assertCodexIdentityUnchanged,
@@ -74,19 +73,7 @@ type IsolationProvider =
   | 'codex'
   | 'cursor'
   | 'agy'
-  | 'opencode'
-  | 'kimi';
-
-/**
- * Spawn mode handed to `resolveProviderEnv` / `resolveCagedLaunch` (SL-5/SL-6,
- * ADR-062). An interactive PTY always runs the provider's NATIVE CLI, so for the
- * vendors that ship one (today: kimi) the terminal is an 'agent' launch — that is
- * the only mode in which `resolveProviderEnv` sets KIMI_CODE_HOME and the only
- * mode in which the provider cage covers kimi. Every other provider stays 'chat',
- * which is what the resolvers already defaulted to, so their launches are
- * byte-identical to before.
- */
-type IsolationMode = 'chat' | 'agent';
+  | 'opencode';
 
 type ShellIncomingMessage = {
   type?: string;
@@ -118,9 +105,9 @@ export function isProviderLoginCommand(
   // T-2037 (qa critical-1): EXACT match against the fixed login commands. The
   // old substring test made any free-form command containing `auth login` a
   // "login", and a login kills and respawns its PTY on every init — i.e. a
-  // reconnect would silently re-run an arbitrary command. `kimi login` and
-  // `codex login --device-auth` are device-code flows whose codes expire, so a
-  // stale reattached PTY would show a dead code: they force a fresh PTY.
+  // reconnect would silently re-run an arbitrary command. `codex login
+  // --device-auth` is a device-code flow whose code expires, so a stale
+  // reattached PTY would show a dead code: it forces a fresh PTY.
   return FRESH_PTY_LOGIN_COMMANDS.has(initialCommand.trim())
     || (isAgyProvider && !hasSession && !isPlainShell);
 }
@@ -163,12 +150,6 @@ const PROVIDER_LOGIN_COMMAND_ALLOWLIST: ReadonlySet<string> = new Set([
   'codex login',
   'codex login --device-auth',
   'opencode auth login',
-  // Kimi (ADR-062): the native `@moonshot-ai/kimi-code` CLI authenticates either
-  // by KIMI_API_KEY (injected by resolveProviderEnv from the per-user encrypted
-  // store) or by an interactive device-code login, which has no headless form —
-  // hence a fixed, exactly-matched terminal command, available to every role like
-  // the other provider logins.
-  'kimi login',
   // B-1260: FULL OAuth is now the default Claude link (access + refresh + full
   // scopes), replacing the inference-only `claude setup-token`. `claude auth
   // login` prints an authorize URL and a "Paste code here if prompted >" prompt
@@ -196,7 +177,6 @@ const PROVIDER_CANONICAL_LOGIN_COMMANDS: ReadonlyMap<string, ReadonlySet<string>
   ['cursor', new Set(['cursor-agent login'])],
   ['codex', new Set(['codex login', 'codex login --device-auth'])],
   ['opencode', new Set(['opencode auth login'])],
-  ['kimi', new Set(['kimi login'])],
   ['agy', new Set(['agy'])],
   ['antigravity', new Set(['agy'])],
 ]);
@@ -715,9 +695,6 @@ export const SHELL_HARNESS_CLI_MISSING_PREFIX = 'Harness CLI not installed for t
  */
 function ptyHarnessCli(id: HarnessBinaryId): string {
   try {
-    // kimi swaps a staged update in on its next start: a terminal never does
-    // it outside a Nassaj update window (T-1873, native-staging.ts).
-    if (id === 'kimi') clearStaleNativeStageBeforeLaunch('kimi', resolveHarnessBinary('kimi'));
     return quotedHarnessBinary(id);
   } catch (error) {
     if (!(error instanceof HarnessBinaryUnresolvedError)) throw error;
@@ -735,7 +712,6 @@ const PTY_LOGIN_COMMAND_HARNESS: ReadonlyMap<string, HarnessBinaryId> = new Map(
   ['agy', 'antigravity'],
   ['cursor-agent', 'cursor'],
   ['opencode', 'opencode'],
-  ['kimi', 'kimi'],
 ]);
 
 type CodexLaunchIdentity = ReturnType<typeof acquireCodexLaunchIdentity>;
@@ -789,6 +765,20 @@ async function admitCodexTerminalLinkMode(
     }));
     return false;
   }
+}
+
+/**
+ * ADR-227 / T-2107: a Codex terminal (`codex resume <id>`) runs the member's own
+ * Codex config, so a chat pinned to a local model server cannot be resumed there
+ * (it would continue on the cloud account). Sends the typed refusal and returns
+ * true when the caller must not spawn.
+ */
+function refuseLocalCodexTerminal(ws: WebSocket, sessionId: string | null | undefined): boolean {
+  const storedEngine = sessionId ? sessionsDb.getSessionEnginePin(sessionId)?.engine ?? null : null;
+  const refusal = localEngineSpawnRefusal({ storedEngine, site: 'terminal' });
+  if (!refusal) return false;
+  ws.send(JSON.stringify({ type: 'error', code: refusal.code, message: refusal.message }));
+  return true;
 }
 
 /**
@@ -849,22 +839,6 @@ export function buildShellCommand(
       return `${opencode} --session "${sessionId}"`;
     }
     return opencode;
-  }
-
-  if (provider === 'kimi') {
-    // Native `@moonshot-ai/kimi-code`. Without this branch a kimi terminal fell
-    // through to the trailing `claude` default — the wrong CLI entirely. An
-    // explicit initialCommand (the `kimi login` device-code flow from the UI)
-    // wins; otherwise resume by id (`kimi -S <id>`, verified against `kimi
-    // --help`) with a bare `kimi` fallback, mirroring the codex branch.
-    if (initialCommand) {
-      return materializeProviderLoginCommand(initialCommand);
-    }
-    const kimi = ptyHarnessCli('kimi');
-    if (hasSession && sessionId) {
-      return `${kimi} -S "${sessionId}" || ${kimi}`;
-    }
-    return kimi;
   }
 
   if (provider === 'agy' || provider === 'antigravity') {
@@ -1045,35 +1019,15 @@ function readIsolationProvider(provider: string): IsolationProvider {
   // 'claude' default made a non-owner's `opencode auth login` terminal write
   // auth.json under the SHARED operator tree (XDG untouched) instead of the
   // user's isolated tree — the exact isolation bug this maps out.
-  // kimi (SL-5/ADR-062): the native CLI reads AND WRITES credential + session
-  // state to disk under KIMI_CODE_HOME. Falling through to the 'claude' default
-  // would hand an interactive `kimi login` the CLAUDE_CONFIG_DIR knob instead —
-  // i.e. the device-code token would land in the SHARED operator ~/.kimi-code
-  // rather than the user's isolated tree. Exactly the opencode/B5 bug above.
   if (
     provider === 'claude'
     || provider === 'codex'
     || provider === 'cursor'
     || provider === 'opencode'
-    || provider === 'kimi'
   ) {
     return provider;
   }
   return 'claude';
-}
-
-/**
- * The spawn mode for an interactive PTY. A terminal always runs the provider's
- * NATIVE CLI, so kimi — the one vendor here that ships one — is an 'agent'
- * launch: only then does `resolveProviderEnv` set the per-user KIMI_CODE_HOME
- * (SL-5) and only then does `cageEnabled` cover kimi (SL-6). Everything else
- * resolves to 'chat', which is the value both resolvers already defaulted to,
- * so no existing provider's launch changes.
- *
- * Exported for the terminal-isolation regression suite.
- */
-export function readIsolationMode(provider: IsolationProvider): IsolationMode {
-  return provider === 'kimi' ? 'agent' : 'chat';
 }
 
 /**
@@ -1482,6 +1436,7 @@ export function handleShellConnection(
         // B-1548 (ADR-200 S4): a Codex model terminal (`codex` / `codex resume`)
         // runs on the member's own tree, so it passes the same link-mode run gate
         // as every other Codex spawn. Plain shells and `codex login` stay ungated.
+        if (provider === 'codex' && !isPlainShell && refuseLocalCodexTerminal(ws, sessionId)) return;
         if (provider === 'codex' && !isPlainShell && !(await admitCodexTerminalLinkMode(ws, userId))) {
           return;
         }
@@ -1504,7 +1459,6 @@ export function handleShellConnection(
         // no userId is present, or the provider is marked shared, resolveProviderEnv
         // returns the base env unchanged — preserving single-user behavior.
         const isolationProvider = readIsolationProvider(provider);
-        const isolationMode = readIsolationMode(isolationProvider);
         // T-1675: a terminal ALWAYS runs on the member's own credential, never on
         // one delegated to them — the PTY is interactive, so any login typed at
         // the prompt would otherwise land in the grantor's tree.
@@ -1512,7 +1466,7 @@ export function handleShellConnection(
           userId,
           isolationProvider,
           process.env,
-          isolationMode,
+          'chat',
           { honorGrants: false }
         );
         // B-90: hoist the user's npm-global binaries to the front of PATH,
@@ -1553,14 +1507,10 @@ export function handleShellConnection(
         // previous pty.spawn). A caged PTY runs bash inside bwrap so a terminal
         // cannot cat another user's ~/.nassaj-users tree or reach docker.sock.
         // codex maps to the exempt path (self-cages) — see resolveCagedLaunch.
-        // `mode` (SL-6) is what un-exempts kimi: its chat path is a hosted HTTP
-        // call with no child to cage, but this PTY runs its native CLI, so the
-        // terminal must be cageable. 'chat' for every other provider is the value
-        // cageEnabled already assumed, so their launches stay byte-identical.
         const ptyLaunch = resolveCagedLaunch({
           userId,
           provider: isolationProvider,
-          mode: isolationMode,
+          mode: 'chat',
           cmd: shell,
           args: shellArgs,
           cwd: resolvedProjectPath,
@@ -1860,9 +1810,7 @@ export function handleShellConnection(
               : provider === 'codex'
                 ? 'Codex'
                 : provider === 'opencode'
-                    ? 'OpenCode'
-                    : provider === 'kimi'
-                      ? 'Kimi'
+                  ? 'OpenCode'
                   : 'Claude';
           welcomeMsg = hasSession
             ? `\x1b[36mResuming ${providerName} session ${safeSessionId} in: ${safeProjectPath}\x1b[0m\r\n`

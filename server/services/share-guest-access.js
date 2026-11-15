@@ -7,12 +7,15 @@
  *      before any shared throttle: a valid token is never refused by pre-auth state
  *   3. failed verification only → per-IP failure buckets: 429 over a limit, else 404
  *   4. liveness incl. owner_unreadable → uniform 404
+ *   4b. session of a removed harness (ADR-229) → 410 provider_removed, only after a
+ *      verified token, so a wrong token never learns that a hidden share exists
  *   5. admission (per-share bucket, concurrency, slots) → 429 with Retry-After
  *
  * The guest principal is never a user: nothing here touches req.user.
  */
 import { ipRateKey } from '../utils/ip-rate-key.js';
 import { clientIp } from '../utils/client-ip.js';
+import { PROVIDER_REMOVED_CODE, isHiddenHistoryProvider } from '../../shared/retiredProviders.js';
 
 import { SessionShareError, evaluateReadLiveness } from './session-share-policy.js';
 import { isShareToken, verifyShareToken } from './share-capability.js';
@@ -57,6 +60,17 @@ export function verifyGuestToken(req, id, deps) {
  */
 export function assertGuestReadable(row, policy, nowMs) {
   if (evaluateReadLiveness(row, policy, nowMs) !== null) throw shareUnavailable();
+}
+
+/**
+ * Step 4b (ADR-229): a verified, live share of a removed harness's conversation
+ * is refused before any transcript, projection or snapshot blob is read.
+ * @throws SessionShareError 410 provider_removed
+ */
+export function assertProviderNotRemoved(row, policy) {
+  if (isHiddenHistoryProvider(policy.getSession(row.session_id)?.provider)) {
+    throw new SessionShareError(PROVIDER_REMOVED_CODE, 410);
+  }
 }
 
 /**

@@ -141,3 +141,19 @@ test('I1: raw permission input follows the run owner, not the primary position',
     for (const s of [ownerTab2, member]) removeSessionMirrorsForSocket(s as never);
   }
 });
+
+test('ADR-173 user_turn: masked for every viewer, and only registered mirrors (the audience) receive it', () => {
+  withSession('turn', (writer, primary, mirror) => {
+    const outsider = socket(3); // never registered: failed the B-137 visibility gate
+    writer.send({ kind: 'user_turn', sessionId: 'turn', provider: 'claude', role: 'user', authorUserId: 1,
+      clientMsgId: 'c1', content: `deploy with ${SK}` });
+    assert.equal(primary.frames.length, 1);
+    assert.equal(mirror.frames.length, 1);
+    assert.equal(outsider.frames.length, 0);
+    for (const frame of [...primary.frames, ...mirror.frames]) {
+      assert.ok(!frame.includes(SK), frame);
+      assert.match(frame, /\[masked:/);
+      assert.equal(JSON.parse(frame).clientMsgId, 'c1', 'identity fields stay intact');
+    }
+  });
+});

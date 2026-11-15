@@ -150,16 +150,17 @@ test('antigravity: planner thinking, tool calls and system messages are dropped'
   }
 });
 
-test('kimi: the vendor transcript shares the owner prompt', async () => {
+test('kimi (ADR-229, removed harness): the vendor transcript is never read into a snapshot', async () => {
   const sessionId = 'kimi_1c3f9036-33ed-48c2-81ca-c90e435f2ef6';
   const projectPath = '/home/operator/Project/nassaj-dev';
   place(path.join(SANDBOX_HOME, '.nassaj-vendor-sessions', 'kimi', vendorProjectHash(projectPath), `${sessionId}.jsonl`),
     'kimi.jsonl');
   register(sessionId, 'kimi', projectPath);
-  const result = await buildSessionShareSnapshot({ sessionId, readerUserId: ownerId, confirmUnattributed: true }, deps);
-  assertClean(result, sessionId);
-  assert.ok(snapshotText(result).includes('تسجيل دخول من هيرميز'));
-  assert.equal(result.snapshot?.providerLabel, 'Kimi');
+  const result = await buildSessionShareSnapshot({ sessionId, readerUserId: ownerId, confirmUnattributed: true }, deps)
+    .catch((error: unknown) => error);
+  const json = JSON.stringify(result);
+  assert.equal(json.includes('تسجيل دخول من هيرميز'), false, 'the hidden prompt is not shared');
+  assert.equal((result as ShareSnapshotResult)?.snapshot?.messages?.length ?? 0, 0, 'nothing is shared');
 });
 
 test('opencode: reasoning, step and tool parts are dropped', async () => {

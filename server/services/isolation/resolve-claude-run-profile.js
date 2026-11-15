@@ -17,11 +17,11 @@ import {
   LOCAL_ENGINE_ENV_KEYS,
   LOCAL_ENGINE_PRIVATE_ENTRIES,
   applyClaudeLocalEngineEnvOrThrow,
-  localEngineUnavailableError,
+  takesLocalEnginePath,
 } from './apply-claude-local-engine-env.js';
 import { assertClaudeSpawnEnvAllowed } from './claude-spawn-env-guard.js';
 import { localEngineDerivedDirName, prepareEnginePinConfigDir } from './engine-pin-config-dir.js';
-import { LOCAL_ENGINE, isLocalEngineValue, isLocalModelId, parseLocalEnginePin } from './local-engine-pin.js';
+import { LOCAL_ENGINE, parseLocalEnginePin } from './local-engine-pin.js';
 import { assertLinkModeRunAllowed } from './link-mode-run-gate.js';
 import {
   OFFICIAL_ENGINE,
@@ -174,27 +174,6 @@ async function useEnginePinConfigDir(env, engineHosts) {
   if (engineHosts instanceof Set && engineHosts.size > 0) {
     env.CLAUDE_CONFIG_DIR = await prepareEnginePinConfigDir(env);
   }
-}
-
-/**
- * ADR-227: does this spawn take the local-engine path? Only a session already
- * pinned to a local server, or a BRAND-NEW session that names a local model.
- * A local model on any other existing session (official, vendor or unknown pin)
- * is refused — `local` is never inferred, and an Anthropic chat never moves to a
- * local server (nor a local chat to Anthropic: the official path refuses below).
- * @returns {boolean}
- * @throws {Error} ENGINE_PROVIDER_UNAVAILABLE (pin_conflict)
- */
-function takesLocalEnginePath({ sessionId, storedEngine, requestedModel, clientEngine }) {
-  const localPinned = parseLocalEnginePin(storedEngine) !== null;
-  const localRequested = isLocalModelId(requestedModel);
-  if (!localPinned && !localRequested) return false;
-  const conflictingClient = typeof clientEngine === 'string' && clientEngine.trim() !== ''
-    && !isLocalEngineValue(clientEngine.trim());
-  if (!localPinned && (sessionId || conflictingClient)) {
-    throw localEngineUnavailableError({ status: 'unavailable', provider: LOCAL_ENGINE, reason: 'pin_conflict' });
-  }
-  return true;
 }
 
 /**

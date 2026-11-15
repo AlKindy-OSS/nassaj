@@ -22,7 +22,7 @@
  *
  * The presence predicates mirror the readers in each provider's auth module
  * (claude-auth / codex-auth / antigravity-token-reader / cursor login /
- * opencode-auth / vendor-auth / kimi-auth-mode); they are spelled out here so
+ * opencode-auth / vendor-auth); they are spelled out here so
  * the spawn path pulls in no provider module graph.
  */
 
@@ -118,12 +118,6 @@ function cursorTreeLinked(principalId) {
   return nonEmpty(auth?.accessToken) || nonEmpty(auth?.refreshToken);
 }
 
-/** kimi agent: the native CLI's subscription credential under KIMI_CODE_HOME. */
-function kimiSubscriptionLinked(principalId) {
-  const file = path.join(userConfigDir(principalId, '.kimi'), 'credentials', 'kimi-code.json');
-  return nonEmpty(readJsonObject(file)?.access_token);
-}
-
 /** OpenCode auth.json entry for `vendor` (or any entry when `vendor` is null). */
 function opencodeAuthEntry(principalId, vendor) {
   const auth = readJsonObject(path.join(userConfigDir(principalId, '.local/share/opencode'), 'auth.json'));
@@ -192,14 +186,17 @@ export const CREDENTIAL_PREDICATES = Object.freeze({
   agy: () => granted('agy', agyTreeLinked),
   cursor: () => granted('cursor', cursorTreeLinked),
   opencode: (ctx) => opencodeRequirement(ctx.model),
-  kimi: (ctx) => granted('kimi', (id) => hasSlotKey(id, 'kimi')
-    || (ctx.mode === 'agent' && kimiSubscriptionLinked(id))),
+  kimi: () => granted('kimi', (id) => hasSlotKey(id, 'kimi')),
   deepseek: () => granted('deepseek', (id) => hasSlotKey(id, 'deepseek')),
   glm: () => granted('glm', (id) => hasSlotKey(id, 'glm')),
   qwen: () => own('qwen', (id) => hasSlotKey(id, 'qwen')),
   // T-2086/ADR-224: the dsh body spends the member's OWN deepseek key slot —
-  // like the deepseek engine above, no grant ever admits a dsh turn.
-  dsh: () => own('deepseek', (id) => hasSlotKey(id, 'deepseek')),
+  // like the deepseek engine above, no grant ever admits a dsh turn. ADR-227 /
+  // T-2108: a chat pinned to the caller's local server, or a new chat on a local
+  // model, spends no DeepSeek key; the runtime proves the server is the caller's.
+  dsh: (ctx) => (isLocalEngineValue(ctx.engine) || (ctx.engine === null && isLocalModel(ctx.model))
+    ? own('local', () => true)
+    : own('deepseek', (id) => hasSlotKey(id, 'deepseek'))),
 });
 
 /** The username of `userId`, or null. Never the email (qa condition 10). */
@@ -338,7 +335,9 @@ function storedEnginePin(sessionId) {
  * @returns {Admission}
  */
 export function admitCredentialTurn({ actor, provider, mode = 'chat', model = null, clientEngine = null, sessionId = null }) {
-  const engine = provider === 'claude' ? (normalizeText(clientEngine) ?? storedEnginePin(sessionId)) : null;
+  // T-2108: a dsh turn reads only the stored pin (its client sends no engine).
+  const engine = provider === 'claude' ? (normalizeText(clientEngine) ?? storedEnginePin(sessionId))
+    : (provider === 'dsh' ? storedEnginePin(sessionId) : null);
   return assertCredentialLinked({ actor, provider, mode, model, engine });
 }
 

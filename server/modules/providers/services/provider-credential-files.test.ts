@@ -22,6 +22,7 @@ const { userConfigDir } = await import('@/services/isolation/provision-user-dirs
 const { PROVIDER_CREDENTIAL_FILES, watchedProviders } = await import('./provider-credential-files.js');
 const { KNOWN_PROVIDERS } = await import('@/services/isolation/known-providers.js');
 const { setNamespacedSecret } = await import('@/services/isolation/provider-secrets-store.js');
+const { isRetiredProvider } = await import('../../../../shared/retiredProviders.js');
 
 await initializeDatabase();
 after(() => closeConnection());
@@ -31,7 +32,6 @@ const SEAM_DIR: Record<string, (env: NodeJS.ProcessEnv) => string> = {
   claude: (env) => env.CLAUDE_CONFIG_DIR!,
   codex: (env) => env.CODEX_HOME!,
   opencode: (env) => path.join(env.XDG_DATA_HOME!, 'opencode'),
-  kimi: (env) => path.join(env.KIMI_CODE_HOME!, 'credentials'),
   agy: (env) => path.join(env.HOME!, '.gemini', 'antigravity-cli'),
   cursor: (env) => path.join(env.HOME!, '.config', 'cursor'),
 };
@@ -52,9 +52,9 @@ describe('provider credential files table (B-1771)', () => {
     assert.deepEqual(KNOWN_PROVIDERS.filter((provider) => !watched.has(provider)), []);
   });
 
-  it('marks only providers without an isolation body as legacy', () => {
+  it('marks only removed bodies as legacy (a key slot may outlive its body)', () => {
     for (const row of PROVIDER_CREDENTIAL_FILES.filter((spec) => spec.legacy)) {
-      assert.ok(!(KNOWN_PROVIDERS as readonly string[]).includes(row.provider), row.provider);
+      assert.ok(isRetiredProvider(row.provider), row.provider);
     }
   });
 

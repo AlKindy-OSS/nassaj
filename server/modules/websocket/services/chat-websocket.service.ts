@@ -28,6 +28,7 @@ import {
 // member a mock omits (it is only dereferenced on the gate's own code path),
 // whereas a static named import would fail ESM linking against such a mock.
 import * as databaseModule from '@/modules/database/index.js';
+import { sourceTreeKeys } from '@/modules/database/repositories/session-source-tree.js';
 import {
   armFencedRun,
   canAccessProjectPath,
@@ -74,6 +75,7 @@ import {
   resolveSessionWorkspaceForLaunch,
 } from '@/modules/session-workspaces/index.js';
 import * as sessionWorkspacesModule from '@/modules/session-workspaces/index.js';
+import { isSharedSessionWritingEnabled } from '@/modules/providers/list/claude/shared-session-writing-flag.js';
 import {
   AGY_BRAIN_ID_PATTERN,
   AGY_SPAWN_KEY_PATTERN,
@@ -298,18 +300,6 @@ export type ChatWebSocketDependencies = {
   queryCodex: (command: string, options: unknown, writer: WebSocketWriter) => Promise<unknown>;
   spawnAntigravity: (command: string, options: unknown, writer: WebSocketWriter) => Promise<unknown>;
   spawnOpenCode: (command: string, options: unknown, writer: WebSocketWriter) => Promise<unknown>;
-  spawnKimi: (command: string, options: unknown, writer: WebSocketWriter) => Promise<unknown>;
-  /**
-   * KM-3 (ADR-062 §4.2): the Kimi NATIVE agent launcher
-   * (server/kimi-agent-cli.js → spawnKimiAgent), distinct from
-   * `spawnKimi` (the toolless CHAT path, server/kimi-cli.js). OPTIONAL: injected by
-   * the composition root only once the kimi-agent path is wired. When absent, a
-   * kimi `mode==='agent'` turn is NOT eligible for the ADR-062 agent revival, so it
-   * is never routed here and never bypasses the T-864 chat disable (no silent
-   * downgrade). Every existing dependency harness that omits it keeps today's exact
-   * behavior.
-   */
-  spawnKimiAgent?: (command: string, options: unknown, writer: WebSocketWriter) => Promise<unknown>;
   spawnGlm: (command: string, options: unknown, writer: WebSocketWriter) => Promise<unknown>;
   /**
    * Server-owned mechanical coordinator for hosted, toolless harnesses. It is
@@ -354,13 +344,12 @@ export type ChatWebSocketDependencies = {
       provider: string; mode: string; coordinationLevel: CoordinationLevel; model?: string;
     }): boolean;
     execute(input: {
-      provider: 'codex' | 'qwen' | 'opencode'; mode: 'chat'; coordinationLevel: CoordinationLevel; model?: string;
+      provider: 'codex' | 'opencode'; mode: 'chat'; coordinationLevel: CoordinationLevel; model?: string;
       prompt: string; userId: number; clientMsgId: string; sessionId: string | null;
       projectPath?: string; onSession: (sessionId: string, isNew: boolean) => void;
     }): Promise<{ text: string; model: string; sessionId: string; isNewSession: boolean }>;
-    cancel(input: { provider: 'codex' | 'qwen' | 'opencode'; sessionId: string; userId: number | null }): boolean;
+    cancel(input: { provider: 'codex' | 'opencode'; sessionId: string; userId: number | null }): boolean;
   };
-  spawnQwen?: (command: string, options: unknown, writer: WebSocketWriter) => Promise<unknown>;
   /** T-2086/ADR-224: the dsh ACP runtime. OPTIONAL: absent = a dsh turn is refused. */
   spawnDsh?: (command: string, options: unknown, writer: WebSocketWriter) => Promise<unknown>;
   /** An empty id aborts the newest dsh run on `rawWs` (Claude's abort-race rule). */
@@ -467,13 +456,16 @@ export type ChatWebSocketDependencies = {
     sessionId: string,
     rawWs?: unknown,
   ) => Promise<boolean | { aborted: boolean; reason: string; sessionId: string | null }>;
+  /** ADR-173 P5: the Claude run's stop right for a member other than its starter. */
+  authorizeClaudeTurnStop?: (
+    sessionId: string,
+    userId: number | null,
+  ) => { allowed: boolean; role: string | null; stuck: boolean; starterUserId: unknown };
   abortCursorSession: (sessionId: string) => boolean;
   abortCodexSession: (sessionId: string) => boolean;
   abortAntigravitySession: (sessionId: string) => boolean;
   abortOpenCodeSession: (sessionId: string) => boolean;
-  abortKimiSession: (sessionId: string) => boolean;
   abortGlmSession: (sessionId: string) => boolean;
-  abortQwenSession?: (sessionId: string) => boolean;
   /** Active-run ownership bridge. Tokens are opaque and rechecked pre-abort. */
   getProviderRunsOwnedByWriter?: (
     writer: WebSocketWriter,
@@ -519,9 +511,7 @@ export type ChatWebSocketDependencies = {
   isCodexSessionActive: (sessionId: string) => boolean;
   isAntigravitySessionActive: (sessionId: string) => boolean;
   isOpenCodeSessionActive: (sessionId: string) => boolean;
-  isKimiSessionActive: (sessionId: string) => boolean;
   isGlmSessionActive: (sessionId: string) => boolean;
-  isQwenSessionActive?: (sessionId: string) => boolean;
   reconnectSessionWriter: (sessionId: string, ws: WebSocket) => boolean;
   /**
    * Returns true when the session's primary WebSocket is still OPEN (socket alive).
@@ -569,9 +559,7 @@ export type ChatWebSocketDependencies = {
   getActiveCodexSessions: () => unknown;
   getActiveAntigravitySessions: () => unknown;
   getActiveOpenCodeSessions: () => unknown;
-  getActiveKimiSessions: () => unknown;
   getActiveGlmSessions: () => unknown;
-  getActiveQwenSessions?: () => unknown;
 };
 
 /**
@@ -919,6 +907,147 @@ export function isSessionWritableByUser(
   }
 }
 
+/** Explicit project membership: creator or project_members row; ADR-172 access under enforcement. */
+function hasExplicitProjectMembership(
+  project: { project_id: string; created_by?: number | null },
+  userId: number,
+): boolean {
+  if (project.created_by === userId) return true;
+  if (databaseModule.projectMembersDb.getRole(project.project_id, userId) !== null) return true;
+  return isProjectMembershipEnforced() && databaseModule.canAccessProject(project.project_id, userId);
+}
+
+/**
+ * ADR-173 authority: may `userId` write into a conversation another member may
+ * have created? A conjunction with the send gate (never wider): a numeric
+ * active user, a session row on a registered project, `isSessionWritableByUser`,
+ * and explicit project membership. The participant arm alone is insufficient.
+ * Used by the launch resolver and the overlay git reads. Fails closed.
+ */
+export function isSharedSessionWriter(sessionId: string, userId: string | number | null): boolean {
+  const numericUserId = toNumericUserId(userId);
+  if (!sessionId || numericUserId === null) return false;
+  try {
+    if (!databaseModule.userDb.getUserById(numericUserId)) return false;
+    const projectPath = databaseModule.sessionsDb.getSessionById(sessionId)?.project_path?.trim() ?? '';
+    const project = projectPath ? databaseModule.projectsDb.getProjectPath(projectPath) : null;
+    if (!project || !isSessionWritableByUser(sessionId, numericUserId)) return false;
+    return hasExplicitProjectMembership(project, numericUserId);
+  } catch {
+    return false;
+  }
+}
+
+export { isSharedSessionWritingEnabled };
+
+type SessionWorkspaceAccess = 'owner' | 'session_writer';
+
+/** Resolver access for a launch: 'session_writer' only for a Claude resume by a shared writer (v1). */
+function sessionWorkspaceAccessFor(
+  provider: string,
+  resumeSessionId: string | null | undefined,
+  userId: number | null,
+): SessionWorkspaceAccess {
+  return provider === 'claude' && resumeSessionId && isSharedSessionWritingEnabled()
+    && isSharedSessionWriter(resumeSessionId, userId)
+    ? 'session_writer'
+    : 'owner';
+}
+
+type ResumedCreator = 'self' | 'other' | 'unknown';
+
+/** The one member whose own tree (`~/.nassaj-users/<n>/`) holds `jsonlPath`, else null (shared/operator, cross-member). */
+function transcriptTreeMemberId(jsonlPath: string | null | undefined): number | null {
+  const members = [...sourceTreeKeys(jsonlPath)].filter((key) => key.startsWith('member:'));
+  if (members.length !== 1) return null;
+  const id = Number(members[0].slice('member:'.length));
+  return Number.isSafeInteger(id) && id > 0 ? id : null;
+}
+
+/**
+ * ADR-173 R3 (qa condition 4): who created a resumed shared-cwd conversation, relative
+ * to the sender. In order: its owner row (strict or inferred); the sender's own spawn
+ * row (he spawned it here; the owner row is gone); the member whose own tree holds the
+ * recorded `jsonl_path` (as allowedFillTrees maps trees to users; a credential grant
+ * never makes a grantee the creator). Otherwise not inferable.
+ */
+function resumedSessionCreator(sessionId: string, userId: number): ResumedCreator {
+  try {
+    const owner = databaseModule.participantsDb.getOwnersBySessionIds([sessionId])[0];
+    if (owner) return owner.userId === userId ? 'self' : 'other';
+    if (databaseModule.participantsDb.hasSpawnConsent?.(sessionId, userId) === true) return 'self';
+    const member = transcriptTreeMemberId(databaseModule.sessionsDb.getSessionById(sessionId)?.jsonl_path);
+    if (member !== null) return member === userId ? 'self' : 'other';
+  } catch {
+    /* unknown: never ownership */
+  }
+  return 'unknown';
+}
+
+type ResumeIdentity = { sharedResume: boolean; sharedParticipant: boolean };
+
+/**
+ * Whether this launch resumes a conversation another user created (qa condition 4):
+ * the overlay manifest owner decides for an overlay, {@link resumedSessionCreator} for a
+ * shared cwd. `sharedResume` (bridge) needs a shared writer and a determinable other
+ * creator. `sharedParticipant`: the sender is recorded participant/shared_write, never
+ * owner, whenever he is not the conversation's creator (R3, qa r2 #2) — a shared writer
+ * or not, whatever the flag — so a non-creator never earns a spawn row or ownership.
+ */
+function resumeIdentityFor(
+  sessionWorkspace: { isolation: string; sharedWriter?: boolean } | null,
+  access: SessionWorkspaceAccess,
+  resumeSessionId: string | null | undefined,
+  userId: number | null,
+): ResumeIdentity {
+  if (!sessionWorkspace || !resumeSessionId || userId === null) return { sharedResume: false, sharedParticipant: false };
+  if (sessionWorkspace.isolation === 'overlay') {
+    const shared = access === 'session_writer' && sessionWorkspace.sharedWriter === true;
+    return { sharedResume: shared, sharedParticipant: shared };
+  }
+  const creator = resumedSessionCreator(resumeSessionId, userId);
+  const sharedResume = access === 'session_writer' && creator === 'other';
+  return { sharedResume, sharedParticipant: creator !== 'self' };
+}
+
+/** ADR-173 v1: providers whose conversation a member other than its creator may not continue. */
+const SHARED_WRITING_UNSUPPORTED_PROVIDERS: ReadonlySet<string> = new Set(['codex', 'antigravity', 'opencode', 'dsh']);
+/** Providers whose conversation a member can fork into one of his own (forkSessionAtMessage). */
+const FORKABLE_PROVIDERS: ReadonlySet<string> = new Set(['claude', 'codex']);
+
+/**
+ * ADR-173 rev.3 P6 (decision 8): the pre-start refusal of a resume by a member other
+ * than the conversation's creator on a provider without shared writing (and of a
+ * supervised Claude turn, v1). No determinable creator keeps today's behaviour.
+ * Returns the frame fields, or null when this rule does not refuse.
+ */
+export function sharedWritingUnsupportedRefusal(input: {
+  provider: LLMProvider;
+  resumeSessionId: string | null;
+  userId: number | null;
+  supervisedClaude: boolean;
+}): Parameters<typeof createNormalizedMessage>[0] | null {
+  const { provider, resumeSessionId, userId } = input;
+  const unsupported = SHARED_WRITING_UNSUPPORTED_PROVIDERS.has(provider)
+    || (provider === 'claude' && input.supervisedClaude);
+  if (!unsupported || !resumeSessionId || userId === null) return null;
+  let creator: { userId: number; username: string } | undefined;
+  try {
+    creator = databaseModule.participantsDb.getOwnersBySessionIds([resumeSessionId])[0];
+  } catch {
+    creator = undefined;
+  }
+  if (!creator || creator.userId === userId) return null;
+  return {
+    kind: 'complete', provider, exitCode: 1, success: false, notStarted: true,
+    code: 'shared_writing_unsupported',
+    ...(provider === 'dsh' ? { legacyCode: 'dsh_shared_session_unsupported' } : {}),
+    error: 'Only the member who started this conversation can continue it here.',
+    creatorName: creator.username ?? null,
+    canFork: FORKABLE_PROVIDERS.has(provider),
+  };
+}
+
 /**
  * B-137 content-visibility gate for the realtime session paths that take a
  * client-supplied sessionId and expose a session's LIVE stream to the requesting
@@ -1009,7 +1138,7 @@ export function isOpenCodeCarrierEnabled(env: NodeJS.ProcessEnv = process.env): 
 }
 
 /**
- * KM-3/GL-8: true when a command explicitly requests the governed AGENT mode
+ * GL-8: true when a command explicitly requests the governed AGENT mode
  * (`options.mode === 'agent'`). Absent/any-other value is the default CHAT mode,
  * so an untouched client payload keeps today's exact routing.
  */
@@ -1022,8 +1151,8 @@ function hostedProvider(provider: string): provider is 'kimi' | 'deepseek' | 'gl
   return provider === 'kimi' || provider === 'deepseek' || provider === 'glm';
 }
 
-function mechanicallyCoordinatedCliProvider(provider: string): provider is 'codex' | 'qwen' | 'opencode' {
-  return provider === 'codex' || provider === 'qwen' || provider === 'opencode';
+function mechanicallyCoordinatedCliProvider(provider: string): provider is 'codex' | 'opencode' {
+  return provider === 'codex' || provider === 'opencode';
 }
 
 export function abortCliSupervisedTurn(
@@ -1061,8 +1190,7 @@ export type OwnedProviderRun = { sessionId: string; provider: string; token: unk
  * Authorization close frames. B-1327: such a close no longer cancels provider
  * work by itself — logout, account switch and token expiry leave runs alive for
  * reattachment; only administrative revocation (user-run-revocation.service)
- * stops them. The flag still exempts these closes from Qwen's foreground-only
- * transport policy, exactly as before.
+ * stops them.
  */
 export function isIdentityRevocationClose(code: number, reason: Buffer): boolean {
   return code === 4401 && reason?.toString() === 'identity_revoked';
@@ -1120,9 +1248,7 @@ export function requestProviderAbort(
     case 'agy':
     case 'antigravity': return dependencies.abortAntigravitySession(run.sessionId) === true;
     case 'opencode': return dependencies.abortOpenCodeSession(run.sessionId) === true;
-    case 'kimi': return dependencies.abortKimiSession(run.sessionId) === true;
     case 'glm': return dependencies.abortGlmSession(run.sessionId) === true;
-    case 'qwen': return dependencies.abortQwenSession?.(run.sessionId) === true;
     case 'dsh': return dependencies.abortDshSession?.(run.sessionId) === true;
     default:
       console.warn('[WARN] No abort bridge for provider run', {
@@ -1933,8 +2059,7 @@ async function dispatchFencedProviderCommand(
   // T-1853/T-1953: a stale client type or a persisted row may still name a
   // provider retired as a body — refuse with a typed frame, never spawn. This is
   // the BODY axis only: an engine run arrives as `claude-command` on a session
-  // persisted under `claude`, so a `kimi` engine stamp never matches here. It
-  // runs before the kimi agent bypass below, which is therefore unreachable.
+  // persisted under `claude`, so a `kimi` engine stamp never matches here.
   const retiredProvider = retiredProviderOfCommandType(messageType)
     ?? (isRetiredProvider(persistedProvider) ? persistedProvider : null);
   if (retiredProvider) {
@@ -1962,14 +2087,11 @@ async function dispatchFencedProviderCommand(
     );
   }
 
-  // KM-3/GL-8 (ADR-062): a GOVERNED agent run for kimi/glm is the ADR-062 revival
-  // of these ids AS agent environments and is therefore NOT subject to the T-864
-  // "plain API vendor" global disable — that disable blocks only their toolless
+  // GL-8 (ADR-062): a GOVERNED agent run for glm is the ADR-062 revival
+  // of this id AS an agent environment and is therefore NOT subject to the T-864
+  // "plain API vendor" global disable — that disable blocks only its toolless
   // CHAT surface. The bypass is kept as NARROW as the actually-available agent
   // launcher, so nothing is re-enabled by accident:
-  //   • kimi: only when the native agent launcher is actually wired
-  //     (spawnKimiAgent injected). An unwired deployment gets NO bypass — the run
-  //     is refused rather than silently downgraded to the disabled chat path.
   //   • glm : only when the OpenCode carrier fleet flag is armed
   //     (NASSAJ_OPENCODE_CARRIER). Flag OFF ⇒ no bypass ⇒ glm stays refused, which
   //     is exactly "flag OFF does not enable glm".
@@ -1984,10 +2106,6 @@ async function dispatchFencedProviderCommand(
   // session keeps running through its carrier instead of dying with its card,
   // while a GLM chat turn (the tool-less raw-HTTP `spawnGlm` body) is refused.
   const agentRequested = isAgentModeRequested(data);
-  const kimiAgentRun =
-    agentRequested
-    && targetProvider === 'kimi'
-    && typeof dependencies.spawnKimiAgent === 'function';
   const glmCarrierRun =
     agentRequested
     && targetProvider === 'glm'
@@ -2052,7 +2170,16 @@ async function dispatchFencedProviderCommand(
     return;
   }
 
-  const isRevivedAgentRun = kimiAgentRun || glmCarrierRun || hostedSupervisionSupported;
+  const isRevivedAgentRun = glmCarrierRun || hostedSupervisionSupported;
+
+  const sharedRefusal = sharedWritingUnsupportedRefusal({
+    provider: targetProvider, resumeSessionId, userId: toNumericUserId(principalId),
+    supervisedClaude: hostedSupervisionSupported,
+  });
+  if (sharedRefusal) {
+    writer.send(createNormalizedMessage({ ...sharedRefusal, ...clientMsgIdEcho(data) }));
+    return;
+  }
 
   if (isProviderGloballyDisabled(targetProvider) && !isRevivedAgentRun) {
     console.log(`[INFO] Refusing dispatch for globally disabled provider "${targetProvider}"`);
@@ -2245,6 +2372,7 @@ async function dispatchFencedProviderCommand(
     )
     : null;
   let sessionWorkspace: ReturnType<typeof resolveSessionWorkspaceForLaunch> | null = null;
+  const workspaceAccess = sessionWorkspaceAccessFor(targetProvider, resumeSessionId, ingressUserId);
   if (resumeSessionId && !logicalProjectPath) {
     writer.send(createNormalizedMessage({
       kind: 'complete', provider: targetProvider, exitCode: 1, success: false,
@@ -2262,6 +2390,7 @@ async function dispatchFencedProviderCommand(
         launchKey: ingressClientMsgId,
         principalId,
         legacyEligible: Boolean(legacyEligibility),
+        access: workspaceAccess,
       });
 
       if (resumeSessionId && sessionWorkspace.isolation === 'overlay') {
@@ -2385,6 +2514,8 @@ async function dispatchFencedProviderCommand(
     coordinationLevel: immutableCoordinationLevel,
     authenticatedPrincipal,
     vendorReceiptInvocation,
+    // ADR-173 (qa condition 1, R3): always server-written, after the client's options.
+    ...resumeIdentityFor(sessionWorkspace, workspaceAccess, resumeSessionId, ingressUserId),
   });
 
   const permissionOptionsFor = (
@@ -2675,20 +2806,6 @@ async function dispatchFencedProviderCommand(
       dependencies.spawnOpenCode(command, options, writer));
     return;
   }
-  if (targetProvider === 'kimi') {
-    // KM-3: agent mode → the governed native launcher; else the unchanged chat
-    // path. `kimiAgentRun` already encodes "agent requested AND launcher wired",
-    // so the else branch is only ever reached for a chat turn (or a future
-    // re-enable of kimi chat).
-    if (kimiAgentRun) {
-      await runAdmittedLegacyProvider('kimi', 'kimi', 'native_agent', options =>
-        dependencies.spawnKimiAgent!(command, options, writer));
-    } else {
-      await runAdmittedLegacyProvider('kimi', 'kimi', 'chat', options =>
-        dependencies.spawnKimi(command, options, writer));
-    }
-    return;
-  }
   if (targetProvider === 'glm') {
     // GL-8: agent mode + carrier armed → run GLM through the OpenCode carrier
     // (provider-prefixed `glm/<model>`, options.carrier=true so opencode-cli.js
@@ -2709,19 +2826,6 @@ async function dispatchFencedProviderCommand(
       await runAdmittedLegacyProvider('glm', 'glm', 'vendor_cli', options =>
         dependencies.spawnGlm(command, options, writer));
     }
-    return;
-  }
-  if (targetProvider === 'qwen') {
-    if (!dependencies.spawnQwen) {
-      writer.send(createNormalizedMessage({
-        kind: 'complete', provider: 'qwen', exitCode: 1, success: false,
-        error: 'Qwen runtime adapter is unavailable on this server.', notStarted: true,
-        ...clientMsgIdEcho(data),
-      }));
-      return;
-    }
-    await runAdmittedLegacyProvider('qwen', 'qwen', 'cli', options =>
-      dependencies.spawnQwen!(command, options, writer));
     return;
   }
   if (targetProvider === 'dsh') {
@@ -2790,6 +2894,64 @@ export function readRequestUserId(
 }
 
 /**
+ * ADR-173 rev.3 P5 (owner decision 2): after the abort write gate, a Claude turn is
+ * stopped only by its starter, the project owner or a platform admin, or by another
+ * shared writer once it is stuck (the run decides and audits). Returns the refusal
+ * frame, or null when the stop may proceed (another provider, an empty id, no wiring).
+ */
+export function refuseForeignTurnStop(
+  dependencies: Pick<ChatWebSocketDependencies, 'getSessionProvider' | 'authorizeClaudeTurnStop'>,
+  sessionId: string,
+  requestedProvider: ReturnType<typeof readProvider>,
+  userId: string | number | null,
+): ReturnType<typeof createNormalizedMessage> | null {
+  return decideTurnStopRequest(dependencies, sessionId, requestedProvider, userId).refusal;
+}
+
+/** ADR-173 P8 B4: who stopped a turn they did not start, as every viewer reads it. */
+export type TurnStoppedBy = { userId: number; name: string };
+
+function stopperDisplayName(userId: number): string {
+  try {
+    const name = databaseModule.userDb.getUserById(userId)?.username;
+    if (typeof name === 'string' && name) return name;
+  } catch {
+    /* fall through to the neutral label */
+  }
+  return `member ${userId}`;
+}
+
+/**
+ * {@link refuseForeignTurnStop} with the attribution of an allowed stop: when the
+ * requester is not the turn's starter, `stoppedBy` names them for the aborted
+ * `complete` every viewer receives (P8 B4). The run decides, and audits, once.
+ */
+export function decideTurnStopRequest(
+  dependencies: Pick<ChatWebSocketDependencies, 'getSessionProvider' | 'authorizeClaudeTurnStop'>,
+  sessionId: string,
+  requestedProvider: ReturnType<typeof readProvider>,
+  userId: string | number | null,
+): { refusal: ReturnType<typeof createNormalizedMessage> | null; stoppedBy: TurnStoppedBy | null } {
+  if (!sessionId || !dependencies.authorizeClaudeTurnStop) return { refusal: null, stoppedBy: null };
+  const provider = resolveSessionControlProvider(sessionId, requestedProvider, dependencies.getSessionProvider);
+  if (provider !== 'claude') return { refusal: null, stoppedBy: null };
+  const requester = toNumericUserId(userId);
+  const verdict = dependencies.authorizeClaudeTurnStop(sessionId, requester);
+  if (verdict.allowed) {
+    const starter = toNumericUserId(verdict.starterUserId);
+    const foreign = requester !== null && starter !== null && starter !== requester;
+    return { refusal: null, stoppedBy: foreign ? { userId: requester, name: stopperDisplayName(requester) } : null };
+  }
+  return { stoppedBy: null, refusal: createNormalizedMessage({
+    kind: 'complete', exitCode: 1, aborted: true, success: false, sessionId, provider: 'claude',
+    abortFailed: true, code: 'turn_stop_forbidden', notStarted: true,
+    error: 'Only the member who started this turn, the project owner or a platform admin can stop it; '
+      + 'other members can stop it once it is stuck.',
+    busyBy: verdict.starterUserId ?? null, stuck: verdict.stuck, canStop: false,
+  }) };
+}
+
+/**
  * Stops the in-flight turn of `sessionId` through the provider that owns it —
  * the dispatch chain of the `abort-session` message, extracted so the server
  * can also stop a turn itself (ADR-172 م1: a removed member's in-flight turns).
@@ -2840,12 +3002,8 @@ export async function abortSessionTurn(
     success = dependencies.abortAntigravitySession(sessionId);
   } else if (provider === 'opencode') {
     success = dependencies.abortOpenCodeSession(sessionId);
-  } else if (provider === 'kimi') {
-    success = dependencies.abortKimiSession(sessionId);
   } else if (provider === 'glm') {
     success = dependencies.abortGlmSession(sessionId);
-  } else if (provider === 'qwen') {
-    success = dependencies.abortQwenSession?.(sessionId) ?? false;
   } else if (provider === 'dsh') {
     success = dependencies.abortDshSession?.(sessionId, rawWs ?? undefined) ?? false;
   } else if (provider === 'claude') {
@@ -3135,6 +3293,11 @@ export function handleChatConnection(
             : refusal);
           return;
         }
+        const stopDecision = decideTurnStopRequest(dependencies, sessionId, readProvider(data.provider), presenceUserId);
+        if (stopDecision.refusal) {
+          writer.send(stopDecision.refusal);
+          return;
+        }
         // T-874(3): abort the session's OWN persisted provider, not the
         // client-declared one (which may be the current global picker selection).
         // Empty/unknown id falls back to the client provider, preserving Claude's
@@ -3156,6 +3319,8 @@ export function handleChatConnection(
             // right run's spinner even when it sent an empty/stale id.
             sessionId: resolvedSessionId ?? sessionId,
             ...(success ? {} : { abortFailed: true, error: abortReason ?? 'abort failed' }),
+            // ADR-173 P8 B4: every viewer (the starter included) reads who stopped it.
+            ...(success && stopDecision.stoppedBy ? { stoppedBy: stopDecision.stoppedBy } : {}),
         } as const;
         writer.send(provider
           ? createNormalizedMessage({ ...abortPayload, provider })
@@ -3953,8 +4118,6 @@ export function handleChatConnection(
           agyReplay.finish();
         } else if (provider === 'opencode') {
           isActive = dependencies.isOpenCodeSessionActive(sessionId);
-        } else if (provider === 'qwen') {
-          isActive = dependencies.isQwenSessionActive?.(sessionId) ?? false;
         } else if (provider === 'dsh') {
           isActive = dependencies.isDshSessionActive?.(sessionId) ?? false;
         } else if (provider === 'claude') {
@@ -4020,7 +4183,7 @@ export function handleChatConnection(
             );
           }
         } else {
-          // Unknown and foundation-only providers (currently Qwen) must never
+          // Unknown and removed providers must never
           // fall through to Claude's activity/reconnect machinery.
           isActive = false;
         }
@@ -4110,7 +4273,7 @@ export function handleChatConnection(
         // every provider's active-id list through the SAME visibility predicate
         // as check-session-status (a private-project run is dropped for a
         // non-member, an unknown/null-path run stays visible like presence);
-        // (b) surface the kimi/glm providers that were silently omitted
+        // (b) surface the glm provider that was silently omitted
         // from this listing.
         const visibleIds = (ids: unknown): string[] =>
           (Array.isArray(ids) ? ids : []).filter(
@@ -4126,9 +4289,7 @@ export function handleChatConnection(
             codex: visibleIds(dependencies.getActiveCodexSessions()),
             antigravity: visibleIds(dependencies.getActiveAntigravitySessions()),
             opencode: visibleIds(dependencies.getActiveOpenCodeSessions()),
-            kimi: visibleIds(dependencies.getActiveKimiSessions()),
             glm: visibleIds(dependencies.getActiveGlmSessions()),
-            qwen: visibleIds(dependencies.getActiveQwenSessions?.() ?? []),
           },
         });
       }
@@ -4195,12 +4356,6 @@ export function handleChatConnection(
     // B-1327: no transport close cancels provider work — not even a 4401
     // identity close (logout, account switch, token expiry). Administrative
     // revocation stops runs explicitly before closing (user-run-revocation).
-    const identityRevoked = isIdentityRevocationClose(code, reason);
-    // Preserve the foreground-only Qwen policy: any transport loss ends Qwen,
-    // except an identity close, which is not a transport loss.
-    if (!identityRevoked && writerSessionId && dependencies.isQwenSessionActive?.(writerSessionId)) {
-      dependencies.abortQwenSession?.(writerSessionId);
-    }
     // T-881 (A-1): the requester is gone, so any in-flight /btw fork bound to this
     // socket is moot — interrupt it and free its flood slots (per-socket +
     // per-user). `btwSocketClosed` also covers the race where onStarted arrives

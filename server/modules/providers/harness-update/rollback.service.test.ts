@@ -282,7 +282,7 @@ test('snapshot listing: facts only — no paths, no member ids', async () => {
   assert.deepEqual(list[0].dataRestore, { requiresAck: true, firstSpawnAt: w.clock.now, spawnCount: 1, storesChanged: null, unknown: false });
   const text = JSON.stringify(list);
   assert.ok(!text.includes(w.home) && !text.includes('.nassaj-users') && !text.includes('/'), text);
-  assert.deepEqual(listHarnessSnapshots('qwen'), []);
+  assert.deepEqual(listHarnessSnapshots('cursor'), []);
   // The GET never hashes stores: an unreadable store does not break (or slow) it.
   fs.chmodSync(run.store, 0o000);
   try {

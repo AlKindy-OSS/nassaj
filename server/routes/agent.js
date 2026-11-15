@@ -15,6 +15,7 @@ import {
   githubTokensDb,
   isProjectMembershipEnforced,
   isWorkspaceTopologyFenceCurrent,
+  participantsDb,
   projectsDb,
 } from '../modules/database/index.js';
 import { parseApiKeyCredentialId } from '../modules/database/repositories/api-key-sso-window.js';
@@ -27,7 +28,6 @@ import { createRateLimiter } from '../middleware/rate-limit.js';
 import { spawnCursor } from '../cursor-cli.js';
 import { queryCodex } from '../openai-codex.js';
 import { spawnOpenCode } from '../opencode-cli.js';
-import { spawnKimiAgent } from '../kimi-agent-cli.js';
 import { providerModelsService } from '../modules/providers/services/provider-models.service.js';
 import { IS_PLATFORM } from '../constants/config.js';
 import { requireExternalApiEnabled } from '../services/external-api-config.js';
@@ -48,6 +48,7 @@ import {
 import {
   isProjectPathWritableByUser,
   isSessionVisibleToUser,
+  isSessionWritableByUser,
 } from '../modules/websocket/services/chat-websocket.service.js';
 import {
   PROVIDER_REMOVED_CODE,
@@ -1268,6 +1269,42 @@ export function refuseUnlinkedAgentRun(actor, provider, model, sessionId) {
   }
 }
 
+/** ADR-173 H5 409 bodies: the reason tells the caller which case refused him. */
+const NOT_SESSION_OWNER_REFUSAL = Object.freeze({
+  error: 'Only the member who started this conversation can continue it through the API; continue it from the chat.',
+  code: 'shared_writing_unsupported',
+  reason: 'not_session_owner',
+});
+const OWNER_UNCONFIRMED_REFUSAL = Object.freeze({
+  error: 'This conversation has no confirmed owner, so it cannot be continued through the API; continue it from the chat.',
+  code: 'shared_writing_unsupported',
+  reason: 'owner_unconfirmed',
+});
+
+/**
+ * ADR-173 rev.3 H5 (always on, no flag): the refusal for a REST resume of
+ * `sessionId` by `userId`, or null when the resume may proceed. Seeing a session
+ * is not writing it; and shared writing (a writer who is not the strict spawn
+ * owner, including a session with no determinable owner) is chat-only in v1.
+ * @param {unknown} sessionId
+ * @param {number|null} userId
+ * @returns {{ status: number, body: { error: string, code?: string, reason?: string } } | null}
+ */
+export function refuseAgentSessionResume(sessionId, userId) {
+  if (!sessionId) return null;
+  if (typeof sessionId !== 'string' || !isSessionVisibleToUser(sessionId, userId)) {
+    return { status: 404, body: { error: 'Session not found' } };
+  }
+  if (!isSessionWritableByUser(sessionId, userId)) {
+    return { status: 403, body: { error: 'This session is not writable by you.', code: 'SESSION_WRITE_FORBIDDEN' } };
+  }
+  const strictOwner = participantsDb.resolveStrictSpawnOwnerUserId(sessionId);
+  if (strictOwner !== userId) {
+    return { status: 409, body: strictOwner === null ? OWNER_UNCONFIRMED_REFUSAL : NOT_SESSION_OWNER_REFUSAL };
+  }
+  return null;
+}
+
 router.post('/', agentLimiter, requireExternalApiEnabled, validateExternalApiKey, async (req, res) => {
   const { githubUrl, projectPath, message, provider = 'claude', model, effort, githubToken, branchName, sessionId } = req.body;
 
@@ -1289,14 +1326,12 @@ router.post('/', agentLimiter, requireExternalApiEnabled, validateExternalApiKey
     return res.status(400).json({ error: 'message is required' });
   }
 
-  // KM-3/GL-8 (ADR-062): kimi and glm join the allowlist for the AGENT surface —
-  // the /api/agent endpoint is inherently an agent run (never chat), so kimi maps
-  // to the native governed launcher and glm to the OpenCode carrier (flag-gated,
-  // enforced in the dispatch below). Their toolless CHAT path is unaffected.
+  // GL-8 (ADR-062): glm joins the allowlist for the AGENT surface — the
+  // /api/agent endpoint is inherently an agent run (never chat), so glm maps to
+  // the OpenCode carrier (flag-gated, enforced in the dispatch below).
   //
-  // T-1953: cursor and kimi are retired as bodies. They get the same typed
-  // refusal as the sockets, before any writer, clone or project registration;
-  // their dispatch branches below are unreachable until they are deleted.
+  // T-1953/ADR-229: retired bodies (cursor, kimi, qwen, hermes) get the same
+  // typed refusal as the sockets, before any writer, clone or project registration.
   if (isRetiredProvider(provider)) {
     return res.status(400).json({ error: PROVIDER_REMOVED_MESSAGE, code: PROVIDER_REMOVED_CODE });
   }
@@ -1357,8 +1392,9 @@ router.post('/', agentLimiter, requireExternalApiEnabled, validateExternalApiKey
     }
   }
 
-  if (sessionId && !isSessionVisibleToUser(sessionId, req.user?.id ?? null)) {
-    return res.status(404).json({ error: 'Session not found' });
+  const resumeRefusal = refuseAgentSessionResume(sessionId, req.user?.id ?? null);
+  if (resumeRefusal) {
+    return res.status(resumeRefusal.status).json(resumeRefusal.body);
   }
 
   // Validate GitHub branch/PR creation requirements
@@ -1673,22 +1709,6 @@ router.post('/', agentLimiter, requireExternalApiEnabled, validateExternalApiKey
         model: model || providerModels.DEFAULT,
         permissionMode: 'bypassPermissions',
         permissionExecution,
-      }, writer));
-    } else if (provider === 'kimi') {
-      // KM-3 (ADR-062): native governed Kimi agent launcher. permissionMode is
-      // pinned to 'acceptEdits' — the SAFE autonomous ceiling (workspace-write via
-      // Kimi `--auto`), mirroring the Codex T-884 headless mapping. The SL-4
-      // ceiling caps this even if KIMI_ALLOW_FULL_ACCESS is ever set, and network
-      // stays OFF; a client value never widens it. Governance/digest/env-sanitize
-      // are enforced fail-closed inside prepareKimiAgentLaunch.
-      console.log('🌙 Starting Kimi native agent session');
-
-      await runPermissionExecutionAdapter(permissionExecution, () => spawnKimiAgent(message.trim(), {
-        projectPath: finalProjectPath,
-        cwd: finalProjectPath,
-        sessionId: sessionId || null,
-        model: model || undefined,
-        permissionMode: 'acceptEdits'
       }, writer));
     } else if (provider === 'glm') {
       // GL-8 (ADR-062): GLM runs through the OpenCode CARRIER (provider-prefixed

@@ -7,6 +7,12 @@
  * stamping) through the projection. It also covers readFailed at the provider
  * failure sites, peek === fetch revision, N1 identity stability, and guests
  * staying off the bounded member history runner.
+ *
+ * ADR-229: conversations of the removed Kimi, Qwen Code and Hermes harnesses are
+ * hidden. Their fixtures are still laid out, and the test pins that neither the
+ * projection nor a member fetch serves them. The Qwen and Hermes record shapes
+ * (the shared vendor turn writer) stay covered by laying the same files under the
+ * live GLM and DeepSeek vendor readers.
  */
 // FIRST import — HOME becomes a /var/tmp sandbox before anything reads it.
 import { SANDBOX_HOME } from '@/shared/__tests__/sandbox-home.js';
@@ -26,6 +32,8 @@ import { historyAdmission } from '@/modules/providers/services/history-budget.se
 import { peekHistoryRevision } from '@/modules/providers/services/session-history-light.service.js';
 import { sessionsService } from '@/modules/providers/services/sessions.service.js';
 import { vendorProjectHash } from '@/modules/providers/shared/vendor/vendor-transcript.js';
+
+import { HIDDEN_HISTORY_PROVIDER_IDS, PROVIDER_REMOVED_CODE } from '../../shared/retiredProviders.js';
 
 import { createBoundedSemaphore } from './bounded-semaphore.js';
 import {
@@ -189,6 +197,10 @@ const SESSIONS = {
   glm: '00000000-0000-4000-8000-000000000207',
   deepseek: '00000000-0000-4000-8000-000000000208',
   cursor: '00000000-0000-4000-8000-000000000209',
+  /** The Qwen turn-writer shape (ids, timestamps, a receipt, a duplicated event) read by the GLM vendor reader. */
+  glmTurns: '00000000-0000-4000-8000-000000000210',
+  /** The Hermes shape (rows without timestamps or ids) read by the DeepSeek vendor reader. */
+  deepseekNoTimestamps: '00000000-0000-4000-8000-000000000211',
 } as const;
 
 /** Lays out every provider fixture once; returns provider → session id. */
@@ -199,6 +211,10 @@ function placeAll(): Record<string, string> {
   placeVendor('kimi', SESSIONS.kimi, BASE, 'kimi.jsonl');
   for (const provider of ['qwen', 'hermes', 'glm', 'deepseek'] as const) placeVendor(provider, SESSIONS[provider], LIVE, `${provider}.jsonl`);
   for (const provider of ['kimi', 'qwen', 'hermes', 'glm', 'deepseek'] as const) register(SESSIONS[provider], provider, PROJECT);
+  placeVendor('glm', SESSIONS.glmTurns, LIVE, 'qwen.jsonl');
+  register(SESSIONS.glmTurns, 'glm', PROJECT);
+  placeVendor('deepseek', SESSIONS.deepseekNoTimestamps, LIVE, 'hermes.jsonl');
+  register(SESSIONS.deepseekNoTimestamps, 'deepseek', PROJECT);
   placeCursor(SESSIONS.cursor);
   register(SESSIONS.cursor, 'cursor', PROJECT);
   const opencode = placeOpenCode();
@@ -219,10 +235,9 @@ const EXPECTED: Record<string, Expected> = {
     ['assistant', 'السبب واضح'], ['assistant', 'تم التحقق'], ['user', 'هذه لقطة الشاشة', ['redacted:secret', 'image']]],
   antigravity: [['user', 'Do not modify'], ['assistant', 'Waiting for the subagent'], ['assistant', 'Successfully read marker'],
     ['assistant', 'The leaked key', SECRET_PART]],
-  kimi: [['user', 'تسجيل دخول من هيرميز'], ['assistant', 'جرّب تسجيل الدخول', SECRET_PART]],
-  qwen: [['user', 'راجع ملف الإعدادات'], ['assistant', 'الملف سليم', SECRET_PART], ['user', 'شكراً']],
-  hermes: [['user', 'مرحبا'], ['assistant', 'أهلاً!'], ['user', 'خطوات تثبيت'], ['assistant', 'استنسخ المستودع', SECRET_PART],
-    ['user', 'مرحبا']],
+  glmTurns: [['user', 'راجع ملف الإعدادات'], ['assistant', 'الملف سليم', SECRET_PART], ['user', 'شكراً']],
+  deepseekNoTimestamps: [['user', 'مرحبا'], ['assistant', 'أهلاً!'], ['user', 'خطوات تثبيت'],
+    ['assistant', 'استنسخ المستودع', SECRET_PART], ['user', 'مرحبا']],
   glm: [['user', 'لخص ملف README'], ['assistant', 'الملف يشرح طريقة التشغيل. وفيه مفتاح ظاهر', SECRET_PART]],
   deepseek: [['user', 'لخص ملف README'], ['assistant', 'الملف يشرح طريقة التشغيل. وفيه مفتاح ظاهر', SECRET_PART]],
   cursor: [['user', 'أين تُعرّف إعدادات الخادم'], ['assistant', 'server/config.js', SECRET_PART], ['user', 'انقله إلى متغيّر بيئة'],
@@ -245,8 +260,22 @@ for (const [provider, expected] of Object.entries(EXPECTED)) {
   });
 }
 
+const HIDDEN = [...HIDDEN_HISTORY_PROVIDER_IDS];
+const isHidden = (provider: string) => HIDDEN_HISTORY_PROVIDER_IDS.has(provider);
+
+test('ADR-229: a hidden conversation is never projected for a guest nor served to a member', async () => {
+  for (const provider of HIDDEN) {
+    await assert.rejects(readAll(newProjection(), placed[provider]), isUnavailable, `${provider}: guest projection`);
+    const fetched = await sessionsService.fetchHistory(placed[provider], ownerId, { limit: null });
+    assert.equal(fetched.unavailableReason, PROVIDER_REMOVED_CODE, provider);
+    assert.equal(fetched.readFailed, true, provider);
+    assert.deepEqual(fetched.messages, [], provider);
+    assert.equal((await peekHistoryRevision(placed[provider], ownerId)).readFailed, true, `${provider}: peek`);
+  }
+});
+
 test('authors come from recorded attribution: owner for the owner, member for anyone else or nobody', async () => {
-  const sessionId = placed.qwen;
+  const sessionId = placed.glmTurns;
   messageAuthorsDb.recordUserMessage(sessionId, ownerId, 'شكراً');
   messageAuthorsDb.recordUserMessage(sessionId, memberId, 'راجع ملف الإعدادات واخبرني إن كان فيه مشكلة');
   const summary = summarize(await readAll(newProjection(), sessionId));
@@ -254,7 +283,7 @@ test('authors come from recorded attribution: owner for the owner, member for an
 });
 
 test('a failed author load makes every human row «member», never «owner»', async (t) => {
-  const sessionId = placed.qwen;
+  const sessionId = placed.glmTurns;
   messageAuthorsDb.recordUserMessage(sessionId, ownerId, 'شكراً');
   t.mock.method(messageAuthorsDb, 'listBySession', () => { throw new Error('authors table unavailable'); });
   t.mock.method(console, 'error', () => {});
@@ -263,8 +292,8 @@ test('a failed author load makes every human row «member», never «owner»', a
   assert.deepEqual([...new Set(summary.filter((m) => m.role === 'user').map((m) => m.author))], ['member']);
 });
 
-test('N1: two parses of Cursor (parse-time timestamps), Hermes and Claude (timestamp-less rows) yield the same keys', async () => {
-  for (const provider of ['cursor', 'hermes', 'claude']) {
+test('N1: two parses of Cursor (parse-time timestamps), vendor and Claude timestamp-less rows yield the same keys', async () => {
+  for (const provider of ['cursor', 'deepseekNoTimestamps', 'claude']) {
     const first = (await readAll(newProjection(), placed[provider])).map((m) => m.k);
     const second = (await readAll(newProjection(), placed[provider])).map((m) => m.k);
     assert.deepEqual(second, first, provider);
@@ -273,7 +302,7 @@ test('N1: two parses of Cursor (parse-time timestamps), Hermes and Claude (times
 });
 
 test('peek === fetch revision on an idle transcript, for every provider', async () => {
-  for (const [provider, sessionId] of Object.entries(placed)) {
+  for (const [provider, sessionId] of Object.entries(placed).filter(([key]) => !isHidden(key))) {
     const peek = await peekHistoryRevision(sessionId, ownerId);
     const fetched = await sessionsService.fetchHistory(sessionId, ownerId, { limit: null, snapshotCache: 'coalesce-only' });
     assert.ok(!peek.readFailed, provider);
@@ -296,7 +325,7 @@ test('readFailed: a rebound transcript is 503 for guests and flagged for members
 });
 
 test('readFailed at provider failure sites: missing vendor transcript, missing brain, missing cursor store, catch on a dead fd', async () => {
-  const cases = [['qwen', '00000000-0000-4000-8000-000000000302'], ['antigravity', '00000000-0000-4000-9000-000000000303'],
+  const cases = [['glm', '00000000-0000-4000-8000-000000000302'], ['antigravity', '00000000-0000-4000-9000-000000000303'],
     ['cursor', '00000000-0000-4000-8000-000000000304']] as const;
   for (const [provider, sessionId] of cases) {
     register(sessionId, provider, PROJECT);
@@ -336,8 +365,8 @@ test('bounded mode: guests never take historyAdmission while members still read;
   assert.ok((await Promise.all(guests)).every((messages) => messages.length === EXPECTED.claude.length));
   assert.equal(admissions, 1, 'only the member read took the bounded runner');
   assert.ok(memberRows > 0);
-  getConnection().prepare('UPDATE sessions SET jsonl_path = ? WHERE session_id = ?').run(`/${'p'.repeat(5000)}`, placed.kimi);
-  await assert.rejects(newProjection().readMessages({ sessionId: placed.kimi, ownerUserId: ownerId, share }), isUnavailable);
+  getConnection().prepare('UPDATE sessions SET jsonl_path = ? WHERE session_id = ?').run(`/${'p'.repeat(5000)}`, placed.deepseek);
+  await assert.rejects(newProjection().readMessages({ sessionId: placed.deepseek, ownerUserId: ownerId, share }), isUnavailable);
 });
 
 test.after(() => closeConnection());

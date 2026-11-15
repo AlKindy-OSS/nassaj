@@ -31,8 +31,6 @@ const SPAWN_ENTRY_POINTS: ReadonlyArray<{ file: string; runProvider: string }> =
   { file: 'agy-cli.js', runProvider: 'antigravity' },
   { file: 'cursor-cli.js', runProvider: 'cursor' },
   { file: 'opencode-cli.js', runProvider: 'opencode' },
-  { file: 'qwen-cli.js', runProvider: 'qwen' },
-  { file: 'kimi-agent-cli.js', runProvider: 'kimi' },
 ];
 
 test('every provider spawn entry file consults the harness-update guard', () => {
@@ -175,16 +173,16 @@ test('assertHarnessNotUpdating throws a retryable harness_updating error while l
 test('beginHarnessLaunch atomically refuses a child after an update lease wins', () => {
   _resetHarnessLeases();
   _resetHarnessLaunches();
-  acquireHarnessLease('kimi', 'job-before-child');
-  assert.throws(() => beginHarnessLaunch('kimi'), (error: Error & { code?: string }) =>
+  acquireHarnessLease('opencode', 'job-before-child');
+  assert.throws(() => beginHarnessLaunch('opencode'), (error: Error & { code?: string }) =>
     error.code === 'harness_updating');
-  releaseHarnessLease('kimi', 'job-before-child');
-  const release = beginHarnessLaunch('kimi');
+  releaseHarnessLease('opencode', 'job-before-child');
+  const release = beginHarnessLaunch('opencode');
   release();
 });
 
 test('an unreadable durable recovery fence blocks admission', () => {
-  assert.equal(isHarnessRecoveryBlocked('qwen', () => {
+  assert.equal(isHarnessRecoveryBlocked('opencode', () => {
     throw new Error('database unavailable');
   }), true);
 });

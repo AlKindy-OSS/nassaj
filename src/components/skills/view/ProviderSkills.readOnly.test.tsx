@@ -45,11 +45,12 @@ const skill = (name: string, extra: Record<string, unknown> = {}) => ({
   name, description: `${name} description`, command: `/${name}`, scope: 'user', sourcePath: `${name}/SKILL.md`, ...extra,
 });
 
-type Provider = 'claude' | 'codex' | 'cursor' | 'qwen';
-// The skills cache is module-level, keyed by provider and mode: each test uses its own pair.
-const renderSkills = (filesMode: 'shared' | 'private', provider: Provider) => (
-  render(<ProviderSkills selectedProvider={provider} currentProjects={[]} filesMode={filesMode} />)
+type Provider = 'claude' | 'codex' | 'cursor';
+// The skills cache is module-level, keyed by provider, mode and projects: each test uses its own key.
+const renderSkills = (filesMode: 'shared' | 'private', provider: Provider, projects: never[] = []) => (
+  render(<ProviderSkills selectedProvider={provider} currentProjects={projects} filesMode={filesMode} />)
 );
+const memberProject = { projectId: 'p-member', displayName: 'member', path: '/member' } as never;
 
 describe('ProviderSkills shared skills', () => {
   beforeEach(() => {
@@ -91,7 +92,7 @@ describe('ProviderSkills shared skills', () => {
   it('lets a member manage skills only on their private files', async () => {
     role = 'member';
     skills = [skill('own')];
-    renderSkills('shared', 'qwen');
+    renderSkills('shared', 'codex', [memberProject]);
     await screen.findByText('own');
     expect(screen.queryByRole('button', { name: 'skills.addSkill' })).toBeNull();
     cleanup();

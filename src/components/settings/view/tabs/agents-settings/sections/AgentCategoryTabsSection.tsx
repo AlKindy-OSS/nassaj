@@ -42,7 +42,7 @@ export default function AgentCategoryTabsSection({
     }));
   }, [categories, t, updateAvailable]);
 
-  // Coming-soon providers (e.g. deepseek) have no category tabs — the content
+  // Coming-soon providers have no category tabs — the content
   // section renders a coming-soon panel instead, so the tab bar is hidden.
   if (items.length === 0) return null;
 

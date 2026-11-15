@@ -42,8 +42,6 @@ export type HarnessBinaryId =
   | 'antigravity'
   | 'cursor'
   | 'opencode'
-  | 'qwen'
-  | 'kimi'
   | 'dsh';
 
 /** How one harness binary is located. */
@@ -64,12 +62,9 @@ export interface HarnessBinarySpec {
 const localBin = (command: string) => (home: string) => path.join(home, '.local', 'bin', command);
 
 /**
- * The registry. Measured on the reference host (2026-09-27): claude, cursor,
- * agy and qwen in `~/.local/bin`, opencode and kimi in their official
- * installers' `~/.opencode/bin` and `~/.kimi-code/bin` (kimi: the vendor's
- * native install script, owner decision ADR-189; KIMI_INSTALL_DIR is NOT
- * honoured — only the measured path or the KIMI_PATH server override), codex
- * through T-1872's machine release identity.
+ * The registry. Measured on the reference host (2026-09-27): claude, cursor
+ * and agy in `~/.local/bin`, opencode in its official installer's
+ * `~/.opencode/bin`, codex through T-1872's machine release identity.
  */
 export const HARNESS_BINARY_SPECS: Readonly<Record<HarnessBinaryId, HarnessBinarySpec>> = Object.freeze({
   // Delegates the candidate to claude-cli-path.ts: its first well-known
@@ -92,12 +87,6 @@ export const HARNESS_BINARY_SPECS: Readonly<Record<HarnessBinaryId, HarnessBinar
     command: 'opencode',
     overrideEnv: 'OPENCODE_PATH',
     measured: (home) => path.join(home, '.opencode', 'bin', 'opencode'),
-  },
-  qwen: { command: 'qwen', overrideEnv: 'QWEN_PATH', measured: localBin('qwen') },
-  kimi: {
-    command: 'kimi',
-    overrideEnv: 'KIMI_PATH',
-    measured: (home) => path.join(home, '.kimi-code', 'bin', 'kimi'),
   },
   // T-2086/ADR-224: the DeepSeek Harness (@deepseek-ai/dsh), a Node CLI. The
   // measured path is the npm user-prefix bin (`~/.local/bin`); its official
@@ -291,13 +280,9 @@ export function inspectHarnessBinaries(): HarnessBinaryStatus[] {
  * disables that harness; the service keeps running. codex is checked through
  * the same machine-release resolver its launches use.
  *
- * A retired BODY (cursor, qwen, kimi — `shared/retiredProviders.ts`) is never
- * reported missing here: the product refuses it before any launch regardless
- * of whether its CLI is installed, so an absent binary is not an operator
- * action item. This is the body axis only — `kimi` stays a live ENGINE of the
- * Claude body (dispatched via `claude-command` + an API key, not this binary),
- * so its launch-time resolution above is untouched and still runs for that
- * axis; only this warning's reporting is filtered.
+ * A retired BODY (cursor — `shared/retiredProviders.ts`) is never reported
+ * missing here: the product refuses it before any launch regardless of whether
+ * its CLI is installed, so an absent binary is not an operator action item.
  */
 export function logUnresolvedHarnessBinaries(
   warn: (message: string, details: Record<string, unknown>) => void = console.warn,

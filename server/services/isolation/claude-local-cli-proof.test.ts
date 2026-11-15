@@ -2,7 +2,7 @@
  * ADR-227 Consequences / T-2098 qa item 3 — credential behaviour is CLI-version
  * dependent, so a local Claude run is admitted only on a Claude CLI version whose
  * header-echo proof passed. The proof is a runnable acceptance step
- * (scripts/prove-claude-local-engine.mjs) that records the version; in release-gate
+ * (scripts/prove-local-engine.mjs) that records the version; in release-gate
  * mode a skipped header-echo counts as failure.
  */
 import assert from 'node:assert/strict';
@@ -12,10 +12,12 @@ import os from 'node:os';
 import path from 'node:path';
 import test, { after } from 'node:test';
 
-import { evaluateProbeOutput } from '../../../scripts/prove-claude-local-engine-lib.mjs';
+import { evaluateProbeOutput } from '../../../scripts/prove-local-engine-lib.mjs';
 
 import { applyClaudeLocalEngineEnv } from './apply-claude-local-engine-env.js';
-import { isClaudeLocalVersionProven, readProvenVersions, recordProvenVersion } from './claude-local-cli-proof.js';
+import {
+  isClaudeLocalVersionProven, isLocalCliVersionProven, provenVersionsFile, readProvenVersions, recordProvenVersion,
+} from './claude-local-cli-proof.js';
 
 const root = fs.mkdtempSync(path.join(process.env.TMPDIR || os.tmpdir(), 't2098-proof-'));
 after(() => fs.rmSync(root, { recursive: true, force: true }));
@@ -80,4 +82,15 @@ test('release-gate mode turns a header-echo SKIP into a failure', () => {
   const gated = run(true);
   assert.notEqual(gated.status, 0, 'with the gate a missing CLI fails');
   assert.match(gated.stdout, /release gate/u);
+});
+
+test('T-2107: the Codex registry is separate and admits the proven codex-cli 0.166.0 only', () => {
+  const file = path.join(root, 'codex-proven.json');
+  recordProvenVersion('0.166.0', { pass: 6, probe: 'codex-header-echo' }, file);
+  assert.equal(isLocalCliVersionProven('codex', '0.166.0', file), true);
+  assert.equal(isLocalCliVersionProven('codex', '0.166.1', file), false);
+  assert.equal(isLocalCliVersionProven('codex', '0.166.0'), true, 'shipped Codex registry');
+  assert.equal(isLocalCliVersionProven('claude', '0.166.0'), false, 'a Codex version never admits Claude');
+  assert.equal(isLocalCliVersionProven('codex', '2.1.312'), false, 'a Claude version never admits Codex');
+  assert.throws(() => provenVersionsFile('agy'));
 });

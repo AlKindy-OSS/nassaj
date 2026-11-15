@@ -6,6 +6,7 @@ import {
   participantsDb,
   projectMembersDb,
   projectsDb,
+  sessionsDb,
   userDb,
 } from '@/modules/database/index.js';
 
@@ -50,8 +51,11 @@ export type SessionAccessMode = 'read' | 'write' | 'restamp';
  *   • spend the ORG key on their turns (apply-claude-engine-provider-env falls
  *     back to the operator-wide slot when the member has no key of their own).
  *
- * Consent for that belongs to whoever is in the conversation, so this mode stops
- * at `participantsDb.isParticipant`.
+ * ADR-173 (H1, qa-critic condition 3): under shared writing every author is a
+ * participant, so participation can no longer stand for that consent. The mode
+ * is now independent of attribution: the session's strict spawn owner (its
+ * creator) or the owner of its project, each also holding 'write'. No other
+ * project arm, and no author, provenance or shared_write row, ever qualifies.
  */
 
 /**
@@ -101,6 +105,10 @@ export function isSessionAccessibleByUser(
   if (requesterUserId === null || !Number.isInteger(requesterUserId)) {
     return false;
   }
+  // Decided before every other branch so no participation arm can reach it.
+  if (mode === 'restamp') {
+    return canRestampSession(sessionId, projectPath, requesterUserId);
+  }
 
   let participant = false;
   try {
@@ -118,17 +126,7 @@ export function isSessionAccessibleByUser(
     if (owner === null) {
       return mode === 'read' || participantsDb.hasSpawnConsent(sessionId, requesterUserId);
     }
-    if (mode === 'restamp' && !participantsDb.hasSpawnConsent(sessionId, requesterUserId)) {
-      return false;
-    }
     return canAccessProject(owner.project_id, requesterUserId);
-  }
-
-  // Participation is the ONLY route to a restamp — no project arm (see the
-  // SessionAccessMode doc). Placed before the other two so a future mode added
-  // to the union cannot fall through into the write branch by omission.
-  if (mode === 'restamp') {
-    return false;
   }
 
   if (isProjectMembershipEnforced() && findOwningProject(projectPath ?? '') === null) {
@@ -157,17 +155,63 @@ function resolveSessionProject(projectPath: string | null | undefined) {
 }
 
 /** Project creator or explicit 'owner' member — the same rule as canManageProject. */
-function isSessionProjectOwner(projectPath: string | null | undefined, userId: number): boolean {
+export function isSessionProjectOwner(projectPath: string | null | undefined, userId: number): boolean {
   const project = resolveSessionProject(projectPath);
   if (!project) return false;
   if (project.created_by === userId) return true;
   return projectMembersDb.getRole(project.project_id, userId) === 'owner';
 }
 
+/**
+ * ADR-173 (review, Low): whether `userId` owns the project the SESSION itself is
+ * recorded in — never a client-named path. Unknown session = false. Never throws.
+ */
+export function isSessionOwnProjectOwner(sessionId: string, userId: number): boolean {
+  try {
+    const projectPath = sessionId ? sessionsDb.getSessionById(sessionId)?.project_path : null;
+    return Boolean(projectPath) && isSessionProjectOwner(projectPath, userId);
+  } catch {
+    return false;
+  }
+}
+
 /** Active user whose platform role is owner/admin; read from the DB, never the request. */
 function hasElevatedAppRole(userId: number): boolean {
   const user = userDb.getUserById(userId);
   return user !== undefined && DESTROY_ELEVATED_APP_ROLES.has(user.role);
+}
+
+/**
+ * ADR-173 (owner decision 2): may `userId` stop any turn of `sessionId`, stuck or not?
+ * The project owner or a platform owner/admin, each holding 'write'. The turn's starter
+ * is decided by the run itself; any other shared writer may stop only a stuck turn.
+ */
+export function isSessionTurnStopPrivileged(sessionId: string, userId: number | null): boolean {
+  if (!sessionId || userId === null || !Number.isInteger(userId)) return false;
+  try {
+    const session = sessionsDb.getSessionById(sessionId);
+    if (!session) return false;
+    const projectPath = session.project_path ?? null;
+    return isSessionAccessibleByUser(sessionId, projectPath, userId, 'write')
+      && (isSessionProjectOwner(projectPath, userId) || hasElevatedAppRole(userId));
+  } catch {
+    return false;
+  }
+}
+
+/** The restamp mandate (see SessionAccessMode): strict spawn owner or project owner, with 'write'. */
+function canRestampSession(
+  sessionId: string,
+  projectPath: string | null | undefined,
+  requesterUserId: number,
+): boolean {
+  try {
+    const mandated = participantsDb.resolveStrictSpawnOwnerUserId(sessionId) === requesterUserId
+      || isSessionProjectOwner(projectPath, requesterUserId);
+    return mandated && isSessionAccessibleByUser(sessionId, projectPath, requesterUserId, 'write');
+  } catch {
+    return false;
+  }
 }
 
 /**

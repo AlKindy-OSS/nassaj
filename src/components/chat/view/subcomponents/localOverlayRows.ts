@@ -1,8 +1,9 @@
 /**
- * localOverlayRows.ts — the "local models · <server>" blocks under the Claude body
- * (ADR-227 Decision 10, T-2098 stage 3b). Pure and DOM-free.
+ * localOverlayRows.ts — the "local models · <server>" blocks under a coding agent
+ * that runs on local servers, Claude, Codex or DeepSeek Harness (ADR-227 Decision
+ * 10, T-2098 stage 3b, T-2107 stage 5, T-2108). Pure and DOM-free.
  *
- * The rows come from GET /api/providers/claude/local-overlay, looped as data: no
+ * The rows come from GET /api/providers/<body>/local-overlay, looped as data: no
  * runtime or vendor name is written here (ADR-194). Eligibility is the server's
  * static verdict; this module adds only the chat-pin rules the picker owes the
  * member before the spawn refuses:
@@ -21,7 +22,16 @@ import { LOCAL_ENGINE, isLocalModelId } from '../../../../../shared/localEngine'
 
 import type { PickerRow } from './modelPickerRows';
 
-/** The server's static verdict for one model (claude-local-overlay.js). */
+/** The coding agents that run on local servers (server/services/isolation/local-overlay.js). */
+export const LOCAL_BODIES = ['claude', 'codex', 'dsh'] as const;
+export type LocalBody = (typeof LOCAL_BODIES)[number];
+
+/** True for a body that runs on local servers. */
+export function isLocalBody(body: string | null | undefined): body is LocalBody {
+  return (LOCAL_BODIES as readonly string[]).includes(body ?? '');
+}
+
+/** The server's static verdict for one model (local-overlay.js). */
 export type LocalOverlayEligibility =
   | 'ok'
   | 'model_id_reserved'
@@ -35,6 +45,8 @@ export type LocalOverlayModel = {
   value: string;
   label: string;
   contextWindow: number | null;
+  /** Smallest window this body's spawn accepts for the model. */
+  minContextWindow: number;
   eligibility: LocalOverlayEligibility;
 };
 
@@ -59,15 +71,20 @@ const FIXABLE_IN_SETTINGS: ReadonlySet<LocalRowBlock> = new Set([
 ]);
 
 export type LocalPickerRow = PickerRow & {
+  /** The coding agent this row starts a local chat on. */
+  body: LocalBody;
   engineProvider: typeof LOCAL_ENGINE;
   providerId: string;
   /** null = selectable. */
   blocked: LocalRowBlock | null;
   /** True when the fix lives in the server's settings. */
   fixInSettings: boolean;
+  /** Smallest window this body's spawn accepts for the model. */
+  minContextWindow: number;
 };
 
 export type LocalPickerBlock = {
+  body: LocalBody;
   providerId: string;
   serverLabel: string;
   rows: LocalPickerRow[];
@@ -84,12 +101,12 @@ export type LocalChatContext = {
 };
 
 /**
- * True while the Claude × local matrix cell is actionable. The picker follows the
+ * True while the body × local matrix cell is actionable. The picker follows the
  * matrix's own convention (`actionableEngineCells`): a cell that is a barrier is
- * hidden, not greyed — so the blocks stay absent until T-2103 flips the cell.
+ * hidden, not greyed — and its overlay is not even read.
  */
-export function claudeLocalCellOpen(): boolean {
-  return actionableEngineCells('claude').some((cell) => cell.engine === LOCAL_ENGINE);
+export function localCellOpen(body: string): boolean {
+  return isLocalBody(body) && actionableEngineCells(body).some((cell) => cell.engine === LOCAL_ENGINE);
 }
 
 /** The provider id (`nassaj_local_<hex>`) of a local model id, or null. */
@@ -116,9 +133,10 @@ function pinBlock(ctx: LocalChatContext, providerId: string): LocalRowBlock | nu
  * never run in THIS chat says so first.
  */
 export function localPickerBlocks(
+  body: LocalBody,
   overlay: readonly LocalOverlayServer[],
   ctx: LocalChatContext,
-  cellOpen: boolean = claudeLocalCellOpen(),
+  cellOpen: boolean = localCellOpen(body),
 ): LocalPickerBlock[] {
   if (!cellOpen) return [];
   return overlay
@@ -126,12 +144,14 @@ export function localPickerBlocks(
     .map((server) => {
       const pinned = pinBlock(ctx, server.providerId);
       return {
+        body,
         providerId: server.providerId,
         serverLabel: server.label,
         rows: server.models.map((model): LocalPickerRow => {
           const blocked = pinned ?? (model.eligibility === 'ok' ? null : model.eligibility);
           return {
-            key: `claude:local-model:${model.value}`,
+            key: `${body}:local-model:${model.value}`,
+            body,
             model: model.value,
             label: model.label,
             engine: { key: 'localServer', vars: {} },
@@ -140,6 +160,7 @@ export function localPickerBlocks(
             providerId: server.providerId,
             blocked,
             fixInSettings: blocked !== null && FIXABLE_IN_SETTINGS.has(blocked),
+            minContextWindow: model.minContextWindow,
           };
         }),
       };

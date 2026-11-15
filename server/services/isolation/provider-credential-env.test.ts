@@ -20,7 +20,7 @@ import { INHERITED_CREDENTIAL_ENV as RESOLVER_LIST } from './resolve-provider-en
 const here = path.dirname(fileURLToPath(import.meta.url));
 const resolverSource = fs.readFileSync(path.join(here, 'resolve-provider-env.js'), 'utf8');
 /** Env names the resolver sets that are switches, not credentials or roots. */
-const NON_CREDENTIAL_SWITCHES = new Set(['DISABLE_AUTOUPDATER', 'OPENCODE_DISABLE_AUTOUPDATE', 'KIMI_CODE_NO_AUTO_UPDATE']);
+const NON_CREDENTIAL_SWITCHES = new Set(['DISABLE_AUTOUPDATER', 'OPENCODE_DISABLE_AUTOUPDATE']);
 
 describe('provider-credential-env (B-1771)', () => {
   it('is the very list the resolver strips', () => {
@@ -29,7 +29,7 @@ describe('provider-credential-env (B-1771)', () => {
 
   it('covers every env name resolveProviderEnv assigns, except updater switches and HOME', () => {
     const assigned = new Set([...resolverSource.matchAll(/\benv\.([A-Z][A-Z0-9_]+)\s*=[^=]/gu)].map((m) => m[1]));
-    assert.ok(assigned.has('CLAUDE_CONFIG_DIR') && assigned.has('KIMI_CODE_HOME'), 'scan found the roots');
+    assert.ok(assigned.has('CLAUDE_CONFIG_DIR') && assigned.has('CODEX_HOME'), 'scan found the roots');
     const uncovered = [...assigned].filter((name) => name !== 'HOME'
       && !NON_CREDENTIAL_SWITCHES.has(name) && !isProviderCredentialEnvName(name));
     assert.deepEqual(uncovered, []);

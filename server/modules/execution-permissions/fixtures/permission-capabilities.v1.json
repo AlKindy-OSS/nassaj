@@ -288,11 +288,6 @@
       "observedAt": "2026-09-01T05:19:00.000Z"
     },
     {
-      "body": "kimi",
-      "reasonCode": "PRODUCTION_PROJECTION_UNVERIFIED",
-      "observedAt": "2026-09-01T05:19:00.000Z"
-    },
-    {
       "body": "deepseek",
       "reasonCode": "NO_V1_MEASUREMENT_CONTRACT",
       "observedAt": "2026-09-01T05:19:00.000Z"
@@ -300,16 +295,6 @@
     {
       "body": "glm",
       "reasonCode": "NO_V1_MEASUREMENT_CONTRACT",
-      "observedAt": "2026-09-01T05:19:00.000Z"
-    },
-    {
-      "body": "hermes",
-      "reasonCode": "ACCOUNT_CREDITS_UNAVAILABLE",
-      "observedAt": "2026-09-01T05:19:00.000Z"
-    },
-    {
-      "body": "qwen",
-      "reasonCode": "AUTHENTICATION_UNAVAILABLE",
       "observedAt": "2026-09-01T05:19:00.000Z"
     },
     {
@@ -323,5 +308,5 @@
       "observedAt": "2026-11-07T15:00:00.000Z"
     }
   ],
-  "artifactDigest": "sha256:b2ddcf53ec93028687de22e7443f2f29adbcb3e63a8a39577e12c3e743cbc51e"
+  "artifactDigest": "sha256:04e6930c169893b2623c505d906ff10467dc5296834d57ade252739585131857"
 }

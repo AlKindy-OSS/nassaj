@@ -28,6 +28,7 @@ import { getProviderCapabilities } from '../constants/providerCapabilities';
 
 import { pickStoredOrCurrent } from './normalizeProviderModel';
 import { claudeSlotCatalogProvider, sanitizeClaudeSlotModel } from './claudeModelSlot';
+import { localSlotCatalog, sanitizeLocalSlotModel } from './localModelSlot';
 
 // Re-export pure engine-provider storage helpers so existing callers keep their
 // import path (from './useChatProviderState') without touching ChatInterface.tsx
@@ -123,8 +124,9 @@ export function useChatProviderState({ selectedSession, selectedProject }: UseCh
   const [claudeModel, setClaudeModel] = useState<string>(() => {
     return sanitizeClaudeSlotModel(engineProvider, localStorage.getItem('claude-model'));
   });
+  // T-2107: a local model id survives the boot read (localModelSlot.ts).
   const [codexModel, setCodexModel] = useState<string>(() => {
-    return sanitizeStoredModel('codex', localStorage.getItem('codex-model'));
+    return sanitizeLocalSlotModel('codex', localStorage.getItem('codex-model'));
   });
   const [opencodeModel, setOpenCodeModel] = useState<string>(() => {
     return sanitizeStoredModel('opencode', localStorage.getItem('opencode-model'));
@@ -147,9 +149,10 @@ export function useChatProviderState({ selectedSession, selectedProject }: UseCh
     return localStorage.getItem('glm-model') || FALLBACK_DEFAULT_MODEL.glm;
   });
   // T-2086/ADR-224: DeepSeek Harness. Its catalog is static (no server models
-  // facet yet), so the stored value is validated against it on boot.
+  // facet yet), so the stored value is validated against it on boot; a local
+  // model id survives (T-2108, localModelSlot.ts).
   const [dshModel, setDshModel] = useState<string>(() => {
-    return sanitizeStoredModel('dsh', localStorage.getItem('dsh-model'));
+    return sanitizeLocalSlotModel('dsh', localStorage.getItem('dsh-model'));
   });
 
   const [providerModelCatalog, setProviderModelCatalog] = useState<
@@ -449,7 +452,7 @@ export function useChatProviderState({ selectedSession, selectedProject }: UseCh
       setClaudeModel(sanitizeClaudeSlotModel(engineProviderRef.current, raw));
     });
     const offCodex = onApplyServerPreference('codex-model', (raw) => {
-      setCodexModel(sanitizeStoredModel('codex', raw));
+      setCodexModel(sanitizeLocalSlotModel('codex', raw));
     });
     const offOpencode = onApplyServerPreference('opencode-model', (raw) => {
       setOpenCodeModel(sanitizeStoredModel('opencode', raw));
@@ -520,9 +523,11 @@ export function useChatProviderState({ selectedSession, selectedProject }: UseCh
     reconcileProviderModel('claude-model', claudeModelCatalog, claudeModel, setClaudeModel);
   }, [claudeModelCatalog, claudeModel, reconcileProviderModel]);
 
+  // T-2107: no catalog governs a local model id, so nothing reconciles it.
+  const codexModelCatalog = localSlotCatalog(codexModel, providerModelCatalog.codex);
   useEffect(() => {
-    reconcileProviderModel('codex-model', providerModelCatalog.codex, codexModel, setCodexModel);
-  }, [providerModelCatalog.codex, codexModel, reconcileProviderModel]);
+    reconcileProviderModel('codex-model', codexModelCatalog, codexModel, setCodexModel);
+  }, [codexModelCatalog, codexModel, reconcileProviderModel]);
 
   useEffect(() => {
     reconcileProviderModel(
@@ -533,9 +538,11 @@ export function useChatProviderState({ selectedSession, selectedProject }: UseCh
     );
   }, [providerModelCatalog.opencode, opencodeModel, reconcileProviderModel]);
 
+  // T-2108: same for a local model id in the dsh slot.
+  const dshModelCatalog = localSlotCatalog(dshModel, providerModelCatalog.dsh);
   useEffect(() => {
-    reconcileProviderModel('dsh-model', providerModelCatalog.dsh, dshModel, setDshModel);
-  }, [providerModelCatalog.dsh, dshModel, reconcileProviderModel]);
+    reconcileProviderModel('dsh-model', dshModelCatalog, dshModel, setDshModel);
+  }, [dshModelCatalog, dshModel, reconcileProviderModel]);
 
   useEffect(() => {
     const kimi = providerModelCatalog.kimi;

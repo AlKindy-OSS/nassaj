@@ -1,21 +1,10 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
 import { describe, it } from 'node:test';
-
-/* eslint-disable boundaries/dependencies -- deterministic lease fixture verifies the capability probe's cross-module admission contract. */
-import { installFakeHarnessBinary } from '@/shared/__tests__/harness-binary-fixtures.js';
-
-import {
-  acquireHarnessLease, releaseHarnessLease,
-} from '../providers/harness-update/lease.js';
-/* eslint-enable boundaries/dependencies */
 
 import {
   CLI_HARNESS_MATRIX, CliTurnSupervisorRuntime, isCliTurnSupervisorArmed, isCliTurnSupervisorEnabled,
 } from './cli-turn-supervisor.service.js';
-import { cliCapabilityInternals } from './cli-capability.js';
 import { createCodexCliAdapter } from './adapters/codex-cli-adapter.js';
 
 const inertAdapter = () => createCodexCliAdapter({
@@ -30,57 +19,24 @@ describe('CLI Turn Supervisor capability gate', () => {
     assert.match(source, /await executeConformantTurn\(/u);
     assert.doesNotMatch(source, /new TurnOrchestrator\(/u);
   });
-  it('is server-authoritative and exact to the three chat flags', () => {
+  it('is server-authoritative and exact to the two chat flags', () => {
     const env = {
       NASSAJ_TURN_SUPERVISOR_CODEX_CHAT: 'true', NASSAJ_TURN_SUPERVISOR_QWEN_CHAT: '1',
       NASSAJ_TURN_SUPERVISOR_OPENCODE_CHAT: 'yes', NASSAJ_TURN_SUPERVISOR_HERMES_CHAT: 'on',
     };
-    for (const provider of ['codex', 'qwen', 'opencode']) {
+    for (const provider of ['codex', 'opencode']) {
       assert.equal(isCliTurnSupervisorEnabled(provider, 'chat', env, () => true), true, provider);
       assert.equal(isCliTurnSupervisorEnabled(provider, 'agent', env), false, provider);
       assert.equal(isCliTurnSupervisorEnabled(provider, 'chat', {}), false, provider);
     }
     assert.equal(isCliTurnSupervisorEnabled('cursor', 'chat', env), false);
-    // T-1953: the hermes cell is deleted; its old flag arms nothing.
-    assert.equal(isCliTurnSupervisorArmed('hermes', 'chat', env), false);
-    assert.equal(isCliTurnSupervisorEnabled('hermes', 'chat', env, () => true), false);
-  });
-
-  it('the installed Qwen help probe denies the current binary', () => {
-    assert.equal(cliCapabilityInternals.qwenProbe(process.env), false);
-    const env = {
-      ...process.env,
-      NASSAJ_TURN_SUPERVISOR_QWEN_CHAT: '1',
-    };
-    assert.equal(isCliTurnSupervisorArmed('qwen', 'chat', env), true);
-    assert.equal(isCliTurnSupervisorEnabled('qwen', 'chat', env), false);
-    assert.equal(CLI_HARNESS_MATRIX.find(({ provider }) => provider === 'qwen')?.supported, false);
-    assert.equal(CLI_HARNESS_MATRIX.some(({ provider }) => (provider as string) === 'hermes'), false);
-  });
-
-  it('refuses capability child creation during update without caching a denial', () => {
-    // T-1873: the probe runs the registry qwen (operator HOME), never a member
-    // QWEN_PATH; a stub that prints nothing keeps the probe hermetic (→ false).
-    const originalHome = process.env.HOME;
-    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'cli-capability-home-'));
-    process.env.HOME = home;
-    const stub = installFakeHarnessBinary(home, 'qwen');
-    const env = { ...process.env, QWEN_PATH: '/definitely/not/a/qwen-binary' };
-    const key = `qwen:${stub}`;
-    cliCapabilityInternals.clearProbeCache();
-    assert.ok('lease' in acquireHarnessLease('qwen', 'capability-test'));
-    try {
-      assert.throws(() => cliCapabilityInternals.qwenProbe(env), /being updated/u);
-      assert.equal(cliCapabilityInternals.hasCachedProbe(key), false);
-    } finally {
-      releaseHarnessLease('qwen', 'capability-test');
+    // T-1953 / ADR-229: the hermes and qwen cells are deleted; their old flags arm nothing.
+    for (const provider of ['hermes', 'qwen']) {
+      assert.equal(isCliTurnSupervisorArmed(provider, 'chat', env), false, provider);
+      assert.equal(isCliTurnSupervisorEnabled(provider, 'chat', env, () => true), false, provider);
+      assert.equal(CLI_HARNESS_MATRIX.some((cell) => (cell.provider as string) === provider), false, provider);
     }
-    assert.equal(isCliTurnSupervisorEnabled('qwen', 'chat', {
-      ...env, NASSAJ_TURN_SUPERVISOR_QWEN_CHAT: '1',
-    }), false);
-    assert.equal(cliCapabilityInternals.hasCachedProbe(key), true);
-    process.env.HOME = originalHome;
-    fs.rmSync(home, { recursive: true, force: true });
+    assert.equal(CLI_HARNESS_MATRIX.some(({ provider }) => (provider as string) === 'kimi'), false);
   });
 
   it('requires an independent configured reviewer for delegate_review', () => {
