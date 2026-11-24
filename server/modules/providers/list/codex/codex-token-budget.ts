@@ -12,6 +12,8 @@ export type ContextSnapshot = {
   nativeCompactTokens: number | null;
   proposedCompactTokens: number | null;
   newSessionTokens: number | null;
+  /** B-1803: set only on a reset; the client must clear any prior reading for this session. */
+  invalidatedBy?: 'compact_boundary';
 };
 
 /** ADR-161: one native cache observation, independent of occupancy and cost. */

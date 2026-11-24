@@ -164,6 +164,9 @@ test('CLI abort bridge is identity scoped to the two supervised providers', () =
   assert.equal(abortCliSupervisedTurn(supervisor as never, 'opencode', 's-3', 41), true);
   assert.equal(abortCliSupervisedTurn(supervisor as never, 'hermes', 's-4', 41), false, 'the hermes cell is deleted');
   assert.equal(abortCliSupervisedTurn(supervisor as never, 'cursor', 's-1', 41), false);
+  // T-2093: a turn-scoped stop forwards the turn's clientMsgId for the supervisor to compare.
+  assert.equal(abortCliSupervisedTurn(supervisor as never, 'codex', 's-5', 41, 'turn-key'), true);
+  assert.deepEqual(seen.at(-1), { provider: 'codex', sessionId: 's-5', userId: 41, clientMsgId: 'turn-key' });
 });
 
 /**

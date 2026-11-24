@@ -181,6 +181,13 @@ const ALLOWLIST: Readonly<Record<string, string>> = Object.freeze({
   'server/services/isolation/provider-credential-env.js': 'GEMINI_API_KEY in the inherited credential env every spawn strips',
   'server/shared/__tests__/real-credential-guard.ts': `${AGY_HOME}: a real credential dotfile tests must never touch`,
   'server/shared/__tests__/real-credential-guard.test.ts': `${AGY_HOME}: asserts ~/.gemini credentials stay untouched`,
+  // T-2094 agy over ACP: agy's own home, brain path and ACP auth method ids.
+  'scripts/agy-acp-live-check.mjs': `${AGY_HOME}: live check reads the agy OAuth token and brain transcript`,
+  'server/agy-cli.acp.guards.test.ts': `${AGY_HOME}: member-home .gemini fixtures for the ACP guards`,
+  'server/modules/providers/list/antigravity/agy-acp-runner.js':
+    `${AGY_HOME}; agy ACP auth method ids (oauth-personal, gemini-api-key) and GEMINI_API_KEY`,
+  'server/modules/providers/shared/acp/__tests__/fake-acp-agent.mjs':
+    `${AGY_HOME}: fake agy ACP agent mirrors its brain path and auth method ids`,
 });
 
 function collectMatchingFiles(): string[] {

@@ -15,6 +15,7 @@ import {
   requireBoundSessionWorkspace,
 } from '@/modules/session-workspaces/index.js';
 import { runPermissionExecutionAdapter } from '@/modules/execution-permissions/adapter.js';
+import { listTurnCheckpoints, readTurnCheckpointDiff } from '@/modules/turn-checkpoints/index.js';
 import { sendAdmissionFailureResponse } from '@/modules/execution-permissions/admission-failure.js';
 
 import { projectsDb } from '../modules/database/index.js';
@@ -39,6 +40,7 @@ import {
   resumeRequest,
 } from '../../scripts/session-commit-arbiter.mjs';
 import { dispatchCommittedPreview } from '../../scripts/preview-oid-dispatch.mjs';
+import { createRateLimiter } from '../middleware/rate-limit.js';
 import { stampWriterEpoch } from '../shared/user-revocation-epoch.js';
 import { hardenGitArgs } from '../../shared/git-safety.js';
 import {
@@ -1164,6 +1166,85 @@ router.get('/diff', async (req, res) => {
       return res.status(400).json({ error: 'Session id and overlay generation are required together' });
     }
     res.json({ error: toSafeGitFailureDetails(error, 'Git operation failed') });
+  }
+});
+
+// ── T-2095: what each agent turn changed (turn checkpoints) ──────────────────
+const TURN_CHECKPOINTS_NOT_FOUND = Object.freeze({ error: 'Turn checkpoints not found' });
+const TURN_SEQ_PATTERN = /^[1-9][0-9]{0,7}$/;
+// /api/git carries no limiter of its own; each read spawns git, so cap it per member.
+const turnCheckpointReadLimiter = createRateLimiter({
+  windowMs: 60_000,
+  max: 120,
+  key: (req) => `turn-checkpoints:${req.user?.id ?? 'anonymous'}`,
+  message: 'Too many requests, please slow down',
+});
+
+function sendTurnCheckpointsNotFound(res) {
+  return res.status(404).set('Cache-Control', 'no-store').json(TURN_CHECKPOINTS_NOT_FOUND);
+}
+
+/**
+ * The caller's own bound overlay for a checkpoint read, or null. QA condition
+ * 6: missing coordinates, a missing overlay, a stale generation and another
+ * owner all collapse into the same null (one uniform 404); there is never a
+ * fallback to the shared project root.
+ */
+async function resolveTurnCheckpointOverlay(req) {
+  try {
+    const projectPath = await getActualProjectPath(req.query.project, req);
+    return requireGitReadWorkspace({ projectPath, query: req.query, principalId: req.user?.id ?? null }) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** A positive integer turn sequence from a query value, or null. */
+function parseTurnSeq(raw) {
+  return typeof raw === 'string' && TURN_SEQ_PATTERN.test(raw) ? Number(raw) : null;
+}
+
+router.get('/turn-checkpoints', turnCheckpointReadLimiter, async (req, res) => {
+  const overlay = await resolveTurnCheckpointOverlay(req);
+  if (!overlay) return sendTurnCheckpointsNotFound(res);
+  const before = req.query.before === undefined ? null : parseTurnSeq(req.query.before);
+  if (req.query.before !== undefined && before === null) {
+    return res.status(400).json({ error: 'Invalid turn cursor' });
+  }
+  try {
+    const listed = await listTurnCheckpoints({
+      binding: overlay, principalId: req.user?.id ?? null, limit: req.query.limit, before,
+    });
+    if (!listed) return sendTurnCheckpointsNotFound(res);
+    return res.set('Cache-Control', 'no-store').json(listed);
+  } catch (error) {
+    console.warn('[git] turn checkpoint list failed', { message: String(error?.message ?? error).slice(0, 200) });
+    return res.status(500).json({ error: 'Turn checkpoints are unavailable' });
+  }
+});
+
+router.get('/turn-checkpoints/diff', turnCheckpointReadLimiter, async (req, res) => {
+  const overlay = await resolveTurnCheckpointOverlay(req);
+  if (!overlay) return sendTurnCheckpointsNotFound(res);
+  const turnSeq = parseTurnSeq(req.query.turnSeq);
+  if (turnSeq === null) return res.status(400).json({ error: 'Invalid turn sequence' });
+  if (req.query.path !== undefined && typeof req.query.path !== 'string') {
+    return res.status(400).json({ error: 'Invalid file path' });
+  }
+  try {
+    const diff = await readTurnCheckpointDiff({
+      binding: overlay, principalId: req.user?.id ?? null, turnSeq, path: req.query.path,
+    });
+    if (!diff) return sendTurnCheckpointsNotFound(res);
+    if (typeof diff.diff === 'string'
+        && (containsSqliteContent(diff.diff) || containsServiceSecretValue(diff.diff))) {
+      return res.set('Cache-Control', 'no-store').json({ path: diff.path, withheld: true, reason: 'protected_content' });
+    }
+    return res.set('Cache-Control', 'no-store').json(diff);
+  } catch (error) {
+    if (/invalid overlay path/.test(String(error?.message))) return res.status(400).json({ error: 'Invalid file path' });
+    console.warn('[git] turn checkpoint diff failed', { message: String(error?.message ?? error).slice(0, 200) });
+    return res.status(500).json({ error: 'Turn checkpoints are unavailable' });
   }
 });
 

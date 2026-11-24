@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { readFileSync } from 'node:fs';
+
 import {
+  claudeCompactBoundarySnapshot,
   claudeContextSnapshot,
   claudeTranscriptContextSnapshot,
   claudeTranscriptWindowTokens,
@@ -41,9 +44,47 @@ test('postcompact native response replaces the prior value without inheritance',
 });
 
 test('hung native control request is bounded and leaves unavailable telemetry', async () => {
-  const snapshot = await readClaudeContextSnapshot({ getContextUsage: () => new Promise(() => {}) }, identity);
+  const started = Date.now();
+  const snapshot = await readClaudeContextSnapshot(
+    { getContextUsage: () => new Promise(() => {}) }, identity, { timeoutMs: 50, log: () => {} },
+  );
+  assert.ok(Date.now() - started < 900, 'the injected timeout, not the 1000 ms default, bounds the read');
   assert.equal(snapshot.usageKind, 'unknown');
   assert.equal(snapshot.usedTokens, null);
+});
+
+test('B-1803: every read emits exactly one outcome line with the session id and elapsed ms', async () => {
+  const cases: Array<[string, { getContextUsage?: () => Promise<unknown> } | null]> = [
+    ['ok', { getContextUsage: async () => ({ model: 'claude-model-a', totalTokens: 5, maxTokens: 200000 }) }],
+    ['timeout', { getContextUsage: () => new Promise(() => {}) }],
+    ['unsupported', {}],
+    ['unsupported', null],
+    ['error', { getContextUsage: async () => { throw new Error('secret-ish detail'); } }],
+  ];
+  for (const [outcome, query] of cases) {
+    const lines: string[] = [];
+    await readClaudeContextSnapshot(query, identity, { timeoutMs: 20, log: (line) => lines.push(line) });
+    assert.equal(lines.length, 1, outcome);
+    assert.match(lines[0], new RegExp(`^\\[CONTEXT-USAGE-READ\\] session=session-a outcome=${outcome} ms=\\d+$`));
+  }
+});
+
+test('B-1803: the compaction reset carries an explicit invalidation the client must clear on', () => {
+  const snapshot = claudeCompactBoundarySnapshot('session-a');
+  assert.equal(snapshot.invalidatedBy, 'compact_boundary');
+  assert.equal(snapshot.sessionId, 'session-a');
+  assert.equal(snapshot.modelId, null);
+  assert.equal(snapshot.usedTokens, null);
+  assert.equal(snapshot.usageKind, 'unknown');
+  // An ordinary reading never claims an invalidation.
+  assert.equal(claudeContextSnapshot(null, identity).invalidatedBy, undefined);
+});
+
+test('B-1803: the live compact_boundary branch emits the explicit invalidation snapshot', () => {
+  const source = readFileSync(new URL('../../../../claude-sdk.js', import.meta.url), 'utf8');
+  const at = source.indexOf("message.subtype === 'compact_boundary' && !message.parent_tool_use_id");
+  assert.notEqual(at, -1, 'compact_boundary branch not found');
+  assert.match(source.slice(at, at + 600), /claudeCompactBoundarySnapshot\(/);
 });
 
 test('caller-supplied identity is preserved; control model does not override it; missing control model still blocks occupancy', () => {
@@ -110,4 +151,16 @@ test('B-1356: transcript snapshot keeps restoration semantics and carries the wi
   const noModel = claudeTranscriptContextSnapshot('session-a', null, 81392);
   assert.equal(noModel.usageKind, 'unknown');
   assert.equal(noModel.windowTokens, null);
+});
+
+test('B-1803: a restored snapshot carries the client-facing identity while the window follows the native id', () => {
+  const snapshot = claudeTranscriptContextSnapshot('session-a', 'claude-opus-5-5', 81392, 'opus[1m]');
+  assert.equal(snapshot.modelId, 'opus[1m]');
+  assert.equal(snapshot.windowTokens, 1_000_000);
+  assert.equal(snapshot.usedTokens, 81392);
+  assert.equal(snapshot.usageKind, 'last_request_input');
+  // No native model in the transcript: no reading, whatever identity is shown.
+  const noNative = claudeTranscriptContextSnapshot('session-a', null, 81392, 'opus[1m]');
+  assert.equal(noNative.usageKind, 'unknown');
+  assert.equal(noNative.windowTokens, null);
 });

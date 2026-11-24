@@ -1,4 +1,6 @@
-import { cacheObservationMetadata, type CacheSnapshot, nativeContextId, nativeTokenCount } from '../codex/codex-token-budget.js';
+import {
+  cacheObservationMetadata, type CacheSnapshot, type ContextSnapshot, nativeContextId, nativeTokenCount,
+} from '../codex/codex-token-budget.js';
 import { readPinnedTail } from '../../shared/pinned-tail.js';
 import { isTranscriptHandle, openRecordedTranscript } from '../../shared/session-transcript-reader.js';
 
@@ -138,7 +140,7 @@ export function claudeContextSnapshot(
   response: unknown,
   identity: { sessionId: string | null; modelId: string | null },
   inputTokens: number | null = null,
-): import('../codex/codex-token-budget.js').ContextSnapshot {
+): ContextSnapshot {
   const control = isRecord(response) ? response : {};
   const count = nativeTokenCount;
   identity = { sessionId: nativeContextId(identity.sessionId), modelId: nativeContextId(identity.modelId) };
@@ -204,35 +206,71 @@ export function claudeTranscriptWindowTokens(modelId: string | null): number | n
 /**
  * Snapshot for a transcript-restored session: last-request input against the
  * model's known window. Not a runtime observation, so `observedAt` stays null
- * and usageKind stays `last_request_input`.
+ * and usageKind stays `last_request_input`. B-1803: `identityModelId` is the
+ * model the client shows for the session (its stored selection); the reading
+ * and the window still come from the native transcript id.
  */
 export function claudeTranscriptContextSnapshot(
   sessionId: string | null,
   modelId: string | null,
   inputTokens: number,
-): import('../codex/codex-token-budget.js').ContextSnapshot {
-  const snapshot = claudeContextSnapshot(null, { sessionId, modelId }, modelId ? inputTokens : null);
+  identityModelId: string | null = modelId,
+): ContextSnapshot {
+  const snapshot = claudeContextSnapshot(null, { sessionId, modelId: identityModelId }, modelId ? inputTokens : null);
   snapshot.observedAt = null;
   snapshot.windowTokens = snapshot.usageKind === 'last_request_input' ? claudeTranscriptWindowTokens(modelId) : null;
   return snapshot;
 }
 
-/** One bounded control request; telemetry failure must never fail a conversation. */
-export async function readClaudeContextSnapshot(
-  query: { getContextUsage?: () => Promise<unknown> } | null,
-  identity: { sessionId: string | null; modelId: string | null },
-): Promise<import('../codex/codex-token-budget.js').ContextSnapshot> {
+/** B-1803: the reset sent at a top-level compact_boundary; the client clears on `invalidatedBy`. */
+export function claudeCompactBoundarySnapshot(sessionId: string | null): ContextSnapshot {
+  return { ...claudeContextSnapshot(null, { sessionId, modelId: null }), invalidatedBy: 'compact_boundary' };
+}
+
+type ContextReadOutcome = 'ok' | 'timeout' | 'unsupported' | 'error';
+const TIMED_OUT = Symbol('context-usage-timeout');
+
+/** Knobs for {@link readClaudeContextSnapshot}; production uses the defaults. */
+export type ContextReadOptions = { timeoutMs?: number; log?: (line: string) => void };
+
+/** Settles to the native response, or to TIMED_OUT once `timeoutMs` elapses. */
+async function raceContextUsage(
+  getContextUsage: () => Promise<unknown>, timeoutMs: number,
+): Promise<unknown> {
   let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<typeof TIMED_OUT>((resolve) => { timer = setTimeout(() => resolve(TIMED_OUT), timeoutMs); });
   try {
-    if (typeof query?.getContextUsage !== 'function') return claudeContextSnapshot(null, identity);
-    const timeout = new Promise<null>((resolve) => { timer = setTimeout(() => resolve(null), 1000); });
-    const response = await Promise.race([Promise.resolve().then(() => query.getContextUsage!()), timeout]);
-    return claudeContextSnapshot(response, identity);
-  } catch {
-    return claudeContextSnapshot(null, identity);
+    return await Promise.race([Promise.resolve().then(getContextUsage), timeout]);
   } finally {
     if (timer) clearTimeout(timer);
   }
+}
+
+/**
+ * One bounded control request; telemetry failure must never fail a conversation.
+ * Emits exactly one `[CONTEXT-USAGE-READ]` line per call: session id, outcome and
+ * elapsed ms only — never tokens, content or model payloads.
+ */
+export async function readClaudeContextSnapshot(
+  query: { getContextUsage?: () => Promise<unknown> } | null,
+  identity: { sessionId: string | null; modelId: string | null },
+  { timeoutMs = 1000, log = console.log }: ContextReadOptions = {},
+): Promise<ContextSnapshot> {
+  const startedAt = Date.now();
+  let outcome: ContextReadOutcome = 'unsupported';
+  let response: unknown = null;
+  try {
+    if (typeof query?.getContextUsage === 'function') {
+      const getContextUsage = query.getContextUsage.bind(query);
+      const raced = await raceContextUsage(getContextUsage, timeoutMs);
+      outcome = raced === TIMED_OUT ? 'timeout' : 'ok';
+      if (raced !== TIMED_OUT) response = raced;
+    }
+  } catch {
+    outcome = 'error';
+  }
+  log(`[CONTEXT-USAGE-READ] session=${identity.sessionId || 'NEW'} outcome=${outcome} ms=${Date.now() - startedAt}`);
+  return claudeContextSnapshot(response, identity);
 }
 
 /** Extract raw disjoint Claude fields before legacy normalization inserts zeros. */

@@ -45,6 +45,15 @@ import { resolveProviderEnv } from './services/isolation/resolve-provider-env.js
 import { assertModelRunActor } from './services/isolation/credential-actor.js';
 import { resolveCagedLaunch } from './services/isolation/provider-cage-wiring.js';
 import { SessionRegistry } from './session-registry.js';
+import {
+    abortAgyAcpTurn,
+    admitAgyAcpTurn,
+    driveAgyAcpTurn,
+    agyAcpPool,
+    isAgyAcpEnabled,
+    killPooledAgyForConversation,
+    prepareAgyAcpLaunch,
+} from './modules/providers/list/antigravity/agy-acp-runner.js';
 
 
 // Per-session replay registry for agy (ADR-021 / PHASE-SR-0). Gated behind
@@ -483,23 +492,31 @@ async function discoverAndRegisterBrainSession(state, priorBrainIds, cleanCwd, f
 
     state.discovered = true;
     state.brainUUID = discoveredBrainUUID;
+    bindBrainToRun(discoveredBrainUUID, cleanCwd, finalSessionId, userId);
+}
 
+/**
+ * Binds a fresh conversation's brain UUID to its real workspace path and to
+ * the run's session record. Shared by the `-p` discovery (snapshot diff) and
+ * the ACP path (session/new answers the UUID directly, T-2094).
+ */
+function bindBrainToRun(brainUUID, cleanCwd, finalSessionId, userId) {
     // Bind for the synchronizer first: this is synchronous and closes the race
     // window even if the DB write below is delayed or fails.
-    registerAntigravityProjectPath(discoveredBrainUUID, cleanCwd);
+    registerAntigravityProjectPath(brainUUID, cleanCwd);
 
     const persisted = sessionManager.getSession(finalSessionId);
     if (persisted) {
-        persisted.cliSessionId = discoveredBrainUUID;
+        persisted.cliSessionId = brainUUID;
         sessionManager.saveSession(finalSessionId);
     }
 
     try {
         sessionsDb.recordDiscoveredSession({
-            sessionId: discoveredBrainUUID,
+            sessionId: brainUUID,
             provider: 'antigravity',
             projectPath: cleanCwd,
-            jsonlPath: buildTranscriptPath(discoveredBrainUUID, userId),
+            jsonlPath: buildTranscriptPath(brainUUID, userId),
         });
     } catch (err) {
         console.error('[agy] failed to register session in DB:', err?.message || err);
@@ -655,9 +672,14 @@ async function resolveAgySpawnModel({ existingBrainUUID, sessionId, requestedMod
     return null;
 }
 
+/**
+ * Runs one agy turn. Shared preparation, then the ACP path when
+ * NASSAJ_AGY_ACP is on (T-2094, read every turn), else — or when ACP declines
+ * the turn (capability probe, pool full) — the `agy -p` path.
+ */
 async function spawnAntigravity(command, options = {}, ws) {
     const opts = options && typeof options === 'object' ? options : {};
-    const { sessionId, projectPath, cwd, sessionSummary, model } = opts;
+    const { sessionId } = opts;
 
     if (refuseSpawnIfHarnessUpdating('antigravity', ws, {
         sessionId,
@@ -665,29 +687,22 @@ async function spawnAntigravity(command, options = {}, ws) {
     })) return;
 
     // The authenticated user driving this run. Drives both the spawn env
-    // (resolveProviderEnv) and which brain dir we read for UUID discovery, so
-    // an isolated agy reads/writes the same per-user brain store.
+    // (resolveProviderEnv) and which brain dir we read, so an isolated agy
+    // reads/writes the same per-user brain store.
     const userId = ws?.userId ?? null;
 
-    // Resolve the brain UUID for resume. Primary source is the in-memory
-    // sessionManager (`cliSessionId`, the shared CLI adapter naming). It is
-    // populated only during the run that created the conversation, so it is
-    // empty after a server restart or when the chat was resumed from history.
-    // Fall back to the persisted session row in that case: for antigravity
-    // sessions the nassaj session_id IS the brain UUID (see
-    // discoverAndRegisterBrainSession below, which writes the row keyed by the
-    // discovered brain UUID), and the jsonl_path embeds the same UUID. Without
-    // this fallback a resume would be misdetected as a fresh conversation and
-    // start a new brain instead of continuing the existing transcript.
+    // Brain UUID for resume: the in-memory sessionManager (`cliSessionId`) is
+    // populated only during the run that created the conversation; after a
+    // server restart or a resume from history the persisted row answers (for
+    // antigravity the nassaj session_id IS the brain UUID). Without this
+    // fallback a resume would start a new brain instead of continuing.
     const existingSession = sessionId ? sessionManager.getSession(sessionId) : null;
     const existingBrainUUID = existingSession?.cliSessionId
         || (sessionId ? resolveBrainUUIDFromDb(sessionId) : null);
 
-    // Stale-resume guard: a resume request whose backing brain folder no longer
-    // exists must not silently start a fresh conversation. Emit an explicit
-    // `conversation_not_found` signal carrying the stale session id and the
-    // original command so the client can offer a deliberate "start new session"
-    // action that re-sends this prompt.
+    // Stale-resume guard: a resume whose brain folder is gone must not
+    // silently start a fresh conversation; the client offers a deliberate
+    // "start new session" that re-sends this prompt.
     if (existingBrainUUID && !(await brainExists(existingBrainUUID, userId))) {
         if (ws) {
             ws.send(createNormalizedMessage({
@@ -703,42 +718,31 @@ async function spawnAntigravity(command, options = {}, ws) {
         return { code: 0, sessionId };
     }
 
-    // B-ISO-AGYLOCK: only fresh conversations (no brain to resume) race on UUID
-    // discovery, so serialize the discovery window for those only. Resumed
-    // conversations carry an explicit --conversation id and need no lock.
-    const needsDiscovery = !existingBrainUUID;
-    const releaseDiscoveryLock = needsDiscovery ? await acquireDiscoveryLock() : null;
-    let discoveryLockReleased = false;
-    const freeDiscoveryLock = () => {
-        if (releaseDiscoveryLock && !discoveryLockReleased) {
-            discoveryLockReleased = true;
-            releaseDiscoveryLock();
-        }
-    };
+    const turn = await prepareAgyTurnInput(command, opts, ws, { userId, existingBrainUUID });
+    if (turn.result) return turn.result;
+    if (isAgyAcpEnabled()) {
+        const acpResult = await runAgyAcpTurn(turn);
+        if (acpResult) return acpResult;
+    }
+    return runAgyPrintTurn(turn);
+}
 
-    // Snapshot brain UUIDs *before* spawn so we can detect the new one after close.
-    // The clock is read first: a brain born before it cannot belong to this run,
-    // which the session handover re-checks against the brain dir's birth time.
-    const spawnStartedAtMs = Date.now();
-    const priorBrainIds = await listBrainIds(userId);
-
-    // Resumed runs: agy's print mode REPLAYS the conversation's previous planner
-    // output on stdout before (or instead of) the new turn's response — observed
-    // on agy 1.x, where a resumed turn's stored reply began with the prior
-    // turn's full text. The brain transcript, not stdout, is the reliable source
-    // for this turn's reply, so snapshot its last step_index before spawn; the
-    // close handler reads only steps appended after it.
+/**
+ * Preparation shared by both paths: transcript fence, instruction prefix,
+ * coordination directive, workspace check and the model to pass.
+ * @returns {Promise<object>} the turn, or `{ result }` when the run ends here
+ */
+async function prepareAgyTurnInput(command, opts, ws, { userId, existingBrainUUID }) {
+    const { sessionId, projectPath, cwd, model } = opts;
+    // Resumed runs read THIS turn's steps after the pre-spawn step index (agy's
+    // print mode replays prior output on stdout), and learn whether the
+    // conversation already carries our <instructions> prefix.
     const preSpawnTranscript = existingBrainUUID
         ? await readTranscriptState(existingBrainUUID, userId)
-    : { lastStepIndex: -1, hasInstructions: false, readable: true };
+        : { lastStepIndex: -1, hasInstructions: false, readable: true };
 
-    // Inject project + global instructions on a fresh conversation (no brain to
-    // resume) — and, once, on a resumed conversation whose transcript never
-    // received the prefix (born outside the UI: Antigravity IDE, raw terminal).
-    // Re-sending on every turn would duplicate it, so resumed conversations that
-    // already carry an <instructions> USER_INPUT are left untouched. The
-    // injected prefix is sent to agy only — sessionManager records the original
-    // user message below — so the chat history stays free of boilerplate.
+    // Instructions go to agy only (sessionManager records the raw message):
+    // on a fresh conversation, and once on a resumed one born outside the UI.
     let commandToSend = command || '';
     if (!existingBrainUUID || !preSpawnTranscript.hasInstructions) {
         const instructionsPrefix = await buildInstructionsPrefix(projectPath || cwd);
@@ -746,77 +750,54 @@ async function spawnAntigravity(command, options = {}, ws) {
             commandToSend = `${instructionsPrefix}\n\n${commandToSend}`;
         }
     }
-
-    // T-1315 (الموجة الثانية): مستوى تنسيق الجولة. يُطبَّق **بعد** كتلة التعليمات
-    // وعلى **كل** جولة لا مرّةً واحدة: التعليمات هوية المشروع (تُحقن مرّة وتبقى في
-    // الـbrain)، أمّا المستوى فقرارُ هذه الجولة بعينها ويتغيّر بين رسالة وأخرى.
-    // الإنفاذ نصّي: لا مفتاحَ عمقٍ موثَّقاً في agy، فلا يُضبط اسمٌ بلا قارئ (‏B-548).
-    // وهو يذهب إلى agy وحده — sessionManager أدناه يسجّل `command` الأصلي، فتبقى
-    // المحادثة نظيفة من التوجيه.
+    // T-1315: the coordination level is this turn's decision, applied after
+    // the instructions on every turn; textual (agy has no documented knob).
     commandToSend = withCoordinationDirective(commandToSend, opts.coordinationLevel);
 
-    // Resolve and sanitize the workspace dir up front — strip non-printable chars
-    // that can leak in from terminal copy/paste. This value is both the process
-    // cwd AND the explicit agy workspace (--add-dir) below.
+    // Strip non-printable chars that leak in from terminal copy/paste. This is
+    // both the process cwd AND the explicit agy workspace (--add-dir).
     const cleanCwd = (cwd || projectPath || process.cwd())
         .replace(/[^\x20-\x7E]/g, '')
         .trim();
 
-    // B-31: verify the project directory exists before acquiring the discovery
-    // lock and spawning agy. Release the lock if already held (shouldn't be at
-    // this point, but guard defensively).
+    // B-31: verify the project directory exists before spawning agy.
     if (cwd || projectPath) {
         const cwdCheck = await checkCwdExists(cleanCwd);
         if (!cwdCheck.ok) {
-            freeDiscoveryLock();
             if (ws) {
                 ws.send(createNormalizedMessage(
                     buildCwdMissingPayload(cwdCheck.error, { sessionId: sessionId || null, provider: 'antigravity' })
                 ));
             }
-            return { code: 1, sessionId };
+            return { result: { code: 1, sessionId } };
         }
     }
 
-    // agy in --print mode ignores the OS process cwd and defaults to its internal
-    // scratch directory (~/.gemini/antigravity-cli/scratch). Without an explicit
-    // workspace it wanders the home tree and latches onto unrelated projects
-    // (e.g. it reads ~/the governance repo/NASSAJ.md while the user is in another project). Pin the
-    // workspace to the selected project with --add-dir so agy stays scoped to it.
-    const args = ['-p', commandToSend, '--dangerously-skip-permissions'];
-    if (cleanCwd) {
-        args.push('--add-dir', cleanCwd);
-    }
-    // T-874(1)/T-875: pass --model only on session CREATION, or on a resume that
-    // carries an EXPLICIT in-conversation re-pick. A plain resume omits --model so
-    // agy keeps its brain's own model (the brain is agy's per-session model
-    // memory), preventing a model pick made in another conversation from bleeding
-    // in. The UI sends the catalog `value`; agy's --model wants the display label,
-    // so resolveAgyModelLabel maps it (and returns null for auto/empty/unknown).
+    // T-874(1)/T-875: a model only on creation or an explicit re-pick; a plain
+    // resume keeps the brain's own model. The label is what agy's --model wants.
     const spawnModel = await resolveAgySpawnModel({ existingBrainUUID, sessionId, requestedModel: model });
-    const agyModelLabel = await resolveAgyModelLabel(
-        spawnModel, userId, options?.authenticatedPrincipal
-    );
-    // T-1854 (qa H1b): last await before spawn — everything below through
-    // spawn + activeSessions.set is synchronous, so a revoked run fence stops here.
-    if (ws?.runFenceRevoked) { freeDiscoveryLock(); return { code: 1, sessionId }; }
-    if (agyModelLabel) {
-        args.push('--model', agyModelLabel);
-    }
-    if (existingBrainUUID) {
-        args.push('--conversation', existingBrainUUID);
-    }
+    const agyModelLabel = await resolveAgyModelLabel(spawnModel, userId, opts.authenticatedPrincipal);
+    return {
+        command, opts, ws, userId, sessionId, existingBrainUUID, preSpawnTranscript,
+        commandToSend, cleanCwd, spawnModel, agyModelLabel,
+    };
+}
 
+/**
+ * Opens the run's session bookkeeping: replay registry key, nassaj session
+ * id, writer stamp, user message, and the send/terminal helpers. Synchronous:
+ * callers run it after their last run-fence check, with no await in between.
+ */
+function openAgyRun(turn) {
+    const { ws, userId, command, opts } = turn;
+    const cwd = opts.cwd || opts.projectPath || process.cwd();
     // B-N5: open the registry under a temporary connectionId so any payload
-    // buffered before the real sessionId is known is retained, then rekey to the
-    // sessionId below without loss/duplication. No-op when the flag is off.
+    // buffered before the real sessionId is known is retained, then rekey.
     const connectionId = connectionIdFor(ws);
     let registryKey = connectionId;
     if (connectionId) {
-        // A connectionId is per-socket and may be reused across runs on the same
-        // long-lived socket. Cancel any pending post-close drop and clear a stale,
-        // already-terminated buffer under it so this run's preamble never inherits
-        // a prior run's payloads (B-N-RESUME clean buffer at the temporary key).
+        // A connectionId may be reused across runs on one socket: never let
+        // this run inherit a prior, already-terminated buffer.
         cancelPendingDrop(connectionId);
         if (agySessionRegistry.enabled
             && agySessionRegistry.entries.has(connectionId)
@@ -826,106 +807,71 @@ async function spawnAntigravity(command, options = {}, ws) {
         agySessionRegistry.open(connectionId);
     }
 
-    // Establish (or reuse) the nassaj-side session id and persist it so the
-    // chat history layer can correlate streamed messages with their session.
-    let finalSessionId = sessionId;
+    let finalSessionId = turn.sessionId;
     let isNewSession = false;
     if (!finalSessionId) {
         finalSessionId = generateNassajSessionId();
         isNewSession = true;
-        sessionManager.createSession(finalSessionId, cwd || projectPath || process.cwd());
+        sessionManager.createSession(finalSessionId, cwd);
     }
-
-    // B-40e: stamp sessionId on the writer as early as possible so SSE / API
-    // callers that read ws.sessionId before the first stdout chunk get the correct
-    // value rather than the temporary connectionId or a stale previous run's id.
+    // B-40e: stamp sessionId on the writer as early as possible.
     if (ws && ws.setSessionId && typeof ws.setSessionId === 'function') {
         ws.setSessionId(finalSessionId);
     }
-
-    // B-N-RESUME (clean buffer): a new run for a sessionId that carries a prior,
-    // already-terminated entry must NOT inherit the previous run's transcript.
-    // Drop the stale entry (and cancel its pending post-close drop) before the
-    // rekey so the buffer never crosses a run boundary. The fresh open() below
-    // re-initialises an empty entry whose seq line starts at 0 — so a client that
-    // reconnects with lastSeq absent/0 replays only THIS run from its start,
-    // bounded by the current run (<= ring capacity), never a previous transcript.
-    // We only reset an INACTIVE prior entry: a still-active entry under the same
-    // sessionId means a live run we must not disturb (and the rekey below would
-    // legitimately throw on that collision).
-    if (finalSessionId) {
-        cancelPendingDrop(finalSessionId);
-        if (
-            agySessionRegistry.enabled
-            && finalSessionId !== connectionId
-            && agySessionRegistry.entries.has(finalSessionId)
-            && !agySessionRegistry.isActive(finalSessionId)
-        ) {
-            agySessionRegistry.drop(finalSessionId);
-        }
-    }
-
-    // B-N5 rekey: hand the temporary connectionId buffer over to the real
-    // sessionId. After this, registryKey is the sessionId and all subsequent
-    // live payloads (and attach/isActive lookups) address the session directly.
-    // B-40b: wrap in try/catch so a concurrent rekey collision (simultaneous
-    // resume on the same socket) does not crash the spawn pipeline — fall back
-    // to a fresh open under the finalSessionId instead.
-    if (connectionId && finalSessionId && connectionId !== finalSessionId) {
-        try {
-            agySessionRegistry.rekey(connectionId, finalSessionId);
-            registryKey = finalSessionId;
-        } catch (rekeyErr) {
-            console.warn('[agy] rekey failed (concurrent resume?); opening fresh entry:', rekeyErr?.message || rekeyErr);
-            registryKey = finalSessionId;
-        }
-    }
-    // Mark the session active in the single source of truth (B-N7). open() also
-    // re-initialises a fresh empty entry after a clean-buffer drop above, so the
-    // new run's seq line starts at 0 with no carried-over payloads.
+    registryKey = rekeyAgyRegistry(connectionId, finalSessionId) ?? registryKey;
+    // B-N7: mark the session active in the single source of truth.
     agySessionRegistry.open(registryKey);
-
     if (command) {
         sessionManager.addMessage(finalSessionId, 'user', command);
     }
 
-    let sessionCreatedSent = false;
-    let assistantText = '';
-  // Timing joins the native DONE planner step under its stable brain/step identity.
+    // Timing joins the native DONE planner step under its stable brain/step identity.
     const turnTimer = createTurnTimer();
-    let terminalNotified = false;
-  let terminalFailure = null;
+    const run = {
+        finalSessionId, isNewSession, registryKey, runPresence: null,
+        turnTimer, terminalNotified: false,
+    };
+    run.safeSend = createAgySafeSend(ws, userId, registryKey);
+    run.notifyTerminal = (outcome) => notifyAgyTerminal(run, turn, outcome);
+    return run;
+}
 
-    // UTF-8 streaming decoder for agy's plain-text stdout. A multibyte char (e.g.
-    // an Arabic letter = 2 bytes in UTF-8) can straddle a chunk boundary; decoding
-    // each Buffer chunk independently with .toString() would split the sequence and
-    // emit U+FFFD (�) mid-word. StringDecoder holds the incomplete trailing bytes
-    // and prepends them to the next chunk, so characters are only emitted once whole.
-    const stdoutDecoder = new StringDecoder('utf8');
+/**
+ * B-N-RESUME + B-N5: drops an inactive prior buffer under `finalSessionId`
+ * and moves the connection buffer onto it. Returns the new key, or null.
+ */
+function rekeyAgyRegistry(connectionId, finalSessionId) {
+    if (!finalSessionId) return null;
+    cancelPendingDrop(finalSessionId);
+    if (agySessionRegistry.enabled
+        && finalSessionId !== connectionId
+        && agySessionRegistry.entries.has(finalSessionId)
+        && !agySessionRegistry.isActive(finalSessionId)) {
+        agySessionRegistry.drop(finalSessionId);
+    }
+    if (!connectionId || connectionId === finalSessionId) return null;
+    // B-40b: a concurrent rekey collision must not crash the spawn pipeline.
+    try {
+        agySessionRegistry.rekey(connectionId, finalSessionId);
+    } catch (rekeyErr) {
+        console.warn('[agy] rekey failed (concurrent resume?); opening fresh entry:', rekeyErr?.message || rekeyErr);
+    }
+    return finalSessionId;
+}
 
-    const safeSend = (payload) => {
-        // Coordinator attribution (B-MU-UX-FIX-ASSISTANT-AUTHOR): agy streams its
-        // reply as stream_delta chunks (live deltas for new sessions, and the
-        // transcript-derived final reply at close). Stamp the JWT-sourced
-        // coordinatorId of the human who spawned this run so live viewers and
-        // the spawner's mirrors attribute the reply to the real participant
-        // instead of the session owner. Control events (session_created,
-        // complete, error) carry no coordinatorId.
+/** The run's single send path: coordinator stamp, replay buffer, then the socket. */
+function createAgySafeSend(ws, userId, registryKey) {
+    return (payload) => {
+        // B-MU-UX-FIX-ASSISTANT-AUTHOR: stamp the human who spawned this run on
+        // the reply chunks; control events carry no coordinatorId.
         const withCoordinator =
             payload.kind === 'stream_delta' && Number.isInteger(userId)
                 ? { ...payload, coordinatorId: userId }
                 : payload;
         const normalized = createNormalizedMessage({ ...withCoordinator, provider: 'antigravity' });
-        // RingBuffer injection point (ADR-021): buffer the live payload under the
-        // current registry key BEFORE forwarding, so a reconnecting socket can be
-        // brought up to date via differential replay even if the original ws has
-        // gone away. No-op when SESSION_REGISTRY_agy is off; buffering does not
-        // depend on `ws` being present (the live stream may outlive the socket).
-        // T-1854 (qa M2): a revoked run fence also stops replay buffering.
+        // ADR-021 replay buffer; T-1854 (qa M2): a revoked run fence also stops it.
         if (ws?.runFenceRevoked !== true) {
-            // ADR-210 (as Claude's bufferThenSend): stamp the ring seq on the
-            // buffered original before sending, so the display chokepoint can
-            // record what live viewers saw and a replay can send exactly that.
+            // ADR-210: stamp the ring seq on the buffered original before sending.
             const seq = agySessionRegistry.record(registryKey, normalized);
             if (seq !== null && seq !== undefined) normalized.sequence = seq;
         }
@@ -937,42 +883,111 @@ async function spawnAntigravity(command, options = {}, ws) {
             console.error('[agy] failed to forward ws payload:', err?.message || err);
         }
     };
+}
 
-    const notifyTerminal = ({ code = null, error = null } = {}) => {
-        if (terminalNotified) return;
-        terminalNotified = true;
-
-        // Live presence + open-sessions counter. B-395: both used to be called
-        // by hand here because agy did not flow through the process monitor; it
-        // now does (below), and the monitor emits exactly these two on
-        // unregister — plus the 'idle' broadcast that clears the badge. Null-safe
-        // because the spawn-failure path reaches this before the handle exists.
-        runPresence?.end();
-
-        if (code === 0 && !error) {
-            notifyRunStopped({
-                userId: ws?.userId || null,
-                provider: 'antigravity',
-                sessionId: finalSessionId,
-                sessionName: sessionSummary,
-                stopReason: 'completed',
-            });
-            return;
-        }
-
-        notifyRunFailed({
-            userId: ws?.userId || null,
-            provider: 'antigravity',
-            sessionId: finalSessionId,
-            sessionName: sessionSummary,
-            error: error || getAgyExitMessage(code),
-        });
+/** Run-end notification (once): presence end + stopped/failed notification. */
+function notifyAgyTerminal(run, turn, { code = null, error = null } = {}) {
+    if (run.terminalNotified) return;
+    run.terminalNotified = true;
+    // B-395: the process monitor emits presence + open-sessions on end().
+    run.runPresence?.end();
+    const base = {
+        userId: turn.ws?.userId || null,
+        provider: 'antigravity',
+        sessionId: run.finalSessionId,
+        sessionName: turn.opts.sessionSummary,
     };
+    if (code === 0 && !error) {
+        notifyRunStopped({ ...base, stopReason: 'completed' });
+        return;
+    }
+    notifyRunFailed({ ...base, error: error || getAgyExitMessage(code) });
+}
 
+/** B-395 presence + participant/author records, shared by both paths. */
+function registerAgyRunPresence(turn, run, { pid, launchReservation }) {
+    run.runPresence = beginProviderRun({
+        provider: 'antigravity',
+        writer: turn.ws,
+        sessionId: run.finalSessionId,
+        projectPath: turn.cleanCwd,
+        pid,
+        launchReservation,
+    });
+    if (turn.ws?.userId) {
+        participantsDb.recordSpawn(run.finalSessionId, turn.ws.userId, {
+            provider: 'antigravity',
+            projectPath: turn.cleanCwd,
+        });
+        // B-MU-UX-FIX-MSG-AUTHOR: who authored this prompt (best-effort hash match).
+        messageAuthorsDb.recordUserMessage(run.finalSessionId, turn.ws.userId, turn.command);
+    }
+}
+
+/** The `session_created` frame of a fresh conversation (spawn key; B-1666 parent null). */
+function sendAgySessionCreated(turn, run) {
+    run.safeSend({
+        kind: 'session_created',
+        newSessionId: run.finalSessionId,
+        sessionId: run.finalSessionId,
+        parentSessionId: null,
+        ...(typeof turn.opts.clientMsgId === 'string' && turn.opts.clientMsgId
+            ? { clientMsgId: turn.opts.clientMsgId }
+            : {}),
+    });
+}
+
+/**
+ * The `agy -p` path (unchanged behaviour): snapshot-diff brain discovery for a
+ * fresh conversation, transcript-derived reply for a resumed one.
+ */
+async function runAgyPrintTurn(turn) {
+    const { ws, userId, existingBrainUUID, cleanCwd, sessionId } = turn;
+    // T-2094 QA 5: never two agy processes on one conversation.
+    killPooledAgyForConversation(userId, existingBrainUUID);
+
+    // B-ISO-AGYLOCK: only fresh conversations race on UUID discovery, so only
+    // they serialize the window from "snapshot prior ids" to "UUID bound".
+    const releaseDiscoveryLock = existingBrainUUID ? null : await acquireDiscoveryLock();
+    let discoveryLockReleased = false;
+    const freeDiscoveryLock = () => {
+        if (releaseDiscoveryLock && !discoveryLockReleased) {
+            discoveryLockReleased = true;
+            releaseDiscoveryLock();
+        }
+    };
+    // The clock is read first: a brain born before it cannot belong to this run,
+    // which the session handover re-checks against the brain dir's birth time.
+    const spawnStartedAtMs = Date.now();
+    const priorBrainIds = await listBrainIds(userId);
+
+    // T-1854 (qa H1b): last await before spawn — everything below through
+    // spawn + activeSessions.set is synchronous, so a revoked run fence stops here.
+    if (ws?.runFenceRevoked) { freeDiscoveryLock(); return { code: 1, sessionId }; }
+    // agy in --print mode ignores the OS cwd; pin the workspace with --add-dir.
+    const args = ['-p', turn.commandToSend, '--dangerously-skip-permissions'];
+    if (cleanCwd) {
+        args.push('--add-dir', cleanCwd);
+    }
+    if (turn.agyModelLabel) {
+        args.push('--model', turn.agyModelLabel);
+    }
+    if (existingBrainUUID) {
+        args.push('--conversation', existingBrainUUID);
+    }
+    const run = openAgyRun(turn);
+    const { agProcess, releaseHarnessLaunch } = spawnAgyPrintProcess(turn, run, args, freeDiscoveryLock);
+    activeSessions.set(run.finalSessionId, { process: agProcess, brainUUID: existingBrainUUID });
+    registerAgyRunPresence(turn, run, { pid: agProcess.pid, launchReservation: releaseHarnessLaunch });
+    return watchAgyPrintProcess(turn, run, agProcess, {
+        freeDiscoveryLock, priorBrainIds, spawnStartedAtMs,
+    });
+}
+
+/** Spawns the `agy -p` child (synchronous; the caller's fence check precedes it). */
+function spawnAgyPrintProcess(turn, run, args, freeDiscoveryLock) {
+    const { userId, cleanCwd } = turn;
     let agProcess;
-    // B-395: assigned right after the spawn; declared here because notifyTerminal
-    // above closes over it and may run on the pre-spawn failure path.
-    let runPresence = null;
     let releaseHarnessLaunch = null;
     try {
         // T-897: cage the agy spawn behind NASSAJ_PROVIDER_CAGE (default OFF ⇒
@@ -998,361 +1013,397 @@ async function spawnAntigravity(command, options = {}, ws) {
         freeDiscoveryLock();
         // B-32: map spawn error to a structured code.
         const mapped = mapSpawnError(err);
-        safeSend({ kind: 'error', code: mapped.code, content: mapped.fallbackMessage, sessionId: finalSessionId });
-        notifyTerminal({ error: err });
+        run.safeSend({ kind: 'error', code: mapped.code, content: mapped.fallbackMessage, sessionId: run.finalSessionId });
+        run.notifyTerminal({ error: err });
         throw err;
     }
+    return { agProcess, releaseHarnessLaunch };
+}
 
-    activeSessions.set(finalSessionId, { process: agProcess, brainUUID: existingBrainUUID });
-
-    // B-395: route the run through the process monitor instead of poking presence
-    // by hand. Same presence + open-sessions bookkeeping as before (the monitor
-    // emits both), and the known pid adds what the hand-rolled version could not:
-    // the "Running" badge on the sidebar row, frozen (kill -STOP) detection, and
-    // a pid for the workflow-liveness probe. finalSessionId is settled above and
-    // never changes afterwards, so no rekey is needed here.
-    runPresence = beginProviderRun({
-        provider: 'antigravity',
-        writer: ws,
-        sessionId: finalSessionId,
-        projectPath: cleanCwd,
-        pid: agProcess.pid,
-        launchReservation: releaseHarnessLaunch,
-    });
-
-    // Record the authenticated human who spawned this agy run. Idempotent at the
-    // DB layer; skipped for unauthenticated (single-user) runs with no userId.
-    if (ws?.userId) {
-        participantsDb.recordSpawn(finalSessionId, ws.userId, {
-            provider: 'antigravity',
-            projectPath: cleanCwd,
-        });
-        // Sender attribution (B-MU-UX-FIX-MSG-AUTHOR): record WHO authored this
-        // prompt so history loads can stamp userId onto the matching USER_INPUT
-        // turn. Best-effort — turns agy rewrites (e.g. injected resume
-        // instructions) simply won't hash-match and stay unattributed.
-        messageAuthorsDb.recordUserMessage(finalSessionId, ws.userId, command);
-    }
-
-    // Shared discovery state so the early stdout hook and the close-time safety
-    // net cooperate and never double-register the same brain UUID.
+/** Streams and settles one `agy -p` child. */
+function watchAgyPrintProcess(turn, run, agProcess, discovery) {
+    const { existingBrainUUID, cleanCwd, userId } = turn;
+    const { finalSessionId, safeSend } = run;
+    // Shared discovery state so the early stdout hook and the close-time
+    // safety net never double-register the same brain UUID.
     const discoveryState = { discovered: false, brainUUID: existingBrainUUID };
+    // UTF-8 streaming decoder: a multibyte char may straddle a chunk boundary.
+    const stdoutDecoder = new StringDecoder('utf8');
+    const state = { assistantText: '', sessionCreatedSent: false, lastStderrError: null, terminalFailure: null };
 
     return new Promise((resolve, reject) => {
-        // Emit session_created on the first stdout chunk for new sessions so the
-        // frontend can pin the conversation id before the stream finishes.
         agProcess.stdout.on('data', (chunk) => {
-            // Decode through the streaming decoder so a multibyte char split across
-            // this and the previous/next chunk is reassembled instead of producing �.
             const text = stdoutDecoder.write(chunk);
             if (!text) return;
-
-            if (!sessionCreatedSent && isNewSession) {
-                sessionCreatedSent = true;
-                safeSend({
-                    kind: 'session_created',
-                    newSessionId: finalSessionId,
-                    sessionId: finalSessionId,
-                    // B-1666: a fresh conversation, never a resume of the viewed one.
-                    parentSessionId: null,
-                    ...(typeof opts.clientMsgId === 'string' && opts.clientMsgId
-                        ? { clientMsgId: opts.clientMsgId }
-                        : {}),
-                });
+            if (!state.sessionCreatedSent && run.isNewSession) {
+                state.sessionCreatedSent = true;
+                sendAgySessionCreated(turn, run);
             }
-
-            // Bind the real workspace path as early as possible — agy has already
-            // materialized the brain folder by the time it streams output — so any
-            // synchronize() that fires mid-run resolves the real project instead of
-            // racing the close handler and writing the placeholder.
+            // Bind the real workspace path as early as possible (agy has the
+            // brain folder by its first output) so a mid-run synchronize()
+            // resolves the real project, then free the discovery lock.
             if (!existingBrainUUID && !discoveryState.discovered) {
-                discoverAndRegisterBrainSession(discoveryState, priorBrainIds, cleanCwd, finalSessionId, userId)
-                    .then(() => {
-                        // Release the discovery lock the moment a UUID is bound, so the
-                        // window stays narrow and concurrent fresh spawns proceed.
-                        if (discoveryState.discovered) {
-                            freeDiscoveryLock();
-                        }
-                    })
+                discoverAndRegisterBrainSession(discoveryState, discovery.priorBrainIds, cleanCwd, finalSessionId, userId)
+                    .then(() => { if (discoveryState.discovered) discovery.freeDiscoveryLock(); })
                     .catch(() => { /* retried on next chunk / at close */ });
             }
-
-            turnTimer.markModelActivity();
-            assistantText += text;
-            // Resumed runs: raw stdout contains agy's replay of PREVIOUS turns,
-            // so forwarding it live would re-show the old reply. Suppress the
-            // live deltas and emit the transcript-derived reply at close;
-            // assistantText is kept as a fallback only.
+            run.turnTimer.markModelActivity();
+            state.assistantText += text;
+            // Resumed runs: stdout replays PREVIOUS turns — the reply is read
+            // from the transcript at close instead.
             if (!existingBrainUUID) {
                 safeSend({ kind: 'stream_delta', content: text, sessionId: finalSessionId });
             }
         });
-
-        let lastStderrError = null;
-
-        agProcess.stderr.on('data', (data) => {
-            const msg = data.toString();
-            // agy inherits node's deprecation noise; suppress it to keep the
-            // chat transcript clean and avoid false error toasts on the client.
-            if (!msg) return;
-            if (msg.includes('DeprecationWarning') || msg.includes('[DEP')) return;
-            console.error('[agy stderr]', msg.trim());
-            // B-394: keep the LAST real error line. agy reports a non-fatal condition
-            // (quota exhausted, auth expired, model unavailable) on stderr and exits
-            // non-zero WITHOUT writing anything to the transcript — so the chat used
-            // to render empty with no cause at all. Measured 2026-08-01: three
-            // sessions died on `Individual quota reached ... Resets in 119h35m` and
-            // the owner saw a blank conversation.
-            const line = msg
-                .split('\n')
-                .map(l => l.trim())
-                .filter(l => l.startsWith('Error:') || l.startsWith('error:'))
-                .pop();
-            if (line) {
-                lastStderrError = line;
-                terminalFailure = line;
-            }
+        agProcess.stderr.on('data', (data) => captureAgyStderr(data, state));
+        agProcess.on('close', (code, signal) => {
+            settleAgyPrintProcess(turn, run, agProcess, { code, signal, state, stdoutDecoder, discoveryState, discovery })
+                .then(resolve, reject);
         });
-
-        agProcess.on('close', async (code, signal) => {
-            // Stop the measured turn before transcript persistence or native-history polling.
-            const processCompletedAt = new Date().toISOString();
-            if (terminalFailure || agProcess.nassajAborted || signal) code = code === 0 ? 1 : code;
-            activeSessions.delete(finalSessionId);
-
-            // Flush any bytes the decoder is still holding. With well-formed UTF-8
-            // this is empty (every char was completed by its following chunk); it
-            // only yields content if agy emitted a truncated final sequence, in
-            // which case StringDecoder substitutes � at the very end (correct: the
-            // input itself was malformed) rather than mid-stream.
-            const tail = stdoutDecoder.end();
-            if (tail) {
-                assistantText += tail;
-                if (!existingBrainUUID) {
-                    safeSend({ kind: 'stream_delta', content: tail, sessionId: finalSessionId });
-                }
-            }
-
-            // Resumed run: surface the reply from the transcript steps appended
-            // by THIS run, replacing the stdout text (which carries the replay
-            // of previous turns). Falls back to the raw stdout text when the
-            // transcript yields nothing new (write lag, layout change) so the
-            // user never receives an empty reply.
-            if (existingBrainUUID) {
-                const newPlannerText = await readNewPlannerTextWithRetry(
-                    existingBrainUUID,
-                    userId,
-                    preSpawnTranscript.lastStepIndex,
-                );
-                assistantText = newPlannerText || assistantText;
-                if (assistantText) {
-                    safeSend({ kind: 'stream_delta', content: assistantText, sessionId: finalSessionId });
-                }
-            }
-            // B-N7: the run is terminal — flip the single source of truth to
-            // inactive. The buffer is retained for a bounded post-close replay
-            // window so a socket that reconnects right after close can still
-            // replay the final payloads (attach is read-only and bounded by the
-            // run's last seq); it is then dropped by scheduleBufferDrop below
-            // (B-N-DROP), not "on the next run".
-            agySessionRegistry.setActive(registryKey, false);
-
-            // Safety net: a run that produced no stdout (or whose brain folder
-            // appeared only at exit) skips the early discovery hook, so retry here.
-            // discoverAndRegisterBrainSession is idempotent via discoveryState.
-            if (!existingBrainUUID) {
-                await discoverAndRegisterBrainSession(discoveryState, priorBrainIds, cleanCwd, finalSessionId, userId);
-            }
-            // Always release the discovery lock at close — covers runs that never
-            // produced stdout or where discovery never bound a UUID.
-            freeDiscoveryLock();
-            const discoveredBrainUUID = existingBrainUUID ? null : discoveryState.brainUUID;
-
-            // The DB row now carries the real path durably; drop the in-process
-            // binding so the registry never grows unbounded across long uptimes.
-            if (discoveredBrainUUID) {
-                clearAntigravityProjectPath(discoveredBrainUUID);
-            }
-
-            if (assistantText && !ws?.isRunOutputRevoked?.()) {
-                sessionManager.addMessage(finalSessionId, 'assistant', assistantText);
-            }
-
-            // PDPL audit log — metadata only, never message content.
-            // Session id is sufficient as an audit trail; client IP is intentionally omitted.
-            console.log(JSON.stringify({
-                audit: true,
-                event: 'antigravity_session_end',
-                timestamp: new Date().toISOString(),
-                sessionId: finalSessionId,
-                brainUUID: discoveredBrainUUID || existingBrainUUID || null,
-                exitCode: code,
-                provider: 'antigravity',
-            }));
-
-            // B-394: سبب الفشل يسبق `complete` و`session_created`.
-            //
-            // كان يُرسَل بعدهما، فيضيع مرتين: `complete` تمسح الدوّارة، ثم
-            // `session_created` تنقل الواجهة إلى معرّف المحادثة الحقيقي — فتصل
-            // رسالةُ خطأٍ موسومة بمفتاح الإطلاق القديم إلى واجهةٍ لم تعد عليه
-            // فتُهمَل. النتيجة التي رآها المالك ثلاث مرات يوم 2026-08-01: محادثة
-            // فارغة تماماً، بينما stderr يحمل «Individual quota reached».
-            //
-            // ونصّ الرسالة كلامُ agy نفسه لا خريطة رموز الخروج: الخريطة تقول عن
-            // الرمز 1 «تحقّق من تثبيت agy» وهي نصيحة خاطئة حين يكون السبب نفاد
-            // حصة أو انتهاء مصادقة. تبقى الخريطة احتياطاً حين يخرج agy صامتاً.
-            if (code !== 0) {
-                const failureReason = lastStderrError || getAgyExitMessage(code);
-                safeSend({
-                    kind: 'error',
-                    code: classifyAgyFailure(failureReason, code),
-                    content: failureReason,
-                    sessionId: finalSessionId,
-                });
-
-                // T-1191: B-394 made the cause ARRIVE; this makes it STAY.
-                //
-                // The message above is live-only. antigravity history is read
-                // from the transcript on disk (AntigravitySessionsProvider
-                // .fetchHistory → jsonl_path) and a failed run writes no step to
-                // it, so on the next load the conversation is blank again with
-                // no cause — exactly the symptom B-394 set out to end, merely
-                // deferred to the reload. Persisting it is the other half.
-                //
-                // Recorded under the BRAIN UUID, not finalSessionId: the spawn
-                // key `agy_<ts>_<rand>` is a transient handle whose stub row is
-                // adopted by the brain UUID once the handover below is accepted,
-                // so a row filed under it would normally be looked up by nobody
-                // (a refused handover is the rare exception). The fallback
-                // to finalSessionId covers the case where the run died before a
-                // brain existed — that row is orphaned, but the alternative is
-                // recording nothing at all for the earliest failures.
-                const failureKey = discoveredBrainUUID || existingBrainUUID || finalSessionId;
-                const quotaResetsAtMs = isQuotaFailure(failureReason)
-                    ? parseQuotaResetMs(failureReason, Date.now())
-                    : null;
-                providerRunFailuresDb.recordFailure({
-                    sessionId: failureKey,
-                    provider: 'antigravity',
-                    reason: failureReason,
-                    exitCode: code,
-                    quotaResetsAtMs,
-                });
-            } else {
-                // A healthy run clears the marker, so a conversation that has
-                // recovered stops displaying a dead error. Without this the
-                // table trades a silent failure for a permanent false one.
-                const healedKey = discoveredBrainUUID || existingBrainUUID || finalSessionId;
-                providerRunFailuresDb.clearFailure(healedKey);
-            }
-
-            const timingSessionId = discoveredBrainUUID || existingBrainUUID;
-            let finalTranscriptMessage = null;
-            if (code === 0 && !terminalFailure && !agProcess.nassajAborted
-                && timingSessionId && preSpawnTranscript.readable) {
-                for (let attempt = 0; attempt < 5 && !finalTranscriptMessage; attempt++) {
-                    try {
-                        const transcript = await fs.readFile(buildTranscriptPath(timingSessionId, userId), 'utf8');
-                        finalTranscriptMessage = finalAgyTranscriptMessage(
-                            transcript, timingSessionId, preSpawnTranscript.lastStepIndex,
-                        );
-                    } catch {
-                        // No durable identity without readable native evidence.
-                    }
-                    if (!finalTranscriptMessage && attempt < 4) {
-                        await new Promise(resolve => setTimeout(resolve, 400));
-                    }
-                }
-            }
-            const durableTiming = finalTranscriptMessage
-                ? settleTurnTiming({
-                    sessionId: timingSessionId,
-                    assistantMessageId: finalTranscriptMessage.id,
-                    startedAt: turnTimer.startedAt(),
-                    completedAt: processCompletedAt,
-                }) : {};
-
-            for (const row of await readTurnProgressRows(timingSessionId, userId, preSpawnTranscript.lastStepIndex,
-                finalSessionId, agProcess.nassajAborted)) {
-                safeSend(row);
-            }
-
-            safeSend({
-                kind: 'complete',
-                exitCode: code,
-                isNewSession,
-                sessionId: finalSessionId,
-                ...durableTiming,
-            });
-
-            // Hand the conversation over to the id agy actually files it under.
-            //
-            // `agy_<ts>_<rand>` is a SPAWN KEY (see generateNassajSessionId) — the
-            // brain UUID is the conversation identity: it is what the synchronizer
-            // indexes, what carries jsonl_path, and what resolveBrainUUIDFromDb
-            // resumes from. participants.recordSpawn created a stub sessions row
-            // for the spawn key; left alone, the chat is empty on the next load
-            // while the real conversation shows up beside it as a second chat.
-            //
-            // A workspace-bound launch (session isolation) also keyed its overlay
-            // alias and ledger row to the spawn key, so the swap must be DECLARED
-            // to the isolation layer and accepted before anything moves: the stub
-            // is adopted and the client is told only on acceptance. A rejected
-            // handover keeps the stub, which stays resumable under its spawn key.
-            // Sent AFTER `complete` on purpose: `complete` only clears the spinner
-            // when its sessionId is the one on screen.
-            const boundBrainUUID = discoveryState.brainUUID || existingBrainUUID || null;
-            if (boundBrainUUID && isRuntimeSpawnKey(finalSessionId)) {
-                handOverSpawnKey({
-                    ws,
-                    from: finalSessionId,
-                    to: boundBrainUUID,
-                    spawnStartedAtMs,
-                    workspaceBound: Boolean(opts.nassajWorkspaceIsolation),
-                    cleanCwd,
-                    userId,
-                    safeSend,
-                });
-            }
-
-            if (code !== 0) {
-                notifyTerminal({ code });
-                // B-N-DROP: schedule the buffer drop AFTER the terminal error is
-                // emitted, so a socket reconnecting inside the retention window can
-                // still replay the final payloads.
-                scheduleBufferDrop(registryKey);
-                // Resolve rather than reject so the WS dispatcher does not turn
-                // a non-zero exit into a generic "websocket error" toast — the
-                // structured error message above already informs the user.
-                resolve({ code, sessionId: finalSessionId });
-                return;
-            }
-
-            notifyTerminal({ code });
-            // B-N-DROP: schedule the deferred buffer drop AFTER `complete` is
-            // emitted — a post-close replay window, not an immediate drop.
-            scheduleBufferDrop(registryKey);
-            resolve({ code, sessionId: finalSessionId });
-        });
-
         agProcess.on('error', (err) => {
-          terminalFailure = err.message || 'Antigravity process error';
-            activeSessions.delete(finalSessionId);
-            agySessionRegistry.setActive(registryKey, false);
-            freeDiscoveryLock();
-            safeSend({ kind: 'error', content: err.message, sessionId: finalSessionId });
-            notifyTerminal({ error: err });
-            // B-N-DROP: schedule the deferred buffer drop AFTER the terminal error
-            // is emitted (post-close replay window), mirroring the close handler.
-            scheduleBufferDrop(registryKey);
+            state.terminalFailure = err.message || 'Antigravity process error';
+            failAgyPrintProcess(run, err, discovery);
             reject(err);
         });
+    });
+}
+
+/** `error` event of a `-p` child: inactive, error frame, notification, drop window. */
+function failAgyPrintProcess(run, err, discovery) {
+    activeSessions.delete(run.finalSessionId);
+    agySessionRegistry.setActive(run.registryKey, false);
+    discovery.freeDiscoveryLock();
+    run.safeSend({ kind: 'error', content: err.message, sessionId: run.finalSessionId });
+    run.notifyTerminal({ error: err });
+    // B-N-DROP: post-close replay window, mirroring the close handler.
+    scheduleBufferDrop(run.registryKey);
+}
+
+/**
+ * B-394: keep the LAST real `Error:` line of agy's stderr. agy reports quota,
+ * auth and model failures there and exits non-zero without a transcript step.
+ */
+function captureAgyStderr(data, state) {
+    const msg = data.toString();
+    // agy inherits node's deprecation noise; keep it out of the chat.
+    if (!msg) return;
+    if (msg.includes('DeprecationWarning') || msg.includes('[DEP')) return;
+    console.error('[agy stderr]', msg.trim());
+    const line = msg
+        .split('\n')
+        .map(l => l.trim())
+        .filter(l => l.startsWith('Error:') || l.startsWith('error:'))
+        .pop();
+    if (line) {
+        state.lastStderrError = line;
+        state.terminalFailure = line;
+    }
+}
+
+/** Close handler of a `-p` child: flush, transcript reply, discovery, then the shared finish. */
+async function settleAgyPrintProcess(turn, run, agProcess, { code, signal, state, stdoutDecoder, discoveryState, discovery }) {
+    const { existingBrainUUID, userId, cleanCwd } = turn;
+    const processCompletedAt = new Date().toISOString();
+    if (state.terminalFailure || agProcess.nassajAborted || signal) code = code === 0 ? 1 : code;
+    activeSessions.delete(run.finalSessionId);
+    // A truncated final UTF-8 sequence surfaces as � at the very end only.
+    const tail = stdoutDecoder.end();
+    if (tail) {
+        state.assistantText += tail;
+        if (!existingBrainUUID) {
+            run.safeSend({ kind: 'stream_delta', content: tail, sessionId: run.finalSessionId });
+        }
+    }
+    // Resumed run: the reply comes from the transcript steps of THIS run; the
+    // stdout text (which carries the replay) is only the fallback.
+    if (existingBrainUUID) {
+        const newPlannerText = await readNewPlannerTextWithRetry(
+            existingBrainUUID, userId, turn.preSpawnTranscript.lastStepIndex,
+        );
+        state.assistantText = newPlannerText || state.assistantText;
+        if (state.assistantText) {
+            run.safeSend({ kind: 'stream_delta', content: state.assistantText, sessionId: run.finalSessionId });
+        }
+    }
+    // B-N7: the run is terminal (buffer kept for the B-N-DROP window).
+    agySessionRegistry.setActive(run.registryKey, false);
+    // Safety net: a run without stdout skipped the early discovery hook.
+    if (!existingBrainUUID) {
+        await discoverAndRegisterBrainSession(discoveryState, discovery.priorBrainIds, cleanCwd, run.finalSessionId, userId);
+    }
+    discovery.freeDiscoveryLock();
+    return finishAgyTurn(turn, run, {
+        code,
+        assistantText: state.assistantText,
+        discoveredBrainUUID: existingBrainUUID ? null : discoveryState.brainUUID,
+        failureReason: state.lastStderrError,
+        failed: Boolean(state.terminalFailure),
+        aborted: Boolean(agProcess.nassajAborted),
+        processCompletedAt,
+        spawnStartedAtMs: discovery.spawnStartedAtMs,
+    });
+}
+
+/**
+ * B-394 / T-1191: the failure cause precedes `complete` and `session_created`
+ * (sent after them it reached a view that had already moved), uses agy's own
+ * words, and is persisted under the brain UUID so a reload still shows it.
+ */
+function recordAgyTurnFailure(run, { code, failureReason, failureKey }) {
+    const reason = failureReason || getAgyExitMessage(code);
+    run.safeSend({
+        kind: 'error',
+        code: classifyAgyFailure(reason, code),
+        content: reason,
+        sessionId: run.finalSessionId,
+    });
+    providerRunFailuresDb.recordFailure({
+        sessionId: failureKey,
+        provider: 'antigravity',
+        reason,
+        exitCode: code,
+        quotaResetsAtMs: isQuotaFailure(reason) ? parseQuotaResetMs(reason, Date.now()) : null,
+    });
+}
+
+/** Durable reply identity + timing from the native transcript (identity only). */
+async function readAgyDurableTiming(turn, run, { timingSessionId, processCompletedAt, eligible }) {
+    if (!eligible || !timingSessionId || !turn.preSpawnTranscript.readable) return {};
+    let finalTranscriptMessage = null;
+    for (let attempt = 0; attempt < 5 && !finalTranscriptMessage; attempt++) {
+        try {
+            const transcript = await fs.readFile(buildTranscriptPath(timingSessionId, turn.userId), 'utf8');
+            finalTranscriptMessage = finalAgyTranscriptMessage(
+                transcript, timingSessionId, turn.preSpawnTranscript.lastStepIndex,
+            );
+        } catch {
+            // No durable identity without readable native evidence.
+        }
+        if (!finalTranscriptMessage && attempt < 4) {
+            await new Promise(resolve => setTimeout(resolve, 400));
+        }
+    }
+    const { turnTimer } = run;
+    const durableTiming = finalTranscriptMessage
+        ? settleTurnTiming({
+            sessionId: timingSessionId,
+            assistantMessageId: finalTranscriptMessage.id,
+            startedAt: turnTimer.startedAt(),
+            completedAt: processCompletedAt,
+        }) : {};
+    return durableTiming;
+}
+
+/**
+ * The end of a turn, shared by both paths: persist the reply, audit, failure
+ * record, timing, progress rows, `complete`, then the spawn-key handover and
+ * the terminal notification. Resolves with `{ code, sessionId }`.
+ */
+async function finishAgyTurn(turn, run, outcome) {
+    const { existingBrainUUID, userId, ws } = turn;
+    const { code, discoveredBrainUUID } = outcome;
+    const { finalSessionId } = run;
+    // The DB row carries the real path durably; drop the in-process binding.
+    if (discoveredBrainUUID) clearAntigravityProjectPath(discoveredBrainUUID);
+    if (outcome.assistantText && !ws?.isRunOutputRevoked?.()) {
+        sessionManager.addMessage(finalSessionId, 'assistant', outcome.assistantText);
+    }
+    // PDPL audit log — metadata only, never message content or client IP.
+    console.log(JSON.stringify({
+        audit: true,
+        event: 'antigravity_session_end',
+        timestamp: new Date().toISOString(),
+        sessionId: finalSessionId,
+        brainUUID: discoveredBrainUUID || existingBrainUUID || null,
+        exitCode: code,
+        provider: 'antigravity',
+    }));
+    // Recorded under the BRAIN UUID: the spawn key is adopted by it on handover.
+    const failureKey = discoveredBrainUUID || existingBrainUUID || finalSessionId;
+    if (code !== 0) recordAgyTurnFailure(run, { code, failureReason: outcome.failureReason, failureKey });
+    else providerRunFailuresDb.clearFailure(failureKey);
+
+    const timingSessionId = discoveredBrainUUID || existingBrainUUID;
+    const durableTiming = await readAgyDurableTiming(turn, run, {
+        timingSessionId,
+        processCompletedAt: outcome.processCompletedAt,
+        eligible: code === 0 && !outcome.failed && !outcome.aborted,
+    });
+    for (const row of await readTurnProgressRows(timingSessionId, userId, turn.preSpawnTranscript.lastStepIndex,
+        finalSessionId, outcome.aborted)) {
+        run.safeSend(row);
+    }
+    run.safeSend({ kind: 'complete', exitCode: code, isNewSession: run.isNewSession, sessionId: finalSessionId, ...durableTiming });
+    handOverAfterTurn(turn, run, discoveredBrainUUID || existingBrainUUID || null, outcome.spawnStartedAtMs);
+    run.notifyTerminal({ code });
+    // B-N-DROP: deferred drop AFTER the terminal frames (post-close replay window).
+    scheduleBufferDrop(run.registryKey);
+    // Resolve, never reject, on a non-zero exit: the error frame above informs the user.
+    return { code, sessionId: finalSessionId };
+}
+
+/**
+ * Hands the conversation over from the spawn key to the brain UUID — after
+ * `complete`, which only clears the spinner on the id on screen.
+ */
+function handOverAfterTurn(turn, run, boundBrainUUID, spawnStartedAtMs) {
+    if (!boundBrainUUID || !isRuntimeSpawnKey(run.finalSessionId)) return;
+    handOverSpawnKey({
+        ws: turn.ws,
+        from: run.finalSessionId,
+        to: boundBrainUUID,
+        spawnStartedAtMs,
+        workspaceBound: Boolean(turn.opts.nassajWorkspaceIsolation),
+        cleanCwd: turn.cleanCwd,
+        userId: turn.userId,
+        safeSend: run.safeSend,
+    });
+}
+
+/** An ACP launch refused before the run opened (env guard, harness update, spawn error). */
+function refuseAgyAcpLaunch(turn, err) {
+    // B-32: the same structured mapping the `-p` spawn failure uses.
+    const mapped = mapSpawnError(err);
+    if (turn.ws) {
+        turn.ws.send(createNormalizedMessage({
+            kind: 'error', code: mapped.code, content: mapped.fallbackMessage, sessionId: turn.sessionId || null, provider: 'antigravity',
+        }));
+    }
+    throw err;
+}
+
+/**
+ * One conversation already has a turn in its ACP process (one process per
+ * member per session): the project-standard `session_busy` refusal, as Claude
+ * and Codex send it — one error frame, no `complete`.
+ */
+function refuseAgyAcpBusy(turn) {
+    if (turn.ws) {
+        const clientMsgId = turn.opts.clientMsgId;
+        turn.ws.send(createNormalizedMessage({
+            kind: 'error',
+            code: 'session_busy',
+            content: 'This conversation is still answering the previous message.',
+            sessionId: turn.sessionId || null,
+            provider: 'antigravity',
+            ...(typeof clientMsgId === 'string' && clientMsgId ? { clientMsgId } : {}),
+        }));
+    }
+    return { code: 1, sessionId: turn.sessionId };
+}
+
+/**
+ * T-2094: the ACP path. Returns null when ACP declines this turn (capability
+ * probe failed, pool full with nothing idle) so the caller runs `agy -p`.
+ */
+async function runAgyAcpTurn(turn) {
+    const { ws, userId, existingBrainUUID, cleanCwd } = turn;
+    let plan;
+    try {
+        plan = await prepareAgyAcpLaunch({ userId, cwd: cleanCwd, brainUUID: existingBrainUUID });
+    } catch (err) {
+        return refuseAgyAcpLaunch(turn, err);
+    }
+    if (plan.fallback) {
+        console.warn(JSON.stringify({ event: 'agy_acp_fallback', reason: plan.fallback }));
+        return null;
+    }
+    // T-1854 (qa H1b): last await before the spawn — admit + open are synchronous.
+    if (ws?.runFenceRevoked) { return { code: 1, sessionId: turn.sessionId }; }
+    let admitted;
+    try {
+        admitted = admitAgyAcpTurn(plan);
+    } catch (err) {
+        return refuseAgyAcpLaunch(turn, err);
+    }
+    if (admitted.status === 'busy') return refuseAgyAcpBusy(turn);
+    if (admitted.status === 'full') {
+        console.warn(JSON.stringify({ event: 'agy_acp_fallback', reason: 'pool_full' }));
+        return null;
+    }
+    const started = startAdmittedAgyAcpRun(turn, admitted);
+    return driveAgyAcpRun(turn, started.run, admitted.entry, { env: plan.env, active: started.active, spawnStartedAtMs: Date.now() });
+}
+
+/**
+ * Opens the run for an admitted ACP turn. Anything that throws here (session
+ * bookkeeping, presence, participant records) must not leak the admission:
+ * the pooled process is dropped (`keep: false`), the launch reservation and
+ * presence are released, the client is told, and the error is rethrown.
+ */
+function startAdmittedAgyAcpRun(turn, admitted) {
+    let run = null;
+    try {
+        run = openAgyRun(turn);
+        const active = { process: admitted.entry.handle.child, brainUUID: turn.existingBrainUUID, acpEntry: admitted.entry, aborted: false };
+        activeSessions.set(run.finalSessionId, active);
+        registerAgyRunPresence(turn, run, { pid: admitted.entry.handle.pid, launchReservation: admitted.releaseLaunch });
+        return { run, active };
+    } catch (err) {
+        agyAcpPool.release(admitted.entry, { keep: false });
+        admitted.releaseLaunch();
+        if (run) {
+            activeSessions.delete(run.finalSessionId);
+            agySessionRegistry.setActive(run.registryKey, false);
+            run.runPresence?.end();
+        }
+        const mapped = mapSpawnError(err);
+        const send = run ? run.safeSend : (payload) => turn.ws?.send(createNormalizedMessage({ ...payload, provider: 'antigravity' }));
+        send({ kind: 'error', code: mapped.code, content: mapped.fallbackMessage, sessionId: run?.finalSessionId ?? turn.sessionId ?? null });
+        throw err;
+    }
+}
+
+/** Drives the admitted ACP turn and hands its outcome to the shared finish. */
+async function driveAgyAcpRun(turn, run, entry, { env, active, spawnStartedAtMs }) {
+    let assistantText = '';
+    let discoveredBrainUUID = null;
+    const outcome = await driveAgyAcpTurn(entry, {
+        userId: turn.userId,
+        env,
+        cwd: turn.cleanCwd,
+        brainUUID: turn.existingBrainUUID,
+        text: turn.commandToSend,
+        modelValue: turn.spawnModel,
+        modelLabel: turn.agyModelLabel,
+        isRevoked: () => turn.ws?.runFenceRevoked === true || active.aborted,
+        onSessionReady: ({ brainUUID, isNew }) => {
+            if (!isNew) return;
+            discoveredBrainUUID = brainUUID;
+            active.brainUUID = brainUUID;
+            // session/new answered the brain UUID: no snapshot diff, no lock.
+            bindBrainToRun(brainUUID, turn.cleanCwd, run.finalSessionId, turn.userId);
+            if (run.isNewSession) sendAgySessionCreated(turn, run);
+        },
+        onText: (text) => {
+            run.turnTimer.markModelActivity();
+            assistantText += text;
+            run.safeSend({ kind: 'stream_delta', content: text, sessionId: run.finalSessionId });
+        },
+    });
+    activeSessions.delete(run.finalSessionId);
+    agySessionRegistry.setActive(run.registryKey, false);
+    const code = active.aborted ? 1 : outcome.code;
+    return finishAgyTurn(turn, run, {
+        code,
+        assistantText,
+        discoveredBrainUUID,
+        failureReason: outcome.failureReason || (active.aborted ? 'agy run was stopped.' : null),
+        failed: code !== 0,
+        aborted: active.aborted,
+        processCompletedAt: new Date().toISOString(),
+        spawnStartedAtMs,
     });
 }
 
 function abortAntigravitySession(sessionId) {
     const session = activeSessions.get(sessionId);
     if (!session?.process) return false;
+    // T-2094: an ACP turn is cancelled first (session/cancel, ≤5 s), then killed.
+    if (session.acpEntry) {
+        session.aborted = true;
+        return abortAgyAcpTurn(session.acpEntry);
+    }
 
     try {
       session.process.nassajAborted = true;

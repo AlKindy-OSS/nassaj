@@ -5,7 +5,9 @@
 
 import { isTerminalSubagentState, preferSubagentRecord } from '../../../../shared/subagent-states';
 import type { NormalizedMessage } from '../../../stores/useSessionStore';
-import type { ChatMessage, ProgressPlan, ProgressSubagent, SubagentChildTool } from '../types/types';
+import type {
+  ChatMessage, ProgressPlan, ProgressSubagent, SubagentChildTool, TurnCheckpointEvent,
+} from '../types/types';
 import { parseLatestDeclaredProgress, type DeclaredProgress } from './declaredProgress';
 import { decodeHtmlEntities, unescapeWithMathProtection, formatUsageLimitText } from '../utils/chatFormatting';
 import { stripChatImageNote } from '../utils/chatImageNote';
@@ -250,6 +252,21 @@ function collectSubagentProgress(messages: NormalizedMessage[]): Map<string, Dec
  * transcript artifacts such as local slash commands and compact summaries are
  * intentionally preserved and annotated so they can render like normal chat.
  */
+const TURN_CHECKPOINT_STATUSES = new Set(['captured', 'failed', 'skipped', 'running']);
+
+/** T-2095: the chip fields of a live `turn_checkpoint` frame, missing counts as zero. */
+function turnCheckpointOf(msg: NormalizedMessage): TurnCheckpointEvent | null {
+  if (!TURN_CHECKPOINT_STATUSES.has(String(msg.status))) return null;
+  const counts = msg.counts ?? { added: 0, modified: 0, deleted: 0 };
+  return {
+    turnSeq: typeof msg.turnSeq === 'number' ? msg.turnSeq : null,
+    status: msg.status as TurnCheckpointEvent['status'],
+    ...(msg.reason ? { reason: msg.reason } : {}),
+    counts: { added: counts.added ?? 0, modified: counts.modified ?? 0, deleted: counts.deleted ?? 0 },
+    withheldCount: typeof msg.withheldCount === 'number' ? msg.withheldCount : 0,
+  };
+}
+
 export function normalizedToChatMessages(messages: NormalizedMessage[]): ChatMessage[] {
   const converted: ChatMessage[] = [];
 
@@ -586,6 +603,22 @@ export function normalizedToChatMessages(messages: NormalizedMessage[]): ChatMes
           ...sharedMetadata,
         });
         break;
+
+      // T-2095: what this turn changed — one chip row under the reply.
+      case 'turn_checkpoint': {
+        const checkpoint = turnCheckpointOf(msg);
+        if (checkpoint) {
+          converted.push({
+            id: msg.id,
+            type: 'assistant',
+            content: '',
+            timestamp: msg.timestamp,
+            sessionId: msg.sessionId,
+            turnCheckpoint: checkpoint,
+          });
+        }
+        break;
+      }
 
       // B-1624: a neutral notice (e.g. a Codex user stop) — a muted line, not
       // an error bubble.

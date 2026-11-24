@@ -1587,6 +1587,31 @@ test('ADR-173 qa r2 #1: a hung launch is freed by a privileged stop and never sp
   await launchesFree(sid);
 });
 
+test('T-2093 review item 3: a late stop for turn A never cancels turn B\'s pending launch', async () => {
+  const sid = 'adr173-hung-launch-0003';
+  resetQueryHarness();
+  let release: () => void = () => {};
+  profileGate = new Promise<void>((resolve) => { release = resolve; });
+  scriptedMessages = [{ ...systemInit, session_id: sid }];
+  const run = sdk.queryClaudeSDK(PROMPT, { cwd: process.cwd(), sessionId: sid, clientMsgId: 'turn-b' }, makeWs());
+  await sleep(50);
+  const keyed = sdk.abortClaudeSDKSession as unknown as (
+    s: string, ws: unknown, key: string | null,
+  ) => Promise<{ aborted: boolean; staleTarget?: boolean }>;
+  try {
+    const late = await keyed(sid, null, 'turn-a');
+    assert.deepEqual([late.aborted, late.staleTarget], [false, true], 'the stop names another turn');
+    const own = await keyed(sid, null, 'turn-b');
+    assert.equal(own.aborted, true, 'the launch\'s own key still stops it before it registers');
+  } finally {
+    profileGate = null;
+    release();
+  }
+  await run;
+  assert.equal(lastQueryArg, null, 'the cancelled launch never spawned a CLI');
+  await launchesFree(sid);
+});
+
 test('ADR-173 qa r2 #1: the valve aborts an overdue launch and frees it; it never spawns', async () => {
   process.env.CLAUDE_LAUNCH_RESERVATION_MAX_MS = '50';
   const sid = 'adr173-hung-launch-0002';

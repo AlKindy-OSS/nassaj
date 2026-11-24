@@ -76,11 +76,23 @@ import {
 } from '@/modules/session-workspaces/index.js';
 import * as sessionWorkspacesModule from '@/modules/session-workspaces/index.js';
 import { isSharedSessionWritingEnabled } from '@/modules/providers/list/claude/shared-session-writing-flag.js';
+import { isTurnCheckpointFrame, withTurnCheckpoint } from '@/modules/turn-checkpoints/index.js';
 import {
   AGY_BRAIN_ID_PATTERN,
   AGY_SPAWN_KEY_PATTERN,
 } from '@/modules/providers/list/antigravity/agy-session-ids.js';
 import { createSessionHandoverGate } from '@/modules/websocket/services/session-handover.js';
+import { activeTurnRegistry, type ActiveTurnRegistry } from '@/modules/websocket/services/active-turn-registry.js';
+import { pendingTurnStarts, type PendingTurnStarts } from '@/modules/websocket/services/pending-turn-starts.js';
+import { controlCommandLru, type ControlCommandLru } from '@/modules/websocket/services/control-command-lru.js';
+import {
+  executeTurnScopedAbort,
+  executeTurnScopedApproval,
+  readControlCommandId,
+  readTurnKey,
+  type ControlReceipt,
+  type TurnAbortOutcome,
+} from '@/modules/websocket/services/turn-scoped-control.js';
 import { describeSteerTurnForViewer, handleSessionSteerWithImages } from '@/modules/session-steer/index.js';
 
 // eslint-disable-next-line boundaries/no-unknown -- steer images reuse the normal prompt's chat-image store.
@@ -115,6 +127,10 @@ type ChatIncomingMessage = AnyRecord & {
   message?: unknown;
   rememberEntry?: unknown;
   lastSeq?: unknown;
+  /** T-2093: idempotency key of a stop or approval command. */
+  commandId?: unknown;
+  /** T-2093: the turn (its starting clientMsgId) a stop is meant for. */
+  targetTurnKey?: unknown;
 };
 
 const DEFAULT_PROVIDER: LLMProvider = 'claude';
@@ -334,6 +350,8 @@ export type ChatWebSocketDependencies = {
       provider: 'kimi' | 'deepseek' | 'glm' | 'claude';
       sessionId: string;
       userId: number | null;
+      /** T-2093: when set, cancels only the turn started by this clientMsgId. */
+      clientMsgId?: string;
     }): boolean;
   };
   /** Server-owned ephemeral CLI supervisor. Unsupported legacy CLI cells are
@@ -348,12 +366,21 @@ export type ChatWebSocketDependencies = {
       prompt: string; userId: number; clientMsgId: string; sessionId: string | null;
       projectPath?: string; onSession: (sessionId: string, isNew: boolean) => void;
     }): Promise<{ text: string; model: string; sessionId: string; isNewSession: boolean }>;
-    cancel(input: { provider: 'codex' | 'opencode'; sessionId: string; userId: number | null }): boolean;
+    cancel(input: {
+      provider: 'codex' | 'opencode'; sessionId: string; userId: number | null;
+      /** T-2093: when set, cancels only the turn started by this clientMsgId. */
+      clientMsgId?: string;
+    }): boolean;
   };
   /** T-2086/ADR-224: the dsh ACP runtime. OPTIONAL: absent = a dsh turn is refused. */
   spawnDsh?: (command: string, options: unknown, writer: WebSocketWriter) => Promise<unknown>;
   /** An empty id aborts the newest dsh run on `rawWs` (Claude's abort-race rule). */
-  abortDshSession?: (sessionId: string, rawWs?: unknown) => boolean;
+  abortDshSession?: (
+    sessionId: string,
+    rawWs?: unknown,
+    /** T-2093: only the run this turn key started; another turn is `staleTarget`. */
+    expectedTurnKey?: string | null,
+  ) => boolean | { aborted: boolean; staleTarget?: boolean };
   isDshSessionActive?: (sessionId: string) => boolean;
   /**
    * Owner-only, once-only answer to a parity-harness question (dsh, OpenCode — ADR-226); false when
@@ -455,12 +482,24 @@ export type ChatWebSocketDependencies = {
   abortClaudeSDKSession: (
     sessionId: string,
     rawWs?: unknown,
-  ) => Promise<boolean | { aborted: boolean; reason: string; sessionId: string | null }>;
+    /** T-2093: the turn the stop names; a different running turn is not touched. */
+    expectedTurnKey?: string | null,
+  ) => Promise<boolean | {
+    aborted: boolean; reason: string; sessionId: string | null; staleTarget?: boolean;
+  }>;
   /** ADR-173 P5: the Claude run's stop right for a member other than its starter. */
   authorizeClaudeTurnStop?: (
     sessionId: string,
     userId: number | null,
   ) => { allowed: boolean; role: string | null; stuck: boolean; starterUserId: unknown };
+  /** T-2093: which turn runs in which session (defaults to the process registry). */
+  activeTurnRegistry?: ActiveTurnRegistry;
+  /** T-2093: control-command idempotency cache (defaults to the process cache). */
+  controlCommandLru?: ControlCommandLru<unknown>;
+  /** T-2095: the turn checkpoint wrapper (defaults to withTurnCheckpoint; tests inject a seam). */
+  turnCheckpoint?: typeof withTurnCheckpoint;
+  /** T-2095: turns in their pre-start window (defaults to the process registry). */
+  pendingTurnStarts?: PendingTurnStarts;
   abortCursorSession: (sessionId: string) => boolean;
   abortCodexSession: (sessionId: string) => boolean;
   abortAntigravitySession: (sessionId: string) => boolean;
@@ -1160,10 +1199,11 @@ export function abortCliSupervisedTurn(
   provider: string | null,
   sessionId: string,
   userId: number | null,
+  clientMsgId?: string,
 ): boolean {
   return Boolean(
     supervisor && provider && mechanicallyCoordinatedCliProvider(provider) && sessionId
-    && supervisor.cancel({ provider, sessionId, userId }),
+    && supervisor.cancel({ provider, sessionId, userId, ...(clientMsgId ? { clientMsgId } : {}) }),
   );
 }
 
@@ -1174,13 +1214,14 @@ export function abortHostedSupervisedTurn(
   provider: string | null,
   sessionId: string,
   userId: number | null,
+  clientMsgId?: string,
 ): boolean {
   return Boolean(
     supervisor
     && provider
     && (hostedProvider(provider) || provider === 'claude')
     && sessionId
-    && supervisor.cancel({ provider, sessionId, userId }),
+    && supervisor.cancel({ provider, sessionId, userId, ...(clientMsgId ? { clientMsgId } : {}) }),
   );
 }
 
@@ -1636,6 +1677,60 @@ export function withClientMsgIdEcho(writer: WebSocketWriter, data: ChatIncomingM
   });
 }
 
+/** True for a frame proving the send never started (e.g. refused as session_busy). */
+function isNotStartedFrame(frame: Record<string, unknown>): boolean {
+  return frame.notStarted === true || frame.code === 'session_busy';
+}
+
+function frameSessionId(frame: Record<string, unknown>): string | null {
+  const id = frame.sessionId ?? frame.newSessionId;
+  return typeof id === 'string' && id ? id : null;
+}
+
+/**
+ * T-2093 (ADR-TURN-SCOPED-CONTROL): stamps `turnKey` (the clientMsgId that
+ * started this turn) on every frame of the run, mirrors included through the
+ * normal fan-out, and keeps the active-turn registry entry for the session.
+ * The entry is added on the turn's first accepted frame and only while the
+ * session has none (never overwritten: a busy send or a steer cannot take it),
+ * and removed by this same turn alone —
+ * on its `complete` or when the dispatch ends (`release`). A send without a
+ * clientMsgId is returned untouched.
+ */
+export function withTurnKey(
+  writer: WebSocketWriter,
+  data: ChatIncomingMessage,
+  principalId: string | number | null,
+  registry: ActiveTurnRegistry,
+): { writer: WebSocketWriter; release(): void } {
+  const options = (data.options ?? {}) as { clientMsgId?: unknown };
+  const turnKey = readTurnKey(options.clientMsgId);
+  if (!turnKey) return { writer, release: () => undefined };
+  const starterUserId = toNumericUserId(principalId);
+  const turn = { sessionId: null as string | null, ended: false };
+  const register = (sessionId: string | null): void => {
+    if (turn.ended || turn.sessionId || !sessionId) return;
+    if (registry.register({ sessionId, turnKey, starterUserId, writer })) turn.sessionId = sessionId;
+  };
+  const release = (): void => {
+    turn.ended = true;
+    if (turn.sessionId) registry.release(turn.sessionId, turnKey);
+  };
+  // No eager registration for a resumed session: the entry is added on the
+  // turn's first accepted frame, so a send refused as session_busy never holds it.
+  const stamped = transparentWriterWithSend(writer, (payload: unknown): void => {
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+      writer.send(payload);
+      return;
+    }
+    const frame = payload as Record<string, unknown>;
+    if (!isNotStartedFrame(frame)) register(frameSessionId(frame));
+    writer.send(Object.hasOwn(frame, 'turnKey') ? frame : { ...frame, turnKey });
+    if (frame.kind === 'complete' && turn.sessionId && frameSessionId(frame) === turn.sessionId) release();
+  });
+  return { writer: stamped, release };
+}
+
 function normalizeBoundedOptionalText(value: unknown, maxLength: number): string | null {
   if (typeof value !== 'string' || value.length === 0 || value.length > maxLength) return null;
   const normalized = value.trim();
@@ -1869,6 +1964,12 @@ export function withUniversalConversationShadow(
     };
 
     const observed = transparentWriterWithSend(writer, (payload: unknown): void => {
+      // T-2095: the live-only checkpoint frame follows the turn's terminal frame
+      // and is not conversation output, so it is never shadow evidence.
+      if (isTurnCheckpointFrame(payload)) {
+        writer.send(payload);
+        return;
+      }
       let attestation: TrustedLegacySessionAttestation | null = null;
       let preInspectionFailed = false;
       try {
@@ -2021,12 +2122,16 @@ export async function dispatchProviderCommand(
   // T-1854 (qa M4): the run fence, once armed, is released on every exit —
   // return, refusal, provider throw or falsy result — never left registered.
   const fenceSlot: { fence: RunFence | null } = { fence: null };
+  // T-2093: every frame of this turn carries its turnKey; the registry entry is
+  // released on every exit, like the fence.
+  const turn = withTurnKey(writer, data, principalId, dependencies.activeTurnRegistry ?? activeTurnRegistry);
   try {
     await dispatchFencedProviderCommand(
-      messageType, data, writer, dependencies, principalId, authenticatedPrincipal, fenceSlot,
+      messageType, data, turn.writer, dependencies, principalId, authenticatedPrincipal, fenceSlot,
     );
   } finally {
     fenceSlot.fence?.finish();
+    turn.release();
   }
 }
 
@@ -2591,6 +2696,34 @@ async function dispatchFencedProviderCommand(
     });
   };
 
+  // T-2095: a checkpoint before and after every turn, for every provider path
+  // (admitted adapters and the direct SDK paths below). Capture never blocks
+  // or fails the turn (skips carry a reason). The pre-turn capture is a window
+  // with no provider session yet: a stop in it marks the pending start, and the
+  // provider is never called; a revocation in it ends the turn silently (the
+  // fence already sent its terminal frame).
+  const startRegistry = dependencies.pendingTurnStarts ?? pendingTurnStarts;
+  const runCheckpointedTurn = <T>(provider: LLMProvider, run: () => Promise<T>): Promise<T | undefined> => {
+    const pending = startRegistry.begin({
+      sessionId: resumeSessionId || null,
+      turnKey: ingressClientMsgId,
+      starterUserId: ingressUserId,
+      connection: (writer as { ws?: unknown }).ws ?? null,
+    });
+    const checkpoint = dependencies.turnCheckpoint ?? withTurnCheckpoint;
+    return checkpoint<T | undefined>({
+      sessionWorkspace, principalId, provider, clientMsgId: ingressClientMsgId, writer,
+    }, async () => {
+      startRegistry.end(pending);
+      if ((writer as FencedWriter).runFenceRevoked === true) return undefined;
+      if (pending.stopped) {
+        writer.send(stoppedBeforeStartFrame(provider, resumeSessionId, data));
+        return undefined;
+      }
+      return run();
+    }).finally(() => startRegistry.end(pending));
+  };
+
   const runAdmittedAdapter = async <T>(
     provider: LLMProvider,
     body: string,
@@ -2606,8 +2739,9 @@ async function dispatchFencedProviderCommand(
       try { execution?.notStarted?.(); } catch { /* the gateway reconciles an unused lease */ }
       return { admitted: false };
     }
-    if (!execution) return { admitted: true, value: await adapter(options) };
-    const value = await runPermissionExecutionAdapter(execution, () => adapter(options));
+    const checkpointed = () => runCheckpointedTurn(provider, () => adapter(options));
+    if (!execution) return { admitted: true, value: await checkpointed() };
+    const value = await runPermissionExecutionAdapter(execution, checkpointed);
     return { admitted: true, value };
   };
 
@@ -2792,8 +2926,10 @@ async function dispatchFencedProviderCommand(
   if (targetProvider === 'codex') {
     const codexOptions = permissionOptionsFor('codex', 'codex', 'sdk', 'sdk_turn');
     if (!codexOptions) return;
-    await runLegacyProviderCallWithShadow(writer, () =>
-      dependencies.queryCodex(command, codexOptions, writer));
+    // Same order as the admitted adapters: a revoked run never pays for a capture.
+    if ((writer as FencedWriter).runFenceRevoked === true) return;
+    await runCheckpointedTurn('codex', () => runLegacyProviderCallWithShadow(writer, () =>
+      dependencies.queryCodex(command, codexOptions, writer)));
     return;
   }
   if (targetProvider === 'antigravity') {
@@ -2846,12 +2982,14 @@ async function dispatchFencedProviderCommand(
   if (targetProvider === 'claude') {
     const claudeOptions = permissionOptionsFor('claude', 'claude', 'sdk', 'sdk_turn');
     if (!claudeOptions) return;
-    await runLegacyProviderCallWithShadow(writer, () =>
+    // Same order as the admitted adapters: a revoked run never pays for a capture.
+    if ((writer as FencedWriter).runFenceRevoked === true) return;
+    await runCheckpointedTurn('claude', () => runLegacyProviderCallWithShadow(writer, () =>
       dependencies.queryClaudeSDK(
         command,
         claudeOptions,
         writer,
-      ));
+      )));
     return;
   }
 
@@ -2891,6 +3029,148 @@ export function readRequestUserId(
   }
 
   return null;
+}
+
+/**
+ * T-2095: the final frame of a turn stopped during its pre-turn checkpoint,
+ * before the provider started: the same aborted `complete` a stop produces,
+ * echoing the turn's clientMsgId, marked `notStarted` (no provider ran).
+ */
+function stoppedBeforeStartFrame(
+  provider: LLMProvider,
+  sessionId: string | null | undefined,
+  data: ChatIncomingMessage,
+): ReturnType<typeof createNormalizedMessage> {
+  return createNormalizedMessage({
+    kind: 'complete', provider, exitCode: 0, success: true, aborted: true, notStarted: true,
+    code: 'stopped_before_start', ...(sessionId ? { sessionId } : {}),
+    ...clientMsgIdEcho(data),
+  });
+}
+
+/** The 404-equivalent reply to a stop on a session the requester may not write. */
+function abortRefusalFrame(sessionId: string, provider: ReturnType<typeof readProvider>): unknown {
+  const refusal = {
+    kind: 'complete',
+    exitCode: 1,
+    aborted: true,
+    success: false,
+    sessionId,
+    abortFailed: true,
+    error: 'Session not found',
+    // B-577: ردٌّ على أمرِ إيقافٍ لجلسةٍ لا يملكها الطالب أو لا وجود
+    // لها — ليس حكماً على جولة، فلا يكتب حالةً على محادثة أحد.
+    notStarted: true,
+  } as const;
+  return provider ? createNormalizedMessage({ ...refusal, provider }) : refusal;
+}
+
+/** Today's `complete`/`aborted` frame for one stop, sent to the session's viewers. */
+function abortCompleteFrame(
+  outcome: Pick<TurnAbortOutcome, 'success' | 'resolvedSessionId' | 'abortReason' | 'provider'>,
+  sessionId: string,
+  stoppedBy: TurnStoppedBy | null = null,
+): unknown {
+  const { success, provider } = outcome;
+  const abortPayload = {
+    kind: 'complete',
+    exitCode: success ? 0 : 1,
+    aborted: true,
+    success,
+    // Echo the session the abort resolved to so the client clears the
+    // right run's spinner even when it sent an empty/stale id.
+    sessionId: outcome.resolvedSessionId ?? sessionId,
+    ...(success ? {} : { abortFailed: true, error: outcome.abortReason ?? 'abort failed' }),
+    // ADR-173 P8 B4: every viewer (the starter included) reads who stopped it.
+    ...(success && stoppedBy ? { stoppedBy } : {}),
+  } as const;
+  return provider ? createNormalizedMessage({ ...abortPayload, provider: provider as LLMProvider }) : abortPayload;
+}
+
+type AbortBridgeContext = {
+  sessionId: string;
+  userId: number | null;
+  rawWs: unknown;
+  expectedTurnKey: string | null;
+};
+type AbortBridgeResult = Pick<TurnAbortOutcome, 'success' | 'abortReason' | 'staleTarget' | 'notRunning'>
+  & { resolvedSessionId?: string | null };
+type AbortBridge = (
+  dependencies: ChatWebSocketDependencies,
+  context: AbortBridgeContext,
+) => boolean | AbortBridgeResult | Promise<AbortBridgeResult>;
+
+/**
+ * Claude bridge. The SDK compares `expectedTurnKey` with the run's recorded
+ * clientMsgId before its first await; an EMPTY id falls back only to the run on
+ * this connection matching that key (or, for an old client, the newest run on
+ * the connection — the brand-new-session race). B-ABORT-CROSSKILL: a named but
+ * stale id never falls back.
+ */
+async function abortClaudeBridge(
+  dependencies: ChatWebSocketDependencies,
+  context: AbortBridgeContext,
+): Promise<AbortBridgeResult> {
+  const result = await dependencies.abortClaudeSDKSession(
+    context.sessionId, context.rawWs ?? undefined, context.expectedTurnKey,
+  );
+  if (typeof result === 'boolean') {
+    return { success: result, abortReason: null, staleTarget: false, notRunning: !result };
+  }
+  const staleTarget = result.staleTarget === true;
+  return {
+    success: result.aborted,
+    abortReason: result.reason,
+    staleTarget,
+    notRunning: !result.aborted && !staleTarget && !result.sessionId,
+    ...(result.sessionId ? { resolvedSessionId: result.sessionId } : {}),
+  };
+}
+
+/**
+ * dsh bridge (synchronous). An empty id picks a run on this socket: the one the
+ * turn key started, or without a key the newest (Claude's abort-race rule); a
+ * run of another turn is `staleTarget` and is not killed.
+ */
+function abortDshBridge(
+  dependencies: ChatWebSocketDependencies,
+  context: AbortBridgeContext,
+): boolean | AbortBridgeResult {
+  const result = dependencies.abortDshSession?.(
+    context.sessionId, context.rawWs ?? undefined, context.expectedTurnKey,
+  ) ?? false;
+  if (typeof result === 'boolean') return result;
+  const staleTarget = result.staleTarget === true;
+  return {
+    success: result.aborted, abortReason: staleTarget ? 'stale_target' : null,
+    staleTarget, notRunning: !result.aborted && !staleTarget,
+  };
+}
+
+/**
+ * T-2093: one abort bridge per provider. Every bridge but Claude's is
+ * synchronous, so the registry comparison and the kill happen in one tick.
+ */
+const PROVIDER_ABORT_BRIDGES: Readonly<Record<string, AbortBridge>> = Object.freeze({
+  cursor: (dependencies, { sessionId }) => dependencies.abortCursorSession(sessionId),
+  codex: (dependencies, { sessionId }) => dependencies.abortCodexSession(sessionId),
+  antigravity: (dependencies, { sessionId }) => dependencies.abortAntigravitySession(sessionId),
+  opencode: (dependencies, { sessionId }) => dependencies.abortOpenCodeSession(sessionId),
+  glm: (dependencies, { sessionId }) => dependencies.abortGlmSession(sessionId),
+  dsh: abortDshBridge,
+  claude: abortClaudeBridge,
+});
+
+/** Supervised turns (hosted HTTP, mechanical CLI) are asked before the bridges. */
+function abortSupervisedTurn(
+  dependencies: ChatWebSocketDependencies,
+  provider: string | null,
+  context: AbortBridgeContext,
+): boolean {
+  const clientMsgId = context.expectedTurnKey ?? undefined;
+  const { sessionId, userId } = context;
+  return abortHostedSupervisedTurn(dependencies.hostedTurnSupervisor, provider, sessionId, userId, clientMsgId)
+    || abortCliSupervisedTurn(dependencies.cliTurnSupervisor, provider, sessionId, userId, clientMsgId);
 }
 
 /**
@@ -2956,6 +3236,10 @@ export function decideTurnStopRequest(
  * the dispatch chain of the `abort-session` message, extracted so the server
  * can also stop a turn itself (ADR-172 م1: a removed member's in-flight turns).
  * Authorization is the CALLER's job. `rawWs` is only the claude no-id fallback.
+ *
+ * T-2093: with `expectedTurnKey`, a registry entry naming ANOTHER turn returns
+ * `staleTarget` and kills nothing; no entry keeps today's session-wide stop.
+ * The comparison and the bridge call share one tick (no await between them).
  */
 export async function abortSessionTurn(
   dependencies: ChatWebSocketDependencies,
@@ -2963,69 +3247,32 @@ export async function abortSessionTurn(
   requestedProvider: ReturnType<typeof readProvider>,
   userId: number | null,
   rawWs: unknown = null,
-): Promise<{
-  provider: ReturnType<typeof resolveSessionControlProvider>;
-  success: boolean;
-  resolvedSessionId: string | null;
-  abortReason: string | null;
-}> {
-  const provider = resolveSessionControlProvider(
-    sessionId,
-    requestedProvider,
-    dependencies.getSessionProvider
-  );
-  let success = false;
-  // The session the abort actually resolved to (claude may fall back to the
-  // newest active run on this connection when the id is missing entirely).
-  let resolvedSessionId: string | null = sessionId || null;
-  let abortReason: string | null = null;
-
-  if (abortHostedSupervisedTurn(
-    dependencies.hostedTurnSupervisor,
-    provider,
-    sessionId,
-    userId,
-  )) {
-    success = true;
-  } else if (abortCliSupervisedTurn(
-    dependencies.cliTurnSupervisor,
-    provider,
-    sessionId,
-    userId,
-  )) {
-    success = true;
-  } else if (provider === 'cursor') {
-    success = dependencies.abortCursorSession(sessionId);
-  } else if (provider === 'codex') {
-    success = dependencies.abortCodexSession(sessionId);
-  } else if (provider === 'antigravity') {
-    success = dependencies.abortAntigravitySession(sessionId);
-  } else if (provider === 'opencode') {
-    success = dependencies.abortOpenCodeSession(sessionId);
-  } else if (provider === 'glm') {
-    success = dependencies.abortGlmSession(sessionId);
-  } else if (provider === 'dsh') {
-    success = dependencies.abortDshSession?.(sessionId, rawWs ?? undefined) ?? false;
-  } else if (provider === 'claude') {
-    // Claude: pass the raw socket so the SDK can fall back to this
-    // connection's newest active run when `sessionId` is EMPTY (the
-    // brand-new-session abort race). B-ABORT-CROSSKILL: a named-but-stale
-    // id no longer falls back — one socket carries every session the tab
-    // opened, so that killed a bystander run. Result is structured.
-    const result = await dependencies.abortClaudeSDKSession(sessionId, rawWs ?? undefined);
-    if (typeof result === 'boolean') {
-      success = result;
-    } else {
-      success = result.aborted;
-      abortReason = result.reason;
-      if (result.sessionId) {
-        resolvedSessionId = result.sessionId;
-      }
-    }
-  } else {
-    abortReason = 'provider runtime unavailable';
+  expectedTurnKey: string | null = null,
+): Promise<TurnAbortOutcome & { provider: ReturnType<typeof resolveSessionControlProvider> }> {
+  const provider = resolveSessionControlProvider(sessionId, requestedProvider, dependencies.getSessionProvider);
+  const base = {
+    provider, success: false, resolvedSessionId: sessionId || null, abortReason: null as string | null,
+    staleTarget: false, notRunning: false,
+  };
+  const registry = dependencies.activeTurnRegistry ?? activeTurnRegistry;
+  if (sessionId && expectedTurnKey && registry.verdict(sessionId, expectedTurnKey) === 'stale') {
+    return { ...base, abortReason: 'stale_target', staleTarget: true };
   }
-  return { provider, success, resolvedSessionId, abortReason };
+  // T-2095: a turn still in its pre-turn checkpoint has no provider session to
+  // abort yet; marking it stopped keeps the provider from ever starting.
+  const pendingStart = (dependencies.pendingTurnStarts ?? pendingTurnStarts).stop({
+    sessionId, turnKey: expectedTurnKey, userId, connection: rawWs,
+  });
+  if (pendingStart) {
+    return { ...base, success: true, resolvedSessionId: pendingStart.sessionId ?? base.resolvedSessionId };
+  }
+  const context = { sessionId, userId, rawWs, expectedTurnKey };
+  if (abortSupervisedTurn(dependencies, provider, context)) return { ...base, success: true };
+  const bridge = provider ? PROVIDER_ABORT_BRIDGES[provider] : undefined;
+  if (!bridge) return { ...base, abortReason: 'provider runtime unavailable', notRunning: true };
+  const result = await bridge(dependencies, context);
+  if (typeof result === 'boolean') return { ...base, success: result, notRunning: !result };
+  return { ...base, ...result, resolvedSessionId: result.resolvedSessionId ?? base.resolvedSessionId };
 }
 
 /**
@@ -3270,30 +3517,50 @@ export function handleChatConnection(
         // deliberately still allowed: it resolves against the newest active run on
         // THIS socket (the brand-new-session STOP race) and can never match another
         // provider's map. Refusal echoes the same 404-equivalent shape a miss does.
-        if (sessionId && !isSessionWritableByUser(sessionId, presenceUserId)) {
+        const requestedControlProvider = readProvider(data.provider);
+        const refuseAbort = (refusedSessionId: string): void => {
           console.log(
             `[WS-SEC] abort-session refused socket=${wsDiagSocketId} `
-            + `session=${sessionId} user=${JSON.stringify(presenceUserId)} reason=not-writable`
+            + `session=${refusedSessionId} user=${JSON.stringify(presenceUserId)} reason=not-writable`
           );
-          const requestedControlProvider = readProvider(data.provider);
-          const refusal = {
-              kind: 'complete',
-              exitCode: 1,
-              aborted: true,
-              success: false,
-              sessionId,
-              abortFailed: true,
-              error: 'Session not found',
-              // B-577: ردٌّ على أمرِ إيقافٍ لجلسةٍ لا يملكها الطالب أو لا وجود
-              // لها — ليس حكماً على جولة، فلا يكتب حالةً على محادثة أحد.
-              notStarted: true,
-          } as const;
-          writer.send(requestedControlProvider
-            ? createNormalizedMessage({ ...refusal, provider: requestedControlProvider })
-            : refusal);
+          writer.send(abortRefusalFrame(refusedSessionId, requestedControlProvider));
+        };
+        // T-2093 (ADR-TURN-SCOPED-CONTROL): a client that names its command gets
+        // write check → LRU → turn-scoped stop and a receipt on THIS socket. A
+        // message without `commandId` keeps the exact legacy path below.
+        const abortCommandId = readControlCommandId(data.commandId);
+        const requesterId = toNumericUserId(presenceUserId);
+        if (abortCommandId && requesterId != null) {
+          let turnStopDecision: ReturnType<typeof decideTurnStopRequest> | null = null;
+          await executeTurnScopedAbort({
+            userId: requesterId, commandId: abortCommandId, sessionId, targetTurnKey: readTurnKey(data.targetTurnKey),
+          }, {
+            lru: dependencies.controlCommandLru ?? controlCommandLru,
+            registry: dependencies.activeTurnRegistry ?? activeTurnRegistry,
+            connectionWriter: writer,
+            isWritable: (candidate) => isSessionWritableByUser(candidate, presenceUserId),
+            // ADR-173 P5: the same stop right as the legacy path, checked before the LRU.
+            authorizeStop: (target) => {
+              turnStopDecision = decideTurnStopRequest(dependencies, target, requestedControlProvider, presenceUserId);
+              if (turnStopDecision.refusal) writer.send(turnStopDecision.refusal);
+              return !turnStopDecision.refusal;
+            },
+            abort: (target, expectedTurnKey) => abortSessionTurn(
+              dependencies, target, requestedControlProvider, requesterId, ws, expectedTurnKey,
+            ),
+            sendTurnFrame: (target, outcome) => writer.send(
+              abortCompleteFrame(outcome, target, turnStopDecision?.stoppedBy ?? null),
+            ),
+            sendRefusal: refuseAbort,
+            sendReceipt: (receipt: ControlReceipt) => sendRawToThisSocket(receipt),
+          });
           return;
         }
-        const stopDecision = decideTurnStopRequest(dependencies, sessionId, readProvider(data.provider), presenceUserId);
+        if (sessionId && !isSessionWritableByUser(sessionId, presenceUserId)) {
+          refuseAbort(sessionId);
+          return;
+        }
+        const stopDecision = decideTurnStopRequest(dependencies, sessionId, requestedControlProvider, presenceUserId);
         if (stopDecision.refusal) {
           writer.send(stopDecision.refusal);
           return;
@@ -3302,29 +3569,14 @@ export function handleChatConnection(
         // client-declared one (which may be the current global picker selection).
         // Empty/unknown id falls back to the client provider, preserving Claude's
         // empty-sessionId abort-race fallback below.
-        const { provider, success, resolvedSessionId, abortReason } = await abortSessionTurn(
+        const outcome = await abortSessionTurn(
           dependencies,
           sessionId,
-          readProvider(data.provider),
-          toNumericUserId(presenceUserId),
+          requestedControlProvider,
+          requesterId,
           ws,
         );
-
-        const abortPayload = {
-            kind: 'complete',
-            exitCode: success ? 0 : 1,
-            aborted: true,
-            success,
-            // Echo the session the abort resolved to so the client clears the
-            // right run's spinner even when it sent an empty/stale id.
-            sessionId: resolvedSessionId ?? sessionId,
-            ...(success ? {} : { abortFailed: true, error: abortReason ?? 'abort failed' }),
-            // ADR-173 P8 B4: every viewer (the starter included) reads who stopped it.
-            ...(success && stopDecision.stoppedBy ? { stoppedBy: stopDecision.stoppedBy } : {}),
-        } as const;
-        writer.send(provider
-          ? createNormalizedMessage({ ...abortPayload, provider })
-          : abortPayload);
+        writer.send(abortCompleteFrame(outcome, sessionId, stopDecision.stoppedBy));
         return;
       }
 
@@ -3992,7 +4244,8 @@ export function handleChatConnection(
 
       if (messageType === 'claude-permission-response') {
         if (typeof data.requestId === 'string' && data.requestId.length > 0) {
-          const result = dependencies.resolveToolApproval(data.requestId, {
+          const requestId = data.requestId;
+          const resolveClaudeApproval = () => dependencies.resolveToolApproval(requestId, {
             allow: Boolean(data.allow),
             updatedInput: data.updatedInput,
             message: typeof data.message === 'string' ? data.message : undefined,
@@ -4006,16 +4259,37 @@ export function handleChatConnection(
             requesterUserId: presenceUserId,
             requesterAuthKind: typeof request.user?.authenticationKind === 'string' ? request.user.authenticationKind : null,
           });
+          // T-2086 / ADR-226: the same answer frame settles a dsh or OpenCode question
+          // (owner-only, once) when no Claude prompt owns the requestId. Both the legacy
+          // and the turn-scoped path (T-2093) resolve through this one function.
+          const resolveApproval = () => {
+            const claude = resolveClaudeApproval();
+            if (claude?.resolved) return claude;
+            const parity = dependencies.resolveParityPermission?.(requestId, {
+              allow: data.allow === true, updatedInput: data.updatedInput, requesterUserId: presenceUserId,
+            }) === true;
+            return parity ? { resolved: true, sessionId: null } : claude;
+          };
+          const approvalCommandId = readControlCommandId(data.commandId);
+          const approverId = toNumericUserId(presenceUserId);
+          if (approvalCommandId && approverId != null) {
+            // T-2093: idempotent answer with a sender-only receipt
+            // (applied | already_resolved); the broadcast below is unchanged.
+            await executeTurnScopedApproval({
+              userId: approverId, commandId: approvalCommandId, requestId, allow: Boolean(data.allow),
+            }, {
+              lru: dependencies.controlCommandLru ?? controlCommandLru,
+              resolve: resolveApproval,
+              onResolved: (resolvedSessionId) => resolveQuestionRequest(resolvedSessionId, requestId),
+              sendReceipt: (receipt: ControlReceipt) => sendRawToThisSocket(receipt),
+            });
+            return;
+          }
+          const result = resolveApproval();
           // لا نحذف الطلب لمجرد وصول جواب من العميل: resolver هو بوابة الملكية
           // والوجود. بعد نجاحه فقط نحسم requestId ونبث زوال آخر سؤال معلق.
           if (result?.resolved && result.sessionId) {
-            resolveQuestionRequest(result.sessionId, data.requestId);
-          }
-          // T-2086 / ADR-226: the same answer frame settles a dsh or OpenCode question (owner-only, once).
-          if (!result?.resolved) {
-            dependencies.resolveParityPermission?.(data.requestId, {
-              allow: data.allow === true, updatedInput: data.updatedInput, requesterUserId: presenceUserId,
-            });
+            resolveQuestionRequest(result.sessionId, requestId);
           }
         }
         return;

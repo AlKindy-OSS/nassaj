@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { useGitPanelController } from '../hooks/useGitPanelController';
@@ -8,14 +8,22 @@ import { getChangedFileCount } from '../utils/gitPanelUtils';
 import ChangesView from '../view/changes/ChangesView';
 import HistoryView from '../view/history/HistoryView';
 import BranchesView from '../view/branches/BranchesView';
+import TurnChangesView from '../view/turns/TurnChangesView';
 import GitPanelHeader from '../view/GitPanelHeader';
 import GitRepositoryErrorState from '../view/GitRepositoryErrorState';
 import GitViewTabs from '../view/GitViewTabs';
 import ConfirmActionModal from '../view/modals/ConfirmActionModal';
 
-export default function GitPanel({ selectedProject, selectedSession = null, isMobile = false, onFileOpen }: GitPanelProps) {
+export default function GitPanel({
+  selectedProject, selectedSession = null, isMobile = false, onFileOpen, turnSessionId = null, turnFocus = null,
+}: GitPanelProps) {
   const { t } = useTranslation('common');
-  const [activeView, setActiveView] = useState<GitPanelView>('changes');
+  const [activeView, setActiveView] = useState<GitPanelView>(turnFocus ? 'turns' : 'changes');
+
+  // T-2095: a chat chip asked for one turn; show the tab it lives in.
+  useEffect(() => {
+    if (turnFocus) setActiveView('turns');
+  }, [turnFocus]);
   const [wrapText, setWrapText] = useState(true);
   const [hasExpandedFiles, setHasExpandedFiles] = useState(false);
   const [confirmAction, setConfirmAction] = useState<ConfirmationRequest | null>(null);
@@ -157,6 +165,17 @@ export default function GitPanel({ selectedProject, selectedSession = null, isMo
               commitDiffs={commitDiffs}
               wrapText={wrapText}
               onFetchCommitDiff={fetchCommitDiff}
+            />
+          )}
+
+          {activeView === 'turns' && (
+            <TurnChangesView
+              key={`${selectedProject.projectId}:${turnFocus?.sessionId ?? turnSessionId ?? ''}`}
+              projectId={selectedProject.projectId ?? null}
+              sessionId={turnFocus?.sessionId ?? turnSessionId}
+              focusTurnSeq={turnFocus?.turnSeq ?? null}
+              isMobile={isMobile}
+              wrapText={wrapText}
             />
           )}
 

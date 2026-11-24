@@ -391,6 +391,31 @@ function readTurnInput(options) {
 }
 
 /**
+ * T-2093 (ADR-TURN-SCOPED-CONTROL): which live dsh run a stop targets. A named id
+ * picks that session's run unless it carries another turn's key (`stale`). An empty
+ * id picks a run on `rawWs` only: the one `expectedTurnKey` started (`stale` when the
+ * socket's runs all carry other keys), or without a key the newest (legacy race rule).
+ * A run recorded without a clientMsgId is never stale.
+ *
+ * @param {Array<{ sessionId: string|null, clientMsgId?: string|null, writer?: { ws?: unknown } }>} live
+ * @param {string} sessionId
+ * @param {unknown} rawWs
+ * @param {string|null} expectedTurnKey
+ * @returns {{ run: object|null, stale: boolean }}
+ */
+export function selectDshAbortRun(live, sessionId, rawWs, expectedTurnKey) {
+  const otherTurn = (run) => Boolean(expectedTurnKey && run.clientMsgId && run.clientMsgId !== expectedTurnKey);
+  if (sessionId) {
+    const run = live.find((entry) => entry.sessionId === sessionId) ?? null;
+    return run && otherTurn(run) ? { run: null, stale: true } : { run, stale: false };
+  }
+  const onSocket = rawWs ? live.filter((entry) => entry.writer?.ws === rawWs) : [];
+  if (!expectedTurnKey) return { run: onSocket.at(-1) ?? null, stale: false };
+  const match = onSocket.find((entry) => entry.clientMsgId === expectedTurnKey) ?? null;
+  return { run: match, stale: !match && onSocket.some(otherTurn) };
+}
+
+/**
  * Builds a dsh runtime. The default instance below is what the server uses;
  * tests build their own with their seams.
  * @param {{ claudeEnv?: (userId: unknown) => NodeJS.ProcessEnv|null, managedSettingsDir?: string,
@@ -465,6 +490,8 @@ export function createDshRuntime(deps = {}) {
     const model = local ? dshLocalModelIds(local).recorded : (options.model || null);
     return {
       runId, userId, sessionId: input.requested, local, localToken: token ?? null,
+      // T-2093: the clientMsgId that started this turn (its turnKey) for turn-scoped stops.
+      clientMsgId: typeof options.clientMsgId === 'string' && options.clientMsgId ? options.clientMsgId : null,
       recorder: new DshTranscriptRecorder({ projectPath: input.projectPath, model }),
       apiKey: prepared.launch.env.DEEPSEEK_API_KEY, engine: prepared.engine, mirror: prepared.mirror, promptContext,
     };
@@ -564,12 +591,12 @@ export function createDshRuntime(deps = {}) {
   /**
    * Cancels the running turn of `sessionId`; with no id, the newest run on
    * `rawWs` (Claude's empty-id abort race). Returns true when one was running.
+   * T-2093: with `expectedTurnKey` only the run that key started is cancelled;
+   * another turn yields `{ aborted: false, staleTarget: true }` (nothing killed).
    */
-  function abortDshSession(sessionId, rawWs = null) {
-    const live = [...runs.values()];
-    const run = sessionId
-      ? live.find((entry) => entry.sessionId === sessionId)
-      : live.filter((entry) => rawWs && entry.writer?.ws === rawWs).at(-1);
+  function abortDshSession(sessionId, rawWs = null, expectedTurnKey = null) {
+    const { run, stale } = selectDshAbortRun([...runs.values()], sessionId, rawWs, expectedTurnKey);
+    if (stale) return { aborted: false, staleTarget: true };
     if (!run) return false;
     run.aborted = true;
     cancelDshPermissionsForRun(run.runId);

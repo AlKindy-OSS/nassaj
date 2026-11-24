@@ -1,10 +1,12 @@
-import { ChevronDown, ChevronRight, Info } from 'lucide-react';
+import { ChevronDown, ChevronRight, Info, Lock } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useState } from 'react';
 import { getStatusBadgeClass } from '../../utils/gitPanelUtils';
 
 type FileStatusLegendProps = {
   isMobile: boolean;
+  /** T-2095: also explain the withheld lock (Turn changes tab only). */
+  showWithheld?: boolean;
 };
 
 const LEGEND_ITEMS = [
@@ -14,7 +16,7 @@ const LEGEND_ITEMS = [
   { status: 'U', label: 'Untracked' },
 ] as const;
 
-export default function FileStatusLegend({ isMobile }: FileStatusLegendProps) {
+export default function FileStatusLegend({ isMobile, showWithheld = false }: FileStatusLegendProps) {
   const { t } = useTranslation('common');
   const [isOpen, setIsOpen] = useState(false);
 
@@ -46,6 +48,16 @@ export default function FileStatusLegend({ isMobile }: FileStatusLegendProps) {
                 <span className="italic text-muted-foreground">{item.label}</span>
               </span>
             ))}
+            {showWithheld && (
+              <span className="flex items-center gap-2">
+                <span
+                  className={`inline-flex h-5 w-5 items-center justify-center rounded border text-[10px] font-bold ${getStatusBadgeClass('U')}`}
+                >
+                  <Lock className="h-3 w-3" aria-hidden="true" />
+                </span>
+                <span className="italic text-muted-foreground">{t('git.turns.legendWithheld')}</span>
+              </span>
+            )}
           </div>
         </div>
       )}

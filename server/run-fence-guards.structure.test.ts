@@ -14,6 +14,8 @@ const SERVER_ROOT = import.meta.dirname;
 
 const LAUNCHERS: Array<[file: string, spawnMarker: string]> = [
   ['agy-cli.js', 'agProcess = spawn(agyLaunch.cmd'],
+  // T-2094: the ACP path admits (beginHarnessLaunch + pooled spawn) synchronously after its guard.
+  ['agy-cli.js', 'admitted = admitAgyAcpTurn(plan'],
   ['modules/providers/shared/vendor/vendor-runtime.js', 'await fetch(config.messagesUrl'],
   ['cursor-cli.js', "runCursorProcess(baseArgs, 'initial')"],
   ['opencode-cli.js', 'opencodeProcess = spawnFunction(opencodeBinary'],

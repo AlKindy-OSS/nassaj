@@ -136,3 +136,28 @@ test('startup safely removes only dead-owner CLI role homes', async () => {
     db.close();
   }
 });
+
+test('T-2095: start launches checkpoint maintenance off the startup path and stop stops it', async () => {
+  const db = database();
+  try {
+    const events: string[] = [];
+    const lifecycle = createTurnSupervisorLifecycle({
+      db,
+      ownerIds: ['hosted-current', 'cli-current'],
+      supervisors: [{ async initialize() {} }, { async initialize() {} }],
+      sweepRoleHomes: async () => [],
+      checkpointMaintenance: {
+        async start() { events.push('checkpoints:start'); throw new Error('a failing sweep never aborts start'); },
+        stop() { events.push('checkpoints:stop'); },
+      },
+    });
+    await lifecycle.prepare();
+    await lifecycle.start();
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(events, ['checkpoints:start']);
+    await lifecycle.stop();
+    assert.deepEqual(events, ['checkpoints:start', 'checkpoints:stop']);
+  } finally {
+    db.close();
+  }
+});

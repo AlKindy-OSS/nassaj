@@ -130,6 +130,14 @@
  "GET /api/git/status": {
   "class": "project"
  },
+ "GET /api/git/turn-checkpoints": {
+  "class": "project",
+  "creatorDenied": "probe carries no sessionId/generation → no bound overlay → uniform 404, never the shared root (T-2095 QA 6)"
+ },
+ "GET /api/git/turn-checkpoints/diff": {
+  "class": "project",
+  "creatorDenied": "probe carries no sessionId/generation → no bound overlay → uniform 404, never the shared root (T-2095 QA 6)"
+ },
  "GET /api/project-board/:projectId": {
   "class": "project"
  },

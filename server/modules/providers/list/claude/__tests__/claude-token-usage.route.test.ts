@@ -143,6 +143,8 @@ type Collaborators = {
   projectPathById: string | null;
   sessionRow: Record<string, unknown> | null;
   visible?: boolean;
+  /** What the client's active-model read reports for the session (resolveResumeModel). */
+  sessionModel?: string | null | Error;
 };
 
 function buildHandler(collaborators: Collaborators) {
@@ -159,7 +161,8 @@ function buildHandler(collaborators: Collaborators) {
   );
 
   const factory = new Function(
-    'projectsDb', 'sessionsDb', 'isProjectVisible', 'coerceUserId', 'readSessionTokenUsage', 'console',
+    'projectsDb', 'sessionsDb', 'isProjectVisible', 'coerceUserId', 'readSessionTokenUsage', 'providerModelsService',
+    'console',
     `return ${handlerSrc};`,
   );
 
@@ -169,6 +172,13 @@ function buildHandler(collaborators: Collaborators) {
     () => collaborators.visible !== false,
     (id: unknown) => id ?? null,
     readSessionTokenUsage,
+    {
+      resolveResumeModel: async (provider: string, sessionId: string, requested: unknown) => {
+        assert.deepEqual([provider, sessionId, requested], ['claude', SESSION_ID, null]);
+        if (collaborators.sessionModel instanceof Error) throw collaborators.sessionModel;
+        return collaborators.sessionModel ?? undefined;
+      },
+    },
     console,
   );
 }
@@ -372,4 +382,40 @@ test('keeps the project-visibility gate ahead of the session lookup', async () =
 
     assert.deepStrictEqual(sent, [{ status: 404, payload: { error: 'Project not found' } }]);
   });
+});
+
+const claudeRow = (fixture: Fixture) => ({
+  session_id: SESSION_ID, provider: 'claude', project_path: PROJECT_PATH, jsonl_path: fixture.overlayTranscript,
+});
+
+test('B-1803: hydration identity is the session model the client shows; window stays from the native id', async () => {
+  await withFixture(async (fixture) => {
+    const handler = buildHandler({ projectPathById: PROJECT_PATH, sessionRow: claudeRow(fixture), sessionModel: 'opus[1m]' });
+    const { res, sent } = makeResponseDouble();
+
+    await handler(request(), res);
+
+    const snapshot = (sent[0].payload as { contextSnapshot: Record<string, unknown> }).contextSnapshot;
+    assert.equal(snapshot.modelId, 'opus[1m]');
+    assert.equal(snapshot.windowTokens, 1_000_000);
+    assert.equal(snapshot.usedTokens, 86284);
+    const shown = contextUsagePresentation(sent[0].payload as Record<string, unknown>, 'claude', SESSION_ID, 'opus[1m]');
+    assert.equal(shown.used, 86284);
+    assert.equal(shown.window, 1_000_000);
+  });
+});
+
+test('B-1803: no stored selection, or a failing lookup, falls back to the native transcript id', async () => {
+  for (const sessionModel of [null, new Error('store unreadable')]) {
+    await withFixture(async (fixture) => {
+      const handler = buildHandler({ projectPathById: PROJECT_PATH, sessionRow: claudeRow(fixture), sessionModel });
+      const { res, sent } = makeResponseDouble();
+
+      await handler(request(), res);
+
+      const snapshot = (sent[0].payload as { contextSnapshot: Record<string, unknown> }).contextSnapshot;
+      assert.equal(snapshot.modelId, 'claude-opus-5-5');
+      assert.equal(snapshot.windowTokens, 1_000_000);
+    });
+  }
 });

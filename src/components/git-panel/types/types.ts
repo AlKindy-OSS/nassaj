@@ -1,6 +1,6 @@
 import type { Project, ProjectSession } from '../../../types/app';
 
-export type GitPanelView = 'changes' | 'history' | 'branches';
+export type GitPanelView = 'changes' | 'history' | 'branches' | 'turns';
 export type FileStatusCode = 'M' | 'A' | 'D' | 'U';
 export type GitStatusFileGroup = 'modified' | 'added' | 'deleted' | 'untracked';
 export type ConfirmActionType = 'discard' | 'delete' | 'commit' | 'pull' | 'push' | 'publish' | 'revertLocalCommit' | 'deleteBranch';
@@ -17,6 +17,10 @@ export type GitPanelProps = {
   selectedSession?: ProjectSession | null;
   isMobile?: boolean;
   onFileOpen?: FileOpenHandler;
+  /** T-2095: conversation whose turn checkpoints the "Turn changes" tab reads. */
+  turnSessionId?: string | null;
+  /** T-2095: a chip's request to open the "Turn changes" tab on one turn. */
+  turnFocus?: { sessionId: string; turnSeq: number; nonce: number } | null;
 };
 
 export type GitStatusResponse = {

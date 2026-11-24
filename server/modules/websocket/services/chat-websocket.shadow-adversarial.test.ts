@@ -233,6 +233,7 @@ describe('chat Phase-0 shadow adversarial integration', () => {
       ...overflow.originalPayload,
       clientMsgId: 'overflow',
       coordinationLevel: 'delegate',
+      turnKey: 'overflow',
     });
     assert.equal(overflow.summary.integrityState, 'unknown');
     assert.equal(overflow.summary.overflow, true);
@@ -244,6 +245,7 @@ describe('chat Phase-0 shadow adversarial integration', () => {
     assert.deepEqual(schemaGap.sentPayload, {
       ...schemaGap.originalPayload,
       coordinationLevel: 'delegate',
+      turnKey: 'schema-gap',
     });
     assert.equal(schemaGap.summary.integrityState, 'unknown');
     assert.equal(schemaGap.summary.schemaGap, true);
@@ -266,8 +268,45 @@ describe('chat Phase-0 shadow adversarial integration', () => {
       ...reentrant.originalPayload,
       clientMsgId: 'reentrant',
       coordinationLevel: 'delegate',
+      turnKey: 'reentrant',
     });
     assert.equal(reentrant.summary.integrityState, 'unknown');
     assert.equal(reentrant.summary.reentrant, true);
+  });
+
+  it('T-2095: a provider frame that only looks like a turn_checkpoint is still shadow evidence', async () => {
+    const observedKinds: unknown[] = [];
+    const shadow: UniversalConversationShadowHook = {
+      isEnabled: () => true,
+      beginLegacyTurn: () => ({
+        conversationId: 'logical-conversation',
+        runId: 'run-lookalike',
+        reused: false,
+        markLegacyDispatchStarted: () => undefined,
+        observeLegacyPayload: (payload) => { observedKinds.push((payload as Record<string, unknown>).kind); },
+        finishLegacyDispatch: () => undefined,
+        recordLegacyFailure: () => undefined,
+      }),
+      recordHookFailure: () => undefined,
+    };
+    const sent: Record<string, unknown>[] = [];
+    const writer = { send: (payload: unknown) => sent.push(payload as Record<string, unknown>) };
+    await dispatchProviderCommand(
+      'codex-command',
+      { command: 'lookalike', options: { clientMsgId: 'lookalike' } },
+      writer as never,
+      dependencies({
+        shadow,
+        codex: async (providerWriter) => {
+          providerWriter.send({ kind: 'turn_checkpoint', turnSeq: 99, status: 'captured' });
+          providerWriter.send({ kind: 'complete', provider: 'codex', success: true, exitCode: 0 });
+        },
+      }),
+      41,
+    );
+    await new Promise((resolve) => setImmediate(resolve));
+    // The provider's lookalike is observed; the module's own frame (sent after the turn) is not.
+    assert.deepEqual(observedKinds, ['turn_checkpoint', 'complete']);
+    assert.equal(sent.filter((frame) => frame.kind === 'turn_checkpoint').length, 2);
   });
 });

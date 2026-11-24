@@ -57,6 +57,8 @@ const SPAWN_SITES: Readonly<Record<string, ReadonlyArray<{ file: string; needle:
   ],
   antigravity: [
     { file: 'agy-cli.js', needle: "beginHarnessLaunch('antigravity')" },
+    // T-2094: the ACP runner (pooled `agy acp` + capability probe) reserves per turn/probe.
+    { file: 'modules/providers/list/antigravity/agy-acp-runner.js', needle: "beginHarnessLaunch('antigravity')" },
     { file: 'modules/providers/list/antigravity/antigravity-models-cli.client.ts', needle: "beginHarnessLaunch('antigravity')" },
   ],
   cursor: [

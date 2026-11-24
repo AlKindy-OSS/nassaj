@@ -102,6 +102,18 @@ test('a launch reservation admits one launcher per session and is released by it
   reservations.release('s1', b);
 });
 
+test('T-2093: a reservation records the clientMsgId of the launching turn', () => {
+  const reservations = createLaunchReservations({ maxMs: () => 60_000, onExpire: () => {} });
+  const a = Symbol('a');
+  const b = Symbol('b');
+  assert.equal(reservations.reserve('s1', 1, a, 'turn-a'), true);
+  assert.equal(reservations.holder('s1')?.clientMsgId, 'turn-a');
+  assert.equal(reservations.reserve('s2', 1, b), true);
+  assert.equal(reservations.holder('s2')?.clientMsgId, null, 'no client id: legacy launch');
+  reservations.release('s1', a);
+  reservations.release('s2', b);
+});
+
 test('the safety valve aborts an overdue launch, then frees and revokes its reservation', async () => {
   const expired: Array<[string, unknown]> = [];
   const reservations = createLaunchReservations({

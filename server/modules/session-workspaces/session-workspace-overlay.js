@@ -259,6 +259,55 @@ function resumedBinding(manifest, principalId, access) {
 }
 
 /**
+ * Reads one overlay instance manifest through no-follow checks: the instance
+ * directory must be a real child of the trusted instances root and the
+ * manifest's cwd must be that instance's own workspace directory.
+ */
+function readTrustedInstanceManifest(root, overlayId) {
+  const instancesRoot = path.join(root, 'instances');
+  const instanceRoot = path.join(instancesRoot, overlayId);
+  let trustedInstancesRoot;
+  let trustedInstanceRoot;
+  try {
+    const instancesStat = fs.lstatSync(instancesRoot);
+    const instanceStat = fs.lstatSync(instanceRoot);
+    if (!instancesStat.isDirectory() || instancesStat.isSymbolicLink()
+        || !instanceStat.isDirectory() || instanceStat.isSymbolicLink()) {
+      throw new Error('unsafe overlay instance node');
+    }
+    trustedInstancesRoot = fs.realpathSync(instancesRoot);
+    trustedInstanceRoot = fs.realpathSync(instanceRoot);
+  } catch {
+    throw new Error('session overlay instance is malformed');
+  }
+  if (path.dirname(trustedInstanceRoot) !== trustedInstancesRoot
+      || path.basename(trustedInstanceRoot) !== overlayId) {
+    throw new Error('session overlay instance escaped its trusted root');
+  }
+  let manifest;
+  try {
+    manifest = readJsonNoFollow(path.join(trustedInstanceRoot, 'manifest.json'));
+  } catch (error) {
+    if (error?.code === 'ENOENT') throw new Error('session overlay alias is dangling');
+    throw new Error('session overlay manifest is malformed');
+  }
+  if (!manifest) throw new Error('session overlay alias is dangling');
+  let workspace;
+  try {
+    const workspaceStat = fs.lstatSync(manifest.cwd);
+    if (!workspaceStat.isDirectory() || workspaceStat.isSymbolicLink()) {
+      throw new Error('unsafe workspace node');
+    }
+    workspace = fs.realpathSync(manifest.cwd);
+  } catch {
+    throw new Error('session overlay workspace is unavailable');
+  }
+  const expected = path.join(trustedInstanceRoot, 'workspace');
+  if (workspace !== fs.realpathSync(expected)) throw new Error('session overlay cwd mismatch');
+  return manifest;
+}
+
+/**
  * Resume-time alias reader. Unlike the idempotent creation helper above, this
  * distinguishes a genuinely absent alias from corrupt or dangling state. Only
  * genuine absence may cross the one-time legacy compatibility boundary.
@@ -284,34 +333,7 @@ function readStrictSessionManifest(root, sessionId, repository, ownerPrincipalId
       || !CANONICAL_OVERLAY_ID.test(alias.overlayId)) {
     throw new Error('session overlay alias is malformed');
   }
-  const instancesRoot = path.join(root, 'instances');
-  const instanceRoot = path.join(instancesRoot, alias.overlayId);
-  let trustedInstancesRoot;
-  let trustedInstanceRoot;
-  try {
-    const instancesStat = fs.lstatSync(instancesRoot);
-    const instanceStat = fs.lstatSync(instanceRoot);
-    if (!instancesStat.isDirectory() || instancesStat.isSymbolicLink()
-        || !instanceStat.isDirectory() || instanceStat.isSymbolicLink()) {
-      throw new Error('unsafe overlay instance node');
-    }
-    trustedInstancesRoot = fs.realpathSync(instancesRoot);
-    trustedInstanceRoot = fs.realpathSync(instanceRoot);
-  } catch {
-    throw new Error('session overlay instance is malformed');
-  }
-  if (path.dirname(trustedInstanceRoot) !== trustedInstancesRoot
-      || path.basename(trustedInstanceRoot) !== alias.overlayId) {
-    throw new Error('session overlay instance escaped its trusted root');
-  }
-  let manifest;
-  try {
-    manifest = readJsonNoFollow(path.join(trustedInstanceRoot, 'manifest.json'));
-  } catch (error) {
-    if (error?.code === 'ENOENT') throw new Error('session overlay alias is dangling');
-    throw new Error('session overlay manifest is malformed');
-  }
-  if (!manifest) throw new Error('session overlay alias is dangling');
+  const manifest = readTrustedInstanceManifest(root, alias.overlayId);
   if (manifest.schema !== OVERLAY_SCHEMA || manifest.overlayId !== alias.overlayId
       || manifest.sessionId !== sessionId || manifest.state !== 'active'
       || manifest.logicalProjectPath !== repository.logicalProjectPath
@@ -319,18 +341,6 @@ function readStrictSessionManifest(root, sessionId, repository, ownerPrincipalId
     throw new Error('session overlay manifest mismatch');
   }
   assertOverlayPrincipal(manifest, ownerPrincipalId, principalCheck);
-  let workspace;
-  try {
-    const workspaceStat = fs.lstatSync(manifest.cwd);
-    if (!workspaceStat.isDirectory() || workspaceStat.isSymbolicLink()) {
-      throw new Error('unsafe workspace node');
-    }
-    workspace = fs.realpathSync(manifest.cwd);
-  } catch {
-    throw new Error('session overlay workspace is unavailable');
-  }
-  const expected = path.join(trustedInstanceRoot, 'workspace');
-  if (workspace !== fs.realpathSync(expected)) throw new Error('session overlay cwd mismatch');
   return manifest;
 }
 
@@ -381,6 +391,65 @@ export function findSessionOverlayWorkspace({ projectPath, sessionId }) {
   );
   if (!manifest) return null;
   return Object.freeze({ cwd: fs.realpathSync(manifest.cwd), overlayId: manifest.overlayId });
+}
+
+/**
+ * T-2095: re-read one overlay instance for a turn checkpoint without spawning
+ * git. The common git dir is derived from the server-produced binding's cwd
+ * (<commonGitDir>/nassaj-session-overlays/instances/<overlayId>/workspace) and
+ * then proven by the same no-follow instance checks every overlay consumer
+ * uses: the manifest must be active, name this overlay and this logical
+ * project, and its cwd must be the instance's own workspace. Returns null when
+ * the instance is gone; a malformed instance throws (fail closed).
+ * @param {{cwd: string, overlayId: string, logicalProjectPath: string}} binding
+ * @returns {Readonly<{overlayId: string, cwd: string, baseOid: string, sessionId: string|null,
+ *   generation: string|null, ownerPrincipalId: string|null, commonGitDir: string}>|null}
+ */
+export function readOverlayInstance(binding) {
+  const overlayId = binding?.overlayId;
+  if (typeof overlayId !== 'string' || !CANONICAL_OVERLAY_ID.test(overlayId) || typeof binding.cwd !== 'string') {
+    throw new Error('invalid overlay binding');
+  }
+  const workspace = path.resolve(binding.cwd);
+  const instanceRoot = path.dirname(workspace);
+  const root = path.dirname(path.dirname(instanceRoot));
+  if (path.basename(workspace) !== 'workspace' || path.basename(instanceRoot) !== overlayId
+      || path.basename(path.dirname(instanceRoot)) !== 'instances'
+      || path.basename(root) !== 'nassaj-session-overlays') {
+    throw new Error('overlay binding is not an instance workspace');
+  }
+  const commonGitDir = path.dirname(root);
+  if (!overlayInstancePresent(commonGitDir, overlayId)) return null;
+  const manifest = readTrustedInstanceManifest(root, overlayId);
+  if (manifest.schema !== OVERLAY_SCHEMA || manifest.overlayId !== overlayId || manifest.state !== 'active'
+      || manifest.logicalProjectPath !== binding.logicalProjectPath) {
+    throw new Error('session overlay manifest mismatch');
+  }
+  return Object.freeze({
+    overlayId,
+    cwd: fs.realpathSync(manifest.cwd),
+    baseOid: manifest.baseOid,
+    sessionId: manifest.sessionId ?? null,
+    generation: manifest.generation ?? null,
+    ownerPrincipalId: manifest.ownerPrincipalId ?? null,
+    commonGitDir: fs.realpathSync(commonGitDir),
+  });
+}
+
+/**
+ * T-2095: true while the overlay instance manifest still exists under the
+ * repository's common git dir (the checkpoint orphan sweep keys on this).
+ * @param {string} commonGitDir
+ * @param {string} overlayId
+ */
+export function overlayInstancePresent(commonGitDir, overlayId) {
+  if (typeof overlayId !== 'string' || !CANONICAL_OVERLAY_ID.test(overlayId)) return false;
+  try {
+    return fs.lstatSync(path.join(commonGitDir, 'nassaj-session-overlays', 'instances', overlayId, 'manifest.json'))
+      .isFile();
+  } catch {
+    return false;
+  }
 }
 
 function publicBinding(manifest, isolation = 'overlay') {
@@ -728,7 +797,8 @@ export function requireBoundSessionWorkspace({
   return binding;
 }
 
-function normalizeOverlayPath(candidate) {
+/** Validates a repository-relative overlay path (no absolute, `..`, `.` or empty segment). */
+export function normalizeOverlayPath(candidate) {
   if (typeof candidate !== 'string' || !candidate || path.isAbsolute(candidate)
       || candidate.includes('\0')) throw new Error('invalid overlay path');
   const ownedPath = candidate.replaceAll('\\', '/').replace(/^\.\//, '');

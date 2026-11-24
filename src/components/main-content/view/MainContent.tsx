@@ -23,6 +23,7 @@ import type { OneShotFrame, ShellErrorInfo } from '../../shell/types/types';
 import { isOneShotRefusalCode } from '../../shell/utils/reconnect';
 import { getProviderDisplayName } from '../../chat/constants/providerCapabilities';
 import GitPanel from '../../git-panel/view/GitPanel';
+import { useTurnChangesFocus } from '../../git-panel/hooks/useTurnChangesFocus';
 import type { MainContentProps } from '../types/types';
 import type { SessionDeepLinkResolution } from '../../../hooks/useProjectsState';
 import { usePaletteOpsRegister } from '../../../contexts/PaletteOpsContext';
@@ -110,6 +111,8 @@ function MainContent({
   onRetryDeepLink,
 }: MainContentProps) {
   const [sessionHeaderTarget, setSessionHeaderTarget] = useState<HTMLDivElement | null>(null);
+  const showGitTab = useCallback(() => setActiveTab('git'), [setActiveTab]);
+  const turnFocus = useTurnChangesFocus(selectedSession?.id ?? null, showGitTab);
   const { t } = useTranslation('common');
   const { preferences } = useUiPreferences();
   const { autoExpandTools, showRawParameters, showThinking, showToolCalls, autoScrollToBottom, sendByCtrlEnter } = preferences;
@@ -419,6 +422,8 @@ function MainContent({
                 selectedProject={project}
                 isMobile={isMobile}
                 onFileOpen={handleFileOpen}
+                turnSessionId={selectedSession?.id ?? null}
+                turnFocus={turnFocus}
               />
             </div>
           )}

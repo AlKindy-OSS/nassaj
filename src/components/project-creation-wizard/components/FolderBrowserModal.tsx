@@ -165,7 +165,7 @@ export default function FolderBrowserModal({
                 onClick={handleCreateFolder}
                 disabled={!newFolderName.trim() || creatingFolder}
               >
-                {creatingFolder ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Create'}
+                {creatingFolder ? <Loader2 className="h-4 w-4 animate-spin" /> : t('folderBrowser.create')}
               </Button>
               <Button size="sm" variant="ghost" onClick={resetNewFolderState}>
                 {t('folderBrowser.cancel')}

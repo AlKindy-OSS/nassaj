@@ -1,0 +1,15 @@
+# T-2095: private nassaj refs (turn checkpoints, session requests, updater
+# refs) never leave this machine. Refuse any push whose local or remote ref is
+# under refs/nassaj* or refs/checkpoints/; everything else (the release push of
+# main and its tag included) is untouched.
+while read -r local_ref local_oid remote_ref remote_oid; do
+  for ref in "$local_ref" "$remote_ref"; do
+    case "$ref" in
+      refs/nassaj*|refs/checkpoints/*)
+        echo "pre-push: refusing to push private ref $ref" >&2
+        exit 1
+        ;;
+    esac
+  done
+done
+exit 0

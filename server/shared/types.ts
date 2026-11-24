@@ -254,7 +254,14 @@ export type MessageKind =
    * `pendingWorkflowIds` has ended. Carries `toolUseId` and `reason`
    * ('notified' | 'failed' | 'process_exited'); sent once per call.
    */
-  | 'workflow_settled';
+  | 'workflow_settled'
+  /**
+   * T-2095: live-only result of the turn's workspace checkpoint, sent after the
+   * provider call returns (it may follow `complete`). Carries `turnSeq`,
+   * `status` ('captured' | 'skipped' | 'failed'), an optional `reason`,
+   * `counts` {added, modified, deleted} and `withheldCount`. Not persisted.
+   */
+  | 'turn_checkpoint';
 
 /**
  * Provider-neutral message envelope used in REST responses and realtime channels.

@@ -188,6 +188,9 @@ test('abort bridge forwards authenticated ownership and falls back only on false
   assert.equal(abortHostedSupervisedTurn(supervisor as never, 'claude', 's-1', 77), true);
   assert.deepEqual(seen[1], { provider: 'claude', sessionId: 's-1', userId: 77 });
   assert.equal(abortHostedSupervisedTurn(supervisor as never, 'kimi', '', 77), false);
+  // T-2093: a turn-scoped stop forwards the turn's clientMsgId for the supervisor to compare.
+  assert.equal(abortHostedSupervisedTurn(supervisor as never, 'claude', 's-2', 77, 'turn-key'), true);
+  assert.deepEqual(seen.at(-1), { provider: 'claude', sessionId: 's-2', userId: 77, clientMsgId: 'turn-key' });
 });
 
 test('ambiguous hosted ingress reaches durable supervisor replay instead of dying at WS gate', async () => {

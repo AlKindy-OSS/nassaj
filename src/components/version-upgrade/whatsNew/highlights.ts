@@ -12,6 +12,24 @@ export interface WhatsNewEntry {
 }
 
 export const WHATS_NEW: Readonly<Record<string, WhatsNewEntry>> = {
+  '2.3.3.3': {
+    ar: [
+      'يحفظ نسّاج لقطة لملفاتك قبل كل دور للوكيل وبعده.',
+      'تحت الردّ سطر بعدد الملفات المتغيّرة يفتح تبويب «تغييرات الدور» في لوحة git.',
+      'الملفات التي تبدو أسراراً لا تُحفظ وتظهر مقفلة.',
+      'زرّ الإيقاف يوقف الدور الذي تراه فقط، ولا يتكرّر بعد انقطاع الاتصال.',
+      'مؤشّر السياق لم يعد يظهر «?» أثناء دور Claude.',
+      'تكبير الصورة وتحريكها داخل العارض دون تكبير الصفحة.',
+    ],
+    en: [
+      'Nassaj saves a snapshot of your files before and after every agent turn.',
+      'A line under the reply counts the changed files and opens the "Turn changes" git tab.',
+      'Files that look like secrets are not saved and show locked.',
+      'The stop button stops only the turn you see, and is not repeated after a reconnect.',
+      'The context ring no longer shows "?" during a Claude turn.',
+      'Zoom and pan an image inside the viewer without zooming the page.',
+    ],
+  },
   '2.3.3.2': {
     ar: [
       'محادثات OpenCode على نموذج محلي صغير تعمل بتعليمات مختصرة تناسب سعته.',

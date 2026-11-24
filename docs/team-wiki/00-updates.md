@@ -1,3 +1,9 @@
+## 2.3.3.3 — 2026-11-24
+
+صار نسّاج يحفظ لقطة لملفاتك قبل كل دور للوكيل وبعده. تحت الردّ سطر يذكر عدد الملفات التي تغيّرت، والضغط عليه يفتح تبويب «تغييرات الدور» في لوحة git لترى فرق كل ملف. الملفات التي تبدو أسراراً لا تُحفظ وتظهر مقفلة. زرّ الإيقاف يوقف الدور الذي تراه فقط، ولا يتكرّر بعد انقطاع الاتصال. مؤشّر السياق لم يعد يظهر «?» أثناء دور Claude، ويمكنك تكبير الصورة داخل العارض دون تكبير الصفحة.
+
+Nassaj now saves a snapshot of your files before and after every agent turn. A line under the reply names how many files changed, and clicking it opens the "Turn changes" tab in the git panel with each file's diff. Files that look like secrets are not saved and show locked. The stop button stops only the turn you see, and is not repeated after a reconnect. The context ring no longer shows "?" during a Claude turn, and you can zoom an image inside the viewer without zooming the page.
+
 ## 2.3.3.2 — 2026-11-15
 
 النماذج المحلية صارت أوسع وأكثر أماناً. محادثات OpenCode على نموذج محلي صغير تعمل بتعليمات مختصرة تناسب سعته، والمنسّق المحلي بلا جلب ويب ويفوّض إلى خمسة وكلاء فقط، ووكيل البحث وحده يعمل على نموذج سحابي مجاني ولا يقرأ الأسرار. Codex يعمل على خادم النماذج المحلي الخاص بك بعد أن يفعّل المالك مفتاحه في بطاقة «النماذج المحلية». أدوار النماذج المحلية لا تُحسب عليك تكلفةً، وإعدادات DeepSeek Harness ظاهرة في الإعدادات. وصار بإمكانك أن تكتب في محادثة Claude بدأها زميلك في المشروع نفسه (مخرجات الأدوات الكبيرة في الأدوار المشتركة تُقتطع عند 30,000 محرف)، ويحدّد المالك أكبر حجم للمرفق بين 1 و200 ميغابايت (شبكات مثل Cloudflare Free/Pro قد تحجب ما فوق 100 ميغابايت). استئناف جلسة زميل عبر `/api/agent` يُرفض الآن بـ409، ولم تعد تعليمات النظام تظهر في سجلّ محادثات Antigravity.

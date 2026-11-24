@@ -30,6 +30,7 @@ import type { CoordinationLevel, OrchestratorDependencies } from './orchestrator
 import { RECOVERY_SCHEMA_SQL, reconcileOnStartup, SqliteRecoveryStore, WriterEpochFence } from './recovery.js';
 import { AdapterTerminalProofAuthority, admitResources, releaseUndispatchedLease, releaseWithExitProof } from './resource-admission.js';
 import { turnSupervisorRepository } from './repository.js';
+import { isCancellableActiveTurn } from './turn-cancel-match.js';
 import { probeProcess } from './watchdog.js';
 
 export type CliHarnessProvider = Exclude<CliTurnProvider, 'claude'>;
@@ -119,6 +120,8 @@ export class CliTurnSupervisorError extends Error {
 
 type Active = Readonly<{
   provider: CliHarnessProvider; userId: number; runId: string; rootId: string;
+  /** T-2093: the clientMsgId that started this turn (its turnKey). */
+  clientMsgId: string;
   controller: AbortController; settled: Promise<void>; resolveSettled(): void;
 }>;
 
@@ -296,6 +299,7 @@ export class CliTurnSupervisorRuntime {
     this.#active.set(sessionId, {
       provider: input.provider, userId: input.userId, runId: adopted.run.runId,
       rootId: adopted.turn.turnId, controller, settled, resolveSettled,
+      clientMsgId: input.clientMsgId,
     });
     const writerEpoch = this.#recoveryStore!.claimWriter(adopted.run.runId);
     let fenceOpened = false;
@@ -389,9 +393,13 @@ export class CliTurnSupervisorRuntime {
     }
   }
 
-  cancel(input: { provider: CliHarnessProvider; sessionId: string; userId: number | null }): boolean {
-    const active = this.#active.get(input.sessionId);
-    if (!active || active.provider !== input.provider || input.userId == null || active.userId !== input.userId) return false;
+  cancel(input: {
+    provider: CliHarnessProvider; sessionId: string; userId: number | null;
+    /** T-2093: when set, cancels only the turn started by this clientMsgId. */
+    clientMsgId?: string;
+  }): boolean {
+    if (!isCancellableActiveTurn(this.#active.get(input.sessionId), input)) return false;
+    const active = this.#active.get(input.sessionId)!;
     void this.#cascade?.cancel(active.rootId, 'user_cancelled').catch((error) => {
       console.error('Durable CLI cancellation failed', { error });
     });

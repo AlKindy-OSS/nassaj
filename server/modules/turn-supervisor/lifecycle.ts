@@ -26,7 +26,14 @@ export type TurnSupervisorLifecycleOptions = {
   readonly heartbeatIntervalMs?: number;
   readonly staleAfterMs?: number;
   readonly createWatchdog?: (ownerId: string) => Watchdog;
+  /**
+   * T-2095: checkpoint store reconciliation (interrupted turns, stale locks,
+   * orphan stores) started once serving begins. Never blocks or aborts start.
+   */
+  readonly checkpointMaintenance?: CheckpointMaintenance;
 };
+
+type CheckpointMaintenance = { start(): void | Promise<void>; stop(): void };
 
 export type TurnSupervisorLifecycle = {
   /** Must complete before the network listener opens. */
@@ -36,6 +43,16 @@ export type TurnSupervisorLifecycle = {
   /** Stops heartbeat timers before SQLite shutdown. */
   stop(): Promise<void>;
 };
+
+/** Runs checkpoint maintenance off the startup path; a failure is logged, never thrown. */
+function startCheckpointMaintenance(maintenance: CheckpointMaintenance | undefined): void {
+  if (!maintenance) return;
+  void Promise.resolve().then(() => maintenance.start()).catch((error: unknown) => {
+    console.warn('[turn-checkpoint] maintenance start failed', {
+      message: String(error instanceof Error ? error.message : error).slice(0, 200),
+    });
+  });
+}
 
 export function createTurnSupervisorLifecycle(
   options: TurnSupervisorLifecycleOptions,
@@ -81,7 +98,11 @@ export function createTurnSupervisorLifecycle(
       if (started) return;
       const admission = requireStartupAdmission();
       if (admission && admission.phase !== 'serving') throw new Error('root_serving_confirmation_required');
-      const begin = () => { started = true; for (const watchdog of watchdogs) watchdog.start(); };
+      const begin = () => {
+        started = true;
+        for (const watchdog of watchdogs) watchdog.start();
+        startCheckpointMaintenance(options.checkpointMaintenance);
+      };
       if (!admission) { begin(); return; }
       starting = sweep().then(async () => {
         for (const supervisor of options.supervisors) await supervisor.resumeDeferredStartupMaintenance?.();
@@ -94,6 +115,7 @@ export function createTurnSupervisorLifecycle(
       await starting;
       if (!started) return;
       started = false;
+      options.checkpointMaintenance?.stop();
       await Promise.all(watchdogs.map((watchdog) => watchdog.stop()));
     },
   };
